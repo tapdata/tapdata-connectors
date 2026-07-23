@@ -47,9 +47,16 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     private Boolean hashKey = false;
     private List<String> partitionKey;
 
-    // Bucket mode: "dynamic" or "fixed"
-    // Dynamic mode: better for general use, uses StreamTableWrite
-    // Fixed mode: better performance, uses BatchTableWrite
+    /*
+     * Connector-level bucket choice. Both values use one StreamTableWrite per physical table;
+     * "dynamic" only writes bucket=-1. Paimon then materializes HASH_DYNAMIC, KEY_DYNAMIC or
+     * BUCKET_UNAWARE from primary/partition-key coverage, while a positive bucket count becomes
+     * HASH_FIXED. Do not infer the final BucketMode from this string alone.
+     *
+     * Sources:
+     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
+     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#L72-L75
+     */
     private String bucketMode = "dynamic";
 
     // Bucket count for fixed bucket mode (only used when bucketMode = "fixed")
@@ -78,16 +85,16 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // 0 = commit immediately (no batching)
     private Integer batchAccumulationSize = 100000;
 
-    // Commit interval in milliseconds (default: 30000ms = 30s)
-    // 0 = no time-based commit, only size-based
+    // Initial-sync buffer timing knob. CDC currently commits synchronously before every callback
+    // return because PDK 2.0.8 exposes no verified durable asynchronous-offset contract.
     private Integer commitIntervalMs = 30000;
 
-    // Enable async commit (default: true)
-    // Async commit improves throughput by not blocking writes
+    // Reserved compatibility knob: PaimonService intentionally disables asynchronous CDC commit
+    // until source-offset acknowledgement and ordering can be proven durable.
     private Boolean enableAsyncCommit = true;
 
-    // Number of write threads for parallel writing (default: 4)
-    // More threads = better parallelism but more resource usage
+    // Currently copied to the Flink-only "sink.parallelism" table option. This direct Paimon Core
+    // writer does not create connector write threads from the value.
     private Integer writeThreads = 4;
 
     // Enable auto compaction (default: true)
@@ -446,6 +453,14 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
      * @return true if paimon-s3 is available, false otherwise
      */
     private static boolean isPaimonS3Available() {
+        /*
+         * REVIEW: paimon-s3 1.3.1 packages S3FileIO below the nested paimon-plugin-s3 directory and
+         * exposes the root-classpath S3Loader as the FileIOLoader. Class.forName(S3FileIO) therefore
+         * returns false with the connector's current artifact, selecting s3a:// even though the
+         * native loader is packaged. Capability detection should use FileIO loader discovery.
+         * Source:
+         * https://github.com/apache/paimon/blob/release-1.3.1/paimon-filesystems/paimon-s3/src/main/java/org/apache/paimon/s3/S3Loader.java#L35-L83
+         */
         try {
             Class.forName("org.apache.paimon.s3.S3FileIO");
             return true;
@@ -604,4 +619,3 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         }
     }
 }
-

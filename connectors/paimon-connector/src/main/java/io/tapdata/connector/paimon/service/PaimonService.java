@@ -108,7 +108,9 @@ public class PaimonService implements AutoCloseable {
 	 * 表级规范写上下文，Key 为 {@code database.tableName}。
 	 *
 	 * <p>每个物理表只允许一个上下文持有 writer、committer、动态桶 router 和 commit identifier，
-	 * 避免同表不同写入对象的路由索引或提交状态相互分离。
+	 * 避免同表不同写入对象的路由索引或提交状态相互分离。多表任务因此是“一表一写入、一表一提交器”，
+	 * 但各表 snapshot 依次提交，并不构成跨表原子事务；Paimon Flink 多表提交器也按表分组并逐表提交：
+	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/StoreMultiCommitter.java#L150-L176
 	 */
 	private final Map<String, PaimonTableWriteContext> tableWriteContexts = new ConcurrentHashMap<>();
 	/** Key 为逻辑表标识，Value 为其物理表路径摘要，用于释放 JVM 内的物理表 owner。 */
@@ -164,7 +166,9 @@ public class PaimonService implements AutoCloseable {
 	 * 动态桶表的源事件入口保护器，Key 为逻辑表标识。
 	 *
 	 * <p>PDK 2.0.8 不提供可排序的 source sequence，因此禁止同一动态桶表的重叠入口把锁竞争顺序
-	 * 误当成事件顺序；不同表以及 fixed/append 表仍可保持原有并发能力。
+	 * 误当成事件顺序；不同表以及 fixed/append 表仍可保持原有并发能力。注意后者只表示桶路由允许
+	 * 并发，不证明无 sequence.field 的主键更新可以乱序到达；同一主键若被重叠 callback 更新，
+	 * commitLocks 的抢锁顺序仍可能不同于源事件顺序。
 	 */
 	private final Map<String, DynamicIngressGuard> dynamicSourceIngressGuards = new ConcurrentHashMap<>();
 
@@ -365,6 +369,11 @@ public class PaimonService implements AutoCloseable {
 				}
 				break;
 			case "oss":
+				// REVIEW: these keys match Paimon OSSLoader, but this connector module does not
+				// package paimon-oss 1.3.1, so options alone cannot register the oss:// FileIO.
+				// Add the matching loader artifact (or remove the advertised storage type).
+				// Source:
+				// https://github.com/apache/paimon/blob/release-1.3.1/paimon-filesystems/paimon-oss/src/main/java/org/apache/paimon/oss/OSSLoader.java#L52-L68
 				options.set("fs.oss.endpoint", config.getOssEndpoint());
 				options.set("fs.oss.accessKeyId", config.getOssAccessKey());
 				options.set("fs.oss.accessKeySecret", config.getOssSecretKey());
@@ -696,23 +705,42 @@ public class PaimonService implements AutoCloseable {
 			schemaBuilder.partitionKeys(config.getPartitionKey(tableName));
 		}
 
-		// Set bucket configuration based on bucket mode
+		// bucket=-1 is only a schema-level request, not one concrete runtime mode. Paimon 1.3.1
+		// resolves it to BUCKET_UNAWARE for append-only tables, HASH_DYNAMIC when a primary key
+		// covers the partition key, and KEY_DYNAMIC for cross-partition upsert. Positive values
+		// resolve to HASH_FIXED:
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#L72-L75
 		if ("dynamic".equalsIgnoreCase(config.getBucketMode(tableName))) {
-			// Dynamic bucket mode: set bucket to -1
-			// This mode provides better flexibility
 			schemaBuilder.option("bucket", "-1");
 		} else {
 			// Fixed bucket mode: set specific bucket count
 			Integer bucketCount = config.getBucketCount(tableName);
 			if (bucketCount == null || bucketCount <= 0) {
+				// REVIEW: spec.json permits -2, which means POSTPONE_MODE in Paimon, but this branch
+				// rewrites it to 4. At present POSTPONE_MODE is reachable only when a later custom
+				// tableProperties entry overrides "bucket" to -2; the first-class UI value is
+				// misleading and should be validated/mapped explicitly.
+				// https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
 				bucketCount = 4; // Default to 4 buckets if not configured
 			}
 			schemaBuilder.option("bucket", String.valueOf(bucketCount));
 		}
 		if (EmptyKit.isNotBlank(config.getFileFormat(tableName))) {
+			// Paimon validates this identifier during table creation. The packaged paimon-format
+			// 1.3.1 service only provides avro/orc/parquet/csv/json; the UI's lance/blob choices
+			// require matching format modules/providers and otherwise fail factory discovery.
+			// Sources:
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L160-L162
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-format/src/main/resources/META-INF/services/org.apache.paimon.format.FileFormatFactory
 			schemaBuilder.option("file.format", config.getFileFormat(tableName));
 		}
 		if (EmptyKit.isNotBlank(config.getCompression(tableName))) {
+			// REVIEW: Paimon 1.3.1 consumes "file.compression", not "compression". The current
+			// compatibility key is retained here because this audit changes comments only, but the
+			// configured value does not select CoreOptions#FILE_COMPRESSION and should be migrated.
+			// Source:
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L259-L264
 			schemaBuilder.option("compression", config.getCompression(tableName));
 		}
 
@@ -741,7 +769,11 @@ public class PaimonService implements AutoCloseable {
 				// Enable full compaction for better query performance
 				schemaBuilder.option("compaction.optimization-interval", config.getCompactionIntervalMinutes(tableName) + "min");
 
-				// Set compaction strategy
+				// REVIEW: Paimon 1.3.1 rejects any non-NONE changelog producer on a table without
+				// primary keys. With the current default enableAutoCompaction=true, creation of an
+				// append-only/BUCKET_UNAWARE table reaches this option and fails schema validation.
+				// Source:
+				// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L120-L126
 				schemaBuilder.option("changelog-producer", "input");
 
 				// Compact small files more aggressively
@@ -753,8 +785,9 @@ public class PaimonService implements AutoCloseable {
 			}
 		}
 
-		// 4. Snapshot settings for better performance
-		// Keep more snapshots in memory for faster access
+		// These are on-disk snapshot-expiration bounds, not an in-memory cache. The hard-coded
+		// 2..5 / 30-minute window also bounds how long commit-user snapshot reconciliation and
+		// streaming-read offsets can rely on old snapshots after a prolonged outage.
 		schemaBuilder.option("snapshot.num-retained.min", "2");
 		schemaBuilder.option("snapshot.num-retained.max", "5");
 		schemaBuilder.option("snapshot.time-retained", "30min");
@@ -769,7 +802,9 @@ public class PaimonService implements AutoCloseable {
 		// 7. Changelog settings for CDC scenarios
 		schemaBuilder.option("changelog-producer.lookup-wait", "false"); // Don't wait for lookup
 
-		// 8. Memory settings
+		// "sink.parallelism" is consumed by the Flink sink builder. This connector calls Paimon
+		// Core StreamTableWrite directly, so this table option does not create write threads or
+		// alter the one-context-per-table topology.
 		schemaBuilder.option("sink.parallelism", String.valueOf(config.getWriteThreads()));
 
 		if (EmptyKit.isNotEmpty(config.getTableProperties(tableName))) {
@@ -1236,6 +1271,11 @@ public class PaimonService implements AutoCloseable {
 					if (cdcStage && !ASYNC_OFFSET_CONTRACT_VERIFIED) {
 						// Current PDK does not define a durable callback acknowledgement or a sequence
 						// for concurrent calls. Confirm the Paimon snapshot before every CDC return.
+						// This narrows the loss window but is not Flink-style end-to-end exactly-once:
+						// Flink checkpoints source progress together with pending committables, while
+						// this connector cannot atomically bind a Paimon snapshot to the Tap source
+						// offset exposed by PDK 2.0.8.
+						// https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/RestoreCommittableStateManager.java#L36-L87
 						shouldCommit = true;
 					} else if (flushOffsetCallback == null && cdcStage) {
 						shouldCommit = true;
@@ -1693,6 +1733,11 @@ public class PaimonService implements AutoCloseable {
 	}
 
 	private void registerPhysicalTableOwner(String tableKey, FileStoreTable table) {
+		// Paimon explicitly disallows concurrent HASH_DYNAMIC writers and KEY_DYNAMIC owns a local
+		// full-key index. This registry enforces the connector's 1/1/0 topology only inside this
+		// JVM; deployment must provide an external single-writer lease to cover other processes.
+		// Source:
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L40-L55
 		String physicalHash = PaimonCommitStateStore.physicalTableHash(
 				table.location().toUri().toString());
 		String owner = serviceWriterOwner + ':' + tableKey;

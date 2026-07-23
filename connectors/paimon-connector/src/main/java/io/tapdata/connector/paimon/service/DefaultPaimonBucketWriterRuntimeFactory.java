@@ -15,7 +15,7 @@ import java.io.IOException;
  *
  * <p>The 1/1/0 channel, assigner and id tuple matches Paimon's dynamic bucket topology for the
  * connector's one-writer-per-table contract:
- * https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/FlinkSinkBuilder.java
+ * https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/FlinkSinkBuilder.java#L219-L257
  */
 enum DefaultPaimonBucketWriterRuntimeFactory implements PaimonBucketWriterRuntimeFactory {
     INSTANCE;

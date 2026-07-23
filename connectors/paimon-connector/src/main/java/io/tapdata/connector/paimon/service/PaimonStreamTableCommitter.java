@@ -12,7 +12,7 @@ import java.util.Objects;
  *
  * <p>Paimon defines {@code filterAndCommit} as the retry-safe path for possibly committed
  * identifiers:
- * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/table/sink/StreamTableCommit.java
+ * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/table/sink/StreamTableCommit.java#L52-L76
  */
 final class PaimonStreamTableCommitter implements PaimonTableCommitter {
 

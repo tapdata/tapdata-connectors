@@ -15,7 +15,7 @@ import java.util.Set;
  *
  * <p>The partition plus trimmed-primary-key hash formula and prepare hook mirror Paimon 1.3.1's
  * {@code HashBucketAssigner} contract:
- * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/index/HashBucketAssigner.java
+ * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/index/HashBucketAssigner.java#L73-L114
  */
 final class HashDynamicBucketWriterStrategy extends AbstractPaimonBucketWriterStrategy {
 
