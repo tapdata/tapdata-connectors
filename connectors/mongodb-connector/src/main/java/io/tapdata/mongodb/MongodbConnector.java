@@ -543,9 +543,9 @@ public class MongodbConnector extends ConnectorBase {
 			return new TapStringValue("/" + bsonRegularExpression.getPattern() + "/" + bsonRegularExpression.getOptions());
 		});
 		//TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
-		codecRegistry.registerFromTapValue(TapTimeValue.class, "DATE_TIME", tapTimeValue -> tapTimeValue.getValue().toDate());
-		codecRegistry.registerFromTapValue(TapDateTimeValue.class, "DATE_TIME", tapDateTimeValue -> tapDateTimeValue.getValue().toDate());
-		codecRegistry.registerFromTapValue(TapDateValue.class, "DATE_TIME", tapDateValue -> tapDateValue.getValue().toDate());
+		codecRegistry.registerFromTapValue(TapTimeValue.class, "DATE_TIME", tapTimeValue -> toDate(tapTimeValue.getValue()));
+		codecRegistry.registerFromTapValue(TapDateTimeValue.class, "DATE_TIME", tapDateTimeValue -> toDate(tapDateTimeValue.getValue()));
+		codecRegistry.registerFromTapValue(TapDateValue.class, "DATE_TIME", tapDateValue -> toDate(tapDateValue.getValue()));
 		codecRegistry.registerFromTapValue(TapYearValue.class, "STRING(4)", TapValue::getOriginValue);
 		codecRegistry.registerFromTapValue(TapBinaryValue.class,"BINARY",tapBinaryValue -> {
 			return new Binary(tapBinaryValue.getValue().getType(), tapBinaryValue.getValue().getValue());
@@ -594,6 +594,16 @@ public class MongodbConnector extends ConnectorBase {
 		connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
 		connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
 		connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
+	}
+
+	protected Date toDate(DateTime dateTime) {
+		if (dateTime == null) {
+			return null;
+		}
+		if (dateTime.isContainsIllegal()) {
+			return null;
+		}
+		return dateTime.toDate();
 	}
 
 	protected void queryIndexes(TapConnectorContext tapConnectorContext, TapTable tapTable, Consumer<List<TapIndex>> listConsumer) {
