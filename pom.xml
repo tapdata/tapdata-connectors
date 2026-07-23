@@ -9,7 +9,7 @@
     <packaging>pom</packaging>
     <modules>
         <module>file-storages</module>
-        <module>tapdata-cli</module>
+<!--        <module>tapdata-cli</module>-->
         <module>connectors-common</module>
         <module>connectors</module>
         <module>connectors-tdd</module>
