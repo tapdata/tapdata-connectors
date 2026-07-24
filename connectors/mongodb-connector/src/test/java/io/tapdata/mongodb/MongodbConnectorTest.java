@@ -4,6 +4,7 @@ import com.mongodb.client.*;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexModel;
 import com.mongodb.client.model.IndexOptions;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
@@ -30,6 +31,7 @@ import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.junit.jupiter.api.*;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -634,6 +636,100 @@ class MongodbConnectorTest {
             when(mongoConfig.getUri()).thenReturn("mongodb://127.0.0.1:27017/test");
             doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
             assertThrows(RuntimeException.class,()->mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent));
+        }
+
+        @Test
+        void testDescendingFieldSerializesToMinusOne(){
+            // 读写对称：降序字段 fieldAsc=false 必须写成 -1，而不是硬编码 1
+            List<TapIndex> indexList = new ArrayList<>();
+            TapIndex tapIndex = new TapIndex();
+            tapIndex.setName("idx_desc");
+            List<TapIndexField> indexFields = new ArrayList<>();
+            indexFields.add(new TapIndexField().name("createTime").fieldAsc(false));
+            tapIndex.setIndexFields(indexFields);
+            indexList.add(tapIndex);
+            when(tapCreateIndexEvent.getIndexList()).thenReturn(indexList);
+            MongoCollection<Document> collection = mock(MongoCollection.class);
+            when(mongoDatabase.getCollection("test")).thenReturn(collection);
+            doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
+
+            mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent);
+
+            ArgumentCaptor<List<IndexModel>> captor = ArgumentCaptor.forClass(List.class);
+            verify(collection).createIndexes(captor.capture());
+            Document keys = (Document) captor.getValue().get(0).getKeys();
+            assertEquals(-1, ((Number) keys.get("createTime")).intValue());
+        }
+
+        @Test
+        void testAscendingFieldSerializesToOne(){
+            // 回归护栏：升序字段 fieldAsc=true 仍是 1
+            List<TapIndex> indexList = new ArrayList<>();
+            TapIndex tapIndex = new TapIndex();
+            tapIndex.setName("idx_asc");
+            List<TapIndexField> indexFields = new ArrayList<>();
+            indexFields.add(new TapIndexField().name("name").fieldAsc(true));
+            tapIndex.setIndexFields(indexFields);
+            indexList.add(tapIndex);
+            when(tapCreateIndexEvent.getIndexList()).thenReturn(indexList);
+            MongoCollection<Document> collection = mock(MongoCollection.class);
+            when(mongoDatabase.getCollection("test")).thenReturn(collection);
+            doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
+
+            mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent);
+
+            ArgumentCaptor<List<IndexModel>> captor = ArgumentCaptor.forClass(List.class);
+            verify(collection).createIndexes(captor.capture());
+            Document keys = (Document) captor.getValue().get(0).getKeys();
+            assertEquals(1, ((Number) keys.get("name")).intValue());
+        }
+
+        @Test
+        void testCompoundMixedDirections(){
+            // 复合索引混合方向：{a:1, b:-1}，顺序与方向都要对
+            List<TapIndex> indexList = new ArrayList<>();
+            TapIndex tapIndex = new TapIndex();
+            tapIndex.setName("idx_ab");
+            List<TapIndexField> indexFields = new ArrayList<>();
+            indexFields.add(new TapIndexField().name("a").fieldAsc(true));
+            indexFields.add(new TapIndexField().name("b").fieldAsc(false));
+            tapIndex.setIndexFields(indexFields);
+            indexList.add(tapIndex);
+            when(tapCreateIndexEvent.getIndexList()).thenReturn(indexList);
+            MongoCollection<Document> collection = mock(MongoCollection.class);
+            when(mongoDatabase.getCollection("test")).thenReturn(collection);
+            doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
+
+            mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent);
+
+            ArgumentCaptor<List<IndexModel>> captor = ArgumentCaptor.forClass(List.class);
+            verify(collection).createIndexes(captor.capture());
+            Document keys = (Document) captor.getValue().get(0).getKeys();
+            assertEquals(1, ((Number) keys.get("a")).intValue());
+            assertEquals(-1, ((Number) keys.get("b")).intValue());
+        }
+
+        @Test
+        void testNullFieldAscDefaultsToAscending(){
+            // fieldAsc 缺省(null)归升序 1，与读侧默认一致、不改旧行为
+            List<TapIndex> indexList = new ArrayList<>();
+            TapIndex tapIndex = new TapIndex();
+            tapIndex.setName("idx_null");
+            List<TapIndexField> indexFields = new ArrayList<>();
+            indexFields.add(new TapIndexField().name("c"));   // fieldAsc 未设 = null
+            tapIndex.setIndexFields(indexFields);
+            indexList.add(tapIndex);
+            when(tapCreateIndexEvent.getIndexList()).thenReturn(indexList);
+            MongoCollection<Document> collection = mock(MongoCollection.class);
+            when(mongoDatabase.getCollection("test")).thenReturn(collection);
+            doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
+
+            mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent);
+
+            ArgumentCaptor<List<IndexModel>> captor = ArgumentCaptor.forClass(List.class);
+            verify(collection).createIndexes(captor.capture());
+            Document keys = (Document) captor.getValue().get(0).getKeys();
+            assertEquals(1, ((Number) keys.get("c")).intValue());
         }
     }
     @Nested
