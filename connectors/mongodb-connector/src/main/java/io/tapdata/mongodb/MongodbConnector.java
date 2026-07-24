@@ -1282,7 +1282,7 @@ public class MongodbConnector extends ConnectorBase {
 						}
 						keys = new Document();
 						for (TapIndexField indexField : indexFields) {
-							keys.append(indexField.getName(), 1);
+							keys.append(indexField.getName(), Boolean.FALSE.equals(indexField.getFieldAsc()) ? -1 : 1);
 						}
 						final IndexOptions indexOptions = new IndexOptions();
 						indexOptions.background(true);
