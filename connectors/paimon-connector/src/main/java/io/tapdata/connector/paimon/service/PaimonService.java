@@ -783,12 +783,26 @@ public class PaimonService implements AutoCloseable {
 				}
 			});
 		}
-		// Create table
-		catalog.createTable(identifier, schemaBuilder.build(), false);
+		Schema finalSchema = schemaBuilder.build();
+		// Paimon 1.3.1 AbstractCatalog#createTable copies Catalog table-default options into
+		// Schema#options with putIfAbsent immediately before creating the table. Mirror that exact
+		// mutation order so the connector validates the same effective options, while preserving
+		// explicit tableProperties overrides and rejecting before Catalog state is changed.
+		// Sources:
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/CatalogUtils.java#L99-L101
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/AbstractCatalog.java#L380-L405
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/AbstractCatalog.java#L649-L650
+		CatalogUtils.tableDefaultOptions(catalog.options())
+				.forEach(finalSchema.options()::putIfAbsent);
+		PaimonWriteSemanticContractResolver.validateNewTable(
+				identifier.getFullName(), finalSchema);
+
+		// Create only after the final Paimon write contract has passed validation.
+		catalog.createTable(identifier, finalSchema, false);
 
 		// log schema builder variables
 		Gson gson = new GsonBuilder().setPrettyPrinting().create();
-		log.info("Created table {} with schema: {}", identifier.getFullName(), gson.toJson(schemaBuilder.build()));
+		log.info("Created table {} with schema: {}", identifier.getFullName(), gson.toJson(finalSchema));
 
 		return true;
 	}
