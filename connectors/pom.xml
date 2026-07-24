@@ -63,7 +63,6 @@
 		<module>greenplum-connector</module>
 		<module>dws-connector</module>
 		<module>azure-cosmosdb-connector</module>
-        <module>hudi-connector</module>
 		<module>huawei-cloud-gaussdb-connector</module>
 		<module>aws-clickhouse-connector</module>
 		<module>mongodb-lower-connector</module>
@@ -282,7 +281,7 @@
 		<repository>
 			<id>nexus-releases</id>
 			<name>nexus-maven-release</name>
-			<url>https://nexus.tapdata.net/repository/maven-releases/</url>
+			<url>https://nexus.tapdata.net/repository/maven-public/</url>
 			<releases>
 				<enabled>true</enabled>
 			</releases>
@@ -296,17 +295,6 @@
 			<url>https://nexus.tapdata.net/repository/maven-snapshots/</url>
 			<releases>
 				<enabled>false</enabled>
-			</releases>
-			<snapshots>
-				<enabled>true</enabled>
-			</snapshots>
-		</repository>
-		<repository>
-			<id>tapdata-tapdata-maven</id>
-			<name>maven</name>
-			<url>https://tapdata-maven.pkg.coding.net/repository/tapdata/maven/</url>
-			<releases>
-				<enabled>true</enabled>
 			</releases>
 			<snapshots>
 				<enabled>true</enabled>

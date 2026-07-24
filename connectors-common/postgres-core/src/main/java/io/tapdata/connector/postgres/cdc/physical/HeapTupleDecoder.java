@@ -33,7 +33,7 @@ public final class HeapTupleDecoder {
         if (tuple == null || tuple.length < SIZE_OF_HEAP_HEADER) {
             return out;
         }
-        WalByteReader h = new WalByteReader(tuple);
+        WalByteReader h = WalByteReader.borrow(tuple);
         int infomask2 = h.readUInt16();
         int infomask = h.readUInt16();
         int tHoff = h.readUInt8();
@@ -54,7 +54,7 @@ public final class HeapTupleDecoder {
             System.arraycopy(tuple, SIZE_OF_HEAP_HEADER, nullBitmap, 0, bitmapLen);
         }
 
-        WalByteReader r = new WalByteReader(tuple, colDataStart, tuple.length - colDataStart);
+        WalByteReader r = WalByteReader.borrow(tuple, colDataStart, tuple.length - colDataStart);
 
         for (int i = 0; i < columns.size(); i++) {
             ColumnInfo col = columns.get(i);

@@ -3,11 +3,17 @@ package io.tapdata.connector.postgres.cdc.physical;
 import io.tapdata.connector.postgres.cdc.NormalRedo;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -112,6 +118,95 @@ public class PhysicalWalLogMinerTest {
     }
 
     @Test
+    public void testReadAssignmentParsesTopAndSubxids() {
+        byte[] body = concat(le32(1000), le32(3), le32(1001), le32(1002), le32(1003));
+        PhysicalWalLogMiner.XactAssignment assignment = PhysicalWalLogMiner.readAssignment(body);
+        assertEquals(1000L, assignment.topXid);
+        assertArrayEquals(new long[]{1001L, 1002L, 1003L}, assignment.subxids);
+    }
+
+    @Test
+    public void testReadAssignmentMalformedFallsBackToEmpty() {
+        PhysicalWalLogMiner.XactAssignment assignment = PhysicalWalLogMiner.readAssignment(new byte[]{1, 2, 3});
+        assertEquals(0L, assignment.topXid);
+        assertEquals(0, assignment.subxids.length);
+    }
+
+    @Test
+    public void testMergeSubxidsIncludesAssignmentOnlyChildren() {
+        Map<Long, Long> assignments = new LinkedHashMap<>();
+        assignments.put(1002L, 1000L);
+        assignments.put(1003L, 1000L);
+        assignments.put(2001L, 2000L);
+
+        long[] merged = PhysicalWalLogMiner.mergeSubxids(1000L, new long[]{1001L, 1002L}, assignments);
+
+        assertArrayEquals(new long[]{1001L, 1002L, 1003L}, merged);
+    }
+
+    @Test
+    public void testMergeSubxidsCoversCommitRecordWithoutSubxacts() {
+        Map<Long, Long> assignments = new LinkedHashMap<>();
+        assignments.put(1003L, 1000L);
+
+        long[] merged = PhysicalWalLogMiner.mergeSubxids(1000L, new long[0], assignments);
+
+        assertArrayEquals(new long[]{1003L}, merged);
+    }
+
+    @Test
+    public void testCommittedXidsOnlyUseCommitRecordSubxids() {
+        Set<Long> committed = PhysicalWalLogMiner.committedXids(1000L, new long[]{1001L});
+
+        assertTrue(committed.contains(1000L));
+        assertTrue(committed.contains(1001L));
+        assertFalse(committed.contains(1002L));
+    }
+
+    @Test
+    public void testRedoCommitFilterSkipsAssignmentOnlyRolledBackSubxid() {
+        Set<Long> committed = PhysicalWalLogMiner.committedXids(1000L, new long[]{1001L});
+        NormalRedo top = redoFromXid(1000L, 10L);
+        NormalRedo committedSub = redoFromXid(1001L, 20L);
+        NormalRedo rolledBackSub = redoFromXid(1002L, 30L);
+
+        assertTrue(PhysicalWalLogMiner.isCommittedRedo(top, committed));
+        assertTrue(PhysicalWalLogMiner.isCommittedRedo(committedSub, committed));
+        assertFalse(PhysicalWalLogMiner.isCommittedRedo(rolledBackSub, committed));
+    }
+
+    @Test
+    public void testRedoCommitFilterKeepsLegacyRedoWithoutSourceXid() {
+        NormalRedo redo = redoFromXid(null, 10L);
+
+        assertTrue(PhysicalWalLogMiner.isCommittedRedo(redo,
+                PhysicalWalLogMiner.committedXids(1000L, new long[0])));
+    }
+
+    @Test
+    public void testSourceXidSurvivesSpillSerialization() throws Exception {
+        NormalRedo redo = redoFromXid(1002L, 30L);
+        redo.setOperation(NormalRedo.OperationEnum.INSERT.name());
+        redo.setNameSpace("public");
+        redo.setTableName("t");
+
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream out = new ObjectOutputStream(bytes)) {
+            out.writeObject(redo);
+        }
+
+        NormalRedo restored;
+        try (ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            restored = (NormalRedo) in.readObject();
+        }
+
+        assertEquals(1002L, restored.getSourceXid().longValue());
+        assertEquals(30L, restored.getCdcSequenceId().longValue());
+        assertFalse(PhysicalWalLogMiner.isCommittedRedo(restored,
+                PhysicalWalLogMiner.committedXids(1000L, new long[]{1001L})));
+    }
+
+    @Test
     public void testLsnStrRoundTrip() {
         String[] samples = {"0/0", "0/16B6A50", "16/B374D848", "FF/FFFFFFFF"};
         for (String s : samples) {
@@ -133,6 +228,8 @@ public class PhysicalWalLogMinerTest {
         // metadata and source LSN are carried onto both halves so ordering holds
         assertEquals(u.getCdcSequenceId(), out.get(0).getCdcSequenceId());
         assertEquals(u.getCdcSequenceId(), out.get(1).getCdcSequenceId());
+        assertEquals(u.getSourceXid(), out.get(0).getSourceXid());
+        assertEquals(u.getSourceXid(), out.get(1).getSourceXid());
         assertEquals(u.getTableName(), out.get(1).getTableName());
     }
 
@@ -179,8 +276,16 @@ public class PhysicalWalLogMinerTest {
         r.setTableName("t");
         r.setTransactionId("42");
         r.setCdcSequenceId(100L);
+        r.setSourceXid(1000L);
         r.setUndoRecord(before);
         r.setRedoRecord(after);
+        return r;
+    }
+
+    private static NormalRedo redoFromXid(Long sourceXid, Long lsn) {
+        NormalRedo r = new NormalRedo();
+        r.setSourceXid(sourceXid);
+        r.setCdcSequenceId(lsn);
         return r;
     }
 

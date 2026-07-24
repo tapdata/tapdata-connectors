@@ -29,6 +29,15 @@ public class HeapTupleDecoderTest {
         }
     }
 
+    private static byte[] hex(String s) {
+        s = s.replaceAll("\\s+", "");
+        byte[] out = new byte[s.length() / 2];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = (byte) Integer.parseInt(s.substring(i * 2, i * 2 + 2), 16);
+        }
+        return out;
+    }
+
     @Test
     public void testDeformFixedAndVarlena() {
         List<ColumnInfo> cols = Arrays.asList(
@@ -86,5 +95,32 @@ public class HeapTupleDecoderTest {
         assertEquals(9, m.get("c"));
         assertFalse(m.containsKey("dead"));
         assertEquals(2, m.size());
+    }
+
+    @Test
+    public void testPg15JsonbShortVarlenaFromWalTuple() {
+        List<ColumnInfo> cols = Arrays.asList(
+                new ColumnInfo("a1", 1, PgTypeDecoder.INT4, 4, 'i', false),
+                new ColumnInfo("a2", 2, PgTypeDecoder.JSONB, -1, 'i', false));
+
+        Map<String, Object> objectRow = HeapTupleDecoder.decode(
+                hex("020002081800040000000b00000020"), cols);
+        assertEquals(4, objectRow.get("a1"));
+        assertEquals("{}", objectRow.get("a2"));
+
+        Map<String, Object> arrayRow = HeapTupleDecoder.decode(
+                hex("020002081800050000000b00000040"), cols);
+        assertEquals(5, arrayRow.get("a1"));
+        assertEquals("[]", arrayRow.get("a2"));
+
+        Map<String, Object> numericRow = HeapTupleDecoder.decode(
+                hex("0200020818000700000057020000200300008005000000020000000c0000106466646b646b646b736600002800000001800c00330c"), cols);
+        assertEquals(7, numericRow.get("a1"));
+        assertEquals("{\"dfd\":\"sf\",\"kdkdk\":123123}", numericRow.get("a2"));
+
+        Map<String, Object> nestedArrayRow = HeapTupleDecoder.decode(
+                hex("0200020818000c000000a902000020030000800500000002000000350000506466646b646b646b73660000040000400a0000900a00001008000010030000002800000001800c00330c00002000000000807b002000000000807b00313233"), cols);
+        assertEquals(12, nestedArrayRow.get("a1"));
+        assertEquals("{\"dfd\":\"sf\",\"kdkdk\":[123123,123,123,\"123\"]}", nestedArrayRow.get("a2"));
     }
 }

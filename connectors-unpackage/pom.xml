@@ -10,7 +10,8 @@
     <modules>
         <module>hive1-connector</module>
         <module>hive3-connector</module>
-<!--        <module>mrs-hive3-connector</module>-->
+        <module>mrs-hive3-connector</module>
+		<module>hudi-connector</module>
     </modules>
 	<properties>
 		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>
@@ -136,7 +137,7 @@
 		<repository>
 			<id>nexus-releases</id>
 			<name>nexus-maven-release</name>
-			<url>https://nexus.tapdata.net/repository/maven-releases/</url>
+			<url>https://nexus.tapdata.net/repository/maven-public/</url>
 			<releases>
 				<enabled>true</enabled>
 			</releases>
@@ -150,17 +151,6 @@
 			<url>https://nexus.tapdata.net/repository/maven-snapshots/</url>
 			<releases>
 				<enabled>false</enabled>
-			</releases>
-			<snapshots>
-				<enabled>true</enabled>
-			</snapshots>
-		</repository>
-		<repository>
-			<id>tapdata-tapdata-maven</id>
-			<name>maven</name>
-			<url>https://tapdata-maven.pkg.coding.net/repository/tapdata/maven/</url>
-			<releases>
-				<enabled>true</enabled>
 			</releases>
 			<snapshots>
 				<enabled>true</enabled>

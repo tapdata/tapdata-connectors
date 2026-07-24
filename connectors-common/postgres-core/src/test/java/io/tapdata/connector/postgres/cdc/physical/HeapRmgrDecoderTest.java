@@ -155,6 +155,36 @@ public class HeapRmgrDecoderTest {
         assertEquals("bb", r.getRedoRecord().get("b"));
     }
 
+    @Test
+    public void testLogicalUpdateDoesNotUseFpiAsOldImageFallback() {
+        byte[] page = heapPage(new int[]{1, 2},
+                new byte[][]{onDiskTuple(1, "stale"), onDiskTuple(2, "new")});
+
+        XLogRecord rec = new XLogRecord();
+        rec.rmid = RM_HEAP_ID;
+        rec.info = XLOG_HEAP_UPDATE;
+        rec.xid = 21;
+        ByteArrayOutputStream md = new ByteArrayOutputStream();
+        u32(md, 0);                                 // old_xmax
+        u16(md, 1);                                 // old_offnum
+        md.write(0);                                // old_infobits
+        md.write(0);                                // flags: no OLD tuple/key
+        u32(md, 0);                                 // new_xmax
+        u16(md, 2);                                 // new_offnum
+        rec.mainData = md.toByteArray();
+        rec.blocks.add(imageBlock0(page));          // FPI is post-image, not a logical old-image source
+
+        HeapRmgrDecoder.Ctx ctx = new HeapRmgrDecoder.Ctx(null, true, null);
+        List<NormalRedo> events = HeapRmgrDecoder.decode(rec, REL, ctx);
+        assertEquals(1, events.size());
+        NormalRedo r = events.get(0);
+        assertEquals("UPDATE", r.getOperation());
+        assertNull(r.getUndoRecord());
+        assertNotNull(r.getRedoRecord());
+        assertEquals(2, r.getRedoRecord().get("a"));
+        assertEquals("new", r.getRedoRecord().get("b"));
+    }
+
     /**
      * Overlay persistence regression: a hot page that took an FPI on one UPDATE
      * must keep serving before-images to later FPI-less UPDATEs on the same
@@ -236,6 +266,35 @@ public class HeapRmgrDecoderTest {
     }
 
     @Test
+    public void testDeleteKeepsOverlayForPossibleSubtransactionRollback() {
+        PageStateCache cache = new PageStateCache();
+        HeapRmgrDecoder.Ctx ctx = new HeapRmgrDecoder.Ctx(cache, false, null);
+
+        byte[] page = heapPage(new int[]{1}, new byte[][]{onDiskTuple(4, "dd")});
+        XLogRecord seed = new XLogRecord();
+        seed.rmid = RM_HEAP_ID;
+        seed.info = XLOG_HEAP_INSERT;
+        seed.xid = 40;
+        ByteArrayOutputStream seedMd = new ByteArrayOutputStream();
+        u16(seedMd, 1);
+        seed.mainData = seedMd.toByteArray();
+        seed.blocks.add(imageBlock0(page));
+        HeapRmgrDecoder.decode(seed, REL, ctx);
+
+        XLogRecord rolledBackDelete = deleteWithoutOldTuple(41, 1);
+        List<NormalRedo> first = HeapRmgrDecoder.decode(rolledBackDelete, REL, ctx);
+        assertEquals(1, first.size());
+        assertEquals(4, first.get(0).getUndoRecord().get("a"));
+
+        XLogRecord committedDelete = deleteWithoutOldTuple(42, 1);
+        List<NormalRedo> second = HeapRmgrDecoder.decode(committedDelete, REL, ctx);
+        assertEquals(1, second.size());
+        assertNotNull(second.get(0).getUndoRecord());
+        assertEquals(4, second.get(0).getUndoRecord().get("a"));
+        assertEquals("dd", second.get(0).getUndoRecord().get("b"));
+    }
+
+    @Test
     public void testUpdateWithFullOldTuple() {
         XLogRecord rec = new XLogRecord();
         rec.rmid = RM_HEAP_ID;
@@ -295,5 +354,23 @@ public class HeapRmgrDecoderTest {
         assertEquals("x", events.get(0).getRedoRecord().get("b"));
         assertEquals(8, events.get(1).getRedoRecord().get("a"));
         assertEquals("yy", events.get(1).getRedoRecord().get("b"));
+    }
+
+    private static XLogRecord deleteWithoutOldTuple(long xid, int offnum) {
+        XLogRecord rec = new XLogRecord();
+        rec.rmid = RM_HEAP_ID;
+        rec.info = XLOG_HEAP_DELETE;
+        rec.xid = xid;
+        ByteArrayOutputStream md = new ByteArrayOutputStream();
+        u32(md, 0);
+        u16(md, offnum);
+        md.write(0);
+        md.write(0);
+        rec.mainData = md.toByteArray();
+        XLogRecord.BlockRef b = new XLogRecord.BlockRef();
+        b.id = 0;
+        b.relNumber = 16384;
+        rec.blocks.add(b);
+        return rec;
     }
 }

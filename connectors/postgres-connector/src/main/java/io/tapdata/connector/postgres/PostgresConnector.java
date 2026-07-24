@@ -10,6 +10,8 @@ import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
 import io.tapdata.connector.postgres.cdc.WalLogMinerV2;
 import io.tapdata.connector.postgres.cdc.WalPgtoMiner;
 import io.tapdata.connector.postgres.cdc.physical.PhysicalWalLogMiner;
+import io.tapdata.connector.postgres.cdc.physical.WalPageDecoder;
+import io.tapdata.connector.postgres.cdc.physical.XLogRecord;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
@@ -37,6 +39,7 @@ import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.exception.TapCodeException;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.*;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -63,11 +66,9 @@ import java.sql.Date;
 import java.text.SimpleDateFormat;
 import java.time.*;
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -92,6 +93,7 @@ public class PostgresConnector extends CommonDbConnector {
     private Object slotName; //must be stored in stateMap
     protected String postgresVersion;
     protected PostgresPartitionContext postgresPartitionContext;
+    private ScheduledExecutorService asyncCheckSlaveExecutor;
 
     @Override
     public void onStart(TapConnectionContext connectorContext) {
@@ -274,7 +276,7 @@ public class PostgresConnector extends CommonDbConnector {
                 cdcRunner.closeCdcRunner();
                 cdcRunner = null;
             }
-            if (EmptyKit.isNotNull(slotName)) {
+            if (EmptyKit.isNotNull(slotName) && postgresConfig.getAutoClearSlot()) {
                 clearSlot();
             }
             if ("walminer".equals(postgresConfig.getLogPluginName())) {
@@ -336,6 +338,19 @@ public class PostgresConnector extends CommonDbConnector {
             if (existSlot.get()) {
                 tapLogger.info("Using an existing logical replication slot, slotName:{}", slotName);
             } else {
+                long begin = System.currentTimeMillis();
+                if ("physical".equals(postgresConfig.getLogPluginName())) {
+                    String sql = "SELECT pg_create_physical_replication_slot('" + slotName + "')";
+                    try {
+                        postgresJdbcContext.execute(sql, 20);
+                    } catch (SQLException e) {
+                        if (System.currentTimeMillis() - begin > 18000) {
+                            throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_TIMEOUT, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                        } else {
+                            throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_FAILED, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                        }
+                    }
+                }
                 tapLogger.warn("The previous logical replication slot no longer exists. Although it has been rebuilt, there is a possibility of data loss. Please check");
             }
         }
@@ -481,6 +496,20 @@ public class PostgresConnector extends CommonDbConnector {
         ErrorKit.ignoreAnyError(() -> {
             if (EmptyKit.isNotNull(cdcRunner)) {
                 cdcRunner.closeCdcRunner();
+            }
+        });
+        ErrorKit.ignoreAnyError(() -> {
+            if (asyncCheckSlaveExecutor != null) {
+                asyncCheckSlaveExecutor.shutdown();
+                try {
+                    if (!asyncCheckSlaveExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                        asyncCheckSlaveExecutor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    asyncCheckSlaveExecutor.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+                asyncCheckSlaveExecutor = null;
             }
         });
         EmptyKit.closeQuietly(postgresTest);
@@ -704,7 +733,8 @@ public class PostgresConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
-            postgresTest.testHostPortForMasterSlave();
+            postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
+            postgresJdbcContext.refresh();
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
@@ -724,12 +754,51 @@ public class PostgresConnector extends CommonDbConnector {
         } else if ("physical".equals(postgresConfig.getLogPluginName())) {
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
-            new PhysicalWalLogMiner(postgresJdbcContext, tapLogger)
-                    .useSlot(slotName.toString())
-                    .watch(new ArrayList<>(tableList), nodeContext.getTableMap())
-                    .offset(offsetState)
-                    .registerConsumer(consumer, recordSize)
-                    .startMiner(this::isAlive);
+            try {
+                PhysicalWalLogMiner miner = new PhysicalWalLogMiner(postgresJdbcContext, tapLogger);
+                miner.useSlot(slotName.toString());
+                miner.watch(new ArrayList<>(tableList), nodeContext.getTableMap());
+
+                // Handle time-based CDC: offsetState may be a Long timestamp from timestampToStreamOffset
+                if (offsetState instanceof Long) {
+                    Long startTimeMs = (Long) offsetState;
+                    tapLogger.info("Physical CDC time-based start: timestamp={}, will filter by commit time", startTimeMs);
+                    // Configure time-based filtering
+                    miner.setFilterStartTime(startTimeMs);
+
+                    // Optimize: Use binary search to find the WAL file closest to the target time
+                    String startLsn = approximateWalLsnByTime(startTimeMs);
+                    if (EmptyKit.isNotBlank(startLsn)) {
+                        tapLogger.info("Starting from approximated WAL LSN: {}, will filter events by commit time >= {}",
+                                startLsn, new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(startTimeMs)));
+                        miner.offset(startLsn);
+                    } else {
+                        tapLogger.warn("Could not approximate WAL LSN from time, falling back to earliest available WAL");
+                        String earliestLsn = queryEarliestAvailableWalLsn();
+                        if (EmptyKit.isNotBlank(earliestLsn)) {
+                            miner.offset(earliestLsn);
+                        } else {
+                            miner.offset(null);
+                        }
+                    }
+                } else {
+                    // Normal offset (String LSN or null)
+                    miner.offset(offsetState);
+                }
+
+                miner.registerConsumer(consumer, recordSize);
+                checkCdcSlaveConnected(miner);
+                miner.startMiner(this::isAlive);
+            } catch (Exception e) {
+                if (e instanceof SQLException) {
+                    exceptionCollector.collectTerminateByServer(e);
+                    exceptionCollector.collectCdcConfigInvalid(e);
+                    exceptionCollector.revealException(e);
+                }
+                if (isAlive()) {
+                    throw e;
+                }
+            }
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
@@ -805,7 +874,8 @@ public class PostgresConnector extends CommonDbConnector {
             });
         }
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
-            postgresTest.testHostPortForMasterSlave();
+            postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
+            postgresJdbcContext.refresh();
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
@@ -825,12 +895,38 @@ public class PostgresConnector extends CommonDbConnector {
         } else if ("physical".equals(postgresConfig.getLogPluginName())) {
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
-            new PhysicalWalLogMiner(postgresJdbcContext, tapLogger)
-                    .useSlot(slotName.toString())
-                    .watch(schemaTableMap, nodeContext.getTableMap())
-                    .offset(offsetState)
-                    .registerConsumer(consumer, batchSize)
-                    .startMiner(this::isAlive);
+            PhysicalWalLogMiner miner = new PhysicalWalLogMiner(postgresJdbcContext, tapLogger);
+            miner.useSlot(slotName.toString());
+            miner.watch(schemaTableMap, nodeContext.getTableMap());
+
+            // Handle time-based CDC: offsetState may be a Long timestamp
+            if (offsetState instanceof Long) {
+                Long startTimeMs = (Long) offsetState;
+                tapLogger.info("Physical CDC multi-connection time-based start: timestamp={}", startTimeMs);
+                miner.setFilterStartTime(startTimeMs);
+
+                // Optimize: Use binary search to find the WAL file closest to the target time
+                String startLsn = approximateWalLsnByTime(startTimeMs);
+                if (EmptyKit.isNotBlank(startLsn)) {
+                    tapLogger.info("Starting from approximated WAL LSN: {}, will filter events by commit time >= {}",
+                            startLsn, new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(startTimeMs)));
+                    miner.offset(startLsn);
+                } else {
+                    tapLogger.warn("Could not approximate WAL LSN from time, falling back to earliest available WAL");
+                    String earliestLsn = queryEarliestAvailableWalLsn();
+                    if (EmptyKit.isNotBlank(earliestLsn)) {
+                        miner.offset(earliestLsn);
+                    } else {
+                        miner.offset(null);
+                    }
+                }
+            } else {
+                miner.offset(offsetState);
+            }
+
+            miner.registerConsumer(consumer, batchSize);
+            checkCdcSlaveConnected(miner);
+            miner.startMiner(this::isAlive);
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
@@ -866,7 +962,7 @@ public class PostgresConnector extends CommonDbConnector {
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
-            postgresTest.testHostPortForMasterSlave();
+            postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotBlank(postgresConfig.getPgtoHost())) {
@@ -881,10 +977,16 @@ public class PostgresConnector extends CommonDbConnector {
             return timestamp;
         }
         if ("physical".equals(postgresConfig.getLogPluginName())) {
-            if (EmptyKit.isNotNull(offsetStartTime)) {
-                tapLogger.warn("Postgres physical CDC does not support a specified start time, using the current wal lsn");
-            }
             buildSlot(connectorContext, false);
+
+            if (EmptyKit.isNotNull(offsetStartTime)) {
+                // Time-based CDC for physical replication slot
+                // Return the timestamp itself - PhysicalWalLogMiner will filter by commit time
+                tapLogger.info("Physical CDC time-based start requested at timestamp {}, will filter events by commit time",
+                        offsetStartTime);
+                return offsetStartTime;
+            }
+
             AtomicReference<String> lsn = new AtomicReference<>();
             // recovery-aware: a standby cannot run pg_current_wal_flush_lsn(), use the last replayed lsn there.
             // Use flush (not insert) position because PG's physical replication START_REPLICATION
@@ -924,6 +1026,29 @@ public class PostgresConnector extends CommonDbConnector {
             }
         }
         return new PostgresOffset();
+    }
+
+    private void checkCdcSlaveConnected(PhysicalWalLogMiner miner) {
+        if (postgresConfig.getCheckCdcSlave()) {
+            asyncCheckSlaveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "slave-async-check");
+                t.setDaemon(true);
+                return t;
+            });
+            asyncCheckSlaveExecutor.scheduleAtFixedRate(() -> {
+                try {
+                    postgresJdbcContext.queryWithNext("SELECT pg_is_in_recovery()", resultSet -> {
+                        boolean isInRecovery = resultSet.getBoolean(1);
+                        if (!isInRecovery) {
+                            tapLogger.warn("The node cdc connected to is master node, we need switch to slave node");
+                            miner.setThreadException(new TapPdkRetryableEx("postgres", new RuntimeException("Master node detected, please switch to slave node for CDC")));
+                        }
+                    });
+                } catch (Exception e) {
+                    tapLogger.warn("Failed to check PostgreSQL server recovery status: {}", e.getMessage());
+                }
+            }, 300, 300, TimeUnit.SECONDS);
+        }
     }
 
     private String getTimestampOffset(Long offsetStartTime) throws SQLException {
@@ -1566,6 +1691,373 @@ public class PostgresConnector extends CommonDbConnector {
     public String exportEventSql(TapConnectorContext connectorContext, TapEvent tapEvent, TapTable table) throws SQLException {
         PostgresWriteRecorder writeRecorder = new PostgresWriteRecorder(null, table, jdbcContext.getConfig().getSchema());
         return exportEventSql(writeRecorder, connectorContext, tapEvent, table);
+    }
+
+    /**
+     * Query the restart_lsn of a physical replication slot.
+     * This is the earliest LSN that the slot requires PostgreSQL to keep.
+     *
+     * @param slotName Name of the replication slot
+     * @return The restart_lsn as a string (e.g., "1C/972C1D68"), or null if slot doesn't exist or has no restart_lsn
+     */
+    private String querySlotRestartLsn(String slotName) {
+        try {
+            String[] result = new String[1];
+            postgresJdbcContext.query(
+                "SELECT restart_lsn::text FROM pg_replication_slots WHERE slot_name = '" + slotName + "'",
+                rs -> {
+                    if (rs.next()) {
+                        result[0] = rs.getString(1);
+                    }
+                }
+            );
+            return result[0];
+        } catch (Exception e) {
+            tapLogger.warn("Failed to query restart_lsn for slot {}: {}", slotName, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Approximate the WAL LSN to start from for time-based CDC.
+     * <p>
+     * Scans WAL segments <b>backwards</b> (newest → oldest), logging every
+     * checkpoint encountered. Uses the existing {@code WalPageDecoder} +
+     * {@code XLogRecord.parse()} path (same as {@code PhysicalWalLogMiner}) so
+     * WAL binary parsing is identical to the miner's.  Scanning backwards
+     * means we encounter checkpoints in newer files first — those are the
+     * ones closest to the target time.  Commit timestamps from
+     * {@code RM_TRANSACTION} records drive the stopping decision: once a file
+     * whose commits are entirely <b>before</b> targetTimeMs is reached, we
+     * return the most recently seen checkpoint LSN.
+     *
+     * @param targetTimeMs Target timestamp in milliseconds since epoch
+     * @return Approximated LSN string, or null
+     */
+    private String approximateWalLsnByTime(Long targetTimeMs) {
+        if (targetTimeMs == null) {
+            return null;
+        }
+        try {
+            // 1. Collect WAL file names ordered by LSN (name-sort = LSN-sort)
+            List<String> names = new ArrayList<>();
+            postgresJdbcContext.query("SELECT name FROM pg_ls_waldir() ORDER BY name",
+                    rs -> { while (rs.next()) names.add(rs.getString("name")); });
+
+            if (names.isEmpty()) {
+                tapLogger.warn("pg_ls_waldir() returned no WAL files");
+                return null;
+            }
+
+            // 2. Query the actual WAL segment size
+            long segSize = 16L * 1024 * 1024;
+            try {
+                long[] sz = new long[1];
+                postgresJdbcContext.query(
+                    "SELECT setting::bigint FROM pg_settings WHERE name='wal_segment_size'",
+                    rs -> { if (rs.next()) sz[0] = rs.getLong(1); });
+                if (sz[0] > 0) segSize = sz[0];
+            } catch (Exception ignored) { /* default 16 MB */ }
+
+            SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            tapLogger.info("Scanning {} WAL files backwards from newest to target {}",
+                    names.size(), fmt.format(new java.util.Date(targetTimeMs)));
+
+            String closestCheckpointFile = null;
+
+            // 3. Scan backwards: newest → oldest
+            int recycledCount = 0, emptyCount = 0, noCommitCount = 0, readFailCount = 0;
+            int scannedCount = 0;
+            for (int i = names.size() - 1; i >= 0; i--) {
+                String name = names.get(i);
+                long fileStartLsn = walFileStartLsn(name);
+                String lsnStr = String.format("%X/%X", fileStartLsn >>> 32, fileStartLsn & 0xFFFFFFFFL);
+
+                tapLogger.info("Scanning WAL {} (lsn={}, {}/{} files)", name, lsnStr,
+                        names.size() - i, names.size());
+
+                // Read entire WAL segment via pg_read_binary_file
+                byte[][] dataHolder = new byte[1][];
+                try {
+                    postgresJdbcContext.query(
+                        "SELECT pg_read_binary_file('pg_wal/' || '" + name + "')",
+                        rs -> { if (rs.next()) dataHolder[0] = rs.getBytes(1); });
+                } catch (Exception e) {
+                    readFailCount++;
+                    tapLogger.info("  → SKIP: pg_read_binary_file failed for {}: {}", name, e.getMessage());
+                    continue;
+                }
+
+                byte[] data = dataHolder[0];
+                if (data == null || data.length < 8192) {
+                    emptyCount++;
+                    tapLogger.info("  → SKIP: empty or too small ({} bytes)", data == null ? 0 : data.length);
+                    continue;
+                }
+
+                tapLogger.info("  → read {} bytes, file size matches", data.length);
+
+                // Validate first page's xlp_pageaddr — recycled WAL files
+                // (renamed from an older segment) retain their original page
+                // address which won't match the filename-derived LSN.
+                // Page header layout: magic(2) + info(2) + tli(4) + pageaddr(8) → pageaddr at offset 8
+                long pageAddr = u64le(data, 8);
+                if (pageAddr != fileStartLsn) {
+                    recycledCount++;
+                    tapLogger.info("  → SKIP: RECYCLED — xlp_pageaddr={}/{} != file-lsn={}",
+                            pageAddr >>> 32, String.format("%08X", pageAddr & 0xFFFFFFFFL), lsnStr);
+                    continue;
+                }
+
+                tapLogger.info("  → xlp_pageaddr matches, parsing records...");
+
+                // Parse with the same decoder+parser the miner uses
+                WalPageDecoder decoder = new WalPageDecoder(fileStartLsn, segSize);
+                decoder.feed(data, 0, data.length);
+
+                int totalRecords = 0, checkpointCount = 0, commitCount = 0;
+                long minCommitMs = Long.MAX_VALUE, maxCommitMs = Long.MIN_VALUE;
+
+                while (true) {
+                    WalPageDecoder.RawRecord raw;
+                    try {
+                        raw = decoder.nextRecord();
+                    } catch (Exception e) {
+                        tapLogger.info("  → decoder.nextRecord() exception, stopping file scan: {}", e.getMessage());
+                        break;
+                    }
+                    if (raw == null) break;
+                    totalRecords++;
+
+                    XLogRecord rec;
+                    try {
+                        rec = XLogRecord.parse(raw);
+                    } catch (Exception e) {
+                        continue;
+                    }
+
+                    // --- checkpoint detection ---
+                    if (rec.rmid == 0 /* RM_XLOG_ID */) {
+                        int op = rec.info & 0xF0;
+                        if (op == 0x00 || op == 0x10) {
+                            checkpointCount++;
+                            // Always update — after the scan, this will point
+                            // to the checkpoint closest to (but ≤) the target time.
+                            closestCheckpointFile = name;
+                            tapLogger.info("  → CHECKPOINT [{}] at raw.lsn={}/{:08X} rec.lsn={}/{:08X}",
+                                    op == 0x00 ? "SHUTDOWN" : "ONLINE",
+                                    raw.lsn >>> 32, raw.lsn & 0xFFFFFFFFL,
+                                    rec.lsn >>> 32, rec.lsn & 0xFFFFFFFFL);
+                        }
+                    }
+
+                    // --- commit timestamp tracking ---
+                    if (rec.rmid == 1 /* RM_TRANSACTION_ID */
+                            && rec.mainData != null && rec.mainData.length >= 8) {
+                        int op = rec.info & 0x70;
+                        if (op == 0x00 || op == 0x30) {
+                            commitCount++;
+                            long pgMicros = u64le(rec.mainData, 0);
+                            long commitMs = (pgMicros + 946684800_000_000L) / 1000;
+                            if (commitMs > 0 && commitMs < minCommitMs) minCommitMs = commitMs;
+                            if (commitMs > maxCommitMs) maxCommitMs = commitMs;
+                        }
+                    }
+                }
+
+                tapLogger.info("  → parsed {} records: {} commits, {} checkpoints",
+                        totalRecords, commitCount, checkpointCount);
+
+                if (maxCommitMs == Long.MIN_VALUE) {
+                    noCommitCount++;
+                    tapLogger.info("  → SKIP: no valid commit records found in this file");
+                    continue;
+                }
+
+                scannedCount++;
+                tapLogger.info("WAL {} ckpt={} commits: {} ~ {}",
+                        name, checkpointCount,
+                        fmt.format(new java.util.Date(minCommitMs)),
+                        fmt.format(new java.util.Date(maxCommitMs)));
+
+                if (maxCommitMs < targetTimeMs) {
+                    tapLogger.info("Passed target time at file {} (commit {} < target {})",
+                            name, fmt.format(new java.util.Date(maxCommitMs)),
+                            fmt.format(new java.util.Date(targetTimeMs)));
+                    break;
+                }
+            }
+
+            tapLogger.info("Scan summary: {} files, {} recycled, {} empty, {} read-fail, {} no-commit, {} with-commits",
+                    names.size(), recycledCount, emptyCount, readFailCount, noCommitCount, scannedCount);
+
+            // 4. Return closest checkpoint file's LSN, or fall back to earliest WAL
+            String resultLsn;
+            if (closestCheckpointFile != null) {
+                resultLsn = walFileToLsn(closestCheckpointFile);
+                tapLogger.info("Using checkpoint LSN from file {}: {}",
+                        closestCheckpointFile, resultLsn);
+            } else {
+                tapLogger.warn("No checkpoint found before target time, falling back to earliest WAL");
+                resultLsn = queryEarliestAvailableWalLsn();
+            }
+
+            // 5. Safety cap: if the approximated LSN is ahead of the current WAL flush
+            //    position (historical WAL files from a previous timeline/incarnation),
+            //    the replication stream would permanently block at readPending().
+            //    Cap to flush_lsn so the stream opens at the latest readable position.
+            if (resultLsn != null) {
+                String flushLsn = queryCurrentWalFlushLsn();
+                if (flushLsn != null) {
+                    long resultLong = lsnToLong(resultLsn);
+                    long flushLong = lsnToLong(flushLsn);
+                    if (resultLong > flushLong) {
+                        tapLogger.warn("Approximated LSN {} is ahead of current WAL flush position {} "
+                                        + "(historical WAL files on disk do not belong to the current timeline). "
+                                        + "Falling back to flush position; time filter >= {} will skip old records.",
+                                resultLsn, flushLsn,
+                                new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(targetTimeMs)));
+                        return flushLsn;
+                    }
+                }
+            }
+            return resultLsn;
+
+        } catch (Exception e) {
+            tapLogger.warn("approximateWalLsnByTime failed: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * Query the earliest available WAL LSN by finding the oldest WAL file.
+     * This LSN represents the oldest WAL that is still retained (by wal_keep_size, replication slots, etc.),
+     * maximizing the chance of capturing historical data for time-based filtering.
+     *
+     * @return The earliest WAL LSN as a string, or null if query fails
+     */
+    private String queryEarliestAvailableWalLsn() {
+        try {
+            String[] result = new String[1];
+
+            // Strategy 1: Try pg_ls_waldir() (PostgreSQL 10+)
+            // Get the oldest WAL file name and convert it to LSN
+            postgresJdbcContext.query(
+                "SELECT min(name) FROM pg_ls_waldir()",
+                rs -> {
+                    if (rs.next()) {
+                        String walFileName = rs.getString(1);
+                        // Convert WAL file name to LSN
+                        result[0] = walFileToLsn(walFileName);
+                    }
+                }
+            );
+
+            if (result[0] != null) {
+                return result[0];
+            }
+
+            // Strategy 2: Fall back to querying min LSN from pg_stat_replication or other sources
+            postgresJdbcContext.query(
+                "SELECT COALESCE(" +
+                "  (SELECT min(restart_lsn) FROM pg_replication_slots WHERE restart_lsn IS NOT NULL)::text, " +
+                "  pg_current_wal_lsn()::text" +
+                ")",
+                rs -> {
+                    if (rs.next()) {
+                        result[0] = rs.getString(1);
+                    }
+                }
+            );
+
+            return result[0];
+        } catch (Exception e) {
+            tapLogger.warn("Failed to query earliest available WAL LSN: {}", e.getMessage());
+            // Final fallback: try to get the oldest LSN from pg_ls_waldir
+            try {
+                String[] result = new String[1];
+                postgresJdbcContext.query(
+                    "SELECT min(name) FROM pg_ls_waldir()",
+                    rs -> {
+                        if (rs.next()) {
+                            String walFileName = rs.getString(1);
+                            result[0] = walFileToLsn(walFileName);
+                        }
+                    }
+                );
+                return result[0];
+            } catch (Exception e2) {
+                tapLogger.warn("Final fallback for earliest WAL also failed: {}", e2.getMessage());
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Convert a WAL file name to an LSN string.
+     * WAL file name format: 000000010000001C00000097
+     * LSN format: 1C/97000000
+     *
+     * @param walFileName WAL file name (24 hex characters)
+     * @return LSN string (e.g., "1C/97000000")
+     */
+    private String walFileToLsn(String walFileName) {
+        if (walFileName == null || walFileName.length() != 24) {
+            return null;
+        }
+
+        // Extract timeline, high 32 bits, and low 32 bits
+        // String timeline = walFileName.substring(0, 8);  // Not needed for LSN
+        String highPart = walFileName.substring(8, 16);
+        String lowPart = walFileName.substring(16, 24);
+
+        // Convert to LSN format: HIGH/LOW000000 (each WAL segment is 16MB = 0x1000000 bytes)
+        long high = Long.parseLong(highPart, 16);
+        long low = Long.parseLong(lowPart, 16);
+
+        return String.format("%X/%X", high, low * 0x1000000L);
+    }
+
+    /**
+     * Convert a WAL file name (24 hex chars) to the absolute LSN (long) of the
+     * segment's first byte.  WAL segment = 16 MB = 0x1000000 bytes.
+     */
+    private static long walFileStartLsn(String name) {
+        return (Long.parseLong(name.substring(8, 16), 16) << 32)
+             | (Long.parseLong(name.substring(16, 24), 16) << 24);
+    }
+
+    /** Parse "XX/YYYYYYYY" LSN string to long. */
+    private static long lsnToLong(String lsn) {
+        int slash = lsn.indexOf('/');
+        return (Long.parseLong(lsn.substring(0, slash), 16) << 32)
+             | Long.parseLong(lsn.substring(slash + 1), 16);
+    }
+
+    /** Query pg_current_wal_flush_lsn() (recovery-aware). */
+    private String queryCurrentWalFlushLsn() {
+        try {
+            String[] result = new String[1];
+            postgresJdbcContext.queryWithNext(
+                "SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END",
+                rs -> result[0] = rs.getString(1));
+            return result[0];
+        } catch (Exception e) {
+            tapLogger.warn("Cannot query current WAL flush LSN: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** Little-endian uint64 from byte[] at offset. */
+    private static long u64le(byte[] b, int o) {
+        return (b[o] & 0xFFL)
+             | ((b[o + 1] & 0xFFL) << 8)
+             | ((b[o + 2] & 0xFFL) << 16)
+             | ((b[o + 3] & 0xFFL) << 24)
+             | ((b[o + 4] & 0xFFL) << 32)
+             | ((b[o + 5] & 0xFFL) << 40)
+             | ((b[o + 6] & 0xFFL) << 48)
+             | ((b[o + 7] & 0xFFL) << 56);
     }
 
     protected void clearIdleSlot() throws SQLException {

@@ -285,6 +285,103 @@
             }
           }
         },
+        "checkCdcSlave": {
+          "type": "boolean",
+          "title": "${checkCdcSlave}",
+          "default": false,
+          "x-index": 83,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["__TAPDATA.connection_type", "deploymentMode", "logPluginName"],
+              "fulfill": {
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='master-slave' && $deps[2]==='physical' ? null:\"none\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "walTdeKey": {
+          "type": "string",
+          "title": "${walTdeKey}",
+          "x-decorator": "FormItem",
+          "x-component": "TextFileReader",
+          "x-component-props": {
+            "base64": true
+          },
+          "fileNameField": "walTdeKeyFile",
+          "x-decorator-props": {
+            "tooltip": "${walTdeKeyTip}"
+          },
+          "x-index": 85,
+          "x-reactions": [
+            {
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName"],
+              "fulfill": {
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='physical' ? null:\"none\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "walTdeKeyPassword": {
+          "type": "string",
+          "title": "${walTdeKeyPassword}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "x-decorator-props": {
+            "tooltip": "${walTdeKeyPasswordTip}"
+          },
+          "x-index": 86,
+          "x-reactions": [
+            {
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName", "walTdeKey"],
+              "fulfill": {
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='physical' && $deps[2] ? null:\"none\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "walTdeKeyWrapAlgorithm": {
+          "type": "string",
+          "title": "${walTdeKeyWrapAlgorithm}",
+          "default": "auto",
+          "enum": [
+            {
+              "label": "Auto",
+              "value": "auto"
+            },
+            {
+              "label": "AES-256-CBC",
+              "value": "aes-256-cbc"
+            },
+            {
+              "label": "AES-128-CBC",
+              "value": "aes-128-cbc"
+            }
+          ],
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-decorator-props": {
+            "tooltip": "${walTdeKeyWrapAlgorithmTip}"
+          },
+          "x-index": 87,
+          "x-reactions": [
+            {
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName", "walTdeKey", "walTdeKeyPassword"],
+              "fulfill": {
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='physical' && $deps[2] && $deps[3] ? null:\"none\"}}"
+                }
+              }
+            }
+          ]
+        },
         "pgtoHost": {
           "type": "string",
           "title": "${pgtoHost}",
@@ -796,12 +893,51 @@
             }
           ]
         },
+        "keepWalHours": {
+          "type": "string",
+          "title": "${keepWalHours}",
+          "default": 0,
+          "x-index": 19,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${keepWalHoursTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "autoClearSlot": {
+          "type": "boolean",
+          "title": "${autoClearSlot}",
+          "default": true,
+          "x-index": 20,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".customSlotName", ".keepWalHours"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length && $deps[1] !== '' && $deps[2] > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "customPublicationName": {
           "type": "string",
           "title": "${customPublicationName}",
           "x-decorator": "FormItem",
           "x-component": "Input",
-          "x-index": 19,
+          "x-index": 21,
           "x-decorator-props": {
             "tooltip": "${customPublicationNameTip}"
           },
@@ -820,7 +956,7 @@
           "type": "boolean",
           "title": "${splitUpdatePk}",
           "default": true,
-          "x-index": 20,
+          "x-index": 22,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-reactions": [
@@ -838,7 +974,7 @@
           "type": "boolean",
           "title": "${ddlTriggerEnable}",
           "default": true,
-          "x-index": 21,
+          "x-index": 23,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-reactions": [
@@ -852,15 +988,102 @@
             }
           ]
         },
-        "keepWalHours": {
+        "walDebug": {
+          "type": "boolean",
+          "title": "${walDebug}",
+          "default": false,
+          "x-index": 24,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${walDebugTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "walPageCacheCapacity": {
           "type": "string",
-          "title": "${keepWalHours}",
+          "title": "${walPageCacheCapacity}",
           "default": 0,
-          "x-index": 22,
+          "x-index": 25,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "x-decorator-props": {
-            "tooltip": "${keepWalHoursTip}"
+            "tooltip": "${walPageCacheCapacityTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "walSpillThreshold": {
+          "type": "string",
+          "title": "${walSpillThreshold}",
+          "default": 500000,
+          "x-index": 26,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${walSpillThresholdTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "walSpillDir": {
+          "type": "string",
+          "title": "${walSpillDir}",
+          "x-index": 27,
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${walSpillDirTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "walLookbackSegments": {
+          "type": "string",
+          "title": "${walLookbackSegments}",
+          "default": 10,
+          "x-index": 28,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 1,
+            "max": 100
+          },
+          "x-decorator-props": {
+            "tooltip": "${walLookbackSegmentsTip}"
           },
           "x-reactions": [
             {
@@ -902,6 +1125,13 @@
       "password" : "password",
       "logPluginName" : "logPluginName",
       "logPluginNameTip": "The higher version PG comes with the PGOUTPUT plugin, but the before data in the logs is not complete. \nThe author recommends using WAL2JSON, and the installation method can be found in the MD documentation",
+      "checkCdcSlave": "Check CDC slave",
+      "walTdeKey": "EDB TDE key file",
+      "walTdeKeyTip": "Upload the EDB TDE wrapped key file, usually PGDATA/pg_encryption/key.bin. Only used by the PHYSICAL log plugin to decrypt encrypted WAL.",
+      "walTdeKeyPassword": "EDB TDE key password",
+      "walTdeKeyPasswordTip": "Password used to unwrap the uploaded EDB TDE key file. Leave empty if the uploaded file is already an unwrapped raw key.",
+      "walTdeKeyWrapAlgorithm": "TDE key wrap algorithm",
+      "walTdeKeyWrapAlgorithmTip": "OpenSSL algorithm used by the EDB TDE key-wrap-command. Auto tries AES-256-CBC first, then AES-128-CBC.",
       "pgtoHost": "Pgto Server Host",
       "pgtoPort": "Pgto Server Port",
       "partPublication": "Part publication",
@@ -941,6 +1171,17 @@
       "ddlTriggerEnable": "Enable DDL trigger",
       "keepWalHours": "Keep Wal hours",
       "keepWalHoursTip": "The number of hours to keep the Wal log. If it is set to 0, it will be cleared right now.",
+      "autoClearSlot": "Auto clear replication slot",
+      "walDebug": "WAL Debug Logging",
+      "walDebugTip": "Enable verbose WAL-DEBUG logs for the physical WAL decoder. Output includes page headers, record boundaries, and content hex dumps. Use only for troubleshooting.",
+      "walPageCacheCapacity": "Page Cache Capacity",
+      "walPageCacheCapacityTip": "Maximum number of page-state cache entries (0 = unbounded). The cache avoids repeated FPI look-backs. Reduce if memory is tight on the agent; increase if WAL has many page revisits.",
+      "walSpillThreshold": "Spill Threshold",
+      "walSpillThresholdTip": "Rows per transaction before spilling to disk (default 500000). Large transactions exceeding this limit write temp files under the spill directory to avoid OOM.",
+      "walSpillDir": "Spill Directory",
+      "walSpillDirTip": "Directory for large-transaction spill files. Defaults to the system temp directory (java.io.tmpdir).",
+      "walLookbackSegments": "Look-back Segments",
+      "walLookbackSegmentsTip": "Number of WAL segments (16 MB each) to scan backwards before the emit position. Larger values warm the page cache more thoroughly but increase startup time.",
       "walLogSize": "Wal log total size(MB)",
       "clearIdleSlot": "Clear idle replication slot",
       "walLogPercent": "Wal log usage rate"
@@ -969,6 +1210,13 @@
       "password" : "密码",
       "logPluginName" : "日志插件",
       "logPluginNameTip": "高版本PG自带PGOUTPUT插件，但是日志的before数据并不完整，笔者推荐使用WAL2JSON，安装方式见MD文档",
+      "checkCdcSlave": "检查CDC优先从库",
+      "walTdeKey": "EDB TDE密钥文件",
+      "walTdeKeyTip": "上传EDB TDE包装后的密钥文件，通常是PGDATA/pg_encryption/key.bin。仅在日志插件选择PHYSICAL时用于解密加密WAL。",
+      "walTdeKeyPassword": "EDB TDE密钥密码",
+      "walTdeKeyPasswordTip": "用于解开上传的EDB TDE密钥文件的密码。如果上传的是已解开的原始密钥，可以留空。",
+      "walTdeKeyWrapAlgorithm": "TDE密钥包装算法",
+      "walTdeKeyWrapAlgorithmTip": "EDB TDE key-wrap-command 使用的 OpenSSL 算法。Auto 会先尝试 AES-256-CBC，再尝试 AES-128-CBC。",
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
       "partPublication": "部分订阅",
@@ -1008,6 +1256,17 @@
       "ddlTriggerEnable": "启用DDL触发器",
       "keepWalHours": "保留Wal小时数",
       "keepWalHoursTip": "保留Wal日志的小时数，如果设置为0，则立即清理。",
+      "autoClearSlot": "自动清理复制槽",
+      "walDebug": "WAL调试日志",
+      "walDebugTip": "开启物理WAL解码器的详细调试日志。输出包括页面头、记录边界和内容十六进制转储。仅用于问题排查。",
+      "walPageCacheCapacity": "页面缓存容量",
+      "walPageCacheCapacityTip": "页面状态缓存的最大条目数（0=无限制）。缓存可避免重复的FPI回溯查找。如果Agent内存紧张请调小，如果WAL页面回访频繁请调大。",
+      "walSpillThreshold": "溢写阈值",
+      "walSpillThresholdTip": "每个事务超过此行数后溢写到磁盘（默认500000）。大事务超出此限制时会在spill目录写入临时文件以避免OOM。",
+      "walSpillDir": "溢写目录",
+      "walSpillDirTip": "大事务溢写文件的存放目录。默认为系统临时目录（java.io.tmpdir）。",
+      "walLookbackSegments": "回溯段数",
+      "walLookbackSegmentsTip": "在emit位置之前向后扫描的WAL段数（每段16MB）。值越大页面缓存预热越充分，但启动时间越长。",
       "walLogSize": "Wal日志总大小(MB)",
       "clearIdleSlot": "清理空闲复制槽",
       "walLogPercent": "Wal日志占用率"
@@ -1036,6 +1295,13 @@
       "password" : "密碼",
       "logPluginName" : "日誌插件",
       "logPluginNameTip": "高版本PG自帶PGOUTPUT插件，但是日誌的before數據並不完整，筆者推薦使用WAL2JSON，安裝方式見MD文檔",
+      "checkCdcSlave": "檢查CDC優先從庫",
+      "walTdeKey": "EDB TDE密鑰文件",
+      "walTdeKeyTip": "上傳EDB TDE包裝後的密鑰文件，通常是PGDATA/pg_encryption/key.bin。僅在日誌插件選擇PHYSICAL時用於解密加密WAL。",
+      "walTdeKeyPassword": "EDB TDE密鑰密碼",
+      "walTdeKeyPasswordTip": "用於解開上傳的EDB TDE密鑰文件的密碼。如果上傳的是已解開的原始密鑰，可以留空。",
+      "walTdeKeyWrapAlgorithm": "TDE密鑰包裝算法",
+      "walTdeKeyWrapAlgorithmTip": "EDB TDE key-wrap-command 使用的 OpenSSL 算法。Auto 會先嘗試 AES-256-CBC，再嘗試 AES-128-CBC。",
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
       "partPublication": "部分訂閱",
@@ -1075,6 +1341,17 @@
       "ddlTriggerEnable": "啟用DDL觸發器",
       "keepWalHours": "保留Wal小時數",
       "keepWalHoursTip": "保留Wal日誌的小时数，如果設置為0，則立即清理。",
+      "autoClearSlot": "自動清理複製槽",
+      "walDebug": "WAL調試日誌",
+      "walDebugTip": "開啟物理WAL解碼器的詳細調試日誌。輸出包括頁面頭、記錄邊界和內容十六進制轉儲。僅用於問題排查。",
+      "walPageCacheCapacity": "頁面緩存容量",
+      "walPageCacheCapacityTip": "頁面狀態緩存的最大條目數（0=無限制）。緩存可避免重複的FPI回溯查找。如果Agent內存緊張請調小，如果WAL頁面回訪頻繁請調大。",
+      "walSpillThreshold": "溢寫閾值",
+      "walSpillThresholdTip": "每個事務超過此行數後溢寫到磁盤（默認500000）。大事務超出此限制時會在spill目錄寫入臨時文件以避免OOM。",
+      "walSpillDir": "溢寫目錄",
+      "walSpillDirTip": "大事務溢寫文件的存放目錄。默認為系統臨時目錄（java.io.tmpdir）。",
+      "walLookbackSegments": "回溯段數",
+      "walLookbackSegmentsTip": "在emit位置之前向後掃描的WAL段數（每段16MB）。值越大頁面緩存預熱越充分，但啟動時間越長。",
       "walLogSize": "Wal日誌總大小(MB)",
       "clearIdleSlot": "清理空閒複製槽",
       "walLogPercent": "Wal日志占用率"

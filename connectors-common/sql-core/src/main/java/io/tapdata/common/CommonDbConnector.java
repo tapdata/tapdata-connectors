@@ -1087,6 +1087,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     protected void execute(String sql, Consumer<Object> consumer, int batchSize) throws Throwable {
         try (Connection connection = jdbcContext.getConnection();
              Statement sqlStatement = connection.createStatement()) {
+            sqlStatement.setFetchSize(batchSize > 0 ? batchSize : 1000); //protected from OM
             boolean hasResult = sqlStatement.execute(sql);
             if (!hasResult) {
                 consumer.accept((long) sqlStatement.getUpdateCount());

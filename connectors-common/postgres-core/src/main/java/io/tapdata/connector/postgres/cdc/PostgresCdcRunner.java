@@ -3,9 +3,7 @@ package io.tapdata.connector.postgres.cdc;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Lists;
 import io.debezium.embedded.EmbeddedEngine;
-import io.debezium.embedded.StopConnectorException;
 import io.debezium.engine.DebeziumEngine;
-import io.debezium.engine.StopEngineException;
 import io.tapdata.common.ddl.DDLFactory;
 import io.tapdata.common.ddl.ccj.CCJBaseDDLWrapper;
 import io.tapdata.common.ddl.type.DDLParserType;
@@ -94,11 +92,6 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     private static final String CDC_CP_INDEX = "cdc_cp_index";      // sorted ts list
     private static final String CDC_LAST_CP_TIME = "cdc_last_cp_time"; // wall-clock of last checkpoint
 
-    /** In-memory LSN – NOT pushed to slot until checkpoint expires. */
-    private final AtomicReference<Long> inMemoryLsn = new AtomicReference<>();
-    /** Commit timestamp (ms) of the current in-memory LSN (from WAL ts_usec). */
-    private final AtomicReference<Long> inMemoryCommitTimeMs = new AtomicReference<>();
-
     /** Cache of last checkpoint wall-clock time — avoids stateMap read on every flushOffset. */
     private final AtomicLong cachedLastCpTime = new AtomicLong();
 
@@ -180,10 +173,25 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             this.filterStartTimeMs = null;  // clear any stale time filter
             PostgresOffsetStorage.DBZ_OFFSET.put(runnerName, (PostgresOffset) offsetState);
         } else if (offsetState instanceof Long) {
-            // Time-based CDC: offsetState is the raw timestamp from timestampToStreamOffset.
-            // Resolve the checkpoint LSN and set up the event-level time filter here,
-            // so the Debezium engine (built in registerConsumer) starts from the right LSN.
-            configureTimeBasedCdc((Long) offsetState);
+            // Time-based CDC: offsetState is a timestamp in epoch milliseconds
+            Long targetTimestampMs = (Long) offsetState;
+            try {
+                // Fast-scan WAL headers to find LSN corresponding to the target timestamp
+                Long startLsn = seekWalToTimestamp(targetTimestampMs);
+                if (startLsn != null) {
+                    PostgresOffset resolvedOffset = new PostgresOffset();
+                    resolvedOffset.setOffsetValue(startLsn);
+                    this.filterStartTimeMs = targetTimestampMs;
+                    PostgresOffsetStorage.DBZ_OFFSET.put(runnerName, resolvedOffset);
+                    TapLogger.info(TAG, "Resolved timestamp {} ms to LSN: {}",
+                            targetTimestampMs, formatLsn(startLsn));
+                } else {
+                    throw new RuntimeException("Failed to find LSN for timestamp: " + targetTimestampMs
+                            + " - WAL may have been cleaned up or timestamp is in the future");
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to seek WAL to timestamp " + targetTimestampMs, e);
+            }
         } else {
             throw new IllegalArgumentException(
                     "Unsupported offset type: " + offsetState.getClass().getName()
@@ -249,145 +257,140 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         List<TapEvent> eventList = TapSimplify.list();
         Map<String, ?> offset = null;
         for (SourceRecord sr : sourceRecords) {
-            try {
-                offset = sr.sourceOffset();
-                // PG use micros to indicate the time but in pdk api we use millis
-                Object tsUsecObj = offset.get("ts_usec");
-                Long referenceTime = tsUsecObj instanceof Number
-                        ? ((Number) tsUsecObj).longValue() / 1000
-                        : null;
+            offset = sr.sourceOffset();
+            // PG use micros to indicate the time but in pdk api we use millis
+            Object tsUsecObj = offset.get("ts_usec");
+            Long referenceTime = tsUsecObj instanceof Number
+                    ? ((Number) tsUsecObj).longValue() / 1000
+                    : null;
 
-                Struct struct = ((Struct) sr.value());
-                if (struct == null) {
-                    continue;
-                }
-                // ── heartbeat: always emit regardless of time filter ──
-                // Debezium heartbeats may not carry ts_usec; they use
-                // ts_ms instead. Process them before the time filter
-                // so idle-period offset advancement is not blocked.
-                if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
-                    eventList.add(new HeartbeatEvent().init().referenceTime(struct.getInt64("ts_ms")));
-                    continue;
-                }
-                // ── time-based CDC filter ──────────────────────────────
-                // Skip DML/DDL events whose commit time is before the
-                // requested start time. This handles the gap between the
-                // checkpoint LSN and the target offsetStartTime.
-                if (referenceTime == null) {
-                    continue; // malformed DML record (no ts_usec) — skip
-                }
-                if (filterStartTimeMs != null && referenceTime < filterStartTimeMs) {
-                    continue;
-                }
-                if (EmptyKit.isNull(sr.valueSchema().field("op"))) {
-                    continue;
-                }
-                String op = struct.getString("op");
-                String lsn = String.valueOf(offset.get("lsn"));
-                String table = struct.getStruct("source").getString("table");
-                String schema = struct.getStruct("source").getString("schema");
+            Struct struct = ((Struct) sr.value());
+            if (struct == null) {
+                continue;
+            }
+            // ── heartbeat: always emit regardless of time filter ──
+            // Debezium heartbeats may not carry ts_usec; they use
+            // ts_ms instead. Process them before the time filter
+            // so idle-period offset advancement is not blocked.
+            if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
+                eventList.add(new HeartbeatEvent().init().referenceTime(struct.getInt64("ts_ms")));
+                continue;
+            }
+            // ── time-based CDC filter ──────────────────────────────
+            // Skip DML/DDL events whose commit time is before the
+            // requested start time. This handles the gap between the
+            // checkpoint LSN and the target offsetStartTime.
+            if (referenceTime == null) {
+                continue; // malformed DML record (no ts_usec) — skip
+            }
+            if (filterStartTimeMs != null && referenceTime < filterStartTimeMs) {
+                continue;
+            }
+            if (EmptyKit.isNull(sr.valueSchema().field("op"))) {
+                continue;
+            }
+            String op = struct.getString("op");
+            String lsn = String.valueOf(offset.get("lsn"));
+            String table = struct.getStruct("source").getString("table");
+            String schema = struct.getStruct("source").getString("schema");
 
-                // ── DDL Trigger: intercept DDL audit table records ──
-                if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())
-                        && isDdlAuditRecord(schema, table)) {
-                    // The audit table only ever has INSERT (and DELETE) — we only care about INSERT
-                    if ("c".equals(op)) {
-                        Struct after = struct.getStruct("after");
-                        if (after != null) {
-                            String ddlTag = after.getString("c_tag");
-                            String ddlSchema = after.getString("c_schema");
-                            String ddlQuery = after.getString("c_ddlqry");
-                            if (ddlQuery != null && !ddlQuery.isEmpty()) {
-                                PostgresOffset ddlOffset = new PostgresOffset();
-                                ddlOffset.setSourceOffset(TapSimplify.toJson(offset));
-                                try {
-                                    DDLFactory.ddlToTapDDLEvent(
-                                            ddlParserType,
-                                            ddlQuery,
-                                            DDL_WRAPPER_CONFIG,
-                                            connectorContext.getTableMap(),
-                                            tapDDLEvent -> {
-                                                tapDDLEvent.setTime(System.currentTimeMillis());
-                                                tapDDLEvent.setReferenceTime(referenceTime);
-                                                tapDDLEvent.setOriginDDL(ddlQuery);
-                                                tapDDLEvent.setExactlyOnceId(lsn);
-                                                if (withSchema && EmptyKit.isNotBlank(ddlSchema) && EmptyKit.isNotBlank(tapDDLEvent.getTableId())) {
-                                                    tapDDLEvent.setNamespaces(Arrays.asList(ddlSchema, tapDDLEvent.getTableId()));
-                                                }
-                                                consumer.accept(Collections.singletonList(tapDDLEvent), ddlOffset);
+            // ── DDL Trigger: intercept DDL audit table records ──
+            if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())
+                    && isDdlAuditRecord(schema, table)) {
+                // The audit table only ever has INSERT (and DELETE) — we only care about INSERT
+                if ("c".equals(op)) {
+                    Struct after = struct.getStruct("after");
+                    if (after != null) {
+                        String ddlSchema = after.getString("c_schema");
+                        String ddlQuery = after.getString("c_ddlqry");
+                        if (ddlQuery != null && !ddlQuery.isEmpty()) {
+                            PostgresOffset ddlOffset = new PostgresOffset();
+                            ddlOffset.setSourceOffset(TapSimplify.toJson(offset));
+                            try {
+                                DDLFactory.ddlToTapDDLEvent(
+                                        ddlParserType,
+                                        ddlQuery,
+                                        DDL_WRAPPER_CONFIG,
+                                        connectorContext.getTableMap(),
+                                        tapDDLEvent -> {
+                                            tapDDLEvent.setTime(System.currentTimeMillis());
+                                            tapDDLEvent.setReferenceTime(referenceTime);
+                                            tapDDLEvent.setOriginDDL(ddlQuery);
+                                            tapDDLEvent.setExactlyOnceId(lsn);
+                                            if (withSchema && EmptyKit.isNotBlank(ddlSchema) && EmptyKit.isNotBlank(tapDDLEvent.getTableId())) {
+                                                tapDDLEvent.setNamespaces(Arrays.asList(ddlSchema, tapDDLEvent.getTableId()));
                                             }
-                                    );
-                                } catch (Throwable e) {
-                                    TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
-                                    tapDDLEvent.setTime(System.currentTimeMillis());
-                                    tapDDLEvent.setReferenceTime(referenceTime);
-                                    tapDDLEvent.setOriginDDL(ddlQuery);
-                                    tapDDLEvent.setExactlyOnceId(lsn);
-                                    if (withSchema && EmptyKit.isNotBlank(ddlSchema) && EmptyKit.isNotBlank(tapDDLEvent.getTableId())) {
-                                        tapDDLEvent.setNamespaces(Arrays.asList(ddlSchema, tapDDLEvent.getTableId()));
-                                    }
-                                    consumer.accept(Collections.singletonList(tapDDLEvent), ddlOffset);
+                                            consumer.accept(Collections.singletonList(tapDDLEvent), ddlOffset);
+                                        }
+                                );
+                            } catch (Throwable e) {
+                                TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
+                                tapDDLEvent.setTime(System.currentTimeMillis());
+                                tapDDLEvent.setReferenceTime(referenceTime);
+                                tapDDLEvent.setOriginDDL(ddlQuery);
+                                tapDDLEvent.setExactlyOnceId(lsn);
+                                if (withSchema && EmptyKit.isNotBlank(ddlSchema) && EmptyKit.isNotBlank(tapDDLEvent.getTableId())) {
+                                    tapDDLEvent.setNamespaces(Arrays.asList(ddlSchema, tapDDLEvent.getTableId()));
                                 }
+                                consumer.accept(Collections.singletonList(tapDDLEvent), ddlOffset);
                             }
                         }
                     }
-                    // Don't process audit table records as normal DML — skip to next record
-                    continue;
                 }
+                // Don't process audit table records as normal DML — skip to next record
+                continue;
+            }
 
-                //双活情形下，需要过滤_tap_double_active记录的同事务数据
-                if (Boolean.TRUE.equals(postgresConfig.getDoubleActive())) {
-                    if ("_tap_double_active".equals(table)) {
-                        dropTransactionId = String.valueOf(sr.sourceOffset().get("transaction_id"));
-                        continue;
-                    } else {
-                        if (null != dropTransactionId) {
-                            if (dropTransactionId.equals(String.valueOf(sr.sourceOffset().get("transaction_id")))) {
-                                continue;
-                            } else {
-                                dropTransactionId = null;
-                            }
+            //双活情形下，需要过滤_tap_double_active记录的同事务数据
+            if (Boolean.TRUE.equals(postgresConfig.getDoubleActive())) {
+                if ("_tap_double_active".equals(table)) {
+                    dropTransactionId = String.valueOf(sr.sourceOffset().get("transaction_id"));
+                    continue;
+                } else {
+                    if (null != dropTransactionId) {
+                        if (dropTransactionId.equals(String.valueOf(sr.sourceOffset().get("transaction_id")))) {
+                            continue;
+                        } else {
+                            dropTransactionId = null;
                         }
                     }
                 }
-                Struct after = struct.getStruct("after");
-                Struct before;
-                if (Boolean.TRUE.equals(replicaFull.get(schema + "." + table)) || EmptyKit.isNull(sr.key())) {
-                    before = struct.getStruct("before");
-                } else {
-                    before = (Struct) sr.key();
+            }
+            Struct after = struct.getStruct("after");
+            Struct before;
+            if (Boolean.TRUE.equals(replicaFull.get(schema + "." + table)) || EmptyKit.isNull(sr.key())) {
+                before = struct.getStruct("before");
+            } else {
+                before = (Struct) sr.key();
+            }
+            TapRecordEvent event = null;
+            switch (op) { //snapshot.mode = 'never'
+                case "c": //after running --insert
+                case "r": //after slot but before running --read
+                    event = new TapInsertRecordEvent().init().table(table).after(getMapFromStruct(after));
+                    break;
+                case "d": //after running --delete
+                    event = new TapDeleteRecordEvent().init().table(table).before(getMapFromStruct(before));
+                    break;
+                case "u": //after running --update
+                    event = new TapUpdateRecordEvent().init().table(table).after(getMapFromStruct(after)).before(getMapFromStruct(before));
+                    break;
+                default:
+                    break;
+            }
+            if (EmptyKit.isNotNull(event)) {
+                event.setReferenceTime(referenceTime);
+                event.setExactlyOnceId(lsn);
+                if (withSchema) {
+                    event.setNamespaces(Lists.newArrayList(schema, table));
                 }
-                TapRecordEvent event = null;
-                switch (op) { //snapshot.mode = 'never'
-                    case "c": //after running --insert
-                    case "r": //after slot but before running --read
-                        event = new TapInsertRecordEvent().init().table(table).after(getMapFromStruct(after));
-                        break;
-                    case "d": //after running --delete
-                        event = new TapDeleteRecordEvent().init().table(table).before(getMapFromStruct(before));
-                        break;
-                    case "u": //after running --update
-                        event = new TapUpdateRecordEvent().init().table(table).after(getMapFromStruct(after)).before(getMapFromStruct(before));
-                        break;
-                    default:
-                        break;
-                }
-                if (EmptyKit.isNotNull(event)) {
-                    event.setReferenceTime(referenceTime);
-                    event.setExactlyOnceId(lsn);
-                    if (withSchema) {
-                        event.setNamespaces(Lists.newArrayList(schema, table));
-                    }
-                }
-                eventList.add(event);
-                if (eventList.size() >= recordSize) {
-                    PostgresOffset postgresOffset = new PostgresOffset();
-                    postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
-                    consumer.accept(eventList, postgresOffset);
-                    eventList = TapSimplify.list();
-                }
-            } catch (StopConnectorException | StopEngineException ex) {
-                throw ex;
+            }
+            eventList.add(event);
+            if (eventList.size() >= recordSize) {
+                PostgresOffset postgresOffset = new PostgresOffset();
+                postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
+                consumer.accept(eventList, postgresOffset);
+                eventList = TapSimplify.list();
             }
         }
         if (EmptyKit.isNotEmpty(eventList)) {
@@ -674,20 +677,6 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     }
 
     /**
-     * Returns the schema-qualified name of the DDL audit table.
-     * Used to detect DDL events in {@link #consumeRecords}.
-     */
-    public String getDdlAuditTableFullName() {
-        if (!Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
-            return null;
-        }
-        String schema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
-                ? postgresConfig.getDdlTriggerSchema()
-                : "public";
-        return schema + "." + PostgresJdbcContext.DDL_AUDIT_TABLE;
-    }
-
-    /**
      * Check whether the current Debezium record represents a DDL event
      * (i.e., an INSERT into the DDL audit table).
      */
@@ -697,69 +686,6 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 : "public";
         return PostgresJdbcContext.DDL_AUDIT_TABLE.equals(table)
                 && auditSchema.equals(schema);
-    }
-
-    // ── CDC delayed LSN advancement ──────────────────────────────────────
-    //
-    // Called by PostgresConnector.flushOffset() each time the CDC consumer
-    // commits a batch. Instead of immediately advancing the slot we:
-    //   1. Update the in-memory LSN & commit time.
-    //   2. Periodically persist a {commit_time -> full sourceOffset} checkpoint.
-    //   3. Periodically expire old checkpoints (advancing the slot to the
-    //      oldest expired checkpoint's LSN before deleting it).
-
-    /**
-     * Configure time-based CDC backfill.
-     * <p>
-     * Called from {@link #offset(Object)} when the offset is a {@code Long}
-     * (raw timestamp from {@code timestampToStreamOffset}).  This method:
-     * <ol>
-     *   <li>Finds the nearest checkpoint with timestamp ≤ {@code offsetStartTimeMs}
-     *       from the stateMap checkpoint index.</li>
-     *   <li>Builds a {@link PostgresOffset} from that checkpoint's full source offset
-     *       and puts it in {@link PostgresOffsetStorage#DBZ_OFFSET} so Debezium
-     *       starts streaming from the checkpoint LSN (not the current slot position).</li>
-     *   <li>Sets the event-level filter so {@link #consumeRecords} silently drops
-     *       any event whose commit time is before {@code offsetStartTimeMs}.</li>
-     * </ol>
-     *
-     * @param offsetStartTimeMs target start time (epoch ms) from {@code timestampToStreamOffset}
-     */
-    public void configureTimeBasedCdc(Long offsetStartTimeMs) {
-        if (offsetStartTimeMs == null) return;
-
-        Long nearestCpTime = findNearestCheckpointBefore(offsetStartTimeMs);
-        if (nearestCpTime == null) {
-            throw new IllegalArgumentException(
-                    "No CDC checkpoint found before target time " + offsetStartTimeMs
-                    + " (retention window is " + getKeepWalHoursOrZero() + " hours, may have elapsed). "
-                    + "Increase keepWalHours or use a more recent offsetStartTime.");
-        }
-
-        Map<String, Object> cpOffset = readCheckpointSourceOffset(nearestCpTime);
-        if (cpOffset == null) {
-            throw new IllegalArgumentException(
-                    "CDC checkpoint at " + nearestCpTime + " is missing or corrupt in stateMap — "
-                    + "cannot start time-based CDC. The checkpoint index may be out of sync; "
-                    + "consider clearing CDC state and restarting.");
-        }
-
-        // Build the offset so Debezium starts from the checkpoint LSN
-        try {
-            String sourceOffsetJson = new ObjectMapper().writeValueAsString(cpOffset);
-            PostgresOffset postgresOffset = new PostgresOffset();
-            postgresOffset.setSourceOffset(sourceOffsetJson);
-            PostgresOffsetStorage.DBZ_OFFSET.put(runnerName, postgresOffset);
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to serialise CDC checkpoint source offset at " + nearestCpTime
-                    + " for time-based CDC: " + e.getMessage(), e);
-        }
-
-        // Enable event-level filtering for the gap between checkpoint time and target time
-        this.filterStartTimeMs = offsetStartTimeMs;
-        TapLogger.info(TAG, "Time-based CDC configured: targetTime={}, nearestCheckpointTime={}, filterStartTimeMs={}",
-                offsetStartTimeMs, nearestCpTime, filterStartTimeMs);
     }
 
     public void processFlushOffset(PostgresOffset offset) {
@@ -787,10 +713,6 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             long commitTimeMs = commitTimeUsec == null
                     ? System.currentTimeMillis()
                     : commitTimeUsec / 1000;
-
-            // Always refresh in-memory state (no slot advancement here)
-            inMemoryLsn.set(lsn);
-            inMemoryCommitTimeMs.set(commitTimeMs);
 
             // ── periodic checkpoint ──────────────────────────────────
             long now = System.currentTimeMillis();
@@ -919,13 +841,6 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 timestamps.stream().map(String::valueOf).collect(Collectors.joining(",")));
     }
 
-    public Long findNearestCheckpointBefore(long targetTimeMs) {
-        List<Long> timestamps = readCheckpointIndex();
-        if (timestamps.isEmpty()) return null;
-        int index = findLastCheckpointIndexBefore(timestamps, targetTimeMs);
-        return index < 0 ? null : timestamps.get(index);
-    }
-
     public Map<String, Object> readCheckpointSourceOffset(Long checkpointTime) {
         Object raw = connectorContext.getStateMap().get(CDC_CP_PREFIX + checkpointTime);
         if (raw == null) return null;
@@ -1011,5 +926,162 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         long seg = lsn >>> 32;
         long off = lsn & 0xFFFFFFFFL;
         return Long.toHexString(seg) + "/" + Long.toHexString(off);
+    }
+
+    // ── WAL timestamp seeking ─────────────────────────────────────────────────
+
+    /**
+     * Fast-scan physical WAL to find the first COMMIT record at or after the target timestamp.
+     * Uses header-only parsing via pg_walinspect (PG 15+) for performance.
+     *
+     * @param targetTimestampMs Target timestamp in epoch milliseconds
+     * @return LSN (as Long) of the first qualifying COMMIT, or null if not found
+     * @throws Exception if WAL reading fails
+     */
+    private Long seekWalToTimestamp(long targetTimestampMs) throws Exception {
+
+        // Get slot's restart_lsn as the starting point for scanning
+        Long restartLsn = getSlotRestartLsn(runnerName);
+        if (restartLsn == null) {
+            throw new RuntimeException("Cannot find restart_lsn for replication slot: " + runnerName);
+        }
+
+        TapLogger.info(TAG, "Seeking WAL from restart_lsn {} to find timestamp >= {} ms",
+                formatLsn(restartLsn), targetTimestampMs);
+
+        // Try using pg_walinspect extension if available (PostgreSQL 15+)
+        Long lsn = trySeekViaWalInspect(restartLsn, targetTimestampMs);
+        if (lsn != null) {
+            return lsn;
+        }
+
+        // Fallback: use restart_lsn as conservative starting point
+        TapLogger.warn(TAG, "pg_walinspect not available - using restart_lsn as fallback. " +
+                "Install pg_walinspect extension for precise timestamp seeking.");
+        return restartLsn;
+    }
+
+    /**
+     * Try to find LSN using pg_get_wal_records_info from pg_walinspect extension (PG 15+).
+     * This scans WAL records by parsing their headers and filtering for COMMIT records
+     * with timestamps >= the target.
+     *
+     * @param startLsn LSN to start scanning from (typically slot's restart_lsn)
+     * @param targetTimestampMs Target timestamp in milliseconds
+     * @return LSN of first COMMIT >= timestamp, or null if not found / extension unavailable
+     */
+    private Long trySeekViaWalInspect(long startLsn, long targetTimestampMs) {
+        try {
+            // Check if pg_walinspect extension is installed
+            final boolean[] hasExtension = {false};
+            postgresJdbcContext.queryWithNext(
+                    "SELECT 1 FROM pg_extension WHERE extname = 'pg_walinspect'",
+                    rs -> hasExtension[0] = true
+            );
+
+            if (!hasExtension[0]) {
+                TapLogger.debug(TAG, "pg_walinspect extension not installed");
+                return null;
+            }
+
+            // Scan WAL records from startLsn to current WAL position
+            // Filter for Transaction COMMIT records and parse their timestamps
+            String sql = String.format(
+                    "SELECT start_lsn, description FROM pg_get_wal_records_info('%s', pg_current_wal_lsn()) " +
+                    "WHERE resource_manager = 'Transaction' AND description LIKE 'COMMIT%%' " +
+                    "ORDER BY start_lsn LIMIT 1000",
+                    formatLsn(startLsn)
+            );
+
+            final Long[] foundLsn = {null};
+            postgresJdbcContext.queryWithNext(sql, rs -> {
+                while (rs.next()) {
+                    String lsnStr = rs.getString("start_lsn");
+                    String desc = rs.getString("description");
+
+                    // Parse commit timestamp from description field
+                    // Format: "COMMIT 2026-07-08 15:30:45.123456 UTC"
+                    Long commitTimeMs = parseCommitTimestamp(desc);
+                    if (commitTimeMs != null && commitTimeMs >= targetTimestampMs) {
+                        TapLogger.info(TAG, "Found target LSN via pg_walinspect: {} (commit time: {} ms)",
+                                lsnStr, commitTimeMs);
+                        foundLsn[0] = parseLsnToLong(lsnStr);
+                        break;  // Found it, stop scanning
+                    }
+                }
+            });
+
+            if (foundLsn[0] == null) {
+                // If we scanned 1000 records and didn't find it, the timestamp might be too far ahead
+                TapLogger.warn(TAG, "Scanned 1000 COMMIT records but didn't find timestamp >= {} ms",
+                        targetTimestampMs);
+            }
+            return foundLsn[0];
+        } catch (Exception e) {
+            TapLogger.debug(TAG, "Failed to seek via pg_walinspect: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Parse commit timestamp from pg_walinspect description string.
+     * Expected format: "COMMIT 2026-07-08 15:30:45.123456 UTC"
+     *
+     * @param description COMMIT record description from pg_walinspect
+     * @return Timestamp in epoch milliseconds, or null if parsing fails
+     */
+    private Long parseCommitTimestamp(String description) {
+        try {
+            // Extract timestamp using regex: "COMMIT YYYY-MM-DD HH:MM:SS.mmmmmm"
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+                    "COMMIT (\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d+)");
+            java.util.regex.Matcher matcher = pattern.matcher(description);
+
+            if (!matcher.find()) {
+                return null;
+            }
+
+            String timestampStr = matcher.group(1);
+
+            // Parse using java.time (assumes UTC timezone)
+            java.time.format.DateTimeFormatter formatter =
+                    java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
+            java.time.LocalDateTime localDateTime = java.time.LocalDateTime.parse(timestampStr, formatter);
+            return localDateTime.atZone(java.time.ZoneOffset.UTC).toInstant().toEpochMilli();
+        } catch (Exception e) {
+            TapLogger.debug(TAG, "Failed to parse commit timestamp from description: {}", description);
+            return null;
+        }
+    }
+
+    /**
+     * Get the restart_lsn for the given replication slot.
+     * This is the earliest LSN that the slot guarantees to have available.
+     *
+     * @param slotName Name of the replication slot
+     * @return restart_lsn as Long, or null if slot not found
+     * @throws Exception if query fails
+     */
+    private Long getSlotRestartLsn(String slotName) throws Exception {
+        String sql = "SELECT restart_lsn FROM pg_replication_slots WHERE slot_name = '" + slotName + "'";
+
+        final Long[] result = {null};
+        postgresJdbcContext.queryWithNext(sql, rs -> {
+            String lsnStr = rs.getString("restart_lsn");
+            if (lsnStr != null) {
+                result[0] = parseLsnToLong(lsnStr);
+            }
+        });
+        return result[0];
+    }
+
+    /**
+     * Format Long LSN to PostgreSQL string format (uppercase hex).
+     *
+     * @param lsn LSN as Long
+     * @return LSN in PostgreSQL format (e.g. "1C/926AE1C0")
+     */
+    private String formatLsn(long lsn) {
+        return String.format("%X/%X", (lsn >> 32) & 0xFFFFFFFFL, lsn & 0xFFFFFFFFL);
     }
 }

@@ -66,6 +66,146 @@ public class RelationCatalog {
         negative.clear();
     }
 
+    public void cache(long relNumber, RelationInfo rel) {
+        if (relNumber > 0 && rel != null) {
+            cache.put(relNumber, rel);
+            negative.remove(relNumber);
+        }
+    }
+
+    /**
+     * Apply a single pg_attribute change (INSERT/UPDATE/DELETE) to the cached
+     * {@link RelationInfo} for the matching schema.table. Called from the consumer
+     * thread when a monitored table's catalog row is decoded from WAL, so that
+     * subsequent DML in the same transaction decodes with the correct column layout.
+     *
+     * @return true if a cached entry was found and updated, false if no entry was
+     *         cached yet (caller should track the change as pending)
+     */
+    public boolean applyPgAttributeChange(String schema, String table, String op,
+                                           int attnum, String attname, long atttypid,
+                                           int attlen, char attalign, boolean attisdropped) {
+        if (attnum <= 0) {
+            return false;
+        }
+        for (Map.Entry<Long, RelationInfo> entry : cache.entrySet()) {
+            RelationInfo rel = entry.getValue();
+            if (!rel.schema.equals(schema) || !rel.table.equals(table)) {
+                continue;
+            }
+            List<ColumnInfo> newColumns = new ArrayList<>(rel.columns);
+            switch (op) {
+                case "INSERT": {
+                    ColumnInfo col = new ColumnInfo(attname, attnum, atttypid, attlen, attalign, attisdropped);
+                    int pos = 0;
+                    while (pos < newColumns.size() && newColumns.get(pos).attnum < attnum) {
+                        pos++;
+                    }
+                    if (pos < newColumns.size() && newColumns.get(pos).attnum == attnum) {
+                        newColumns.set(pos, col);
+                    } else {
+                        newColumns.add(pos, col);
+                    }
+                    break;
+                }
+                case "UPDATE": {
+                    for (int i = 0; i < newColumns.size(); i++) {
+                        if (newColumns.get(i).attnum == attnum) {
+                            newColumns.set(i, new ColumnInfo(attname, attnum, atttypid, attlen, attalign, attisdropped));
+                            break;
+                        }
+                    }
+                    break;
+                }
+                case "DELETE":
+                    newColumns.removeIf(c -> c.attnum == attnum);
+                    break;
+                default:
+                    return false;
+            }
+            RelationInfo updated = new RelationInfo(rel.schema, rel.table, newColumns,
+                    new ArrayList<>(rel.keyColumns), rel.replicaIdentityFull);
+            cache.put(entry.getKey(), updated);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Apply pending column changes to a freshly-loaded {@link RelationInfo} before
+     * it is returned to the caller. Used when DDL was detected for a table before
+     * its first DML appeared (so the catalog entry was not yet cached).
+     *
+     * @param pending a list of {@link PgAttributeChange} objects accumulated for this
+     *                table's OID; may be null or empty
+     * @return a new RelationInfo with changes applied, or the original if no changes
+     */
+    public static RelationInfo applyPendingChanges(RelationInfo rel, java.util.List<PgAttributeChange> pending) {
+        if (pending == null || pending.isEmpty()) {
+            return rel;
+        }
+        List<ColumnInfo> columns = new ArrayList<>(rel.columns);
+        for (PgAttributeChange c : pending) {
+            if (c.attnum <= 0) {
+                continue;
+            }
+            switch (c.op) {
+                case "INSERT": {
+                    ColumnInfo col = new ColumnInfo(c.attname, c.attnum, c.atttypid, c.attlen, c.attalign, c.attisdropped);
+                    int pos = 0;
+                    while (pos < columns.size() && columns.get(pos).attnum < c.attnum) {
+                        pos++;
+                    }
+                    if (pos < columns.size() && columns.get(pos).attnum == c.attnum) {
+                        columns.set(pos, col);
+                    } else {
+                        columns.add(pos, col);
+                    }
+                    break;
+                }
+                case "UPDATE": {
+                    for (int i = 0; i < columns.size(); i++) {
+                        if (columns.get(i).attnum == c.attnum) {
+                            columns.set(i, new ColumnInfo(c.attname, c.attnum, c.atttypid, c.attlen, c.attalign, c.attisdropped));
+                            break;
+                        }
+                    }
+                    break;
+                }
+                case "DELETE":
+                    columns.removeIf(col -> col.attnum == c.attnum);
+                    break;
+            }
+        }
+        return new RelationInfo(rel.schema, rel.table, columns,
+                new ArrayList<>(rel.keyColumns), rel.replicaIdentityFull);
+    }
+
+    /**
+     * Captures a single pg_attribute row change decoded from WAL, stored until
+     * the affected table's RelationInfo is loaded into the cache.
+     */
+    public static final class PgAttributeChange {
+        public final String op;       // "INSERT", "UPDATE", "DELETE"
+        public final int attnum;
+        public final String attname;
+        public final long atttypid;
+        public final int attlen;
+        public final char attalign;
+        public final boolean attisdropped;
+
+        public PgAttributeChange(String op, int attnum, String attname, long atttypid,
+                                  int attlen, char attalign, boolean attisdropped) {
+            this.op = op;
+            this.attnum = attnum;
+            this.attname = attname;
+            this.atttypid = atttypid;
+            this.attlen = attlen;
+            this.attalign = attalign;
+            this.attisdropped = attisdropped;
+        }
+    }
+
     private RelationInfo load(long relNumber) {
         try {
             long[] oid = {0};

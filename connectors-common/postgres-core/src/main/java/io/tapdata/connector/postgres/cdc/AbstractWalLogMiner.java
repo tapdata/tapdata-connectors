@@ -48,11 +48,16 @@ public abstract class AbstractWalLogMiner {
     protected Map<String, List<String>> schemaTableMap;
     protected String dropTransactionId;
     protected String walLogDirectory;
+    protected KVReadOnlyMap<TapTable> tableMap;
 
     public AbstractWalLogMiner(PostgresJdbcContext postgresJdbcContext, Log tapLogger) {
         this.postgresJdbcContext = postgresJdbcContext;
         this.postgresConfig = (PostgresConfig) postgresJdbcContext.getConfig();
         this.tapLogger = tapLogger;
+    }
+
+    public void setThreadException(final Throwable t) {
+        threadException.set(t);
     }
 
     public AbstractWalLogMiner watch(List<String> tableList, KVReadOnlyMap<TapTable> tableMap) {
@@ -61,6 +66,7 @@ public abstract class AbstractWalLogMiner {
         filterSchema = tableList.size() > 50;
         this.pureDataTypeMap = new ConcurrentHashMap<>();
         this.dataTypeMap = new ConcurrentHashMap<>();
+        this.tableMap = tableMap;
         tableList.forEach(tableName -> {
             TapTable table = tableMap.get(tableName);
             if (EmptyKit.isNotNull(table)) {

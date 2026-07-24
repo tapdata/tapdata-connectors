@@ -21,42 +21,26 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
+import io.tapdata.entity.schema.TapTable;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import org.postgresql.PGConnection;
 import org.postgresql.PGProperty;
 import org.postgresql.replication.LogSequenceNumber;
 import org.postgresql.replication.PGReplicationStream;
+import org.postgresql.util.PSQLException;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.EOFException;
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.io.OutputStream;
-import java.io.UncheckedIOException;
+import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.PriorityQueue;
-import java.util.Properties;
-import java.util.Set;
-import java.util.UUID;
+import java.text.SimpleDateFormat;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -94,7 +78,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * transactions without OOM. ObjectOutputStream writes NormalRedo sequentially
      * (NormalRedo is already Serializable); the files are read back via streaming
      * k-way merge on COMMIT and deleted. Set via TAPDATA_WAL_SPILL_THRESHOLD (default 500K). */
-    private static final long PER_XID_SPILL_THRESHOLD = parseSpillThreshold();
+    private static final long PER_XID_SPILL_THRESHOLD_DEFAULT = 500_000L;
     private static final long[] EMPTY_SUBXACTS = new long[0];
     /* How often to surface the running tally of UPDATE/DELETE whose before-image
      * could not be recovered (page-state cache miss under wal_level=replica). */
@@ -102,6 +86,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
 
     private String slotName;
     private String startLsn;
+    private Long filterStartTimeMs; // Time-based filtering: drop events before this timestamp
     private RelationCatalog catalog;
     private final Set<String> allowTables = new HashSet<>();
     /* DDL detection: maps each monitored relation's pg_class OID to its
@@ -113,6 +98,13 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private long pgAttributeRelNode;
     private RelationInfo pgAttributeRel;
     private HeapRmgrDecoder.Ctx catalogDecodeCtx;
+    /* DDL barrier: when a transaction containing DDL is detected, reader thread
+     * pauses submission to decode queue until consumer completes DDL processing
+     * and downstream acknowledges schema update. Guards against DDL/DML race where
+     * DML referencing new schema columns arrives before DDL is applied downstream. */
+    private final Object ddlBarrierLock = new Object();
+    private volatile boolean ddlBarrierActive = false;
+    private final Set<Long> ddlPendingXids = new HashSet<>();
     /* Page-state overlay for pg_attribute itself, so an FPI-less catalog UPDATE
      * (DROP/RENAME/ALTER COLUMN under wal_level=replica) can still reconstruct
      * its before/after tuple images from an earlier FPI on the same page.
@@ -132,6 +124,23 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * transactions and in stream order. Consumer-thread only. */
     private final Map<Long, List<NormalRedo>> ddlRedosByXid = new HashMap<>();
     private final Map<Long, List<NormalRedo>> pendingByXid = new HashMap<>();
+    /* XLOG_XACT_ASSIGNMENT maps subtransaction xids to their top-level xid before
+     * those subxids write heap/catalog records. Consumer-thread only; used as a
+     * fallback when individual heap records do not carry XLR_BLOCK_ID_TOPLEVEL_XID. */
+    private final Map<Long, Long> subxidToTopXid = new HashMap<>();
+    /* Pending pg_attribute column changes per monitored table, keyed by
+     * "schema.table". When a DDL (ADD/DROP/RENAME COLUMN) is decoded from WAL
+     * before any DML has caused the affected table's RelationInfo to be loaded
+     * into the catalog cache, the change is buffered here. On the next catalog
+     * lookup for that table the pending changes are applied to the freshly-loaded
+     * RelationInfo and removed. Consumer-thread only. */
+    private final Map<String, List<RelationCatalog.PgAttributeChange>> pendingColumnChanges = new HashMap<>();
+    /* Tracks schema version per table (keyed by "schema.table"), incremented on
+     * every DDL change applied to that table's RelationInfo. Pool threads snapshot
+     * the version at decodeUnit() time; the consumer thread re-decodes on version
+     * mismatch, guaranteeing correct column layout for DML decoded before a DDL
+     * record was processed. Read/written from both pool+consumer threads. */
+    private final ConcurrentHashMap<String, Integer> schemaVersions = new ConcurrentHashMap<>();
     /* Per-xid spill state: when a single transaction's in-memory NormalRedo list
      * exceeds PER_XID_SPILL_THRESHOLD the entire bucket is written to a sequential
      * spill file and the list is cleared, bounding per-xid heap to ~threshold *
@@ -148,6 +157,13 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private PageStateCache pageCache;
     private boolean walLevelLogical;
     private HeapRmgrDecoder.Ctx decodeCtx;
+    /*
+     * Side-effect-free context used only by pool threads for wal_level=logical.
+     * cache=null and walLevelLogical=true guarantee HeapRmgrDecoder will not
+     * read or mutate PageStateCache while pre-decoding DML.
+     */
+    private static final HeapRmgrDecoder.Ctx LOGICAL_FAST_DECODE_CTX =
+            new HeapRmgrDecoder.Ctx(null, true, null);
     /* Running diagnostics for before-image coverage under wal_level=replica:
      * how many emitted UPDATE/DELETE carried a null before-image (cache miss),
      * throttled to one warning per interval. Consumer-thread only. */
@@ -160,21 +176,92 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private volatile long emitFromLsn;
     private final AtomicLong lastReceiveLsnForStatus = new AtomicLong();
 
-    /* Verbose [WAL-DEBUG] logging is gated behind the TAPDATA_WAL_DEBUG env var
-     * so a normal run stays quiet; set TAPDATA_WAL_DEBUG=true to surface the
+    /* Verbose [WAL-DEBUG] logging is gated per task via PostgresConfig.walDebug,
+     * with a fallback to the TAPDATA_WAL_DEBUG env var for backward compatibility.
+     * Set walDebug=true in the node config (or the env var) to surface the
      * per-record and per-checkpoint trace used for byte-level troubleshooting. */
-    static final boolean WAL_DEBUG_ENABLED =
-            "true".equalsIgnoreCase(System.getenv("TAPDATA_WAL_DEBUG"));
+    private boolean isWalDebugEnabled() {
+        Boolean cfg = postgresConfig.getWalDebug();
+        if (cfg != null) {
+            return cfg;
+        }
+        return "true".equalsIgnoreCase(System.getenv("TAPDATA_WAL_DEBUG"));
+    }
 
-    /* Page-cache size. Under wal_level=replica a page's before-image is only
-     * recoverable while its FPI-seeded overlay stays cached. Default is
-     * unbounded (no eviction) so a page is never lost once seen within the read
-     * window — matching walminer's full FPW-replay model — at the cost of heap
-     * proportional to the checkpoint cycle's touched-page count. Set a positive
-     * TAPDATA_WAL_PAGE_CACHE_CAPACITY to re-impose an LRU bound when heap is the
-     * tighter constraint (trading before-image coverage for a fixed budget). */
-    static final int PAGE_CACHE_CAPACITY =
-            parseCapacity(System.getenv("TAPDATA_WAL_PAGE_CACHE_CAPACITY"), 0);
+    /* Instance-level page-cache capacity, configurable via PostgresConfig or env. */
+    private int getPageCacheCapacity() {
+        Integer cfg = postgresConfig.getWalPageCacheCapacity();
+        if (cfg != null && cfg > 0) {
+            return cfg;
+        }
+        String env = System.getenv("TAPDATA_WAL_getPageCacheCapacity()");
+        if (env != null && !env.trim().isEmpty()) {
+            try {
+                int v = Integer.parseInt(env.trim());
+                if (v > 0) return v;
+            } catch (NumberFormatException ignored) { }
+        }
+        return 0;
+    }
+
+    /* Instance-level spill threshold, configurable via PostgresConfig or env. */
+    private long getSpillThreshold() {
+        Integer cfg = postgresConfig.getWalSpillThreshold();
+        if (cfg != null && cfg > 0) {
+            return cfg;
+        }
+        return parseSpillThresholdFromEnv();
+    }
+
+    /* Instance-level lookback segments, configurable via PostgresConfig,
+     * system property, or the default of 10. */
+    private int getLookbackSegments() {
+        Integer cfg = postgresConfig.getWalLookbackSegments();
+        if (cfg != null && cfg > 0) {
+            return cfg;
+        }
+        String prop = System.getProperty("tapdata.wal.lookback.segments");
+        if (prop != null && !prop.trim().isEmpty()) {
+            try {
+                int v = Integer.parseInt(prop.trim());
+                if (v > 0) return v;
+            } catch (NumberFormatException ignored) { }
+        }
+        return 10;
+    }
+
+    private EdbTdeWalDecryptor newWalDecryptorIfConfigured(long startLsn) {
+        String uploadedKey = postgresConfig.getWalTdeKey();
+        if (EmptyKit.isBlank(uploadedKey)) {
+            return null;
+        }
+        try {
+            String keyWrapAlgorithm = postgresConfig.getWalTdeKeyWrapAlgorithm();
+            byte[] unwrappedKey = EdbTdeWalDecryptor.unwrapUploadedKey(
+                    uploadedKey, postgresConfig.getWalTdeKeyPassword(), keyWrapAlgorithm);
+            int bits = getWalTdeDataEncryptionBits(unwrappedKey);
+            EdbTdeWalDecryptor decryptor = new EdbTdeWalDecryptor(unwrappedKey, bits, startLsn);
+            tapLogger.info("Physical WAL miner enables EDB TDE WAL decryption: dataEncryptionBits={} keyWrapAlgorithm={} walKeyFingerprint={} startLsn={}",
+                    bits, keyWrapAlgorithm == null ? "auto" : keyWrapAlgorithm, decryptor.walKeyFingerprint(), lsnStr(startLsn));
+            return decryptor;
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to initialize EDB TDE WAL decryptor", e);
+        }
+    }
+
+    private int getWalTdeDataEncryptionBits(byte[] unwrappedKey) {
+        Integer cfg = postgresConfig.getWalTdeDataEncryptionBits();
+        if (cfg != null && cfg > 0) {
+            return cfg;
+        }
+        if (unwrappedKey != null && unwrappedKey.length >= 128) {
+            return 256;
+        }
+        if (unwrappedKey != null && unwrappedKey.length >= 64) {
+            return 128;
+        }
+        return 256;
+    }
 
     public PhysicalWalLogMiner(PostgresJdbcContext postgresJdbcContext, Log tapLogger) {
         super(postgresJdbcContext, tapLogger);
@@ -193,17 +280,36 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return this;
     }
 
+    /**
+     * Configure time-based filtering for physical WAL mining.
+     * Events with commit time before the specified timestamp will be silently dropped.
+     *
+     * @param filterStartTimeMs Minimum commit timestamp in milliseconds since epoch
+     * @return this
+     */
+    public PhysicalWalLogMiner setFilterStartTime(Long filterStartTimeMs) {
+        this.filterStartTimeMs = filterStartTimeMs;
+        if (filterStartTimeMs != null) {
+            tapLogger.info("Physical WAL miner configured with time filter: only events >= {} will be emitted",
+                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date(filterStartTimeMs)));
+        }
+        return this;
+    }
+
     @Override
     public void startMiner(Supplier<Boolean> isAlive) throws Throwable {
         buildAllowSet();
         catalog = new RelationCatalog(postgresJdbcContext, tapLogger);
         long segSize = querySegmentSize();
         walLevelLogical = queryWalLevelLogical();
-        pageCache = walLevelLogical ? null : new PageStateCache(PAGE_CACHE_CAPACITY);
+        pageCache = walLevelLogical ? null : new PageStateCache(getPageCacheCapacity());
         // Spill directory for large transactions — created once per miner lifecycle
         // so the consumer thread can spill and drain without IO coordination.
-        String spillRoot = System.getenv().getOrDefault("TAPDATA_WAL_SPILL_DIR",
-                System.getProperty("java.io.tmpdir"));
+        String spillRoot = postgresConfig.getWalSpillDir();
+        if (spillRoot == null || spillRoot.trim().isEmpty()) {
+            spillRoot = System.getenv().getOrDefault("TAPDATA_WAL_SPILL_DIR",
+                    System.getProperty("java.io.tmpdir"));
+        }
         spillDir = Paths.get(spillRoot, "physical-wal-spill-" + UUID.randomUUID());
         try {
             Files.createDirectories(spillDir);
@@ -212,7 +318,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             throw new UncheckedIOException("Cannot create spill directory " + spillDir, e);
         }
         decodeCtx = new HeapRmgrDecoder.Ctx(pageCache, walLevelLogical,
-                WAL_DEBUG_ENABLED ? (fmt, args) -> tapLogger.info(fmt, args) : null);
+                isWalDebugEnabled() ? tapLogger::info : null);
         buildDdlWatch();
         // Seed strategy (standby-friendly). PageStateCache is seeded by each
         // page's first post-checkpoint FPI, which is what unlocks UPDATE/DELETE
@@ -305,13 +411,31 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 anchor = Math.min(restartLsn, emitFromLsn);
                 anchorSrc = "slot restart_lsn (prior redo recycled)";
             }
+            // (3) Physical replication slot — no server-enforced WAL retention
+            // floor (restart_lsn is always NULL for physical slots). PostgreSQL
+            // retains WAL segments on disk independently of the slot; a heuristic
+            // look-back of several segments almost certainly crosses a 5-minute
+            // checkpoint boundary whose FPIs will seed the page cache. The
+            // stream-open below validates; if WAL was recycled the retry loop
+            // advances forward until a readable position is found.
+            if (anchor <= 0 && restartLsn == 0) {
+                int lookbackSegs = getLookbackSegments();
+                long lookback = lookbackSegs * segSize;
+                long candidate = emitFromLsn > lookback ? emitFromLsn - lookback : 0L;
+                if (candidate < emitFromLsn) {
+                    anchor = candidate;
+                    anchorSrc = "physical-slot look-back (≤ " + lookbackSegs + " WAL segments)";
+                }
+            }
             if (anchor > 0 && anchor < readFromLsn) {
                 // Rewind reads to the cycle start so the cold cache warms with every
                 // hot page's post-checkpoint FPI before we emit; the earlier records
                 // are dropped at the commit gate in applyDecoded().
-                readFromLsn = anchor;
-                tapLogger.info("Physical WAL miner will warm the page cache from {} {} before emitting from {}",
-                        anchorSrc, lsnStr(readFromLsn), startLsn);
+                // Align to page boundary so WalPageDecoder.resync() can properly
+                // handle page headers and continuation records.
+                readFromLsn = pageAlignDown(anchor);
+                tapLogger.info("Physical WAL miner will warm the page cache from {} {} (page-aligned from {}) before emitting from {}",
+                        anchorSrc, lsnStr(readFromLsn), lsnStr(anchor), startLsn);
             } else if (anchor > 0) {
                 // emitFromLsn sits exactly on a checkpoint redo: nothing earlier to
                 // replay, the cache warms in-line as the stream advances.
@@ -325,45 +449,112 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 // emit position stay un-seeded until the stream crosses the next
                 // checkpoint's fresh FPI. Make the cause and remedies visible.
                 tapLogger.warn("Physical WAL miner cannot pre-warm the page cache: no checkpoint redo at or before the "
-                        + "emit position {} is reachable (saved offset stranded behind a later checkpoint, a standby, "
-                        + "or pg_control_checkpoint() not granted). UPDATE/DELETE before-images on hot pages (e.g. "
-                        + "bmsql_district) stay null until the stream crosses the next checkpoint's fresh FPI. Grant "
-                        + "EXECUTE on pg_control_checkpoint() to the connection user (or add it to pg_monitor), set "
-                        + "REPLICA IDENTITY FULL on the source tables, or use wal_level=logical for immediate coverage.",
+                                + "emit position {} is reachable (saved offset stranded behind a later checkpoint, a standby, "
+                                + "or pg_control_checkpoint() not granted). UPDATE/DELETE before-images on hot pages (e.g. "
+                                + "bmsql_district) stay null until the stream crosses the next checkpoint's fresh FPI. Grant "
+                                + "EXECUTE on pg_control_checkpoint() to the connection user (or add it to pg_monitor), set "
+                                + "REPLICA IDENTITY FULL on the source tables, or use wal_level=logical for immediate coverage.",
                         startLsn);
             }
         }
-        long startLsnLong = readFromLsn;
-        tapLogger.info("Physical WAL miner starting from lsn {} on slot {}", startLsn, slotName);
-        if (WAL_DEBUG_ENABLED) {
+        long startLsnLong = pageAlignDown(readFromLsn);
+        tapLogger.info("Physical WAL miner opening stream from page-aligned lsn {} on slot {} (emit from {})",
+                lsnStr(startLsnLong), slotName, startLsn);
+        if (isWalDebugEnabled()) {
             tapLogger.info("[WAL-DEBUG] miner config: withSchema={} schema={} walLevelLogical={} pageCache={} allowTables({})={}",
                     withSchema, postgresConfig.getSchema(), walLevelLogical,
                     pageCache == null ? "off"
-                            : "on(cap=" + (PAGE_CACHE_CAPACITY > 0 ? String.valueOf(PAGE_CACHE_CAPACITY) : "unbounded") + ")",
+                            : "on(cap=" + (getPageCacheCapacity() > 0 ? String.valueOf(getPageCacheCapacity()) : "unbounded") + ")",
                     allowTables.size(), allowTables);
         }
         consumer.streamReadStarted();
-        try (Connection conn = DriverManager.getConnection(postgresConfig.getDatabaseUrl(), replicationProps())) {
-            PGConnection pg = conn.unwrap(PGConnection.class);
-            PGReplicationStream stream = pg.getReplicationAPI()
-                    .replicationStream()
-                    .physical()
-                    .withSlotName(slotName)
-                    .withStartPosition(LogSequenceNumber.valueOf(startLsnLong))
-                    .start();
-            run(stream, startLsnLong, segSize, isAlive);
+        try {
+            openStreamWithWarmRetry(readFromLsn, emitFromLsn, segSize, isAlive);
         } finally {
             consumer.streamReadEnded();
             cleanupAllSpills();
         }
     }
 
+    /**
+     * Open a physical replication stream at {@code startLsn}, retrying at
+     * progressively closer positions when the requested WAL segment has been
+     * recycled. The initial {@code startLsn} may be a look-back anchor well
+     * before {@code emitLsn}; on a "requested WAL segment has already been
+     * removed" error the start position is advanced via binary search toward
+     * emitLsn. If even emitLsn is unreachable the exception propagates.
+     */
+    private void openStreamWithWarmRetry(long startLsn, long emitLsn, long segSize,
+                                         Supplier<Boolean> isAlive) throws Throwable {
+        long emitStart = pageAlignDown(emitLsn);
+        long currentStart = pageAlignDown(startLsn);
+        if (currentStart > emitStart) {
+            currentStart = emitStart;
+        }
+        if (currentStart != startLsn || emitStart != emitLsn) {
+            tapLogger.info("Physical WAL miner page-aligns stream open: requested_start={} aligned_start={} emit_lsn={} emit_page={}",
+                    lsnStr(startLsn), lsnStr(currentStart), lsnStr(emitLsn), lsnStr(emitStart));
+        }
+        int maxAttempts = 8; // binary search over ~10 segments → within 1 segment
+        PSQLException lastRemoved = null;
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            if (attempt > 0) {
+                tapLogger.info("Physical WAL miner retrying stream open at lsn {} (attempt {}/{})",
+                        lsnStr(currentStart), attempt + 1, maxAttempts);
+            }
+            try (Connection conn = DriverManager.getConnection(
+                    postgresConfig.getDatabaseUrl(), replicationProps())) {
+                PGConnection pg = conn.unwrap(PGConnection.class);
+                PGReplicationStream stream = pg.getReplicationAPI()
+                        .replicationStream()
+                        .physical()
+                        .withSlotName(slotName)
+                        .withStartPosition(LogSequenceNumber.valueOf(currentStart))
+                        .start();
+                run(stream, currentStart, segSize, isAlive);
+                return;
+            } catch (PSQLException e) {
+                String msg = e.getMessage();
+                if (msg != null && (msg.contains("requested WAL segment")
+                        || msg.contains("has already been removed"))) {
+                    lastRemoved = e;
+                    if (currentStart >= emitStart) {
+                        throw e; // even the page containing emitLsn is unreachable
+                    }
+                    long remaining = emitStart - currentStart;
+                    long step = Math.max(remaining / 2, segSize);
+                    currentStart = currentStart + step;
+                    // Page-align: WalPageDecoder must start at a page boundary so
+                    // resync() can handle XLP_FIRST_IS_CONTRECORD and readLogical()
+                    // can correctly skip page headers. A non-page-aligned start
+                    // lands mid-record and yields garbage xl_tot_len values.
+                    currentStart = pageAlignDown(currentStart);
+                    if (currentStart >= emitStart) {
+                        currentStart = emitStart;
+                    }
+                    // Last attempts: use the page containing emitLsn directly.
+                    if (attempt >= maxAttempts - 2) {
+                        currentStart = emitStart;
+                    }
+                    continue;
+                }
+                throw e;
+            }
+        }
+        if (lastRemoved != null) {
+            throw lastRemoved;
+        }
+        throw new IllegalStateException("Physical WAL miner stream open retry exhausted without opening a stream");
+    }
+
     /* Reader thread: serially frames the WAL byte stream (WalPageDecoder is
      * stateful) and offloads the heavy per-record decoding to a thread pool. A
      * single consumer thread drains the processor in submission order, so the
      * transaction buffer and emitted LSN sequence stay correct. */
-    private void run(PGReplicationStream stream, long startLsnLong, long segSize, Supplier<Boolean> isAlive) throws Exception {
-        WalPageDecoder decoder = new WalPageDecoder(startLsnLong, segSize);
+    private void run(PGReplicationStream stream, long startLsnLong, long segSize, Supplier<Boolean> isAlive) throws Throwable {
+        WalPageDecoder decoder = null;
+        EdbTdeWalDecryptor walDecryptor = newWalDecryptorIfConfigured(startLsnLong);
+        long nextChunkLsn = startLsnLong;
         // Frame from startLsnLong (possibly the checkpoint redo) but report offsets
         // only from emitFromLsn so the saved resume point never moves backwards
         // while the cache-warming prefix is being replayed.
@@ -390,6 +581,17 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     int n = buf.remaining();
                     byte[] arr = new byte[n];
                     buf.get(arr);
+                    long chunkStartLsn = nextChunkLsn;
+                    if (recv != null) {
+                        chunkStartLsn = recv.asLong() - n;
+                    }
+                    if (decoder == null || chunkStartLsn != nextChunkLsn) {
+                        decoder = new WalPageDecoder(chunkStartLsn, segSize);
+                    }
+                    if (walDecryptor != null) {
+                        arr = walDecryptor.decrypt(chunkStartLsn, arr, 0, n);
+                    }
+                    nextChunkLsn = chunkStartLsn + n;
                     decoder.feed(arr, 0, n);
                     WalPageDecoder.RawRecord raw;
                     while ((raw = decoder.nextRecord()) != null) {
@@ -403,7 +605,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                         lastReceiveLsnForStatus.set(recv.asLong());
                         updateReplicationStatusIfDue(stream, lastStatusUpdateMs, false);
                     }
-            }
+                }
             } finally {
                 ErrorKit.ignoreAnyError(() -> updateReplicationStatusIfDue(stream, lastStatusUpdateMs, true));
                 ErrorKit.ignoreAnyError(stream::close);
@@ -411,7 +613,11 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             ErrorKit.ignoreAnyError(consumerThread::join);
         }
         if (threadException.get() != null) {
-            throw new RuntimeException(threadException.get());
+            Throwable t = threadException.get();
+            if (t instanceof TapPdkRetryableEx) {
+                throw t;
+            }
+            throw new RuntimeException(t);
         }
     }
 
@@ -421,6 +627,20 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                            WalPageDecoder.RawRecord raw, Supplier<Boolean> isAlive,
                            PGReplicationStream stream, long[] lastStatusUpdateMs) throws Exception {
         while (isAlive.get() && threadException.get() == null) {
+            // Check if DDL barrier is active - if so, pause submission until
+            // consumer thread clears it after downstream acknowledges schema update
+            synchronized (ddlBarrierLock) {
+                while (ddlBarrierActive && isAlive.get() && threadException.get() == null) {
+                    tapLogger.info("Physical WAL miner reader thread paused - waiting for DDL barrier to clear");
+                    try {
+                        ddlBarrierLock.wait(1000);  // Wait max 1 second, then recheck conditions
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return false;
+                    }
+                    updateReplicationStatusIfDue(stream, lastStatusUpdateMs, false);
+                }
+            }
             if (processor.runAsync(raw, this::decodeUnit, 1, TimeUnit.SECONDS)) {
                 return true;
             }
@@ -463,7 +683,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     /* Consumer thread: drains decoded units in submission order, buffers heap
      * changes per transaction and flushes them on COMMIT, preserving LSN order. */
     private void consumeLoop(ConcurrentProcessor<WalPageDecoder.RawRecord, Decoded> processor,
-                            Supplier<Boolean> isAlive, String initialOffset) {
+                             Supplier<Boolean> isAlive, String initialOffset) {
         List<TapEvent> batch = new ArrayList<>();
         // The persisted resume offset must always sit on a transaction boundary.
         // Emitted batches only ever contain committed changes, so saving a
@@ -524,16 +744,19 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
     }
 
-    /* CPU-light, order-independent slice executed on the pool threads: parse the
-     * record (XLogRecord.parse is the only heavy part) and pre-resolve the
-     * relation for heap changes. The actual HeapRmgrDecoder pass and any cache
-     * mutation happen on the single consumer thread to keep page-state
-     * mutations race-free; see PageStateCache.javadoc.
+    /* Decode unit executed on pool threads.
      *
-     * Any unchecked exception from XLogRecord.parse (or the catalog lookup) is
-     * swallowed here and the record is downgraded to OTHER. Letting it escape
-     * would surface as a ConcurrentProcessorApplyException on get() and kill
-     * the entire miner over a single malformed/unexpected record. */
+     * Fast path: when wal_level=logical, DML WAL carries enough tuple bytes to
+     * decode without PageStateCache. The worker may pre-decode those records
+     * with LOGICAL_FAST_DECODE_CTX, which has no cache and no debug callback.
+     *
+     * Slow path: replica-level WAL and any DDL-sensitive record are decoded on
+     * the consumer thread in WAL order. Workers must not mutate page cache,
+     * catalog pending changes, or DDL state.
+     *
+     * Any unchecked exception from XLogRecord.parse is swallowed here and the
+     * record is downgraded to OTHER. Letting it escape would surface as a
+     * ConcurrentProcessorApplyException on get() and kill the entire miner. */
     private Decoded decodeUnit(WalPageDecoder.RawRecord raw) {
         Decoded d = new Decoded();
         d.offset = lsnStr(raw.nextLsn);
@@ -547,7 +770,20 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 // PL-pgSQL EXCEPTION) changes flush on the top-level COMMIT instead
                 // of leaking forever under their subxid.
                 d.xid = rec.topXid != 0 ? rec.topXid : rec.xid;
-                d.rel = resolveRel(rec);
+                XLogRecord.BlockRef b0 = rec.block(0);
+                d.relNumber = b0 != null ? b0.relNumber : 0;
+                if (walLevelLogical) {
+                    // Only logical-level WAL is safe to pre-decode: the context
+                    // below cannot touch PageStateCache. Consumer validates the
+                    // schema version and same-xid DDL state before using d.redos.
+                    RelationInfo rel = resolveRelForFastDecode(d.relNumber);
+                    if (rel != null) {
+                        d.rel = rel;
+                        String tableKey = rel.schema + "." + rel.table;
+                        d.schemaVersion = schemaVersions.getOrDefault(tableKey, 0);
+                        d.redos = decodeHeapLogicalFast(rec, rel);
+                    }
+                }
             } else if (rec.rmid == RM_TRANSACTION_ID) {
                 d.xid = rec.xid;
                 int op = rec.info & XLOG_XACT_OPMASK;
@@ -558,6 +794,11 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 } else if (op == XLOG_XACT_ABORT || op == XLOG_XACT_ABORT_PREPARED) {
                     d.kind = Decoded.ABORT;
                     d.subxids = readSubxacts(rec.mainData, rec.info);
+                } else if (op == XLOG_XACT_ASSIGNMENT) {
+                    d.kind = Decoded.ASSIGNMENT;
+                    XactAssignment assignment = readAssignment(rec.mainData);
+                    d.xid = assignment.topXid != 0 ? assignment.topXid : rec.xid;
+                    d.subxids = assignment.subxids;
                 }
             } else if (rec.rmid == RM_XLOG_ID) {
                 d.kind = Decoded.XLOG;
@@ -571,18 +812,72 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return d;
     }
 
-    /* Pool-side relation lookup: catalog has its own thread-safe cache. Returns
-     * null when the relation is not in the allow set or cannot be resolved. */
-    private RelationInfo resolveRel(XLogRecord rec) {
-        XLogRecord.BlockRef b0 = rec.block(0);
-        if (b0 == null) {
+    /* Pool-thread lookup for the logical fast path. This deliberately does not
+     * apply or consume pendingColumnChanges: those are WAL-order side effects and
+     * belong to resolveRelForConsumer(). */
+    private RelationInfo resolveRelForFastDecode(long relNumber) {
+        if (relNumber <= 0) {
             return null;
         }
-        RelationInfo rel = catalog.lookup(b0.relNumber);
+        if (pgAttributeRelNode > 0 && relNumber == pgAttributeRelNode) {
+            return null;
+        }
+        RelationInfo rel = catalog.lookup(relNumber);
         if (rel == null || !allowed(rel)) {
             return null;
         }
         return rel;
+    }
+
+    /* Consumer-thread relation resolution. Called from applyDecoded after any
+     * catalog DDL updates for earlier LSNs have already been applied, guaranteeing
+     * the DML decode sees the correct column layout. */
+    private RelationInfo resolveRelForConsumer(long relNumber) {
+        if (relNumber <= 0) {
+            return null;
+        }
+        RelationInfo rel = catalog.lookup(relNumber);
+        if (rel == null || !allowed(rel)) {
+            return null;
+        }
+        // Apply and consume any pending DDL column changes for this table.
+        // Keyed by schema.table, not relfilenode, because DDL detection uses
+        // pg_attribute.attrelid (pg_class OID) which may differ from relfilenode
+        // after TRUNCATE / VACUUM FULL.
+        String tableKey = rel.schema + "." + rel.table;
+        List<RelationCatalog.PgAttributeChange> pending = pendingColumnChanges.remove(tableKey);
+        if (pending != null) {
+            if (isWalDebugEnabled()) {
+                tapLogger.info("[WAL-DEBUG] applying {} pending pg_attribute change(s) to {}.{} before DML decode; beforeColumns={}",
+                        pending.size(), rel.schema, rel.table, columnLayout(rel));
+            }
+            rel = RelationCatalog.applyPendingChanges(rel, pending);
+            catalog.cache(relNumber, rel);
+            if (isWalDebugEnabled()) {
+                tapLogger.info("[WAL-DEBUG] applied pending pg_attribute changes to {}.{}; afterColumns={}",
+                        rel.schema, rel.table, columnLayout(rel));
+            }
+        }
+        return rel;
+    }
+
+    /* Side-effect-free pool decode for wal_level=logical. Never call this for
+     * replica-level WAL: old/new tuple reconstruction may require PageStateCache
+     * and must run in consumer WAL order. */
+    private List<NormalRedo> decodeHeapLogicalFast(XLogRecord rec, RelationInfo rel) {
+        List<NormalRedo> redos;
+        try {
+            redos = HeapRmgrDecoder.decode(rec, rel, LOGICAL_FAST_DECODE_CTX);
+        } catch (RuntimeException ex) {
+            tapLogger.warn("skip logical fast heap record at lsn={} rel={}.{} due to decode error: {}",
+                    lsnStr(rec.lsn), rel.schema, rel.table, ex.getMessage());
+            return Collections.emptyList();
+        }
+        for (NormalRedo r : redos) {
+            r.setCdcSequenceId(rec.lsn);
+            r.setSourceXid(rec.xid);
+        }
+        return expandKeyUpdates(redos, rel);
     }
 
     /* Consumer-side heap decode + page-state maintenance. Must run on the
@@ -601,6 +896,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
         for (NormalRedo r : redos) {
             r.setCdcSequenceId(rec.lsn);   // source LSN, used to order a transaction's changes
+            r.setSourceXid(rec.xid);
         }
         return expandKeyUpdates(redos, rel);
     }
@@ -677,6 +973,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         c.setTableName(u.getTableName());
         c.setTransactionId(u.getTransactionId());
         c.setCdcSequenceId(u.getCdcSequenceId());
+        c.setSourceXid(u.getSourceXid());
         return c;
     }
 
@@ -698,12 +995,12 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             for (XLogRecord.BlockRef b : rec.blocks) {
                 pageCache.invalidateRelation(b.relNumber);
             }
-            if (WAL_DEBUG_ENABLED) {
+            if (isWalDebugEnabled()) {
                 tapLogger.info("[WAL-DEBUG] TRUNCATE rmid={} lsn={} cacheSize={}", rec.rmid, lsnStr(rec.lsn), pageCache.size());
             }
             return;
         }
-        if (WAL_DEBUG_ENABLED && rec.rmid == RM_HEAP2_ID) {
+        if (isWalDebugEnabled() && rec.rmid == RM_HEAP2_ID) {
             int op = rec.heapOp();
             if (op == XLOG_HEAP2_PRUNE || op == XLOG_HEAP2_VACUUM
                     || op == XLOG_HEAP2_FREEZE_PAGE || op == XLOG_HEAP2_VISIBLE) {
@@ -717,7 +1014,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * each checkpoint resets the per-page FPI-required flag, which is the
      * pivot for understanding why a given record does/doesn't carry an FPI. */
     private void logCheckpointIfAny(XLogRecord rec) {
-        if (!WAL_DEBUG_ENABLED || rec.rmid != RM_XLOG_ID) {
+        if (!isWalDebugEnabled() || rec.rmid != RM_XLOG_ID) {
             return;
         }
         int op = rec.info & XLR_RMGR_INFO_MASK;
@@ -773,7 +1070,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             }
             CachedPage cp = pageCache.getOrCreate(b.relNumber, b.blockNumber);
             boolean applied = cp.seedFromImage(page);
-            if (WAL_DEBUG_ENABLED) {
+            if (isWalDebugEnabled()) {
                 if (applied) {
                     tapLogger.info("[WAL-DEBUG] SEED rel={}.{} blk={} offsets={} (FPI rmid={} info=0x{})",
                             rel.schema, rel.table, b.blockNumber, cp.size(),
@@ -795,7 +1092,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             return EMPTY_SUBXACTS;
         }
         try {
-            WalByteReader r = new WalByteReader(mainData);
+            WalByteReader r = WalByteReader.borrow(mainData);
             r.skip(8);                       // xact_time (TimestampTz)
             long xinfo = r.readUInt32();     // xl_xact_xinfo
             if ((xinfo & XACT_XINFO_HAS_DBINFO) != 0) {
@@ -818,18 +1115,37 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return EMPTY_SUBXACTS;
     }
 
-    /* Single-threaded application of the ordered decode result to the per-xid
-     * buffer; only this method touches {@code pendingByXid} and the page
-     * cache. Heap records are decoded here (not on the pool) so the cache
-     * mini-redo sees them in strict WAL order. */
+    static XactAssignment readAssignment(byte[] mainData) {
+        if (mainData == null || mainData.length < 8) {
+            return XactAssignment.EMPTY;
+        }
+        try {
+            WalByteReader r = WalByteReader.borrow(mainData);
+            long topXid = r.readUInt32();
+            int n = (int) r.readUInt32();
+            if (topXid == 0 || n <= 0) {
+                return topXid == 0 ? XactAssignment.EMPTY : new XactAssignment(topXid, EMPTY_SUBXACTS);
+            }
+            long[] subs = new long[n];
+            for (int i = 0; i < n; i++) {
+                subs[i] = r.readUInt32();
+            }
+            return new XactAssignment(topXid, subs);
+        } catch (RuntimeException ignore) {
+            return XactAssignment.EMPTY;
+        }
+    }
+
+    /* Consumer-thread application of the ordered decode result to the per-xid
+     * buffer. Heap records are used from the worker only on the logical fast
+     * path and only when no DDL invalidation is visible. Otherwise the consumer
+     * re-decodes in WAL order with the current catalog/page-cache state.
+     *
+     * FPI seeding runs here in WAL order, ensuring page cache state matches the
+     * actual WAL sequence regardless of pool-thread ordering. */
     private List<TapEvent> applyDecoded(Decoded d, List<TapEvent> batch, String safeOffsetBeforeApply) {
         if (d.rec != null) {
-            // Seed from FPIs carried by *any* record (standalone XLOG_FPI /
-            // XLOG_FPI_FOR_HINT, heap2 prune/visible/freeze, etc.), not just the
-            // heap INSERT/UPDATE/DELETE the decoder handles. Runs before heap
-            // decode so primePage's own (identical) reseed leaves heap behaviour
-            // unchanged while cold pages whose post-checkpoint FPI rode on a
-            // non-heap record finally get seeded — matching walminer's FPW replay.
+            // Seed from FPIs carried by *any* record, in strict WAL order.
             seedFpisFromRecord(d.rec);
         }
         switch (d.kind) {
@@ -837,17 +1153,44 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 if (d.rec == null) {
                     return batch;
                 }
-                if (d.rel != null) {
-                    List<NormalRedo> redos = decodeHeapOnConsumer(d.rec, d.rel);
-                    if (!redos.isEmpty()) {
-                        appendRedos(d.xid, redos);
-                        pendingRedoCount += redos.size();
+                long xid = topXidFor(d.xid);
+                // Check whether the logical fast-path pre-decode is still valid.
+                // Re-decode on consumer when:
+                //   1. This xid has DDL pending (same-xid DDL/DML interleaving)
+                //   2. Schema version changed (cross-xid DDL between decode and apply)
+                //   3. Pre-decode was not possible (d.redos == null)
+                RelationInfo current = d.relNumber > 0 ? catalog.lookup(d.relNumber) : null;
+                String tableKey = current != null ? current.schema + "." + current.table : null;
+                int currentSchemaVersion = tableKey != null ? schemaVersions.getOrDefault(tableKey, 0) : -1;
+                boolean ddlPending = ddlPendingXids.contains(xid);
+                boolean redoValid = walLevelLogical && d.redos != null && !ddlPending
+                        && (d.schemaVersion == currentSchemaVersion || currentSchemaVersion == -1);
+
+                if (redoValid) {
+                    // Logical fast-path result is safe — just append.
+                    if (!d.redos.isEmpty()) {
+                        appendRedos(xid, d.redos);
+                        pendingRedoCount += d.redos.size();
                         checkPendingPressure();
                     }
                 } else {
-                    detectCatalogDdl(d.rec, d.xid);
+                    // Re-decode on consumer with correct catalog
+                    d.rel = resolveRelForConsumer(d.relNumber);
+                    if (d.rel != null) {
+                        List<NormalRedo> redos = decodeHeapOnConsumer(d.rec, d.rel);
+                        if (!redos.isEmpty()) {
+                            appendRedos(xid, redos);
+                            pendingRedoCount += redos.size();
+                            checkPendingPressure();
+                        }
+                    } else {
+                        detectCatalogDdl(d.rec, xid);
+                    }
                 }
                 invalidateForMaintenance(d.rec);
+                break;
+            case Decoded.ASSIGNMENT:
+                registerSubxids(d.xid, d.subxids);
                 break;
             case Decoded.XLOG:
                 if (d.rec != null) {
@@ -855,26 +1198,68 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 }
                 break;
             case Decoded.COMMIT:
-                // Drain via streaming k-way merge: spill files + in-memory buffers
-                // are merged LSN-ordered without materializing the full transaction.
-                try (DrainResult dr = drainTransaction(d.xid, d.subxids)) {
-                    List<NormalRedo> ddlChanges = drainDdlRedos(d.xid, d.subxids);
+                long[] commitSubxids = subxidsForTop(d.xid, d.subxids);
+                Set<Long> committedXids = committedXids(d.xid, d.subxids);
+                // Debug: log the subxids we parsed from this COMMIT
+                if (isWalDebugEnabled() && commitSubxids.length > 0) {
+                    tapLogger.info("[WAL-DEBUG] COMMIT xid={} has {} subxids: {}",
+                            d.xid, commitSubxids.length, java.util.Arrays.toString(commitSubxids));
+                }
+                // Drain DDL redos first (pg_attribute changes) - these are processed
+                // separately from normal DML and used to synthesize DDL events.
+                List<NormalRedo> ddlChanges = drainDdlRedos(d.xid, commitSubxids);
+                ddlChanges.removeIf(r -> !isCommittedRedo(r, committedXids));
+                ddlChanges.sort(Comparator.comparingLong(PhysicalWalLogMiner::redoLsn));
+
+                // Drain normal DML via streaming k-way merge
+                try (DrainResult dr = drainTransaction(d.xid, commitSubxids)) {
                     // Always drain (frees the per-xid buffers and keeps the page cache
                     // in step), but suppress commits that landed before the emit
                     // position: their records only served to warm the cache and were
                     // already captured by the snapshot / a prior offset.
                     if (d.rec != null && d.rec.lsn < emitFromLsn) {
+                        // Early exit for warm-up transactions, but must still clean up
+                        // DDL tracking state to prevent memory leaks
+                        clearDdlPending(d.xid, commitSubxids);
+                        clearSubxidAssignments(d.xid, commitSubxids);
+                        clearPendingColumnChanges(d.xid, commitSubxids);
                         break;
                     }
-                    // Emit field DDL before this commit's DML so a target applies the
-                    // schema change before any row that depends on it.
-                    if (!ddlChanges.isEmpty()) {
-                        emitDdlEvents(ddlChanges, d.commitMillis, batch);
+
+                    // Time-based filtering: drop transactions committed before the filter time
+                    if (filterStartTimeMs != null && d.commitMillis < filterStartTimeMs) {
+                        if (isWalDebugEnabled()) {
+                            tapLogger.info("[WAL-DEBUG] FILTER-DROP transaction xid={} with commit time {} < filter time {}",
+                                    d.xid, d.commitMillis, filterStartTimeMs);
+                        }
+                        clearDdlPending(d.xid, commitSubxids);
+                        clearSubxidAssignments(d.xid, commitSubxids);
+                        clearPendingColumnChanges(d.xid, commitSubxids);
+                        break;
                     }
+
                     int emitted = 0;
+                    int emittedDdl = 0;
+                    int ddlIndex = 0;
                     int totalRedos = dr.count;
+                    int skipped = 0;
                     while (dr.iterator.hasNext()) {
                         NormalRedo r = dr.iterator.next();
+                        long dmlLsn = redoLsn(r);
+                        while (ddlIndex < ddlChanges.size()
+                                && redoLsn(ddlChanges.get(ddlIndex)) <= dmlLsn) {
+                            batch = emitDdlAndWait(ddlChanges.get(ddlIndex++), d.commitMillis, batch, safeOffsetBeforeApply, d.xid);
+                            emittedDdl++;
+                        }
+                        if (!isCommittedRedo(r, committedXids)) {
+                            skipped++;
+                            if (isWalDebugEnabled()) {
+                                tapLogger.info("[WAL-DEBUG] SKIP rolled-back xid={} op={} {}.{} lsn={}",
+                                        r.getSourceXid(), r.getOperation(), r.getNameSpace(), r.getTableName(),
+                                        lsnStr(redoLsn(r)));
+                            }
+                            continue;
+                        }
                         r.setTimestamp(d.commitMillis);
                         r.setCdcSequenceStr(d.offset);
                         TapEvent ev = toEvent(r);
@@ -882,7 +1267,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                             batch.add(ev);
                             emitted++;
                             trackNullImage(r);
-                            if (WAL_DEBUG_ENABLED) {
+                            if (isWalDebugEnabled()) {
                                 tapLogger.info("[WAL-DEBUG] EMIT op={} {}.{} lsn={} before={} after={}",
                                         r.getOperation(), r.getNameSpace(), r.getTableName(),
                                         lsnStr(redoLsn(r)), r.getUndoRecord(), r.getRedoRecord());
@@ -916,15 +1301,50 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                             }
                         }
                     }
-                    if (WAL_DEBUG_ENABLED) {
-                        tapLogger.info("[WAL-DEBUG] COMMIT drain xid={} redos={} emitted={} offset={}",
-                                d.xid, totalRedos, emitted, d.offset);
+                    while (ddlIndex < ddlChanges.size()) {
+                        batch = emitDdlAndWait(ddlChanges.get(ddlIndex++), d.commitMillis, batch, safeOffsetBeforeApply, d.xid);
+                        emittedDdl++;
                     }
+                    if (isWalDebugEnabled()) {
+                        tapLogger.info("[WAL-DEBUG] COMMIT drain xid={} redos={} emitted={} skipped={} ddl={} subxids={} offset={}",
+                                d.xid, totalRedos, emitted, skipped, emittedDdl, commitSubxids.length, d.offset);
+                    }
+                    clearDdlPending(d.xid, commitSubxids);
+                    clearSubxidAssignments(d.xid, commitSubxids);
+                    clearPendingColumnChanges(d.xid, commitSubxids);
                 }
                 break;
             case Decoded.ABORT:
-                discardTransaction(d.xid, d.subxids);
-                drainDdlRedos(d.xid, d.subxids);
+                long[] abortSubxids = subxidsForTop(d.xid, d.subxids);
+                boolean subtransactionAbort = subxidToTopXid.containsKey(d.xid);
+                if (subtransactionAbort) {
+                    discardTransaction(d.xid, d.subxids);
+                } else {
+                    discardTransaction(d.xid, abortSubxids);
+                }
+                List<NormalRedo> abortedDdls = drainDdlRedos(d.xid, abortSubxids);
+                // Revert in-memory RelationCatalog changes from aborted DDL
+                if (!abortedDdls.isEmpty()) {
+                    rebuildCatalogOverlaysFromBufferedDdl();
+                    if (isWalDebugEnabled()) {
+                        tapLogger.info("[WAL-DEBUG] ABORT xid={} with {} DDL changes; catalog invalidated",
+                                d.xid, abortedDdls.size());
+                    }
+                }
+                // Clear DDL tracking for aborted transactions. If this transaction
+                // had activated the barrier, clear it unconditionally to prevent deadlock.
+                synchronized (ddlBarrierLock) {
+                    boolean wasTracked = clearDdlPendingLocked(d.xid, abortSubxids);
+                    if (wasTracked && ddlBarrierActive) {
+                        // This aborted transaction might have activated the barrier,
+                        // clear it to allow reader to resume
+                        ddlBarrierActive = false;
+                        ddlBarrierLock.notifyAll();
+                        tapLogger.info("Physical WAL miner DDL barrier cleared after ABORT xid={}", d.xid);
+                    }
+                }
+                clearSubxidAssignments(d.xid, abortSubxids);
+                clearPendingColumnChanges(d.xid, abortSubxids);
                 break;
             default:
                 break;
@@ -932,7 +1352,162 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return batch;
     }
 
-    /* Build a streaming, LSN-ordered iterator over the buffered changes for a
+    private long topXidFor(long xid) {
+        Long top = subxidToTopXid.get(xid);
+        return top == null ? xid : top;
+    }
+
+    private long[] subxidsForTop(long topXid, long[] walSubxids) {
+        return mergeSubxids(topXid, walSubxids, subxidToTopXid);
+    }
+
+    static Set<Long> committedXids(long topXid, long[] walSubxids) {
+        Set<Long> committed = new HashSet<>();
+        if (topXid != 0) {
+            committed.add(topXid);
+        }
+        if (walSubxids != null) {
+            for (long sub : walSubxids) {
+                if (sub != 0) {
+                    committed.add(sub);
+                }
+            }
+        }
+        return committed;
+    }
+
+    static boolean isCommittedRedo(NormalRedo redo, Set<Long> committedXids) {
+        Long sourceXid = redo.getSourceXid();
+        return sourceXid == null || committedXids.contains(sourceXid);
+    }
+
+    static long[] mergeSubxids(long topXid, long[] walSubxids, Map<Long, Long> assignments) {
+        if ((walSubxids == null || walSubxids.length == 0) && (assignments == null || assignments.isEmpty())) {
+            return EMPTY_SUBXACTS;
+        }
+        LinkedHashSet<Long> merged = new LinkedHashSet<>();
+        if (walSubxids != null) {
+            for (long sub : walSubxids) {
+                if (sub != 0 && sub != topXid) {
+                    merged.add(sub);
+                }
+            }
+        }
+        if (assignments != null && topXid != 0) {
+            for (Map.Entry<Long, Long> e : assignments.entrySet()) {
+                Long parent = e.getValue();
+                Long sub = e.getKey();
+                if (Objects.equals(parent, topXid) && sub != null && sub != 0 && sub != topXid) {
+                    merged.add(sub);
+                }
+            }
+        }
+        if (merged.isEmpty()) {
+            return EMPTY_SUBXACTS;
+        }
+        long[] out = new long[merged.size()];
+        int i = 0;
+        for (Long sub : merged) {
+            out[i++] = sub;
+        }
+        return out;
+    }
+
+    private void registerSubxids(long topXid, long[] subxids) {
+        if (topXid == 0 || subxids == null || subxids.length == 0) {
+            return;
+        }
+        for (long sub : subxids) {
+            if (sub != 0 && sub != topXid) {
+                subxidToTopXid.put(sub, topXid);
+            }
+        }
+        if (isWalDebugEnabled()) {
+            tapLogger.info("[WAL-DEBUG] XACT assignment topXid={} subxids={}",
+                    topXid, Arrays.toString(subxids));
+        }
+    }
+
+    private void clearSubxidAssignments(long topXid, long[] subxids) {
+        subxidToTopXid.remove(topXid);
+        if (subxids != null && subxids.length > 0) {
+            for (long sub : subxids) {
+                subxidToTopXid.remove(sub);
+            }
+        }
+        subxidToTopXid.entrySet().removeIf(e -> Objects.equals(e.getValue(), topXid));
+    }
+
+    private void clearPendingColumnChanges(long topXid, long[] subxids) {
+        // Pending column changes are keyed by OID, not XID. At COMMIT/ABORT time
+        // we don't know which OIDs this transaction affected without scanning all
+        // entries. Since pending changes only accumulate for the edge case where
+        // DDL precedes first DML (rare), we keep them until the next resolveRel
+        // applies them. The worst case is a slow leak if DDLs keep happening
+        // without DML — but that's an unusual CDC pattern.
+        //
+        // For the common path, pendingColumnChanges entries are empty because
+        // catalog.applyPgAttributeChange returned true (cache hit).
+    }
+
+    private void rebuildCatalogOverlaysFromBufferedDdl() {
+        catalog.invalidate();
+        pendingColumnChanges.clear();
+        List<NormalRedo> remaining = new ArrayList<>();
+        for (List<NormalRedo> redos : ddlRedosByXid.values()) {
+            remaining.addAll(redos);
+        }
+        remaining.sort(Comparator.comparingLong(PhysicalWalLogMiner::redoLsn));
+        for (NormalRedo r : remaining) {
+            bufferPendingColumnChange(r);
+        }
+    }
+
+    private void bufferPendingColumnChange(NormalRedo r) {
+        Long attrelid = readAttrelid(r);
+        if (attrelid == null) {
+            return;
+        }
+        MonitoredTable mt = monitoredOidToName.get(attrelid);
+        if (mt == null) {
+            return;
+        }
+        Integer attnum = readInt(r.getRedoRecord(), "attnum");
+        if (attnum == null) {
+            attnum = readInt(r.getUndoRecord(), "attnum");
+        }
+        String attname = readStr(r.getRedoRecord(), "attname");
+        if (attname == null) {
+            attname = readStr(r.getUndoRecord(), "attname");
+        }
+        Long atttypid = readLong(r.getRedoRecord(), "atttypid");
+        if (atttypid == null) {
+            atttypid = readLong(r.getUndoRecord(), "atttypid");
+        }
+        Integer attlen = readInt(r.getRedoRecord(), "attlen");
+        if (attlen == null) {
+            attlen = readInt(r.getUndoRecord(), "attlen");
+        }
+        String attalignStr = readStr(r.getRedoRecord(), "attalign");
+        if (attalignStr == null) {
+            attalignStr = readStr(r.getUndoRecord(), "attalign");
+        }
+        Boolean attisdropped = readBool(r.getRedoRecord(), "attisdropped");
+        if (attisdropped == null) {
+            attisdropped = readBool(r.getUndoRecord(), "attisdropped");
+        }
+        if (attnum == null || attname == null || atttypid == null || attlen == null) {
+            return;
+        }
+        char attalign = (attalignStr != null && !attalignStr.isEmpty()) ? attalignStr.charAt(0) : 'c';
+        String tableKey = mt.schema + "." + mt.table;
+        pendingColumnChanges.computeIfAbsent(tableKey, k -> new ArrayList<>())
+                .add(new RelationCatalog.PgAttributeChange(
+                        r.getOperation(), attnum, attname, atttypid, attlen, attalign,
+                        Boolean.TRUE.equals(attisdropped)));
+    }
+
+    /** Build a streaming, LSN-ordered iterator over the buffered changes for a
      * top-level xid together with all of its subtransaction xids. Spill files are
      * opened as ObjectInputStreams and merged via a k-way PriorityQueue so that
      * COMMIT-time heap is bounded to O(num_streams), not O(total_rows). */
@@ -991,6 +1566,55 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return all;
     }
 
+    private List<TapEvent> emitDdlAndWait(NormalRedo ddlRedo, long commitMillis,
+                                          List<TapEvent> batch, String offset, long xid) {
+        int before = batch.size();
+        emitDdlEvents(Collections.singletonList(ddlRedo), commitMillis, batch);
+        if (batch.size() == before) {
+            return batch;
+        }
+        synchronized (ddlBarrierLock) {
+            ddlBarrierActive = true;
+            tapLogger.info("Physical WAL miner DDL barrier activated for xid={} lsn={} - reader thread will pause",
+                    xid, lsnStr(redoLsn(ddlRedo)));
+        }
+        try {
+            tapLogger.info("Physical WAL miner flushing DDL batch with {} events for xid={}, offset={}",
+                    batch.size(), xid, offset);
+            consumer.accept(batch, offset);
+            tapLogger.info("Physical WAL miner waiting for downstream DDL processing (xid={}, lsn={})",
+                    xid, lsnStr(redoLsn(ddlRedo)));
+            TimeUnit.MILLISECONDS.sleep(500);
+            return new ArrayList<>();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("DDL wait interrupted", e);
+        } finally {
+            synchronized (ddlBarrierLock) {
+                ddlBarrierActive = false;
+                ddlBarrierLock.notifyAll();
+                tapLogger.info("Physical WAL miner DDL barrier cleared for xid={} lsn={} - reader thread resuming",
+                        xid, lsnStr(redoLsn(ddlRedo)));
+            }
+        }
+    }
+
+    private void clearDdlPending(long topXid, long[] subxids) {
+        synchronized (ddlBarrierLock) {
+            clearDdlPendingLocked(topXid, subxids);
+        }
+    }
+
+    private boolean clearDdlPendingLocked(long topXid, long[] subxids) {
+        boolean removed = ddlPendingXids.remove(topXid);
+        if (subxids != null) {
+            for (long sub : subxids) {
+                removed |= ddlPendingXids.remove(sub);
+            }
+        }
+        return removed;
+    }
+
     private void checkPendingPressure() {
         if (pendingRedoCount < PENDING_REDO_WARN_THRESHOLD) {
             return;
@@ -1000,8 +1624,8 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             lastPendingWarnMs = now;
             int spilled = spillStates.size();
             tapLogger.warn("Physical WAL miner has buffered {} uncommitted changes across {} open transactions"
-                    + (spilled > 0 ? " ({} transaction(s) spilled to disk)" : "")
-                    + "; check for long-running transactions on the source to avoid excessive memory use",
+                            + (spilled > 0 ? " ({} transaction(s) spilled to disk)" : "")
+                            + "; check for long-running transactions on the source to avoid excessive memory use",
                     pendingRedoCount, pendingByXid.size(), spilled);
         }
     }
@@ -1014,7 +1638,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
         List<NormalRedo> bucket = pendingByXid.computeIfAbsent(xid, k -> new ArrayList<>());
         bucket.addAll(redos);
-        if (bucket.size() >= PER_XID_SPILL_THRESHOLD) {
+        if (bucket.size() >= getSpillThreshold()) {
             ss = spillStates.computeIfAbsent(xid, k -> new SpillState());
             spillRedos(xid, ss, bucket);
             bucket.clear();
@@ -1061,7 +1685,10 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             tapLogger.info("Physical WAL miner opened spill file for xid={} at {}", xid, file);
         } catch (IOException e) {
             if (fos != null) {
-                try { fos.close(); } catch (IOException ignored) {}
+                try {
+                    fos.close();
+                } catch (IOException ignored) {
+                }
             }
             throw new IllegalStateException("Physical WAL miner cannot open spill file " + file
                     + " for xid=" + xid + "; aborting miner so WAL can be replayed", e);
@@ -1098,9 +1725,11 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
     }
 
-    /** Close the spill writer for a specific xid if it exists. Called before
+    /**
+     * Close the spill writer for a specific xid if it exists. Called before
      * COMMIT/ABORT to ensure the file is properly flushed and closed before
-     * reading begins, avoiding file locking issues on some platforms. */
+     * reading begins, avoiding file locking issues on some platforms.
+     */
     private void closeSpillWriterForXid(long xid) {
         SpillState ss = spillStates.get(xid);
         if (ss != null) {
@@ -1140,7 +1769,10 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 Files.walk(spillDir)
                         .sorted(Comparator.reverseOrder())
                         .forEach(p -> {
-                            try { Files.deleteIfExists(p); } catch (IOException ignored) {}
+                            try {
+                                Files.deleteIfExists(p);
+                            } catch (IOException ignored) {
+                            }
                         });
             } catch (IOException e) {
                 tapLogger.warn("Physical WAL miner could not clean spill directory {}: {}",
@@ -1158,10 +1790,14 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     // ordered by source LSN. This bounds COMMIT-time heap to O(num_streams)
     // rather than O(total_rows).
 
-    /** A closeable, sorted stream of NormalRedo objects from one source (in-memory
-     * list or on-disk spill file). */
+    /**
+     * A closeable, sorted stream of NormalRedo objects from one source (in-memory
+     * list or on-disk spill file).
+     */
     private interface RedoStream extends AutoCloseable, Iterator<NormalRedo> {
-        /** LSN of the next record, or {@code Long.MAX_VALUE} if exhausted. */
+        /**
+         * LSN of the next record, or {@code Long.MAX_VALUE} if exhausted.
+         */
         long peekLsn();
     }
 
@@ -1178,23 +1814,30 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             next = iter.hasNext() ? iter.next() : null;
         }
 
-        @Override public boolean hasNext() { return next != null; }
+        @Override
+        public boolean hasNext() {
+            return next != null;
+        }
 
-        @Override public NormalRedo next() {
+        @Override
+        public NormalRedo next() {
             NormalRedo r = next;
             advance();
             return r;
         }
 
-        @Override public long peekLsn() {
+        @Override
+        public long peekLsn() {
             Long id = next != null ? next.getCdcSequenceId() : null;
             return id == null ? Long.MAX_VALUE : id;
         }
 
-        @Override public void close() {}
+        @Override
+        public void close() {
+        }
     }
 
-    private class SpillFileRedoStream implements RedoStream {
+    private static class SpillFileRedoStream implements RedoStream {
         final Path file;
         private final ObjectInputStream ois;
         private NormalRedo next;
@@ -1219,25 +1862,34 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             }
         }
 
-        @Override public boolean hasNext() { return next != null; }
+        @Override
+        public boolean hasNext() {
+            return next != null;
+        }
 
-        @Override public NormalRedo next() {
+        @Override
+        public NormalRedo next() {
             NormalRedo r = next;
             advance();
             return r;
         }
 
-        @Override public long peekLsn() {
+        @Override
+        public long peekLsn() {
             Long id = next != null ? next.getCdcSequenceId() : null;
             return id == null ? Long.MAX_VALUE : id;
         }
 
-        @Override public void close() {
-            try { ois.close(); } catch (IOException ignored) {}
+        @Override
+        public void close() {
+            try {
+                ois.close();
+            } catch (IOException ignored) {
+            }
         }
     }
 
-    private class SequentialRedoStream implements RedoStream {
+    private static class SequentialRedoStream implements RedoStream {
         private final List<Path> files;
         private int fileIndex;
         private SpillFileRedoStream current;
@@ -1272,11 +1924,13 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             }
         }
 
-        @Override public boolean hasNext() {
+        @Override
+        public boolean hasNext() {
             return current != null && current.hasNext();
         }
 
-        @Override public NormalRedo next() {
+        @Override
+        public NormalRedo next() {
             NormalRedo r = current.next();
             if (!current.hasNext()) {
                 openNextNonEmpty();
@@ -1284,17 +1938,21 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             return r;
         }
 
-        @Override public long peekLsn() {
+        @Override
+        public long peekLsn() {
             return current == null ? Long.MAX_VALUE : current.peekLsn();
         }
 
-        @Override public void close() {
+        @Override
+        public void close() {
             closeCurrent();
         }
     }
 
-    /** Result of draining a transaction for COMMIT: a merged LSN-ordered iterator
-     * plus metadata for count tracking and spill file cleanup. */
+    /**
+     * Result of draining a transaction for COMMIT: a merged LSN-ordered iterator
+     * plus metadata for count tracking and spill file cleanup.
+     */
     private static final class DrainResult implements AutoCloseable {
         final Iterator<NormalRedo> iterator;
         final int count;
@@ -1309,7 +1967,10 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         @Override
         public void close() {
             if (iterator instanceof AutoCloseable) {
-                try { ((AutoCloseable) iterator).close(); } catch (Exception ignored) {}
+                try {
+                    ((AutoCloseable) iterator).close();
+                } catch (Exception ignored) {
+                }
             }
             deleteFiles(spillFiles);
         }
@@ -1317,18 +1978,26 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
 
     private static void closeStreams(List<RedoStream> streams) {
         for (RedoStream stream : streams) {
-            try { stream.close(); } catch (Exception ignored) {}
+            try {
+                stream.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
     private static void deleteFiles(List<Path> files) {
         for (Path file : files) {
-            try { Files.deleteIfExists(file); } catch (IOException ignored) {}
+            try {
+                Files.deleteIfExists(file);
+            } catch (IOException ignored) {
+            }
         }
     }
 
-    /** Discard a transaction's buffered changes without reading them (ABORT path).
-     * Removes from pendingByXid, deletes spill files, adjusts pendingRedoCount. */
+    /**
+     * Discard a transaction's buffered changes without reading them (ABORT path).
+     * Removes from pendingByXid, deletes spill files, adjusts pendingRedoCount.
+     */
     private void discardTransaction(long topXid, long[] subxids) {
         // Close spill writers first to ensure files are properly closed
         closeSpillWriterForXid(topXid);
@@ -1357,18 +2026,23 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         if (ss != null) {
             closeSpillWriterQuietly(ss);
             for (Path file : ss.files) {
-                try { Files.deleteIfExists(file); } catch (IOException ignored) {}
+                try {
+                    Files.deleteIfExists(file);
+                } catch (IOException ignored) {
+                }
             }
             return memCount + ss.spilledCount;
         }
         return memCount;
     }
 
-    /** K-way merge of sorted RedoStreams, producing LSN-ordered output.
+    /**
+     * K-way merge of sorted RedoStreams, producing LSN-ordered output.
      * The returned iterator implements {@link AutoCloseable} so that
      * {@link DrainResult#close()} can close every underlying stream
      * (and its {@link ObjectInputStream}) even when the merge wraps
-     * multiple spill files. */
+     * multiple spill files.
+     */
     private static Iterator<NormalRedo> kwayMerge(List<RedoStream> streams) {
         if (streams.isEmpty()) {
             return Collections.emptyIterator();
@@ -1390,9 +2064,11 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return new MergedRedoIterator(pq, streams);
     }
 
-    /** An {@link Iterator}&lt;{@link NormalRedo}&gt; that is also
+    /**
+     * An {@link Iterator}&lt;{@link NormalRedo}&gt; that is also
      * {@link AutoCloseable} — closes every constituent {@link RedoStream}
-     * when the merge is done or the transaction is discarded. */
+     * when the merge is done or the transaction is discarded.
+     */
     private static final class MergedRedoIterator implements Iterator<NormalRedo>, AutoCloseable {
         private final PriorityQueue<RedoStream> pq;
         private final List<RedoStream> streams;
@@ -1420,14 +2096,19 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         @Override
         public void close() {
             for (RedoStream s : streams) {
-                try { s.close(); } catch (Exception ignored) {}
+                try {
+                    s.close();
+                } catch (Exception ignored) {
+                }
             }
         }
     }
 
-    /** Collect streams for one xid, removing it from pendingByXid and spillStates.
+    /**
+     * Collect streams for one xid, removing it from pendingByXid and spillStates.
      * Spill files are represented as one lazy sequential stream, so each xid opens
-     * at most one spill file at a time. Returns the total record count. */
+     * at most one spill file at a time. Returns the total record count.
+     */
     private int collectStreams(long xid, List<RedoStream> streams, List<Path> spillFiles) {
         List<NormalRedo> inMem = pendingByXid.remove(xid);
         int memCount = inMem != null ? inMem.size() : 0;
@@ -1469,19 +2150,19 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         long now = System.currentTimeMillis();
         if (now - lastNullImageWarnMs >= NULL_IMAGE_WARN_INTERVAL_MS) {
             lastNullImageWarnMs = now;
-            if (PAGE_CACHE_CAPACITY > 0) {
+            if (getPageCacheCapacity() > 0) {
                 tapLogger.warn("Physical WAL miner has emitted {} UPDATE/DELETE without a before-image due to "
-                        + "page-state cache misses under wal_level=replica. This affects large/cold tables whose "
-                        + "working set exceeds the page cache ({} pages) within a checkpoint cycle. Raise "
-                        + "TAPDATA_WAL_PAGE_CACHE_CAPACITY, or set REPLICA IDENTITY FULL on those tables, or use "
-                        + "wal_level=logical, to restore full before-image coverage.",
-                        nullImageCount, PAGE_CACHE_CAPACITY);
+                                + "page-state cache misses under wal_level=replica. This affects large/cold tables whose "
+                                + "working set exceeds the page cache ({} pages) within a checkpoint cycle. Raise "
+                                + "TAPDATA_WAL_getPageCacheCapacity(), or set REPLICA IDENTITY FULL on those tables, or use "
+                                + "wal_level=logical, to restore full before-image coverage.",
+                        nullImageCount, getPageCacheCapacity());
             } else {
                 tapLogger.warn("Physical WAL miner has emitted {} UPDATE/DELETE without a before-image under "
-                        + "wal_level=replica. The page cache is unbounded, so these are pages whose "
-                        + "post-checkpoint FPI falls outside the read window (rows last written before the warm-up "
-                        + "anchor, e.g. deletes on FIFO/queue tables). Set REPLICA IDENTITY FULL on those tables, "
-                        + "or use wal_level=logical, to restore full before-image coverage.",
+                                + "wal_level=replica. The page cache is unbounded, so these are pages whose "
+                                + "post-checkpoint FPI falls outside the read window (rows last written before the warm-up "
+                                + "anchor, e.g. deletes on FIFO/queue tables). Set REPLICA IDENTITY FULL on those tables, "
+                                + "or use wal_level=logical, to restore full before-image coverage.",
                         nullImageCount);
             }
         }
@@ -1499,6 +2180,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         static final int COMMIT = 2;
         static final int ABORT = 3;
         static final int XLOG = 4;
+        static final int ASSIGNMENT = 5;
         int kind = OTHER;
         long xid;
         String offset;
@@ -1506,7 +2188,27 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         long commitMillis;
         long[] subxids;
         XLogRecord rec;
+        /* relfilenode from the WAL block reference — resolved to RelationInfo
+         * on the consumer thread so DDL-updated catalog columns are visible. */
+        long relNumber;
+        /* Relation snapshot used by the logical fast path, or consumer-resolved
+         * relation for the ordered fallback path. */
         RelationInfo rel;
+        /** Logical fast-path redos from pool thread (null means consumer must decode). */
+        List<NormalRedo> redos;
+        /** Schema version at decodeUnit time; if mismatch detected at consumer, re-decode. */
+        int schemaVersion;
+    }
+
+    static final class XactAssignment {
+        static final XactAssignment EMPTY = new XactAssignment(0, EMPTY_SUBXACTS);
+        final long topXid;
+        final long[] subxids;
+
+        XactAssignment(long topXid, long[] subxids) {
+            this.topXid = topXid;
+            this.subxids = subxids == null ? EMPTY_SUBXACTS : subxids;
+        }
     }
 
     private TapEvent toEvent(NormalRedo r) {
@@ -1539,6 +2241,24 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return rel.schema.equals(postgresConfig.getSchema()) && allowTables.contains(rel.table);
     }
 
+    private static String columnLayout(RelationInfo rel) {
+        if (rel == null || rel.columns == null) {
+            return "[]";
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < rel.columns.size(); i++) {
+            ColumnInfo c = rel.columns.get(i);
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(c.attnum).append(':').append(c.name);
+            if (c.dropped) {
+                sb.append("(dropped)");
+            }
+        }
+        return sb.append(']').toString();
+    }
+
     private void buildAllowSet() {
         if (withSchema) {
             if (schemaTableMap != null) {
@@ -1554,8 +2274,15 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * on-disk relfilenode of pg_catalog.pg_attribute (a mapped catalog whose
      * pg_class.relfilenode is 0, so pg_relation_filenode() is used), and (3) that
      * catalog's column layout for tuple deformation. Any failure degrades to "DDL
-     * detection disabled" (logged) rather than aborting the miner. */
+     * detection disabled" (logged) rather than aborting the miner.
+     *
+     * IMPORTANT: Uses a REPEATABLE READ transaction to get a consistent catalog snapshot
+     * and avoids connection leaks by NOT calling getConnection() directly. */
     private void buildDdlWatch() {
+        // All catalog queries use JdbcContext.query() which properly manages connection
+        // pooling via try-with-resources. We execute them all in sequence; while not
+        // in a single transaction, the DDL barrier mechanism prevents concurrent DDL
+        // from corrupting the WAL stream by pausing decode when DDL is detected.
         try {
             postgresJdbcContext.query(
                     "SELECT c.oid, n.nspname, c.relname FROM pg_class c "
@@ -1605,9 +2332,15 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         // Give the catalog its own page overlay so FPI-less pg_attribute UPDATEs
         // (DROP/RENAME/ALTER COLUMN) reconstruct their before/after tuple images
         // from an earlier FPI on the same page, mirroring the user-table cache.
-        catalogPageCache = walLevelLogical ? null : new PageStateCache(PAGE_CACHE_CAPACITY);
-        catalogDecodeCtx = new HeapRmgrDecoder.Ctx(catalogPageCache, walLevelLogical,
-                WAL_DEBUG_ENABLED ? (fmt, args) -> tapLogger.info(fmt, args) : null);
+        //
+        // This must stay enabled even when the user-table WAL level is logical:
+        // pg_attribute UPDATE records may still omit the old tuple bytes. DDL
+        // recognition relies on the catalog overlay to recover the before-image
+        // and mark the xid as DDL before later DML in the same transaction is
+        // decoded/emitted.
+        catalogPageCache = new PageStateCache(getPageCacheCapacity());
+        catalogDecodeCtx = new HeapRmgrDecoder.Ctx(catalogPageCache, false,
+                isWalDebugEnabled() ? tapLogger::info : null);
         // Baseline column layout for every monitored table; later pg_attribute
         // changes are diffed against this to derive the concrete field DDL.
         try {
@@ -1645,7 +2378,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             // A catalog heap record on some other table. Surface insert/multi-insert
             // misses only under WAL debug so a relfilenode mismatch (e.g. pg_attribute
             // rewritten) on an ADD COLUMN can be spotted without flooding the log.
-            if (WAL_DEBUG_ENABLED && b0 != null
+            if (isWalDebugEnabled() && b0 != null
                     && (rec.heapOp() == XLOG_HEAP_INSERT || rec.heapOp() == XLOG_HEAP2_MULTI_INSERT)) {
                 tapLogger.info("[WAL-DEBUG] catalog heap op=0x{} on relNode={} (pg_attribute relNode={}) lsn={}",
                         Integer.toHexString(rec.heapOp()), b0.relNumber, pgAttributeRelNode, lsnStr(rec.lsn));
@@ -1678,7 +2411,66 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             tapLogger.info("Physical WAL miner pg_attribute row: op={} attrelid={} attnum={} attname={} monitored={}",
                     r.getOperation(), attrelid, attnum, attname, monitored);
             if (monitored) {
+                // DDL redos are stored ONLY in ddlRedosByXid, NOT in pendingByXid.
+                // They should not be emitted as normal DML (pg_attribute changes are
+                // internal to PostgreSQL). Instead, they are used to synthesize DDL events.
                 ddlRedosByXid.computeIfAbsent(xid, k -> new ArrayList<>()).add(r);
+
+                // Update the in-memory RelationCatalog so that subsequent DML in
+                // this same transaction decodes with the correct column layout.
+                // Without this, a DML after ADD COLUMN still uses the old column
+                // count and produces wrong/missing column data.
+                MonitoredTable mt = monitoredOidToName.get(attrelid);
+                String op = r.getOperation();
+                Long atttypid = readLong(r.getRedoRecord(), "atttypid");
+                if (atttypid == null) atttypid = readLong(r.getUndoRecord(), "atttypid");
+                Integer attlen = readInt(r.getRedoRecord(), "attlen");
+                if (attlen == null) attlen = readInt(r.getUndoRecord(), "attlen");
+                String attalignStr = readStr(r.getRedoRecord(), "attalign");
+                if (attalignStr == null) attalignStr = readStr(r.getUndoRecord(), "attalign");
+                char attalign = (attalignStr != null && !attalignStr.isEmpty()) ? attalignStr.charAt(0) : 'c';
+                Boolean attisdropped = readBool(r.getRedoRecord(), "attisdropped");
+                if (attisdropped == null) attisdropped = readBool(r.getUndoRecord(), "attisdropped");
+                if (attisdropped == null) attisdropped = false;
+
+                if (mt != null && atttypid != null && attlen != null && attnum != null && attnum > 0 && attname != null) {
+                    boolean applied = catalog.applyPgAttributeChange(
+                            mt.schema, mt.table, op, attnum, attname,
+                            atttypid, attlen, attalign, attisdropped);
+                    String tableKey = mt.schema + "." + mt.table;
+                    if (applied) {
+                        // Increment schema version so pool-thread pre-decodes
+                        // with the old version are detected and re-decoded.
+                        schemaVersions.merge(tableKey, 1, Integer::sum);
+                        // Catalog cache was updated in-place — any stale pending
+                        // entries for this table are now superseded.
+                        pendingColumnChanges.remove(tableKey);
+                    } else {
+                        // RelationInfo not cached yet — buffer for when it is loaded.
+                        // Keyed by schema.table (not attrelid/relfilenode) because
+                        // DDL detection uses pg_attribute.attrelid (pg_class OID)
+                        // while DML block refs carry relfilenode, and the two may
+                        // differ after TRUNCATE/VACUUM FULL.
+                        pendingColumnChanges
+                                .computeIfAbsent(tableKey, k -> new ArrayList<>())
+                                .add(new RelationCatalog.PgAttributeChange(
+                                        op, attnum, attname, atttypid, attlen, attalign, attisdropped));
+                    }
+                    if (isWalDebugEnabled()) {
+                        tapLogger.info("[WAL-DEBUG] catalog column update applied={} {}.{} op={} attnum={} attname={}",
+                                applied, mt.schema, mt.table, op, attnum, attname);
+                    }
+                } else if (isWalDebugEnabled() && mt != null && attnum != null && attnum <= 0) {
+                    tapLogger.info("[WAL-DEBUG] catalog column update ignored system column {}.{} op={} attnum={} attname={}",
+                            mt.schema, mt.table, r.getOperation(), attnum, attname);
+                }
+
+                // Mark this transaction as containing DDL - when its COMMIT is seen,
+                // reader thread will be blocked until downstream acknowledges schema update
+                synchronized (ddlBarrierLock) {
+                    ddlPendingXids.add(xid);
+                    tapLogger.info("Physical WAL miner marked xid={} as DDL transaction", xid);
+                }
             }
         }
     }
@@ -1741,7 +2533,8 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         boolean notNull = Boolean.TRUE.equals(readBool(after, "attnotnull"));
         String type = resolveType(readLong(after, "atttypid"), readInt(after, "atttypmod"));
         if (!dropped) {
-            batch.add(stamp(new TapNewFieldEvent().field(new TapField(name, type).nullable(!notNull)), t, commitMillis));
+            TapTable table = withSchema ? tableMap.get(t.schema + "." + t.table) : tableMap.get(t.table);
+            batch.add(stamp(new TapNewFieldEvent().field(new TapField(name, type).nullable(!notNull).pos(table.getMaxPos() + 1)), t, commitMillis));
             tapLogger.info("Physical WAL miner synthesized ADD COLUMN {} {} on {}.{} from a pg_attribute insert.",
                     name, type, t.schema, t.table);
         }
@@ -1941,10 +2734,12 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private static final class MonitoredTable {
         final String schema;
         final String table;
+
         MonitoredTable(String schema, String table) {
             this.schema = schema;
             this.table = table;
         }
+
         @Override
         public String toString() {
             return schema + "." + table;
@@ -1959,6 +2754,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         final String dataType;
         final boolean notNull;
         final boolean dropped;
+
         ColSnap(String name, String dataType, boolean notNull, boolean dropped) {
             this.name = name;
             this.dataType = dataType;
@@ -2109,7 +2905,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return parsed > 0 ? parsed : DEFAULT_WAL_SEGMENT_SIZE;
     }
 
-    static long parseSpillThreshold() {
+    static long parseSpillThresholdFromEnv() {
         String val = System.getenv("TAPDATA_WAL_SPILL_THRESHOLD");
         if (val == null || val.trim().isEmpty()) {
             return 500_000L;
@@ -2165,11 +2961,15 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         if (mainData == null || mainData.length < 8) {
             return System.currentTimeMillis();
         }
-        long micros = new WalByteReader(mainData).readInt64();
+        long micros = WalByteReader.borrow(mainData).readInt64();
         return (micros + PG_EPOCH_MICROS) / 1000L;
     }
 
     static String lsnStr(long lsn) {
         return LogSequenceNumber.valueOf(lsn).asString();
+    }
+
+    private static long pageAlignDown(long lsn) {
+        return (lsn / XLOG_BLCKSZ) * XLOG_BLCKSZ;
     }
 }

@@ -16,9 +16,6 @@
       {
         "id": "dml_update_policy",
         "alternatives": ["ignore_on_nonexists"]
-      },
-      {
-        "id": "flush_offset_callback"
       }
     ],
     "connection": {

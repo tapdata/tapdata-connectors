@@ -62,7 +62,7 @@ public class XLogRecord {
         XLogRecord rec = new XLogRecord();
         rec.lsn = raw.lsn;
         rec.nextLsn = raw.nextLsn;
-        WalByteReader r = new WalByteReader(raw.bytes);
+        WalByteReader r = WalByteReader.borrow(raw.bytes);
         rec.totLen = r.readUInt32();
         rec.xid = r.readUInt32();
         rec.prev = r.readInt64();

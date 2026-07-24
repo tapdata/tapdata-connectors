@@ -87,7 +87,7 @@ public final class HeapRmgrDecoder {
 
     private static NormalRedo decodeInsert(XLogRecord rec, RelationInfo rel, Ctx ctx) {
         XLogRecord.BlockRef b0 = rec.block(0);
-        WalByteReader md = new WalByteReader(rec.mainData);
+        WalByteReader md = WalByteReader.borrow(rec.mainData);
         int offnum = md.readUInt16();
         boolean initPage = (rec.info & XLOG_HEAP_INIT_PAGE) != 0;
 
@@ -116,12 +116,12 @@ public final class HeapRmgrDecoder {
             cp.put(offnum, tuple);
         }
         NormalRedo r = base(rec, rel, OperationEnum.INSERT);
-        r.setRedoRecord(HeapTupleDecoder.decode(tuple, rel.columns));
+        r.setRedoRecord(decodeTuple(tuple, rel, ctx, "insert"));
         return r;
     }
 
     private static NormalRedo decodeDelete(XLogRecord rec, RelationInfo rel, Ctx ctx) {
-        WalByteReader md = new WalByteReader(rec.mainData);
+        WalByteReader md = WalByteReader.borrow(rec.mainData);
         md.skip(4);                                 // xmax (not needed by the overlay)
         int offnum = md.readUInt16();
         md.skip(1);                                 // infobits
@@ -137,27 +137,26 @@ public final class HeapRmgrDecoder {
             // and stays LP_NORMAL until vacuum, so the before-image is still
             // readable from the overlay at offnum.
             oldTuple = cp.get(offnum);
-        } else if (oldTuple == null && b0 != null && b0.hasImage) {
+        } else if (oldTuple == null && !ctx.walLevelLogical && b0 != null && b0.hasImage) {
             oldTuple = PageImageExtractor.extractWalTuple(b0, offnum);
         }
         ctx.log("[WAL-DEBUG] DELETE rel={} blk={} offnum={} flags=0x{} hasImage={} cacheHit={} mainData={} oldTuple={}",
                 new Object[]{relTag(rel), blockNumber(b0), offnum, Integer.toHexString(flags),
                         b0 != null && b0.hasImage, cp != null && (b0 == null || !b0.hasImage),
                         hex(rec.mainData), hex(oldTuple)});
-        if (cp != null) {
-            // Tuple is gone; drop it so a later reuse of this slot does not read
-            // the stale version before its INSERT/UPDATE overwrites the overlay.
-            cp.remove(offnum);
-        }
+        // Keep the tuple bytes in the overlay. DELETE WAL is decoded before the
+        // commit/abort gate, and a later ROLLBACK TO SAVEPOINT can make the row
+        // visible again. Slot reuse is still safe because INSERT/UPDATE-new
+        // overwrites the offset before any later record should read it.
         NormalRedo r = base(rec, rel, OperationEnum.DELETE);
         if (oldTuple != null) {
-            r.setUndoRecord(HeapTupleDecoder.decode(oldTuple, rel.columns));
+            r.setUndoRecord(decodeTuple(oldTuple, rel, ctx, "delete-old"));
         }
         return r;
     }
 
     private static NormalRedo decodeUpdate(XLogRecord rec, RelationInfo rel, Ctx ctx) {
-        WalByteReader md = new WalByteReader(rec.mainData);
+        WalByteReader md = WalByteReader.borrow(rec.mainData);
         md.skip(4);                                 // old_xmax (not needed by the overlay)
         int oldOffnum = md.readUInt16();
         md.skip(1);                                 // old_infobits
@@ -175,7 +174,7 @@ public final class HeapRmgrDecoder {
         CachedPage oldCp = b1 != null ? primePage(ctx, rel, b1, false) : newCp;
         if (oldTuple == null && oldCp != null) {
             oldTuple = oldCp.get(oldOffnum);
-        } else if (oldTuple == null) {
+        } else if (oldTuple == null && !ctx.walLevelLogical) {
             XLogRecord.BlockRef oldRef = (b1 != null && b1.hasImage) ? b1 : b0;
             oldTuple = PageImageExtractor.extractWalTuple(oldRef, oldOffnum);
         }
@@ -216,16 +215,16 @@ public final class HeapRmgrDecoder {
         }
         NormalRedo r = base(rec, rel, OperationEnum.UPDATE);
         if (oldTuple != null) {
-            r.setUndoRecord(HeapTupleDecoder.decode(oldTuple, rel.columns));
+            r.setUndoRecord(decodeTuple(oldTuple, rel, ctx, "update-old"));
         }
         if (newTuple != null) {
-            r.setRedoRecord(HeapTupleDecoder.decode(newTuple, rel.columns));
+            r.setRedoRecord(decodeTuple(newTuple, rel, ctx, "update-new"));
         }
         return r;
     }
 
     private static List<NormalRedo> decodeMultiInsert(XLogRecord rec, RelationInfo rel, Ctx ctx) {
-        WalByteReader md = new WalByteReader(rec.mainData);
+        WalByteReader md = WalByteReader.borrow(rec.mainData);
         md.skip(1);                                 // flags
         md.skip(1);                                 // padding
         int ntuples = md.readUInt16();
@@ -238,7 +237,7 @@ public final class HeapRmgrDecoder {
         CachedPage cp = primePage(ctx, rel, b0, (rec.info & XLOG_HEAP_INIT_PAGE) != 0);
         byte[][] tuples = new byte[ntuples][];
         if (b0 != null && b0.hasData && b0.data.length > 0) {
-            WalByteReader r = new WalByteReader(b0.data);
+            WalByteReader r = WalByteReader.borrow(b0.data);
             for (int i = 0; i < ntuples; i++) {
                 r.align(2);                         // SHORTALIGN before each tuple header
                 int datalen = r.readUInt16();
@@ -262,7 +261,7 @@ public final class HeapRmgrDecoder {
                 continue;
             }
             NormalRedo nr = base(rec, rel, OperationEnum.INSERT);
-            nr.setRedoRecord(HeapTupleDecoder.decode(tuples[i], rel.columns));
+            nr.setRedoRecord(decodeTuple(tuples[i], rel, ctx, "multi-insert"));
             out.add(nr);
         }
         ctx.log("[WAL-DEBUG] MULTI_INSERT rel={} blk={} ntuples={} offnums={} dataLen={}",
@@ -278,12 +277,32 @@ public final class HeapRmgrDecoder {
         return out;
     }
 
+    private static Map<String, Object> decodeTuple(byte[] tuple, RelationInfo rel, Ctx ctx, String image) {
+        if (tuple != null && tuple.length >= SIZE_OF_HEAP_HEADER) {
+            int infomask2 = u16(tuple, 0);
+            int infomask = u16(tuple, 2);
+            int tHoff = tuple[4] & 0xFF;
+            int natts = infomask2 & HEAP_NATTS_MASK;
+            ctx.log("[WAL-DEBUG] TUPLE-DECODE image={} rel={} tupleLen={} natts={} infomask=0x{} tHoff={} relColumns={}",
+                    new Object[]{image, relTag(rel), tuple.length, natts, Integer.toHexString(infomask),
+                            tHoff, columnLayout(rel)});
+        }
+        return HeapTupleDecoder.decode(tuple, rel.columns);
+    }
+
+    private static int u16(byte[] bytes, int offset) {
+        if (bytes == null || bytes.length < offset + 2) {
+            return 0;
+        }
+        return (bytes[offset] & 0xFF) | ((bytes[offset + 1] & 0xFF) << 8);
+    }
+
     private static byte[] reconstructNew(XLogRecord.BlockRef b0, int flags, byte[] oldTuple) {
         if (b0 == null || !b0.hasData || b0.data == null) {
             return null;
         }
         try {
-            WalByteReader r = new WalByteReader(b0.data);
+            WalByteReader r = WalByteReader.borrow(b0.data);
             int prefixlen = (flags & XLH_UPDATE_PREFIX_FROM_OLD) != 0 ? r.readUInt16() : 0;
             int suffixlen = (flags & XLH_UPDATE_SUFFIX_FROM_OLD) != 0 ? r.readUInt16() : 0;
             int infomask2 = r.readUInt16();
@@ -350,6 +369,7 @@ public final class HeapRmgrDecoder {
         r.setTableName(rel.table);
         r.setTransactionId(String.valueOf(rec.xid));
         r.setCdcSequenceId(rec.lsn);
+        r.setSourceXid(rec.xid);
         return r;
     }
 
@@ -409,6 +429,24 @@ public final class HeapRmgrDecoder {
 
     private static String relTag(RelationInfo rel) {
         return rel == null ? "?" : rel.schema + "." + rel.table;
+    }
+
+    private static String columnLayout(RelationInfo rel) {
+        if (rel == null || rel.columns == null) {
+            return "[]";
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < rel.columns.size(); i++) {
+            ColumnInfo c = rel.columns.get(i);
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(c.attnum).append(':').append(c.name);
+            if (c.dropped) {
+                sb.append("(dropped)");
+            }
+        }
+        return sb.append(']').toString();
     }
 
     private static long blockNumber(XLogRecord.BlockRef b) {
