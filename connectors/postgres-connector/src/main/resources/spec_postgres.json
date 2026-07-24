@@ -347,6 +347,41 @@
             }
           ]
         },
+        "walTdeKeyWrapAlgorithm": {
+          "type": "string",
+          "title": "${walTdeKeyWrapAlgorithm}",
+          "default": "auto",
+          "enum": [
+            {
+              "label": "Auto",
+              "value": "auto"
+            },
+            {
+              "label": "AES-256-CBC",
+              "value": "aes-256-cbc"
+            },
+            {
+              "label": "AES-128-CBC",
+              "value": "aes-128-cbc"
+            }
+          ],
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-decorator-props": {
+            "tooltip": "${walTdeKeyWrapAlgorithmTip}"
+          },
+          "x-index": 87,
+          "x-reactions": [
+            {
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName", "walTdeKey", "walTdeKeyPassword"],
+              "fulfill": {
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='physical' && $deps[2] && $deps[3] ? null:\"none\"}}"
+                }
+              }
+            }
+          ]
+        },
         "pgtoHost": {
           "type": "string",
           "title": "${pgtoHost}",
@@ -1095,6 +1130,8 @@
       "walTdeKeyTip": "Upload the EDB TDE wrapped key file, usually PGDATA/pg_encryption/key.bin. Only used by the PHYSICAL log plugin to decrypt encrypted WAL.",
       "walTdeKeyPassword": "EDB TDE key password",
       "walTdeKeyPasswordTip": "Password used to unwrap the uploaded EDB TDE key file. Leave empty if the uploaded file is already an unwrapped raw key.",
+      "walTdeKeyWrapAlgorithm": "TDE key wrap algorithm",
+      "walTdeKeyWrapAlgorithmTip": "OpenSSL algorithm used by the EDB TDE key-wrap-command. Auto tries AES-256-CBC first, then AES-128-CBC.",
       "pgtoHost": "Pgto Server Host",
       "pgtoPort": "Pgto Server Port",
       "partPublication": "Part publication",
@@ -1178,6 +1215,8 @@
       "walTdeKeyTip": "上传EDB TDE包装后的密钥文件，通常是PGDATA/pg_encryption/key.bin。仅在日志插件选择PHYSICAL时用于解密加密WAL。",
       "walTdeKeyPassword": "EDB TDE密钥密码",
       "walTdeKeyPasswordTip": "用于解开上传的EDB TDE密钥文件的密码。如果上传的是已解开的原始密钥，可以留空。",
+      "walTdeKeyWrapAlgorithm": "TDE密钥包装算法",
+      "walTdeKeyWrapAlgorithmTip": "EDB TDE key-wrap-command 使用的 OpenSSL 算法。Auto 会先尝试 AES-256-CBC，再尝试 AES-128-CBC。",
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
       "partPublication": "部分订阅",
@@ -1261,6 +1300,8 @@
       "walTdeKeyTip": "上傳EDB TDE包裝後的密鑰文件，通常是PGDATA/pg_encryption/key.bin。僅在日誌插件選擇PHYSICAL時用於解密加密WAL。",
       "walTdeKeyPassword": "EDB TDE密鑰密碼",
       "walTdeKeyPasswordTip": "用於解開上傳的EDB TDE密鑰文件的密碼。如果上傳的是已解開的原始密鑰，可以留空。",
+      "walTdeKeyWrapAlgorithm": "TDE密鑰包裝算法",
+      "walTdeKeyWrapAlgorithmTip": "EDB TDE key-wrap-command 使用的 OpenSSL 算法。Auto 會先嘗試 AES-256-CBC，再嘗試 AES-128-CBC。",
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
       "partPublication": "部分訂閱",

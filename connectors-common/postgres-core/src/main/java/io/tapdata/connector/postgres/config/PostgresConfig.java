@@ -58,6 +58,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     // file is uploaded in connection config.
     private String walTdeKey;
     private String walTdeKeyPassword;
+    private String walTdeKeyWrapAlgorithm = "auto";
     private Integer walTdeDataEncryptionBits;
     private Boolean checkCdcSlave = false;
 
@@ -345,6 +346,14 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setWalTdeKeyPassword(String walTdeKeyPassword) {
         this.walTdeKeyPassword = walTdeKeyPassword;
+    }
+
+    public String getWalTdeKeyWrapAlgorithm() {
+        return walTdeKeyWrapAlgorithm;
+    }
+
+    public void setWalTdeKeyWrapAlgorithm(String walTdeKeyWrapAlgorithm) {
+        this.walTdeKeyWrapAlgorithm = walTdeKeyWrapAlgorithm;
     }
 
     public Integer getWalTdeDataEncryptionBits() {

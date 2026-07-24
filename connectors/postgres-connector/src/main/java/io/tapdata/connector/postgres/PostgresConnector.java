@@ -276,7 +276,7 @@ public class PostgresConnector extends CommonDbConnector {
                 cdcRunner.closeCdcRunner();
                 cdcRunner = null;
             }
-            if (EmptyKit.isNotNull(slotName)) {
+            if (EmptyKit.isNotNull(slotName) && postgresConfig.getAutoClearSlot()) {
                 clearSlot();
             }
             if ("walminer".equals(postgresConfig.getLogPluginName())) {

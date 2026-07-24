@@ -14,6 +14,7 @@ import java.util.Base64;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class EdbTdeWalDecryptorTest {
 
@@ -71,18 +72,130 @@ class EdbTdeWalDecryptorTest {
     }
 
     @Test
+    void decryptsWalWithAes128DataEncryptionKey() throws Exception {
+        byte[] key = hex(
+                "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
+                        + "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
+                        + "20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f"
+                        + "30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f");
+        byte[] walKey = Arrays.copyOfRange(key, 32, 48);
+        byte[] plain = hex("16 d1 06 00 00 00 00 00 00 00 00 05 00 00 00 00");
+        byte[] encrypted = aesCtr(walKey, 0x05000000L, plain);
+
+        EdbTdeWalDecryptor decryptor = new EdbTdeWalDecryptor(key, 128, 0x05000000L);
+        byte[] decrypted = decryptor.decrypt(0x05000000L, encrypted, 0, encrypted.length);
+
+        assertArrayEquals(plain, decrypted);
+    }
+
+    @Test
+    void decryptsRealEdbAs17Aes128WalPageHeader() throws Exception {
+        byte[] unwrappedKey = unwrapRealAes128Key();
+        byte[] encrypted = hex(
+                "27 19 c1 07 df f7 52 99 75 1c 38 90 29 72 ea 93"
+                        + "40 8d 97 20 d6 c8 07 6c 67 10 33 73 2d e8 2b bc"
+                        + "e4 8b 53 b9 1e 4a 4c a2 5b 69 70 2f 80 2f 9f 44"
+                        + "cd a9 70 5e 29 3e 2a e2 a2 1c 40 c9 c9 b3 e4 f7");
+
+        EdbTdeWalDecryptor decryptor = new EdbTdeWalDecryptor(unwrappedKey, 128, 0x04B28000L);
+        byte[] plain = decryptor.decrypt(0x04B28000L, encrypted, 0, encrypted.length);
+
+        assertEquals(0xD116, littleEndianInt(new byte[] {plain[0], plain[1], 0, 0}, 0));
+        assertEquals(0x0005, littleEndianInt(new byte[] {plain[2], plain[3], 0, 0}, 0));
+        assertEquals(0x04B28000L, littleEndianLong(plain, 8));
+        assertEquals(4, littleEndianInt(plain, 16));
+    }
+
+    @Test
+    void decryptsRealEdbAs17Aes128WalContinuationPageHeader() throws Exception {
+        byte[] unwrappedKey = unwrapRealAes128Key();
+        byte[] encrypted = hex(
+                "fd b6 b7 4a b7 25 f9 c8 77 71 df 01 6d 8a 35 df"
+                        + "52 18 66 6a 5d 05 b8 ee ec b6 52 79 81 f6 26 30"
+                        + "26 fd ea b9 b6 ae fe 6b 91 b5 66 41 39 7c e4 ca"
+                        + "f5 e2 9e 42 2a 28 bd 9f 52 12 b1 73 09 bf cd 37");
+
+        EdbTdeWalDecryptor decryptor = new EdbTdeWalDecryptor(unwrappedKey, 128, 0x0500C000L);
+        byte[] plain = decryptor.decrypt(0x0500C000L, encrypted, 0, encrypted.length);
+
+        assertEquals(0xD116, littleEndianInt(new byte[] {plain[0], plain[1], 0, 0}, 0));
+        assertEquals(0x0005, littleEndianInt(new byte[] {plain[2], plain[3], 0, 0}, 0));
+        assertEquals(0x0500C000L, littleEndianLong(plain, 8));
+        assertEquals(1765, littleEndianInt(plain, 16));
+    }
+
+    @Test
+    void decryptsRealEdbAs17Aes128FromNonBlockAlignedLsn() throws Exception {
+        byte[] unwrappedKey = unwrapRealAes128Key();
+        byte[] encrypted = hex("67 10 33 73 2d e8 2b bc e4 8b 53 b9 1e 4a 4c a2");
+
+        EdbTdeWalDecryptor decryptor = new EdbTdeWalDecryptor(unwrappedKey, 128, 0x04B28000L);
+        byte[] plain = decryptor.decrypt(0x04B28018L, encrypted, 0, encrypted.length);
+
+        assertArrayEquals(hex("41 00 02 00 00 00 00 00 36 00 00 00 4c 03 00 00"), plain);
+    }
+
+    @Test
+    void rejectsShortAes128DataEncryptionKey() {
+        byte[] key = new byte[47];
+
+        assertThrows(IllegalArgumentException.class, () -> new EdbTdeWalDecryptor(key, 128, 0L));
+    }
+
+    @Test
     void unwrapsUploadedOpenSslWrappedKeyWithPassword() throws Exception {
         byte[] rawKey = Base64.getDecoder().decode(
                 "EECRuRwqVNOA1T+ZhGhqHlsO8omEt4BB4raeuiL1WLR5BW96BgskGhqhyfXgzC5F"
                         + "ndIC6nzYRu8CkFdO9GmHZgcClEPtRDFryDEXLsWy2GwdzQq8bVPjzSblLlzZ"
                         + "9pLhGGnUialLjlrbBqZrzrvUcWMy7nGIo1S90E9ivrYLBJY=");
         byte[] salt = hex("01 02 03 04 05 06 07 08");
-        byte[] wrapped = openSslWrap(rawKey, "tapdata", salt);
+        byte[] wrapped = openSslWrap(rawKey, "tapdata", salt, 32);
         String uploaded = Base64.getUrlEncoder().encodeToString(wrapped);
 
         byte[] unwrapped = EdbTdeWalDecryptor.unwrapUploadedKey(uploaded, "tapdata");
 
         assertArrayEquals(rawKey, unwrapped);
+    }
+
+    @Test
+    void unwrapsUploadedOpenSslAes128WrappedKeyWithPassword() throws Exception {
+        byte[] rawKey = Base64.getDecoder().decode(
+                "EECRuRwqVNOA1T+ZhGhqHlsO8omEt4BB4raeuiL1WLR5BW96BgskGhqhyfXgzC5F"
+                        + "ndIC6nzYRu8CkFdO9GmHZgcClEPtRDFryDEXLsWy2GwdzQq8bVPjzSblLlzZ"
+                        + "9pLhGGnUialLjlrbBqZrzrvUcWMy7nGIo1S90E9ivrYLBJY=");
+        byte[] salt = hex("01 02 03 04 05 06 07 08");
+        byte[] wrapped = openSslWrap(rawKey, "tapdata", salt, 16);
+        String uploaded = Base64.getUrlEncoder().encodeToString(wrapped);
+
+        byte[] unwrapped = EdbTdeWalDecryptor.unwrapUploadedKey(uploaded, "tapdata");
+
+        assertArrayEquals(rawKey, unwrapped);
+    }
+
+    @Test
+    void unwrapsUploadedOpenSslAes128WrappedKeyWithExplicitAlgorithm() throws Exception {
+        byte[] rawKey = Base64.getDecoder().decode(
+                "EECRuRwqVNOA1T+ZhGhqHlsO8omEt4BB4raeuiL1WLR5BW96BgskGhqhyfXgzC5F"
+                        + "ndIC6nzYRu8CkFdO9GmHZgcClEPtRDFryDEXLsWy2GwdzQq8bVPjzSblLlzZ"
+                        + "9pLhGGnUialLjlrbBqZrzrvUcWMy7nGIo1S90E9ivrYLBJY=");
+        byte[] salt = hex("01 02 03 04 05 06 07 08");
+        byte[] wrapped = openSslWrap(rawKey, "tapdata", salt, 16);
+        String uploaded = Base64.getUrlEncoder().encodeToString(wrapped);
+
+        byte[] unwrapped = EdbTdeWalDecryptor.unwrapUploadedKey(uploaded, "tapdata", "aes-128-cbc");
+
+        assertArrayEquals(rawKey, unwrapped);
+    }
+
+    @Test
+    void rejectsUnsupportedKeyWrapAlgorithm() throws Exception {
+        byte[] rawKey = new byte[96];
+        new SecureRandom(new byte[] {1, 2, 3, 4}).nextBytes(rawKey);
+        byte[] wrapped = openSslWrap(rawKey, "tapdata", hex("01 02 03 04 05 06 07 08"), 16);
+        String uploaded = Base64.getUrlEncoder().encodeToString(wrapped);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> EdbTdeWalDecryptor.unwrapUploadedKey(uploaded, "tapdata", "aes-192-cbc"));
     }
 
     @Test
@@ -126,14 +239,14 @@ class EdbTdeWalDecryptorTest {
         return out;
     }
 
-    private static byte[] openSslWrap(byte[] rawKey, String password, byte[] salt) throws Exception {
+    private static byte[] openSslWrap(byte[] rawKey, String password, byte[] salt, int keyLength) throws Exception {
         byte[] keyAndIv = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-                .generateSecret(new PBEKeySpec(password.toCharArray(), salt, 10_000, (32 + 16) * 8))
+                .generateSecret(new PBEKeySpec(password.toCharArray(), salt, 10_000, (keyLength + 16) * 8))
                 .getEncoded();
         Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
         cipher.init(Cipher.ENCRYPT_MODE,
-                new SecretKeySpec(Arrays.copyOfRange(keyAndIv, 0, 32), "AES"),
-                new IvParameterSpec(Arrays.copyOfRange(keyAndIv, 32, 48)));
+                new SecretKeySpec(Arrays.copyOfRange(keyAndIv, 0, keyLength), "AES"),
+                new IvParameterSpec(Arrays.copyOfRange(keyAndIv, keyLength, keyLength + 16)));
         byte[] encrypted = cipher.doFinal(rawKey);
         byte[] magic = "Salted__".getBytes(StandardCharsets.US_ASCII);
         byte[] out = new byte[magic.length + salt.length + encrypted.length];
@@ -141,5 +254,28 @@ class EdbTdeWalDecryptorTest {
         System.arraycopy(salt, 0, out, magic.length, salt.length);
         System.arraycopy(encrypted, 0, out, magic.length + salt.length, encrypted.length);
         return out;
+    }
+
+    private static byte[] unwrapRealAes128Key() throws Exception {
+        byte[] wrapped = Base64.getDecoder().decode(
+                "U2FsdGVkX1/mjX4mF9kGLRBBVwgY6YSXGUyWxIBEy1rvkzZ07hVnOfkuvH2e638r"
+                        + "SAZKuVawrcwV9msXqevVpYVJR1skqQbU0kphKIt8/pvSiTB68MKe5Z14fNCEB5Sb");
+        String uploaded = Base64.getEncoder().encodeToString(wrapped);
+        return EdbTdeWalDecryptor.unwrapUploadedKey(uploaded, "CreatedBySJMDBA", "aes-128-cbc");
+    }
+
+    private static byte[] aesCtr(byte[] key, long startLsn, byte[] input) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"), new IvParameterSpec(counterIv(startLsn / 16)));
+        return cipher.doFinal(input);
+    }
+
+    private static byte[] counterIv(long block) {
+        byte[] iv = new byte[16];
+        for (int i = 15; i >= 8; i--) {
+            iv[i] = (byte) block;
+            block >>>= 8;
+        }
+        return iv;
     }
 }

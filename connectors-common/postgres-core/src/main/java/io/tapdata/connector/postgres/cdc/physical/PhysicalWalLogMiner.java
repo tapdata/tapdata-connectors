@@ -235,21 +235,30 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         if (EmptyKit.isBlank(uploadedKey)) {
             return null;
         }
-        int bits = getWalTdeDataEncryptionBits();
         try {
-            byte[] unwrappedKey = EdbTdeWalDecryptor.unwrapUploadedKey(uploadedKey, postgresConfig.getWalTdeKeyPassword());
-            tapLogger.info("Physical WAL miner enables EDB TDE WAL decryption: dataEncryptionBits={} startLsn={}",
-                    bits, lsnStr(startLsn));
-            return new EdbTdeWalDecryptor(unwrappedKey, bits, startLsn);
+            String keyWrapAlgorithm = postgresConfig.getWalTdeKeyWrapAlgorithm();
+            byte[] unwrappedKey = EdbTdeWalDecryptor.unwrapUploadedKey(
+                    uploadedKey, postgresConfig.getWalTdeKeyPassword(), keyWrapAlgorithm);
+            int bits = getWalTdeDataEncryptionBits(unwrappedKey);
+            EdbTdeWalDecryptor decryptor = new EdbTdeWalDecryptor(unwrappedKey, bits, startLsn);
+            tapLogger.info("Physical WAL miner enables EDB TDE WAL decryption: dataEncryptionBits={} keyWrapAlgorithm={} walKeyFingerprint={} startLsn={}",
+                    bits, keyWrapAlgorithm == null ? "auto" : keyWrapAlgorithm, decryptor.walKeyFingerprint(), lsnStr(startLsn));
+            return decryptor;
         } catch (Exception e) {
             throw new IllegalStateException("Failed to initialize EDB TDE WAL decryptor", e);
         }
     }
 
-    private int getWalTdeDataEncryptionBits() {
+    private int getWalTdeDataEncryptionBits(byte[] unwrappedKey) {
         Integer cfg = postgresConfig.getWalTdeDataEncryptionBits();
         if (cfg != null && cfg > 0) {
             return cfg;
+        }
+        if (unwrappedKey != null && unwrappedKey.length >= 128) {
+            return 256;
+        }
+        if (unwrappedKey != null && unwrappedKey.length >= 64) {
+            return 128;
         }
         return 256;
     }
@@ -543,7 +552,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * single consumer thread drains the processor in submission order, so the
      * transaction buffer and emitted LSN sequence stay correct. */
     private void run(PGReplicationStream stream, long startLsnLong, long segSize, Supplier<Boolean> isAlive) throws Throwable {
-        WalPageDecoder decoder = new WalPageDecoder(startLsnLong, segSize);
+        WalPageDecoder decoder = null;
         EdbTdeWalDecryptor walDecryptor = newWalDecryptorIfConfigured(startLsnLong);
         long nextChunkLsn = startLsnLong;
         // Frame from startLsnLong (possibly the checkpoint redo) but report offsets
@@ -572,10 +581,17 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     int n = buf.remaining();
                     byte[] arr = new byte[n];
                     buf.get(arr);
-                    if (walDecryptor != null) {
-                        arr = walDecryptor.decrypt(nextChunkLsn, arr, 0, n);
+                    long chunkStartLsn = nextChunkLsn;
+                    if (recv != null) {
+                        chunkStartLsn = recv.asLong() - n;
                     }
-                    nextChunkLsn += n;
+                    if (decoder == null || chunkStartLsn != nextChunkLsn) {
+                        decoder = new WalPageDecoder(chunkStartLsn, segSize);
+                    }
+                    if (walDecryptor != null) {
+                        arr = walDecryptor.decrypt(chunkStartLsn, arr, 0, n);
+                    }
+                    nextChunkLsn = chunkStartLsn + n;
                     decoder.feed(arr, 0, n);
                     WalPageDecoder.RawRecord raw;
                     while ((raw = decoder.nextRecord()) != null) {

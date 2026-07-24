@@ -939,12 +939,11 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
      * @throws Exception if WAL reading fails
      */
     private Long seekWalToTimestamp(long targetTimestampMs) throws Exception {
-        String slotName = postgresConfig.getLogPluginName();
 
         // Get slot's restart_lsn as the starting point for scanning
-        Long restartLsn = getSlotRestartLsn(slotName);
+        Long restartLsn = getSlotRestartLsn(runnerName);
         if (restartLsn == null) {
-            throw new RuntimeException("Cannot find restart_lsn for replication slot: " + slotName);
+            throw new RuntimeException("Cannot find restart_lsn for replication slot: " + runnerName);
         }
 
         TapLogger.info(TAG, "Seeking WAL from restart_lsn {} to find timestamp >= {} ms",
