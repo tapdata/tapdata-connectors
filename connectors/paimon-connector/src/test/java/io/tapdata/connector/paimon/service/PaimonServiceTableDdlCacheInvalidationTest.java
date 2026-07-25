@@ -2,6 +2,7 @@ package io.tapdata.connector.paimon.service;
 
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
@@ -23,7 +24,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -92,6 +92,7 @@ class PaimonServiceTableDdlCacheInvalidationTest {
                         () -> fixture.service.dropTable(TABLE_NAME));
 
         assertSame(actionFailure, thrown);
+        assertSame(actionFailure, stickyFailure(fixture.service).get());
         assertCurrentTableCachesRemoved(fixture.service);
         assertOtherTableCachesPreserved(fixture.service);
     }
@@ -105,8 +106,7 @@ class PaimonServiceTableDdlCacheInvalidationTest {
         when(writerStrategy.prepareCommit(0L)).thenThrow(flushFailure);
         PaimonTableWriteContext context = context(writerStrategy);
         map(fixture.service, "tableWriteContexts").put(TABLE_KEY, context);
-        map(fixture.service, "accumulatedRecordCount")
-                .put(TABLE_KEY, new AtomicInteger(1));
+        coordinator(fixture.service).acceptInitial(TABLE_KEY, 1);
 
         Exception thrown =
                 assertThrows(Exception.class, () -> fixture.service.dropTable(TABLE_NAME));
@@ -132,6 +132,7 @@ class PaimonServiceTableDdlCacheInvalidationTest {
                 assertThrows(Exception.class, () -> fixture.service.dropTable(TABLE_NAME));
 
         assertSame(closeFailure, thrown);
+        assertSame(closeFailure, stickyFailure(fixture.service).get());
         verify(fixture.catalog, never()).dropTable(any(Identifier.class), eq(true));
         assertCurrentTableCachesRemoved(fixture.service);
         assertOtherTableCachesPreserved(fixture.service);
@@ -192,6 +193,7 @@ class PaimonServiceTableDdlCacheInvalidationTest {
                         .init()
                         .table(TABLE_NAME)
                         .after(Collections.singletonMap("id", 1));
+        event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "INITIAL_SYNC");
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         Future<?> ddlFuture = null;
@@ -243,6 +245,7 @@ class PaimonServiceTableDdlCacheInvalidationTest {
         PaimonConfig config = new PaimonConfig();
         config.setDatabase("default");
         PaimonService service = new PaimonService(config, mock(Log.class));
+        service.startForTest();
         Catalog catalog = mock(Catalog.class);
         setField(service, "catalog", catalog);
         return new Fixture(service, catalog);
@@ -318,6 +321,13 @@ class PaimonServiceTableDdlCacheInvalidationTest {
         Field field = PaimonService.class.getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(service, value);
+    }
+
+    private static PaimonMicroBatchCoordinator coordinator(PaimonService service)
+            throws Exception {
+        Field field = PaimonService.class.getDeclaredField("microBatchCoordinator");
+        field.setAccessible(true);
+        return (PaimonMicroBatchCoordinator) field.get(service);
     }
 
     private static final class Fixture {

@@ -42,6 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -107,6 +108,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
                             .init()
                             .table("synthetic_initial_t")
                             .after(sourceData);
+            event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "INITIAL_SYNC");
 
             service.writeRecords(
                     Collections.singletonList(event), tapTable, connectorContext);
@@ -339,7 +341,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
             assertEquals(0, tableWriteContextCount(service));
             assertTrue(persistedState.isEmpty());
         } finally {
-            service.close();
+            assertThrows(PaimonFatalWriteException.class, service::close);
         }
     }
 
@@ -605,7 +607,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
             assertEquals("old", rows.get(0).getString(2).toString());
         } finally {
             if (fenced) {
-                assertThrows(IllegalStateException.class, service::close);
+                assertThrows(PaimonFatalWriteException.class, service::close);
             } else {
                 service.close();
             }
@@ -791,7 +793,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
             assertEquals("old", rows.get(0).getString(2).toString());
         } finally {
             if (fenced) {
-                assertThrows(IllegalStateException.class, service::close);
+                assertThrows(PaimonFatalWriteException.class, service::close);
             } else {
                 service.close();
             }
@@ -916,7 +918,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
             assertTrue(failure.getMessage().contains("value"));
             assertNull(target.snapshotManager().latestSnapshotIdFromFileSystem());
         } finally {
-            insertService.close();
+            assertThrows(PaimonFatalWriteException.class, insertService::close);
         }
 
         TapTable deleteTable =
@@ -961,7 +963,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
                     target.snapshotManager().latestSnapshotIdFromFileSystem());
             assertEquals(1, readRows(target).size());
         } finally {
-            assertThrows(IllegalStateException.class, deleteService::close);
+            assertThrows(PaimonFatalWriteException.class, deleteService::close);
         }
     }
 
@@ -1006,7 +1008,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
             assertNull(target.snapshotManager().latestSnapshotIdFromFileSystem());
             assertTrue(persistedState.isEmpty());
         } finally {
-            service.close();
+            assertThrows(PaimonFatalWriteException.class, service::close);
         }
     }
 
@@ -1106,7 +1108,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
             assertTrue(thrown.getMessage().contains("PAIMON_INCOMPLETE_BEFORE_IMAGE"));
         } finally {
             if (fenced) {
-                assertThrows(IllegalStateException.class, service::close);
+                assertThrows(PaimonFatalWriteException.class, service::close);
             } else {
                 service.close();
             }
@@ -1292,7 +1294,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
                     target.snapshotManager().latestSnapshotIdFromFileSystem());
             assertEquals(1, readRows(target).size());
         } finally {
-            assertThrows(IllegalStateException.class, service::close);
+            assertThrows(PaimonFatalWriteException.class, service::close);
         }
     }
 
@@ -1333,9 +1335,9 @@ class PaimonServiceDynamicBucketIntegrationTest {
                             .add(new TapField("id", "INT").primaryKeyPos(1))
                             .add(new TapField("pt", "INT"));
 
-            IllegalStateException fenced =
+            PaimonFatalWriteException fenced =
                     assertThrows(
-                            IllegalStateException.class,
+                            PaimonFatalWriteException.class,
                             () ->
                                     service.writeRecords(
                                             Collections.singletonList(
@@ -1350,9 +1352,9 @@ class PaimonServiceDynamicBucketIntegrationTest {
                                                                     1))),
                                             otherTable,
                                             context(stateMap)));
-            assertTrue(fenced.getMessage().contains("fenced after an ingress failure"));
+            assertSame(thrown, fenced);
         } finally {
-            service.close();
+            assertThrows(PaimonFatalWriteException.class, service::close);
         }
     }
 
@@ -1417,7 +1419,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
         } finally {
             IllegalStateException closeFailure =
                     assertThrows(IllegalStateException.class, defaultService::close);
-            assertTrue(containsMessage(closeFailure, "fenced after an ingress failure"));
+            assertTrue(containsMessage(closeFailure, "Append only writer can not accept"));
         }
 
         // An ingress write error intentionally fences a service instance. A restarted instance
@@ -1782,12 +1784,14 @@ class PaimonServiceDynamicBucketIntegrationTest {
     private TapInsertRecordEvent cdcInsert(String table, Map<String, Object> after) {
         TapInsertRecordEvent event = new TapInsertRecordEvent().init().table(table).after(after);
         event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+        event.addInfo("nodeIds", Collections.singletonList("test-source"));
         return event;
     }
 
     private TapUpdateRecordEvent cdcUpdateAfter(String table, Map<String, Object> after) {
         TapUpdateRecordEvent event = new TapUpdateRecordEvent().init().table(table).after(after);
         event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+        event.addInfo("nodeIds", Collections.singletonList("test-source"));
         return event;
     }
 
@@ -1800,6 +1804,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
                         .before(before)
                         .after(after);
         event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+        event.addInfo("nodeIds", Collections.singletonList("test-source"));
         return event;
     }
 
@@ -1807,6 +1812,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
         TapDeleteRecordEvent event =
                 new TapDeleteRecordEvent().init().table(table).before(before);
         event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+        event.addInfo("nodeIds", Collections.singletonList("test-source"));
         return event;
     }
 
