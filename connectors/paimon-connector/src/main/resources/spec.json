@@ -329,14 +329,6 @@
             {
               "label": "JSON",
               "value": "json"
-            },
-            {
-              "label": "LANCE",
-              "value": "lance"
-            },
-            {
-              "label": "BLOB",
-              "value": "blob"
             }
           ],
           "x-reactions": [

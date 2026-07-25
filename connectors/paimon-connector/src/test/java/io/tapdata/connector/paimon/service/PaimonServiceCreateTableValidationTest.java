@@ -13,6 +13,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.BucketMode;
@@ -191,6 +192,49 @@ class PaimonServiceCreateTableValidationTest {
                                             crossPartitionTable(identifier.getObjectName())));
 
             assertTrue(thrown.getMessage().contains("PAIMON_LEGACY_COMPRESSION_OPTION"));
+            assertThrows(Catalog.TableNotExistException.class, () -> catalog.getTable(identifier));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void unavailableFirstClassFileFormatMustFailBeforeTableCreation() throws Exception {
+        Catalog catalog = catalog("unavailable-first-class-format", Collections.emptyMap());
+        PaimonConfig config = config("unavailable_first_class_format");
+        config.setFileFormat("lance");
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, "unavailable_first_class_format");
+
+        try {
+            assertThrows(
+                    FactoryException.class,
+                    () ->
+                            service.createTable(
+                                    crossPartitionTable(identifier.getObjectName())));
+            assertThrows(Catalog.TableNotExistException.class, () -> catalog.getTable(identifier));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void unavailableTablePropertyFileFormatMustFailBeforeTableCreation() throws Exception {
+        Catalog catalog = catalog("unavailable-property-format", Collections.emptyMap());
+        PaimonConfig config = config("unavailable_property_format");
+        config.setFileFormat("orc");
+        config.setTableProperties(
+                Collections.singletonList(
+                        property(CoreOptions.FILE_FORMAT.key(), "blob")));
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, "unavailable_property_format");
+
+        try {
+            assertThrows(
+                    FactoryException.class,
+                    () ->
+                            service.createTable(
+                                    crossPartitionTable(identifier.getObjectName())));
             assertThrows(Catalog.TableNotExistException.class, () -> catalog.getTable(identifier));
         } finally {
             service.close();

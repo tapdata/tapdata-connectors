@@ -3,6 +3,7 @@ package io.tapdata.connector.paimon.service;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
@@ -158,6 +159,7 @@ final class PaimonWriteSemanticContractResolver {
         Objects.requireNonNull(schema, "schema");
         validateNoLegacyCompressionOption(tableKey, schema);
         CoreOptions options = CoreOptions.fromMap(schema.options());
+        validateFileFormatProvider(options);
         validateKeyDynamicIgnoreDeleteConflict(
                 tableKey,
                 deriveBucketMode(schema),
@@ -186,6 +188,18 @@ final class PaimonWriteSemanticContractResolver {
                         + LEGACY_COMPRESSION_OPTION
                         + ", use="
                         + CoreOptions.FILE_COMPRESSION.key());
+    }
+
+    private static void validateFileFormatProvider(CoreOptions options) {
+        // Paimon 1.3.1 SchemaValidation uses FileFormat.fromIdentifier with the complete table
+        // options. Calling the same public API here performs ServiceLoader provider discovery
+        // before Catalog#createTable. Do not duplicate a Connector-side provider allowlist:
+        // packaged or future providers remain defined by the actual Paimon classpath.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L160-L162
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/format/FileFormat.java#L76-L92
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/factories/FormatFactoryUtil.java#L39-L60
+        FileFormat.fromIdentifier(options.formatType(), options.toConfiguration());
     }
 
     static BucketMode deriveBucketMode(Schema schema) {

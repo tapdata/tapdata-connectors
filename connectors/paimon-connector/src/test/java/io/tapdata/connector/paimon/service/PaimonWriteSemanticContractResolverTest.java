@@ -3,6 +3,7 @@ package io.tapdata.connector.paimon.service;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
@@ -360,6 +361,40 @@ class PaimonWriteSemanticContractResolverTest {
 
         assertTrue(thrown.getMessage().contains("PAIMON_LEGACY_COMPRESSION_OPTION"));
         assertTrue(thrown.getMessage().contains(CoreOptions.FILE_COMPRESSION.key()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"avro", "orc", "parquet", "csv", "json"})
+    void packagedFileFormatProviderMustBeDiscoverable(String fileFormat) {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.FILE_FORMAT.key(), fileFormat)
+                        .build();
+
+        PaimonWriteSemanticContractResolver.validateNewTable(
+                "default.available_format", schema);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lance", "blob", "not-installed"})
+    void unavailableFileFormatMustFailProviderDiscovery(String fileFormat) {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.FILE_FORMAT.key(), fileFormat)
+                        .build();
+
+        FactoryException thrown =
+                assertThrows(
+                        FactoryException.class,
+                        () ->
+                                PaimonWriteSemanticContractResolver.validateNewTable(
+                                        "default.unavailable_format", schema));
+
+        assertTrue(thrown.getMessage().contains(fileFormat));
     }
 
     @Test

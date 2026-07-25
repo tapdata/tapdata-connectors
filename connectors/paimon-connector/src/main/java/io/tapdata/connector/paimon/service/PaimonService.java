@@ -728,13 +728,14 @@ public class PaimonService implements AutoCloseable {
 			schemaBuilder.option("bucket", String.valueOf(bucketCount));
 		}
 		if (EmptyKit.isNotBlank(config.getFileFormat(tableName))) {
-			// Paimon validates this identifier during table creation. The packaged paimon-format
-			// 1.3.1 service only provides avro/orc/parquet/csv/json; the UI's lance/blob choices
-			// require matching format modules/providers and otherwise fail factory discovery.
+			// The final Schema is preflighted with Paimon's FileFormat provider discovery before
+			// Catalog#createTable. Use the canonical option constant so first-class and
+			// tableProperties values share the same final key.
 			// Sources:
 			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L160-L162
-			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-format/src/main/resources/META-INF/services/org.apache.paimon.format.FileFormatFactory
-			schemaBuilder.option("file.format", config.getFileFormat(tableName));
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L229-L238
+			schemaBuilder.option(
+					CoreOptions.FILE_FORMAT.key(), config.getFileFormat(tableName));
 		}
 		if (EmptyKit.isNotBlank(config.getCompression(tableName))) {
 			// Paimon 1.3.1 CoreOptions#fileCompression reads only FILE_COMPRESSION. Using the
