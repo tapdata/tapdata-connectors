@@ -375,6 +375,50 @@ class PaimonWriteSemanticContractResolverTest {
     }
 
     @Test
+    void contractMustCapturePhysicalDefaultFieldsAsAnImmutableSet() {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("nullable_without_default", DataTypes.STRING())
+                        .column(
+                                "nullable_with_default",
+                                DataTypes.STRING(),
+                                null,
+                                "'fallback'")
+                        .column(
+                                "non_null_with_default",
+                                DataTypes.STRING().copy(false),
+                                null,
+                                "'required'")
+                        .primaryKey("id")
+                        .option("bucket", "2")
+                        .option("merge-engine", "deduplicate")
+                        .build();
+        FileStoreTable table =
+                mockTable(BucketMode.HASH_FIXED, TableSchema.create(0L, schema));
+
+        PaimonWriteSemanticContract contract =
+                PaimonWriteSemanticContractResolver.resolve("default.t", table);
+
+        // Paimon 1.3.1 TableWriteImpl#writeAndReturn checks non-null fields before
+        // DefaultValueRow replaces nullable nulls with schema defaults. The connector must
+        // retain physical default metadata so it can reject explicit null before conversion.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java#L187-L213
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/casting/DefaultValueRow.java#L209-L228
+        assertEquals(
+                new java.util.LinkedHashSet<>(
+                        java.util.Arrays.asList(
+                                "nullable_with_default", "non_null_with_default")),
+                contract.defaultedTargetFields());
+        assertTrue(contract.nonNullTargetFields().contains("non_null_with_default"));
+        assertFalse(contract.nonNullTargetFields().contains("nullable_with_default"));
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> contract.defaultedTargetFields().add("mutation"));
+    }
+
+    @Test
     void rowKindFieldMustExistAndUseCharacterStringType() {
         FileStoreTable table =
                 table(

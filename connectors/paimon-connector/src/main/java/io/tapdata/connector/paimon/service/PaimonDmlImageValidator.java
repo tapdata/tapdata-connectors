@@ -6,6 +6,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import org.apache.paimon.CoreOptions.MergeEngine;
 
 import javax.annotation.Nullable;
 
@@ -37,7 +38,9 @@ final class PaimonDmlImageValidator {
                         requirements,
                         ((TapInsertRecordEvent) event).getAfter(),
                         "INSERT",
-                        "PAIMON_INCOMPLETE_AFTER_IMAGE");
+                        "PAIMON_INCOMPLETE_AFTER_IMAGE",
+                        contract.requiresFullChangelog(),
+                        false);
             } else if (event instanceof TapUpdateRecordEvent) {
                 TapUpdateRecordEvent update = (TapUpdateRecordEvent) event;
                 validateImage(
@@ -46,14 +49,10 @@ final class PaimonDmlImageValidator {
                         requirements,
                         update.getBefore(),
                         "UPDATE_BEFORE",
-                        "PAIMON_INCOMPLETE_BEFORE_IMAGE");
-                validateImage(
-                        tableKey,
-                        contract,
-                        requirements,
-                        update.getAfter(),
-                        "UPDATE_AFTER",
-                        "PAIMON_INCOMPLETE_AFTER_IMAGE");
+                        "PAIMON_INCOMPLETE_BEFORE_IMAGE",
+                        contract.requiresFullChangelog(),
+                        false);
+                validateUpdateAfter(tableKey, contract, requirements, update.getAfter());
             } else if (event instanceof TapDeleteRecordEvent) {
                 validateImage(
                         tableKey,
@@ -61,7 +60,9 @@ final class PaimonDmlImageValidator {
                         requirements,
                         ((TapDeleteRecordEvent) event).getBefore(),
                         "DELETE",
-                        "PAIMON_INCOMPLETE_BEFORE_IMAGE");
+                        "PAIMON_INCOMPLETE_BEFORE_IMAGE",
+                        contract.requiresFullChangelog(),
+                        false);
             }
         }
     }
@@ -78,7 +79,9 @@ final class PaimonDmlImageValidator {
                 resolveRequirements(tableKey, contract, generatedFields, tapTable),
                 after,
                 "INSERT",
-                "PAIMON_INCOMPLETE_AFTER_IMAGE");
+                "PAIMON_INCOMPLETE_AFTER_IMAGE",
+                contract.requiresFullChangelog(),
+                false);
     }
 
     static void validateUpdate(
@@ -96,14 +99,10 @@ final class PaimonDmlImageValidator {
                 requirements,
                 before,
                 "UPDATE_BEFORE",
-                "PAIMON_INCOMPLETE_BEFORE_IMAGE");
-        validateImage(
-                tableKey,
-                contract,
-                requirements,
-                after,
-                "UPDATE_AFTER",
-                "PAIMON_INCOMPLETE_AFTER_IMAGE");
+                "PAIMON_INCOMPLETE_BEFORE_IMAGE",
+                contract.requiresFullChangelog(),
+                false);
+        validateUpdateAfter(tableKey, contract, requirements, after);
     }
 
     static void validateDelete(
@@ -118,7 +117,28 @@ final class PaimonDmlImageValidator {
                 resolveRequirements(tableKey, contract, generatedFields, tapTable),
                 before,
                 "DELETE",
-                "PAIMON_INCOMPLETE_BEFORE_IMAGE");
+                "PAIMON_INCOMPLETE_BEFORE_IMAGE",
+                contract.requiresFullChangelog(),
+                false);
+    }
+
+    private static void validateUpdateAfter(
+            String tableKey,
+            PaimonWriteSemanticContract contract,
+            ValidationRequirements requirements,
+            @Nullable Map<String, Object> after) {
+        boolean deduplicateUpdateAfter = requirements.deduplicateUpdateAfterRequired;
+        validateImage(
+                tableKey,
+                contract,
+                requirements,
+                after,
+                "UPDATE_AFTER",
+                deduplicateUpdateAfter
+                        ? "PAIMON_DEDUPLICATE_INCOMPLETE_UPDATE_AFTER"
+                        : "PAIMON_INCOMPLETE_AFTER_IMAGE",
+                deduplicateUpdateAfter || contract.requiresFullChangelog(),
+                deduplicateUpdateAfter);
     }
 
     private static ValidationRequirements resolveRequirements(
@@ -130,12 +150,21 @@ final class PaimonDmlImageValidator {
         Objects.requireNonNull(contract, "contract");
         Objects.requireNonNull(generatedFields, "generatedFields");
         Objects.requireNonNull(tapTable, "tapTable");
-        if (!contract.requiresFullChangelog()) {
+        // Paimon 1.3.1 DeduplicateMergeFunction stores a primary-key value as one complete
+        // latest record. This is an engine/property contract, so every primary-key BucketMode
+        // requires a complete UPDATE_AFTER even when full changelog input is otherwise optional.
+        // Source:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/mergetree/compact/DeduplicateMergeFunction.java#L27-L48
+        boolean deduplicateUpdateAfterRequired =
+                !contract.primaryKeys().isEmpty()
+                        && contract.mergeEngine() == MergeEngine.DEDUPLICATE;
+        if (!contract.requiresFullChangelog() && !deduplicateUpdateAfterRequired) {
             return ValidationRequirements.DISABLED;
         }
 
         LinkedHashSet<String> requiredSourceFields = new LinkedHashSet<>();
         LinkedHashSet<String> nonNullSourceFields = new LinkedHashSet<>();
+        LinkedHashSet<String> defaultedSourceFields = new LinkedHashSet<>();
         for (String targetField : contract.targetFields()) {
             if (targetField.equals(contract.rowKindField())) {
                 continue;
@@ -151,6 +180,9 @@ final class PaimonDmlImageValidator {
                         || contract.primaryKeys().contains(targetField)) {
                     nonNullSourceFields.add(targetField);
                 }
+                if (contract.defaultedTargetFields().contains(targetField)) {
+                    defaultedSourceFields.add(targetField);
+                }
             }
         }
 
@@ -165,7 +197,11 @@ final class PaimonDmlImageValidator {
             }
         }
         return new ValidationRequirements(
-                requiredSourceFields, nonNullSourceFields, unmappedFields);
+                requiredSourceFields,
+                nonNullSourceFields,
+                defaultedSourceFields,
+                unmappedFields,
+                deduplicateUpdateAfterRequired);
     }
 
     private static void validateImage(
@@ -174,28 +210,45 @@ final class PaimonDmlImageValidator {
             ValidationRequirements requirements,
             @Nullable Map<String, Object> image,
             String operation,
-            String reasonCode) {
-        if (!requirements.enabled) {
+            String reasonCode,
+            boolean enabled,
+            boolean rejectDefaultedNull) {
+        if (!enabled) {
             return;
         }
 
         Set<String> missingFields = new LinkedHashSet<>();
         Set<String> nullFields = new LinkedHashSet<>();
+        Set<String> defaultedNullFields = new LinkedHashSet<>();
         for (String sourceField : requirements.requiredSourceFields) {
             if (image == null || !image.containsKey(sourceField)) {
                 missingFields.add(sourceField);
-            } else if (image.get(sourceField) == null
-                    && requirements.nonNullSourceFields.contains(sourceField)) {
-                nullFields.add(sourceField);
+            } else if (image.get(sourceField) == null) {
+                if (requirements.nonNullSourceFields.contains(sourceField)) {
+                    nullFields.add(sourceField);
+                }
+                if (rejectDefaultedNull
+                        && requirements.defaultedSourceFields.contains(sourceField)) {
+                    defaultedNullFields.add(sourceField);
+                }
             }
         }
 
         if (requirements.unmappedFields.isEmpty()
                 && missingFields.isEmpty()
-                && nullFields.isEmpty()) {
+                && nullFields.isEmpty()
+                && defaultedNullFields.isEmpty()) {
             return;
         }
 
+        // Paimon 1.3.1 DeduplicateMergeFunction#add keeps the latest value as the complete
+        // record, so a sparse UPDATE_AFTER would erase omitted columns in every BucketMode.
+        // Validate the original Map before TableWriteImpl#writeAndReturn checks nullability and
+        // DefaultValueRow replaces nullable explicit nulls with schema defaults.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/mergetree/compact/DeduplicateMergeFunction.java#L27-L48
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java#L187-L213
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/casting/DefaultValueRow.java#L209-L228
         // Do not append the source map or any field value; CDC images may contain credentials or
         // personal data.
         throw new PaimonFatalWriteException(
@@ -213,35 +266,38 @@ final class PaimonDmlImageValidator {
                         + ", missingFields="
                         + missingFields
                         + ", nullFields="
-                        + nullFields);
+                        + nullFields
+                        + (rejectDefaultedNull
+                                ? ", defaultedNullFields=" + defaultedNullFields
+                                : ""));
     }
 
     private static final class ValidationRequirements {
         private static final ValidationRequirements DISABLED =
                 new ValidationRequirements(
-                        Collections.emptySet(), Collections.emptySet(), Collections.emptySet(), false);
+                        Collections.emptySet(),
+                        Collections.emptySet(),
+                        Collections.emptySet(),
+                        Collections.emptySet(),
+                        false);
 
         private final Set<String> requiredSourceFields;
         private final Set<String> nonNullSourceFields;
+        private final Set<String> defaultedSourceFields;
         private final Set<String> unmappedFields;
-        private final boolean enabled;
+        private final boolean deduplicateUpdateAfterRequired;
 
         private ValidationRequirements(
                 Set<String> requiredSourceFields,
                 Set<String> nonNullSourceFields,
-                Set<String> unmappedFields) {
-            this(requiredSourceFields, nonNullSourceFields, unmappedFields, true);
-        }
-
-        private ValidationRequirements(
-                Set<String> requiredSourceFields,
-                Set<String> nonNullSourceFields,
+                Set<String> defaultedSourceFields,
                 Set<String> unmappedFields,
-                boolean enabled) {
+                boolean deduplicateUpdateAfterRequired) {
             this.requiredSourceFields = requiredSourceFields;
             this.nonNullSourceFields = nonNullSourceFields;
+            this.defaultedSourceFields = defaultedSourceFields;
             this.unmappedFields = unmappedFields;
-            this.enabled = enabled;
+            this.deduplicateUpdateAfterRequired = deduplicateUpdateAfterRequired;
         }
     }
 }

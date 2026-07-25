@@ -22,6 +22,7 @@ final class PaimonWriteSemanticContractTestFactory {
                 Collections.emptySet(),
                 Collections.emptySet(),
                 Collections.emptySet(),
+                Collections.emptySet(),
                 null,
                 -1);
     }

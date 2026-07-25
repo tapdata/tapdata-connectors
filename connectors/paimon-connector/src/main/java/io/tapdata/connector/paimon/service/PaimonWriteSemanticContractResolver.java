@@ -76,13 +76,24 @@ final class PaimonWriteSemanticContractResolver {
         RowType rowType = schema.logicalRowType();
         List<String> targetFields = rowType.getFieldNames();
         Set<String> nonNullTargetFields = new LinkedHashSet<>();
+        Set<String> defaultedTargetFields = new LinkedHashSet<>();
         for (DataField field : rowType.getFields()) {
             if (!field.type().isNullable()) {
                 nonNullTargetFields.add(field.name());
             }
+            if (field.defaultValue() != null) {
+                defaultedTargetFields.add(field.name());
+            }
         }
         nonNullTargetFields.addAll(schema.primaryKeys());
 
+        // Paimon 1.3.1 TableWriteImpl#writeAndReturn checks non-null fields before wrapping the
+        // row in DefaultValueRow. For nullable fields, DefaultValueRow substitutes schema
+        // defaults when the converted row is null, so the immutable contract must preserve
+        // DataField#defaultValue metadata for validation against the original source Map.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java#L187-L213
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/casting/DefaultValueRow.java#L209-L228
         Optional<String> configuredRowKindField = options.rowkindField();
         String rowKindField = configuredRowKindField.orElse(null);
         int rowKindFieldIndex = -1;
@@ -133,6 +144,7 @@ final class PaimonWriteSemanticContractResolver {
                 fullChangelogRequired,
                 targetFields,
                 nonNullTargetFields,
+                defaultedTargetFields,
                 new LinkedHashSet<>(schema.primaryKeys()),
                 new LinkedHashSet<>(schema.partitionKeys()),
                 rowKindField,
