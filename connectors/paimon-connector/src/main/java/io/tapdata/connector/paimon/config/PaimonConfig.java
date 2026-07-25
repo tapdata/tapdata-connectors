@@ -96,10 +96,6 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // until source-offset acknowledgement and ordering can be proven durable.
     private Boolean enableAsyncCommit = true;
 
-    // Currently copied to the Flink-only "sink.parallelism" table option. This direct Paimon Core
-    // writer does not create connector write threads from the value.
-    private Integer writeThreads = 4;
-
     // Enable auto compaction (default: true)
     // Compaction merges small files for better query performance
     private Boolean enableAutoCompaction = true;
@@ -421,14 +417,6 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     public void setEnableAsyncCommit(Boolean enableAsyncCommit) {
         this.enableAsyncCommit = enableAsyncCommit;
-    }
-
-    public Integer getWriteThreads() {
-        return writeThreads;
-    }
-
-    public void setWriteThreads(Integer writeThreads) {
-        this.writeThreads = writeThreads;
     }
 
     public Boolean getEnableAutoCompaction() {

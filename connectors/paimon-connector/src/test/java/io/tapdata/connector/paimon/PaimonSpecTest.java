@@ -14,6 +14,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -71,6 +72,23 @@ class PaimonSpecTest {
         assertTrue(messages.getAsJsonObject("en_US").has("bucketMode_postpone"));
         assertTrue(messages.getAsJsonObject("zh_CN").has("bucketMode_postpone"));
         assertTrue(messages.getAsJsonObject("zh_TW").has("bucketMode_postpone"));
+    }
+
+    @Test
+    void flinkOnlyWriteThreadsMustNotBeExposed() throws Exception {
+        JsonObject spec = loadSpec();
+        JsonObject properties =
+                spec.getAsJsonObject("configOptions")
+                        .getAsJsonObject("node")
+                        .getAsJsonObject("properties");
+
+        assertFalse(properties.has("writeThreads"));
+
+        JsonObject messages = spec.getAsJsonObject("messages");
+        for (String locale : Arrays.asList("en_US", "zh_CN", "zh_TW")) {
+            assertFalse(messages.getAsJsonObject(locale).has("writeThreads"));
+            assertFalse(messages.getAsJsonObject(locale).has("writeThreads_placeholder"));
+        }
     }
 
     private static JsonObject loadSpec() throws Exception {

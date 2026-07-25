@@ -241,6 +241,46 @@ class PaimonServiceCreateTableValidationTest {
         }
     }
 
+    @Test
+    void coreWriterTableMustNotPersistFlinkSinkParallelism() throws Exception {
+        String tableName = "no_flink_sink_parallelism";
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        PaimonService service = service(tableName, catalog);
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+
+        try {
+            assertTrue(service.createTable(crossPartitionTable(tableName)));
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+            assertFalse(table.options().containsKey("sink.parallelism"));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void flinkSinkParallelismTablePropertyMustFailBeforeTableCreation() throws Exception {
+        String tableName = "reject_flink_sink_parallelism";
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        PaimonConfig config = config(tableName);
+        config.setTableProperties(
+                Collections.singletonList(property("sink.parallelism", "8")));
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+
+        try {
+            PaimonFatalWriteException thrown =
+                    assertThrows(
+                            PaimonFatalWriteException.class,
+                            () -> service.createTable(crossPartitionTable(tableName)));
+
+            assertTrue(thrown.getMessage().contains("PAIMON_FLINK_ONLY_SINK_PARALLELISM"));
+            assertThrows(Catalog.TableNotExistException.class, () -> catalog.getTable(identifier));
+        } finally {
+            service.close();
+        }
+    }
+
     @ParameterizedTest(name = "{0} => bucket={2}, mode={3}")
     @MethodSource("firstClassBucketModes")
     void firstClassBucketModeMustMaterializePaimonMode(

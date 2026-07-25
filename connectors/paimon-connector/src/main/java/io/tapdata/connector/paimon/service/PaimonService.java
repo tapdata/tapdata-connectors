@@ -796,11 +796,6 @@ public class PaimonService implements AutoCloseable {
 		// 7. Changelog settings for CDC scenarios
 		schemaBuilder.option("changelog-producer.lookup-wait", "false"); // Don't wait for lookup
 
-		// "sink.parallelism" is consumed by the Flink sink builder. This connector calls Paimon
-		// Core StreamTableWrite directly, so this table option does not create write threads or
-		// alter the one-context-per-table topology.
-		schemaBuilder.option("sink.parallelism", String.valueOf(config.getWriteThreads()));
-
 		if (EmptyKit.isNotEmpty(config.getTableProperties(tableName))) {
 			config.getTableProperties(tableName).forEach(v -> {
 				if (StringUtils.isEmpty(v.get("propKey"))

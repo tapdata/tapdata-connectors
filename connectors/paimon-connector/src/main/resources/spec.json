@@ -552,29 +552,6 @@
             }
           ]
         },
-        "writeThreads": {
-          "type": "number",
-          "title": "${writeThreads}",
-          "x-decorator": "FormItem",
-          "x-component": "InputNumber",
-          "x-component-props": {
-            "min": 1,
-            "max": 32,
-            "placeholder": "${writeThreads_placeholder}"
-          },
-          "default": 4,
-          "x-index": 100,
-          "x-reactions": [
-            {
-              "dependencies": ["$inputs"],
-              "fulfill": {
-                "state": {
-                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
-                }
-              }
-            }
-          ]
-        },
         "enableAutoCompaction": {
           "type": "boolean",
           "title": "${enableAutoCompaction}",
@@ -719,8 +696,6 @@
       "commitIntervalMs": "Commit Interval (ms)",
       "commitIntervalMs_placeholder": "Time interval for commits in milliseconds (default: 30000)",
       "enableAsyncCommit": "Enable Async Commit",
-      "writeThreads": "Write Threads",
-      "writeThreads_placeholder": "Number of parallel write threads (1-32, default: 4)",
       "enableAutoCompaction": "Enable Auto Compaction",
       "compactionIntervalMinutes": "Compaction Interval (minutes)",
       "compactionIntervalMinutes_placeholder": "Interval for auto compaction (1-1440, default: 30)",
@@ -778,8 +753,6 @@
       "commitIntervalMs": "提交间隔（毫秒）",
       "commitIntervalMs_placeholder": "提交的时间间隔（毫秒，默认：30000）",
       "enableAsyncCommit": "启用异步提交",
-      "writeThreads": "写入线程数",
-      "writeThreads_placeholder": "并行写入线程数（1-32，默认：4）",
       "enableAutoCompaction": "启用自动压缩",
       "compactionIntervalMinutes": "压缩间隔（分钟）",
       "compactionIntervalMinutes_placeholder": "自动压缩的时间间隔（1-1440，默认：30）",
@@ -837,8 +810,6 @@
       "commitIntervalMs": "提交間隔（毫秒）",
       "commitIntervalMs_placeholder": "提交的時間間隔（毫秒，默認：30000）",
       "enableAsyncCommit": "啟用異步提交",
-      "writeThreads": "寫入線程數",
-      "writeThreads_placeholder": "並行寫入線程數（1-32，默認：4）",
       "enableAutoCompaction": "啟用自動壓縮",
       "compactionIntervalMinutes": "壓縮間隔（分鐘）",
       "compactionIntervalMinutes_placeholder": "自動壓縮的時間間隔（1-1440，默認：30）",

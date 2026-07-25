@@ -25,6 +25,7 @@ import static org.apache.paimon.types.DataTypeFamily.CHARACTER_STRING;
 final class PaimonWriteSemanticContractResolver {
 
     private static final String LEGACY_COMPRESSION_OPTION = "compression";
+    private static final String FLINK_SINK_PARALLELISM_OPTION = "sink.parallelism";
 
     private PaimonWriteSemanticContractResolver() {}
 
@@ -158,6 +159,7 @@ final class PaimonWriteSemanticContractResolver {
         Objects.requireNonNull(tableKey, "tableKey");
         Objects.requireNonNull(schema, "schema");
         validateNoLegacyCompressionOption(tableKey, schema);
+        validateNoFlinkSinkParallelism(tableKey, schema);
         CoreOptions options = CoreOptions.fromMap(schema.options());
         validateBucketConfiguration(tableKey, schema, options);
         validateFileFormatProvider(options);
@@ -189,6 +191,28 @@ final class PaimonWriteSemanticContractResolver {
                         + LEGACY_COMPRESSION_OPTION
                         + ", use="
                         + CoreOptions.FILE_COMPRESSION.key());
+    }
+
+    private static void validateNoFlinkSinkParallelism(String tableKey, Schema schema) {
+        if (!schema.options().containsKey(FLINK_SINK_PARALLELISM_OPTION)) {
+            return;
+        }
+
+        // Connector product constraint: sink.parallelism belongs to Paimon's Flink connector and
+        // is consumed while the Flink sink graph is built. This connector allocates Paimon Core
+        // StreamTableWrite instances directly, so persisting the option would promise write
+        // concurrency that the current runtime never creates.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/FlinkConnectorOptions.java#L93-L100
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/FlinkTableSinkBase.java#L138-L150
+        throw new PaimonFatalWriteException(
+                "PAIMON_FLINK_ONLY_SINK_PARALLELISM"
+                        + " table="
+                        + tableKey
+                        + ", option="
+                        + FLINK_SINK_PARALLELISM_OPTION
+                        + " is only consumed by Paimon's Flink sink and cannot configure this "
+                        + "Connector's Core writer");
     }
 
     private static void validateFileFormatProvider(CoreOptions options) {

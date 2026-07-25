@@ -8,6 +8,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -191,5 +192,18 @@ public class PaimonConfigTest {
         config.setBucketCount(null);
 
         assertDoesNotThrow(config::validate);
+    }
+
+    @Test
+    public void flinkOnlyWriteThreadsMustNotBeExposedByCoreWriterConfig() {
+        assertTrue(
+                Arrays.stream(PaimonConfig.class.getDeclaredFields())
+                        .noneMatch(field -> "writeThreads".equals(field.getName())));
+        assertTrue(
+                Arrays.stream(PaimonConfig.class.getDeclaredMethods())
+                        .noneMatch(
+                                method ->
+                                        "getWriteThreads".equals(method.getName())
+                                                || "setWriteThreads".equals(method.getName())));
     }
 }

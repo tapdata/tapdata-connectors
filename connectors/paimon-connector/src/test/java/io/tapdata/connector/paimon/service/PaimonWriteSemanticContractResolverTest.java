@@ -398,6 +398,27 @@ class PaimonWriteSemanticContractResolverTest {
         assertTrue(thrown.getMessage().contains(fileFormat));
     }
 
+    @Test
+    void flinkOnlySinkParallelismMustBeRejectedBeforeTableCreation() {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .primaryKey("id")
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option("sink.parallelism", "8")
+                        .build();
+
+        PaimonFatalWriteException thrown =
+                assertThrows(
+                        PaimonFatalWriteException.class,
+                        () ->
+                                PaimonWriteSemanticContractResolver.validateNewTable(
+                                        "default.flink_only_option", schema));
+
+        assertTrue(thrown.getMessage().contains("PAIMON_FLINK_ONLY_SINK_PARALLELISM"));
+        assertTrue(thrown.getMessage().contains("sink.parallelism"));
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("bucketValidationSchemas")
     void bucketValidationMustMatchPaimonSchemaValidation(
