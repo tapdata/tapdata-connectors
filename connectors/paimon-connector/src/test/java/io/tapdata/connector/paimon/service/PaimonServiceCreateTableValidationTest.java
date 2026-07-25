@@ -8,6 +8,7 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -31,6 +32,7 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -119,6 +121,77 @@ class PaimonServiceCreateTableValidationTest {
 
             assertEquals(BucketMode.KEY_DYNAMIC, table.bucketMode());
             assertEquals("false", table.options().get("ignore-delete"));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void firstClassCompressionMustUseCanonicalPaimonOption() throws Exception {
+        Catalog catalog = catalog("canonical-compression", Collections.emptyMap());
+        PaimonConfig config = config("canonical_compression");
+        config.setCompression("snappy");
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, "canonical_compression");
+
+        try {
+            assertTrue(service.createTable(crossPartitionTable(identifier.getObjectName())));
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+            assertEquals(
+                    "snappy",
+                    CoreOptions.fromMap(table.options()).fileCompression());
+            assertEquals("snappy", table.options().get(CoreOptions.FILE_COMPRESSION.key()));
+            assertFalse(table.options().containsKey("compression"));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void canonicalTablePropertyMustOverrideFirstClassCompression() throws Exception {
+        Catalog catalog = catalog("compression-override", Collections.emptyMap());
+        PaimonConfig config = config("compression_override");
+        config.setCompression("zstd");
+        config.setTableProperties(
+                Collections.singletonList(
+                        property(CoreOptions.FILE_COMPRESSION.key(), "snappy")));
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, "compression_override");
+
+        try {
+            assertTrue(service.createTable(crossPartitionTable(identifier.getObjectName())));
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+            assertEquals(
+                    "snappy",
+                    CoreOptions.fromMap(table.options()).fileCompression());
+            assertEquals("snappy", table.options().get(CoreOptions.FILE_COMPRESSION.key()));
+            assertFalse(table.options().containsKey("compression"));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void legacyCompressionTablePropertyMustFailBeforeTableCreation() throws Exception {
+        Catalog catalog = catalog("legacy-compression", Collections.emptyMap());
+        PaimonConfig config = config("legacy_compression");
+        config.setTableProperties(
+                Collections.singletonList(property("compression", "snappy")));
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, "legacy_compression");
+
+        try {
+            PaimonFatalWriteException thrown =
+                    assertThrows(
+                            PaimonFatalWriteException.class,
+                            () ->
+                                    service.createTable(
+                                            crossPartitionTable(identifier.getObjectName())));
+
+            assertTrue(thrown.getMessage().contains("PAIMON_LEGACY_COMPRESSION_OPTION"));
+            assertThrows(Catalog.TableNotExistException.class, () -> catalog.getTable(identifier));
         } finally {
             service.close();
         }

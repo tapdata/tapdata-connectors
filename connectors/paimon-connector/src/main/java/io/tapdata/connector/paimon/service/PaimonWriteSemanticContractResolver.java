@@ -23,6 +23,8 @@ import static org.apache.paimon.types.DataTypeFamily.CHARACTER_STRING;
 /** Resolves and validates the Paimon 1.3.1 write semantics before writer resources are allocated. */
 final class PaimonWriteSemanticContractResolver {
 
+    private static final String LEGACY_COMPRESSION_OPTION = "compression";
+
     private PaimonWriteSemanticContractResolver() {}
 
     static PaimonWriteSemanticContract resolve(String tableKey, FileStoreTable table) {
@@ -154,12 +156,36 @@ final class PaimonWriteSemanticContractResolver {
     static void validateNewTable(String tableKey, Schema schema) {
         Objects.requireNonNull(tableKey, "tableKey");
         Objects.requireNonNull(schema, "schema");
+        validateNoLegacyCompressionOption(tableKey, schema);
         CoreOptions options = CoreOptions.fromMap(schema.options());
         validateKeyDynamicIgnoreDeleteConflict(
                 tableKey,
                 deriveBucketMode(schema),
                 options.mergeEngine(),
                 options.ignoreDelete());
+    }
+
+    private static void validateNoLegacyCompressionOption(String tableKey, Schema schema) {
+        if (!schema.options().containsKey(LEGACY_COMPRESSION_OPTION)) {
+            return;
+        }
+
+        // Paimon 1.3.1 defines and reads only "file.compression". Its generic schema validation
+        // still has a TODO for validating every option key, so "compression" is otherwise
+        // accepted but ignored. Reject the legacy key after tableProperties and Catalog defaults
+        // are merged, while the Catalog still has no table state.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L259-L264
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L2237-L2240
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L93-L101
+        throw new PaimonFatalWriteException(
+                "PAIMON_LEGACY_COMPRESSION_OPTION"
+                        + " table="
+                        + tableKey
+                        + ", option="
+                        + LEGACY_COMPRESSION_OPTION
+                        + ", use="
+                        + CoreOptions.FILE_COMPRESSION.key());
     }
 
     static BucketMode deriveBucketMode(Schema schema) {

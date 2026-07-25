@@ -24,6 +24,7 @@ import io.tapdata.pdk.core.utils.CommonUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.*;
 import org.apache.paimon.data.*;
@@ -736,12 +737,14 @@ public class PaimonService implements AutoCloseable {
 			schemaBuilder.option("file.format", config.getFileFormat(tableName));
 		}
 		if (EmptyKit.isNotBlank(config.getCompression(tableName))) {
-			// REVIEW: Paimon 1.3.1 consumes "file.compression", not "compression". The current
-			// compatibility key is retained here because this audit changes comments only, but the
-			// configured value does not select CoreOptions#FILE_COMPRESSION and should be migrated.
-			// Source:
+			// Paimon 1.3.1 CoreOptions#fileCompression reads only FILE_COMPRESSION. Using the
+			// canonical constant prevents the Connector field name "compression" from becoming an
+			// unknown Schema option that Paimon silently ignores.
+			// Sources:
 			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L259-L264
-			schemaBuilder.option("compression", config.getCompression(tableName));
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L2237-L2240
+			schemaBuilder.option(
+					CoreOptions.FILE_COMPRESSION.key(), config.getCompression(tableName));
 		}
 
 		// ===== Performance Optimization Options =====

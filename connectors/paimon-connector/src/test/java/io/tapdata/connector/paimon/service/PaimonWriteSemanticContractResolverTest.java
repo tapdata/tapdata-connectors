@@ -335,6 +335,34 @@ class PaimonWriteSemanticContractResolverTest {
     }
 
     @Test
+    void legacyCompressionOptionMustBeRejectedBeforeTableCreation() {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option("compression", "snappy")
+                        .build();
+
+        // Paimon 1.3.1 only consumes CoreOptions.FILE_COMPRESSION
+        // ("file.compression"). Unknown table options are not rejected by the generic schema
+        // validation TODO, so the legacy key silently leaves the Paimon default unchanged.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L259-L264
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L93-L101
+        assertEquals("zstd", CoreOptions.fromMap(schema.options()).fileCompression());
+
+        PaimonFatalWriteException thrown =
+                assertThrows(
+                        PaimonFatalWriteException.class,
+                        () ->
+                                PaimonWriteSemanticContractResolver.validateNewTable(
+                                        "default.legacy_compression", schema));
+
+        assertTrue(thrown.getMessage().contains("PAIMON_LEGACY_COMPRESSION_OPTION"));
+        assertTrue(thrown.getMessage().contains(CoreOptions.FILE_COMPRESSION.key()));
+    }
+
+    @Test
     void optionalChangelogMustPreserveExistingRetractFilterConfiguration() {
         FileStoreTable table =
                 table(
