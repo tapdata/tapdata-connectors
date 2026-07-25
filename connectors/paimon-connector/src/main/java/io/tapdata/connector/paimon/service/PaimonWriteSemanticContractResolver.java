@@ -159,6 +159,7 @@ final class PaimonWriteSemanticContractResolver {
         Objects.requireNonNull(schema, "schema");
         validateNoLegacyCompressionOption(tableKey, schema);
         CoreOptions options = CoreOptions.fromMap(schema.options());
+        validateBucketConfiguration(tableKey, schema, options);
         validateFileFormatProvider(options);
         validateKeyDynamicIgnoreDeleteConflict(
                 tableKey,
@@ -200,6 +201,94 @@ final class PaimonWriteSemanticContractResolver {
         // https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/format/FileFormat.java#L76-L92
         // https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/factories/FormatFactoryUtil.java#L39-L60
         FileFormat.fromIdentifier(options.formatType(), options.toConfiguration());
+    }
+
+    private static void validateBucketConfiguration(
+            String tableKey, Schema schema, CoreOptions options) {
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        int bucket = options.bucket();
+
+        // This is a scoped equivalent of Paimon 1.3.1's private
+        // SchemaValidation#validateBucket. It runs against final options after tableProperties
+        // and Catalog defaults, before Catalog#createTable. Keep every branch aligned with the
+        // upstream method instead of expanding this class into a generic Paimon option validator.
+        // Source:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L556-L604
+        if (bucket == -1) {
+            if (options.toMap().get(CoreOptions.BUCKET_KEY.key()) != null) {
+                throw invalidBucket(
+                        tableKey,
+                        bucket,
+                        "bucket-key cannot be defined for dynamic bucket mode");
+            }
+            if (tableSchema.primaryKeys().isEmpty()
+                    && options.toMap()
+                                    .get(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key())
+                            != null) {
+                throw invalidBucket(
+                        tableKey,
+                        bucket,
+                        "append-only dynamic bucket does not support "
+                                + CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key());
+            }
+            return;
+        }
+
+        boolean primaryKeyPostpone =
+                bucket == BucketMode.POSTPONE_BUCKET
+                        && !tableSchema.primaryKeys().isEmpty();
+        if (bucket < 1 && !primaryKeyPostpone) {
+            throw invalidBucket(
+                    tableKey,
+                    bucket,
+                    "bucket must be -1, -2 for a primary-key table, or greater than 0");
+        }
+
+        if (tableSchema.primaryKeys().isEmpty() && tableSchema.bucketKeys().isEmpty()) {
+            throw invalidBucket(
+                    tableKey,
+                    bucket,
+                    "bucketed append-only table requires bucket-key");
+        }
+
+        List<String> nestedBucketKeys =
+                tableSchema.fields().stream()
+                        .filter(
+                                field ->
+                                        tableSchema.bucketKeys().contains(field.name())
+                                                && isNestedBucketKeyType(field.type()))
+                        .map(DataField::name)
+                        .collect(java.util.stream.Collectors.toList());
+        if (!nestedBucketKeys.isEmpty()) {
+            throw invalidBucket(
+                    tableKey,
+                    bucket,
+                    "nested type cannot be used as bucket-key: " + nestedBucketKeys);
+        }
+    }
+
+    private static boolean isNestedBucketKeyType(DataType dataType) {
+        switch (dataType.getTypeRoot()) {
+            case ARRAY:
+            case MULTISET:
+            case MAP:
+            case ROW:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static PaimonFatalWriteException invalidBucket(
+            String tableKey, int bucket, String reason) {
+        return new PaimonFatalWriteException(
+                "PAIMON_INVALID_BUCKET_CONFIGURATION"
+                        + " table="
+                        + tableKey
+                        + ", bucket="
+                        + bucket
+                        + ", reason="
+                        + reason);
     }
 
     static BucketMode deriveBucketMode(Schema schema) {

@@ -241,6 +241,152 @@ class PaimonServiceCreateTableValidationTest {
         }
     }
 
+    @ParameterizedTest(name = "{0} => bucket={2}, mode={3}")
+    @MethodSource("firstClassBucketModes")
+    void firstClassBucketModeMustMaterializePaimonMode(
+            String bucketMode,
+            Integer bucketCount,
+            int expectedBucket,
+            BucketMode expectedMode)
+            throws Exception {
+        String tableName = "first_class_" + bucketMode;
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        PaimonConfig config = config(tableName);
+        config.setBucketMode(bucketMode);
+        config.setBucketCount(bucketCount);
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+
+        try {
+            assertTrue(service.createTable(crossPartitionTable(tableName)));
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+            assertEquals(
+                    Integer.toString(expectedBucket),
+                    table.options().get(CoreOptions.BUCKET.key()));
+            assertEquals(expectedMode, table.bucketMode());
+        } finally {
+            service.close();
+        }
+    }
+
+    private static Stream<Arguments> firstClassBucketModes() {
+        return Stream.of(
+                Arguments.of("dynamic", null, -1, BucketMode.KEY_DYNAMIC),
+                Arguments.of(
+                        "postpone",
+                        null,
+                        BucketMode.POSTPONE_BUCKET,
+                        BucketMode.POSTPONE_MODE),
+                Arguments.of("fixed", 4, 4, BucketMode.HASH_FIXED));
+    }
+
+    @ParameterizedTest(name = "fixed bucketCount={0}")
+    @MethodSource("invalidFixedBucketCounts")
+    void invalidFixedBucketCountMustFailWithoutFallback(Integer bucketCount) throws Exception {
+        String suffix = bucketCount == null ? "null" : Integer.toString(bucketCount).replace('-', 'n');
+        String tableName = "invalid_fixed_" + suffix;
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        PaimonConfig config = config(tableName);
+        config.setBucketMode("fixed");
+        config.setBucketCount(bucketCount);
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+
+        try {
+            IllegalArgumentException thrown =
+                    assertThrows(
+                            IllegalArgumentException.class,
+                            () -> service.createTable(crossPartitionTable(tableName)));
+
+            assertTrue(thrown.getMessage().contains("Bucket count"));
+            assertThrows(Catalog.TableNotExistException.class, () -> catalog.getTable(identifier));
+        } finally {
+            service.close();
+        }
+    }
+
+    private static Stream<Arguments> invalidFixedBucketCounts() {
+        return Stream.of(
+                Arguments.of((Integer) null),
+                Arguments.of(0),
+                Arguments.of(-1),
+                Arguments.of(-2));
+    }
+
+    @Test
+    void unknownFirstClassBucketModeMustFailBeforeTableCreation() throws Exception {
+        String tableName = "unknown_bucket_mode";
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        PaimonConfig config = config(tableName);
+        config.setBucketMode("automatic");
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+
+        try {
+            IllegalArgumentException thrown =
+                    assertThrows(
+                            IllegalArgumentException.class,
+                            () -> service.createTable(crossPartitionTable(tableName)));
+
+            assertTrue(thrown.getMessage().contains("Bucket mode"));
+            assertThrows(Catalog.TableNotExistException.class, () -> catalog.getTable(identifier));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void appendOnlyPostponeMustFailBeforeTableCreation() throws Exception {
+        String tableName = "append_postpone";
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        PaimonConfig config = config(tableName);
+        config.setBucketMode("postpone");
+        config.setPartitionKey(Collections.emptyList());
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+
+        try {
+            PaimonFatalWriteException thrown =
+                    assertThrows(
+                            PaimonFatalWriteException.class,
+                            () -> service.createTable(appendOnlyTable(tableName)));
+
+            assertTrue(thrown.getMessage().contains("PAIMON_INVALID_BUCKET_CONFIGURATION"));
+            assertThrows(Catalog.TableNotExistException.class, () -> catalog.getTable(identifier));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void tablePropertyBucketMustOverrideFirstClassBucketAndBeRevalidated() throws Exception {
+        String tableName = "bucket_property_override";
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        PaimonConfig config = config(tableName);
+        config.setBucketMode("fixed");
+        config.setBucketCount(4);
+        config.setTableProperties(
+                Collections.singletonList(
+                        property(
+                                CoreOptions.BUCKET.key(),
+                                Integer.toString(BucketMode.POSTPONE_BUCKET))));
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+
+        try {
+            assertTrue(service.createTable(crossPartitionTable(tableName)));
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+            assertEquals(
+                    Integer.toString(BucketMode.POSTPONE_BUCKET),
+                    table.options().get(CoreOptions.BUCKET.key()));
+            assertEquals(BucketMode.POSTPONE_MODE, table.bucketMode());
+        } finally {
+            service.close();
+        }
+    }
+
     @ParameterizedTest(name = "{0} => {2}")
     @MethodSource("physicalBucketModes")
     void derivedBucketModeMustMatchMaterializedFileStoreTable(
@@ -434,6 +580,12 @@ class PaimonServiceCreateTableValidationTest {
         return new TapTable(tableName)
                 .add(new TapField("id", "INT").primaryKeyPos(1))
                 .add(new TapField("pt", "INT"))
+                .add(new TapField("value", "STRING"));
+    }
+
+    private TapTable appendOnlyTable(String tableName) {
+        return new TapTable(tableName)
+                .add(new TapField("id", "INT"))
                 .add(new TapField("value", "STRING"));
     }
 

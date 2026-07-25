@@ -5,6 +5,7 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -395,6 +396,120 @@ class PaimonWriteSemanticContractResolverTest {
                                         "default.unavailable_format", schema));
 
         assertTrue(thrown.getMessage().contains(fileFormat));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("bucketValidationSchemas")
+    void bucketValidationMustMatchPaimonSchemaValidation(
+            String description, Schema schema, boolean expectedValid) {
+        if (expectedValid) {
+            org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+                    () ->
+                            PaimonWriteSemanticContractResolver.validateNewTable(
+                                    "default.bucket_validation", schema));
+            org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+                    () -> SchemaValidation.validateTableSchema(TableSchema.create(0L, schema)));
+            return;
+        }
+
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        PaimonWriteSemanticContractResolver.validateNewTable(
+                                "default.bucket_validation", schema));
+        assertThrows(
+                RuntimeException.class,
+                () -> SchemaValidation.validateTableSchema(TableSchema.create(0L, schema)));
+    }
+
+    private static Stream<Arguments> bucketValidationSchemas() {
+        return Stream.of(
+                Arguments.of(
+                        "dynamic bucket rejects bucket-key",
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .primaryKey("id")
+                                .option(CoreOptions.BUCKET.key(), "-1")
+                                .option(CoreOptions.BUCKET_KEY.key(), "id")
+                                .build(),
+                        false),
+                Arguments.of(
+                        "append dynamic rejects full-compaction delta commits",
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .option(CoreOptions.BUCKET.key(), "-1")
+                                .option(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1")
+                                .build(),
+                        false),
+                Arguments.of(
+                        "append table rejects postpone bucket",
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .option(
+                                        CoreOptions.BUCKET.key(),
+                                        Integer.toString(BucketMode.POSTPONE_BUCKET))
+                                .build(),
+                        false),
+                Arguments.of(
+                        "primary key table rejects other negative bucket",
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .primaryKey("id")
+                                .option(CoreOptions.BUCKET.key(), "-3")
+                                .build(),
+                        false),
+                Arguments.of(
+                        "append fixed requires bucket-key",
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .option(CoreOptions.BUCKET.key(), "4")
+                                .build(),
+                        false),
+                Arguments.of(
+                        "bucket-key rejects nested type",
+                        Schema.newBuilder()
+                                .column(
+                                        "nested",
+                                        DataTypes.MAP(
+                                                DataTypes.STRING(), DataTypes.STRING()))
+                                .option(CoreOptions.BUCKET.key(), "4")
+                                .option(CoreOptions.BUCKET_KEY.key(), "nested")
+                                .build(),
+                        false),
+                Arguments.of(
+                        "primary dynamic is valid",
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .primaryKey("id")
+                                .option(CoreOptions.BUCKET.key(), "-1")
+                                .build(),
+                        true),
+                Arguments.of(
+                        "primary postpone is valid",
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .primaryKey("id")
+                                .option(
+                                        CoreOptions.BUCKET.key(),
+                                        Integer.toString(BucketMode.POSTPONE_BUCKET))
+                                .build(),
+                        true),
+                Arguments.of(
+                        "primary fixed is valid",
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .primaryKey("id")
+                                .option(CoreOptions.BUCKET.key(), "4")
+                                .build(),
+                        true),
+                Arguments.of(
+                        "append fixed with primitive bucket-key is valid",
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .option(CoreOptions.BUCKET.key(), "4")
+                                .option(CoreOptions.BUCKET_KEY.key(), "id")
+                                .build(),
+                        true));
     }
 
     @Test

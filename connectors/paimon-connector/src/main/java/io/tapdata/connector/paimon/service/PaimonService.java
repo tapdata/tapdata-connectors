@@ -706,27 +706,17 @@ public class PaimonService implements AutoCloseable {
 			schemaBuilder.partitionKeys(config.getPartitionKey(tableName));
 		}
 
-		// bucket=-1 is only a schema-level request, not one concrete runtime mode. Paimon 1.3.1
-		// resolves it to BUCKET_UNAWARE for append-only tables, HASH_DYNAMIC when a primary key
-		// covers the partition key, and KEY_DYNAMIC for cross-partition upsert. Positive values
-		// resolve to HASH_FIXED:
+		// Map the Connector's first-class dynamic/postpone/fixed choice to Paimon's native bucket
+		// values before tableProperties applies its documented override. Paimon defines -1 as
+		// dynamic, -2 as postpone, and positive values as fixed; PaimonConfig rejects every other
+		// first-class combination instead of silently falling back.
+		// Sources:
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
 		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
 		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#L72-L75
-		if ("dynamic".equalsIgnoreCase(config.getBucketMode(tableName))) {
-			schemaBuilder.option("bucket", "-1");
-		} else {
-			// Fixed bucket mode: set specific bucket count
-			Integer bucketCount = config.getBucketCount(tableName);
-			if (bucketCount == null || bucketCount <= 0) {
-				// REVIEW: spec.json permits -2, which means POSTPONE_MODE in Paimon, but this branch
-				// rewrites it to 4. At present POSTPONE_MODE is reachable only when a later custom
-				// tableProperties entry overrides "bucket" to -2; the first-class UI value is
-				// misleading and should be validated/mapped explicitly.
-				// https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
-				bucketCount = 4; // Default to 4 buckets if not configured
-			}
-			schemaBuilder.option("bucket", String.valueOf(bucketCount));
-		}
+		schemaBuilder.option(
+				CoreOptions.BUCKET.key(), Integer.toString(config.resolveBucket(tableName)));
 		if (EmptyKit.isNotBlank(config.getFileFormat(tableName))) {
 			// The final Schema is preflighted with Paimon's FileFormat provider discovery before
 			// Catalog#createTable. Use the canonical option constant so first-class and

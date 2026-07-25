@@ -2,11 +2,13 @@ package io.tapdata.connector.paimon.config;
 
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.kit.EmptyKit;
+import org.apache.paimon.table.BucketMode;
 
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -48,12 +50,13 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     private List<String> partitionKey;
 
     /*
-     * Connector-level bucket choice. Both values use one StreamTableWrite per physical table;
-     * "dynamic" only writes bucket=-1. Paimon then materializes HASH_DYNAMIC, KEY_DYNAMIC or
-     * BUCKET_UNAWARE from primary/partition-key coverage, while a positive bucket count becomes
-     * HASH_FIXED. Do not infer the final BucketMode from this string alone.
+     * Connector-level bucket choice. All modes use one StreamTableWrite per physical table.
+     * "dynamic" writes bucket=-1, "postpone" writes bucket=-2, and "fixed" requires a positive
+     * bucket count. Paimon materializes the final BucketMode from the schema and table shape.
      *
      * Sources:
+     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
+     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
      * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
      * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#L72-L75
      */
@@ -273,6 +276,46 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     public void setBucketCount(Integer bucketCount) {
         this.bucketCount = bucketCount;
+    }
+
+    /**
+     * Resolve the first-class bucket configuration for one logical table to Paimon's native
+     * {@code bucket} value.
+     *
+     * <p>Paimon 1.3.1 defines -1 as dynamic, -2 as postpone, and positive values as fixed bucket
+     * mode. A non-positive fixed count is never reinterpreted as another mode.
+     *
+     * <p>Sources:
+     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
+     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
+     *
+     * @param tableName logical table name used for per-table configuration lookup
+     * @return Paimon's native bucket value
+     */
+    public int resolveBucket(String tableName) {
+        return resolveBucket(getBucketMode(tableName), getBucketCount(tableName));
+    }
+
+    private static int resolveBucket(String mode, Integer fixedBucketCount) {
+        if (mode == null || mode.trim().isEmpty()) {
+            throw new IllegalArgumentException("Bucket mode is required");
+        }
+
+        switch (mode.trim().toLowerCase(Locale.ROOT)) {
+            case "dynamic":
+                return -1;
+            case "postpone":
+                return BucketMode.POSTPONE_BUCKET;
+            case "fixed":
+                if (fixedBucketCount == null || fixedBucketCount <= 0) {
+                    throw new IllegalArgumentException(
+                            "Bucket count must be greater than 0 when using fixed bucket mode");
+                }
+                return fixedBucketCount;
+            default:
+                throw new IllegalArgumentException(
+                        "Bucket mode must be one of 'dynamic', 'postpone', or 'fixed'");
+        }
     }
 
     /**
@@ -568,20 +611,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
             throw new IllegalArgumentException("Storage type is required");
         }
 
-        if (bucketMode == null || bucketMode.trim().isEmpty()) {
-            throw new IllegalArgumentException("Bucket mode is required");
-        }
-
-        if (!"dynamic".equalsIgnoreCase(bucketMode) && !"fixed".equalsIgnoreCase(bucketMode)) {
-            throw new IllegalArgumentException("Bucket mode must be either 'dynamic' or 'fixed'");
-        }
-
-        // Validate bucket count only for fixed mode
-        if ("fixed".equalsIgnoreCase(bucketMode)) {
-            if (bucketCount == null || bucketCount <= 0) {
-                throw new IllegalArgumentException("Bucket count must be greater than 0 when using fixed bucket mode");
-            }
-        }
+        resolveBucket(bucketMode, bucketCount);
         
         switch (storageType.toLowerCase()) {
             case "s3":
