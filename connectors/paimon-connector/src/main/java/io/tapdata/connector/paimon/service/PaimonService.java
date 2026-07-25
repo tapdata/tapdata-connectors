@@ -918,7 +918,7 @@ public class PaimonService implements AutoCloseable {
 		Identifier identifier = Identifier.create(database, tableName);
 
 		try {
-			runTableDdl(tableKey, () -> catalog.dropTable(identifier, true));
+			runTableDdl(tableKey, tableName, () -> catalog.dropTable(identifier, true));
 		} catch (Catalog.TableNotExistException e) {
 			// Table does not exist, do nothing
 		}
@@ -946,7 +946,7 @@ public class PaimonService implements AutoCloseable {
 
 		// Drain and invalidate the old writer before changing table contents. Native truncate keeps
 		// partition keys, options, UUID and physical location intact.
-		runTableDdl(tableKey, () -> {
+		runTableDdl(tableKey, tableName, () -> {
 			Table currentTable = catalog.getTable(identifier);
 			try (BatchTableCommit commit = currentTable.newBatchWriteBuilder().newCommit()) {
 				commit.truncateTable();
@@ -954,7 +954,8 @@ public class PaimonService implements AutoCloseable {
 		});
 	}
 
-	private void runTableDdl(String tableKey, TableDdlAction action) throws Exception {
+	private void runTableDdl(String tableKey, String tableName, TableDdlAction action)
+			throws Exception {
 		throwIfStickyWriteFailure();
 		Object lock = commitLocks.computeIfAbsent(tableKey, ignored -> new Object());
 		synchronized (lock) {
@@ -972,6 +973,7 @@ public class PaimonService implements AutoCloseable {
 				}
 				action.run();
 			} finally {
+				invalidateTableDerivedCaches(tableKey, tableName);
 				// Keep ownership through the Catalog DDL itself. Releasing it before action.run()
 				// would let a second local service create a writer against a half-mutated table.
 				unregisterPhysicalTableOwner(tableKey);
@@ -982,6 +984,33 @@ public class PaimonService implements AutoCloseable {
 				drainingTables.remove(tableKey);
 			}
 		}
+	}
+
+	/**
+	 * Invalidate Connector-owned metadata derived from one logical table generation.
+	 *
+	 * <p>Paimon 1.3.1 {@code CachingCatalog#dropTable} invalidates Paimon's own table and
+	 * partition caches after a successful drop. Connector policy additionally invalidates these
+	 * independent row-layout and legacy-hash caches after every DDL attempt, including failures,
+	 * so a later table generation cannot reuse stale field positions or source primary keys.
+	 * This helper runs inside the existing per-table lifecycle lock.
+	 *
+	 * <p>Source:
+	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/CachingCatalog.java#L184-L197
+	 */
+	private void invalidateTableDerivedCaches(String tableKey, String tableName) {
+		paimonFieldCache.remove(tableKey);
+		fieldIndexCache.remove(tableKey);
+		computeHashKey.remove(tableName);
+		primaryKeyMap.remove(tableName);
+	}
+
+	/** Clear the same Connector-owned derived-cache set during whole-service cleanup. */
+	private void clearAllTableDerivedCaches() {
+		paimonFieldCache.clear();
+		fieldIndexCache.clear();
+		computeHashKey.clear();
+		primaryKeyMap.clear();
 	}
 
 	@FunctionalInterface
@@ -1019,11 +1048,6 @@ public class PaimonService implements AutoCloseable {
 		beginSourceIngress(ingressGuard, "writeRecords", tableKey);
 		boolean successful = false;
 		try {
-			computeHashKey.computeIfAbsent(tableName,
-					ignored -> Boolean.TRUE.equals(config.getHashKey(tableName))
-							&& EmptyKit.isNotEmpty(table.primaryKeys(true))
-							&& table.primaryKeys(true).size() > 5);
-			primaryKeyMap.putIfAbsent(tableName, table.primaryKeys(true));
 			WriteListResult<TapRecordEvent> result =
 					writeRecordsWithStreamWriteInternal(recordEvents, table, connectorContext);
 			successful = true;
@@ -1142,6 +1166,7 @@ public class PaimonService implements AutoCloseable {
 						lastCommitTime.computeIfAbsent(tableKey, k -> new AtomicLong())
 								.set(System.currentTimeMillis());
 					}
+					cacheSourceDerivedState(tableName, table);
 					// Validate the whole source batch before allocating a writer, IOManager or
 					// dynamic-bucket RocksDB state. An existing context supplies the immutable
 					// contract it was created with; a first write resolves it from the target table.
@@ -1309,6 +1334,22 @@ public class PaimonService implements AutoCloseable {
 		}
 	}
 
+	/**
+	 * Cache source metadata used by the Connector's legacy synthetic-key path.
+	 *
+	 * <p>The caller holds the same per-table lifecycle lock as {@link #runTableDdl}. Keeping
+	 * population under that lock prevents an ingress waiting behind DDL from publishing metadata
+	 * for the old table generation after the DDL finally block has invalidated it. This changes
+	 * only cache timing; the legacy MD5 encoding and {@code VARCHAR(32)} contract are unchanged.
+	 */
+	private void cacheSourceDerivedState(String tableName, TapTable table) {
+		computeHashKey.computeIfAbsent(tableName,
+				ignored -> Boolean.TRUE.equals(config.getHashKey(tableName))
+						&& EmptyKit.isNotEmpty(table.primaryKeys(true))
+						&& table.primaryKeys(true).size() > 5);
+		primaryKeyMap.putIfAbsent(tableName, table.primaryKeys(true));
+	}
+
 	private boolean isPaimonConflict(Throwable e) {
 		Throwable t = e;
 		while (t != null) {
@@ -1382,9 +1423,8 @@ public class PaimonService implements AutoCloseable {
 		drainingTables.clear();
 		asyncCommitEligibleTables.clear();
 
-		// Clear Paimon field cache
-		paimonFieldCache.clear();
-		fieldIndexCache.clear();
+		// Clear every Connector-owned table-derived cache, matching the single-table DDL path.
+		clearAllTableDerivedCaches();
 
 		// Close old catalog if exists
 		if (catalog != null) {

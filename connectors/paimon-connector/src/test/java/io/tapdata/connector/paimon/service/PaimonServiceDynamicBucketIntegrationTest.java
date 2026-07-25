@@ -390,6 +390,147 @@ class PaimonServiceDynamicBucketIntegrationTest {
     }
 
     @Test
+    void connectorDropRecreateMustUseNewPhysicalFieldOrder() throws Exception {
+        PaimonConfig config = config("ddl-schema-generation");
+        TapTable tapTable =
+                new TapTable("ddl_schema_t")
+                        .add(new TapField("left_value", "STRING"))
+                        .add(new TapField("id", "INT").primaryKeyPos(1))
+                        .add(new TapField("right_value", "STRING"));
+
+        PaimonService service = service(config);
+        try {
+            Catalog catalog = catalog(service);
+            createFixedSchemaOrderTable(catalog, "ddl_schema_t", false);
+            TapConnectorContext connectorContext = context(stateMap());
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert(
+                                    "ddl_schema_t",
+                                    map(
+                                            "id",
+                                            1,
+                                            "left_value",
+                                            "old-left",
+                                            "right_value",
+                                            "old-right"))),
+                    tapTable,
+                    connectorContext);
+
+            service.dropTable("ddl_schema_t");
+            createFixedSchemaOrderTable(catalog, "ddl_schema_t", true);
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert(
+                                    "ddl_schema_t",
+                                    map(
+                                            "id",
+                                            2,
+                                            "left_value",
+                                            "new-left",
+                                            "right_value",
+                                            "new-right"))),
+                    tapTable,
+                    connectorContext);
+
+            // Paimon 1.3.1 CachingCatalog#dropTable invalidates Paimon's own cached Table.
+            // Connector policy must independently invalidate the cached DataField order so the
+            // recreated generation is converted as right_value,id,left_value.
+            // Source:
+            // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/CachingCatalog.java#L184-L197
+            List<InternalRow> rows =
+                    readRows(
+                            catalog.getTable(
+                                    Identifier.create(DATABASE, "ddl_schema_t")));
+            assertEquals(1, rows.size());
+            assertEquals("new-right", rows.get(0).getString(0).toString());
+            assertEquals(2, rows.get(0).getInt(1));
+            assertEquals("new-left", rows.get(0).getString(2).toString());
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void connectorDropRecreateMustRecomputeHashModeAndSourcePrimaryKeys()
+            throws Exception {
+        PaimonConfig config = config("ddl-hash-generation");
+        config.setHashKey(false);
+        Map<String, Object> persistedState = new ConcurrentHashMap<>();
+        TapConnectorContext connectorContext = context(stateMap(persistedState));
+        PaimonService service = service(config);
+        try {
+            Catalog catalog = catalog(service);
+            createFixedNonPartitionedTable(catalog, "ddl_hash_t");
+            TapTable simpleTable =
+                    new TapTable("ddl_hash_t")
+                            .add(new TapField("value", "STRING"))
+                            .add(new TapField("id", "INT").primaryKeyPos(1));
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert(
+                                    "ddl_hash_t",
+                                    map("value", "without-hash", "id", 1))),
+                    simpleTable,
+                    connectorContext);
+
+            service.dropTable("ddl_hash_t");
+            config.setHashKey(true);
+            createSyntheticHashFixedTable(catalog, "ddl_hash_t");
+            TapTable syntheticTable = syntheticHashTapTable("ddl_hash_t", false);
+            Map<String, Object> syntheticData = syntheticHashData("with-hash");
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert("ddl_hash_t", syntheticData)),
+                    syntheticTable,
+                    connectorContext);
+
+            List<InternalRow> hashedRows =
+                    readRows(
+                            catalog.getTable(
+                                    Identifier.create(DATABASE, "ddl_hash_t")));
+            assertEquals(1, hashedRows.size());
+            assertEquals(
+                    service.toHash(syntheticTable.primaryKeys(true), syntheticData),
+                    hashedRows.get(0).getString(1).toString());
+
+            service.dropTable("ddl_hash_t");
+            config.setHashKey(false);
+            createFixedNonPartitionedTable(catalog, "ddl_hash_t");
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert(
+                                    "ddl_hash_t",
+                                    map("value", "without-hash-again", "id", 2))),
+                    simpleTable,
+                    connectorContext);
+
+            // The two DDL boundaries must force false -> true -> false recomputation and replace
+            // the six-field source PK dependency set with the recreated table's single id key.
+            assertEquals(
+                    Boolean.FALSE,
+                    derivedCache(service, "computeHashKey").get("ddl_hash_t"));
+            Object cachedPrimaryKeys =
+                    derivedCache(service, "primaryKeyMap").get("ddl_hash_t");
+            assertTrue(cachedPrimaryKeys instanceof java.util.Collection);
+            assertEquals(
+                    Collections.singletonList("id"),
+                    new ArrayList<>((java.util.Collection<?>) cachedPrimaryKeys));
+            List<InternalRow> plainRows =
+                    readRows(
+                            catalog.getTable(
+                                    Identifier.create(DATABASE, "ddl_hash_t")));
+            assertEquals(1, plainRows.size());
+            assertEquals(2, plainRows.get(0).getInt(0));
+            assertEquals(
+                    "without-hash-again",
+                    plainRows.get(0).getString(1).toString());
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
     void keyDynamicDeduplicateBatchMustRejectLaterSparseUpdateWithoutSnapshotAdvance()
             throws Exception {
         PaimonConfig config = config("key-deduplicate-sparse-batch");
@@ -1491,6 +1632,47 @@ class PaimonServiceDynamicBucketIntegrationTest {
                 false);
     }
 
+    private void createFixedSchemaOrderTable(
+            Catalog catalog, String tableName, boolean reordered) throws Exception {
+        Schema.Builder builder = Schema.newBuilder();
+        if (reordered) {
+            builder.column("right_value", DataTypes.STRING())
+                    .column("id", DataTypes.INT())
+                    .column("left_value", DataTypes.STRING());
+        } else {
+            builder.column("id", DataTypes.INT())
+                    .column("left_value", DataTypes.STRING())
+                    .column("right_value", DataTypes.STRING());
+        }
+        catalog.createTable(
+                Identifier.create(DATABASE, tableName),
+                builder.primaryKey("id")
+                        .option("bucket", "2")
+                        .option("write-buffer-size", "8mb")
+                        .build(),
+                false);
+    }
+
+    private void createSyntheticHashFixedTable(Catalog catalog, String tableName)
+            throws Exception {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("value", DataTypes.STRING())
+                        // Paimon stores the Connector's legacy MD5 key in the existing
+                        // VARCHAR(32) physical contract; F4 only refreshes its dependencies.
+                        .column("_hash_key", DataTypes.VARCHAR(32));
+        for (int i = 1; i <= 6; i++) {
+            builder.column("pk" + i, DataTypes.INT());
+        }
+        catalog.createTable(
+                Identifier.create(DATABASE, tableName),
+                builder.primaryKey("_hash_key")
+                        .option("bucket", "2")
+                        .option("write-buffer-size", "8mb")
+                        .build(),
+                false);
+    }
+
     private void createInputRowKindTable(Catalog catalog, String tableName) throws Exception {
         catalog.createTable(
                 Identifier.create(DATABASE, tableName),
@@ -1720,6 +1902,14 @@ class PaimonServiceDynamicBucketIntegrationTest {
         Field field = PaimonService.class.getDeclaredField("tableWriteContexts");
         field.setAccessible(true);
         return ((Map<?, ?>) field.get(service)).size();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> derivedCache(PaimonService service, String fieldName)
+            throws Exception {
+        Field field = PaimonService.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return (Map<String, Object>) field.get(service);
     }
 
     private boolean containsMessage(Throwable error, String text) {
