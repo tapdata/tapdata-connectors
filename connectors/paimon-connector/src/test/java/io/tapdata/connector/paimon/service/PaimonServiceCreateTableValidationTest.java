@@ -28,6 +28,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -38,7 +39,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class PaimonServiceCreateTableValidationTest {
@@ -427,6 +431,171 @@ class PaimonServiceCreateTableValidationTest {
         }
     }
 
+    @ParameterizedTest(name = "{0}: {4} -> {5}")
+    @MethodSource("existingBucketModeMismatches")
+    void existingBucketModeMismatchMustWarnWithPhysicalModes(
+            String tableName,
+            Schema existingSchema,
+            String configuredMode,
+            Integer configuredBucketCount,
+            BucketMode actualMode,
+            BucketMode configuredPhysicalMode)
+            throws Exception {
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+        catalog.createTable(identifier, existingSchema, false);
+        FileStoreTable before = (FileStoreTable) catalog.getTable(identifier);
+        Map<String, String> optionsBefore = new HashMap<>(before.options());
+        Long snapshotBefore = before.snapshotManager().latestSnapshotIdFromFileSystem();
+
+        PaimonConfig config = config(tableName);
+        config.setBucketMode(configuredMode);
+        config.setBucketCount(configuredBucketCount);
+        Log log = mock(Log.class);
+        PaimonService service = service(config, catalog, log);
+
+        try {
+            assertFalse(service.createTable(new TapTable(tableName)));
+
+            verify(log)
+                    .warn(
+                            eq(
+                                    "Table {} already exists with Paimon bucket mode {}, but "
+                                            + "effective config resolves to {}. Cannot switch bucket mode "
+                                            + "for existing table. Using existing table configuration."),
+                            eq(tableName),
+                            eq(actualMode),
+                            eq(configuredPhysicalMode));
+            FileStoreTable after = (FileStoreTable) catalog.getTable(identifier);
+            assertEquals(actualMode, after.bucketMode());
+            assertEquals(optionsBefore, after.options());
+            assertEquals(snapshotBefore, after.snapshotManager().latestSnapshotIdFromFileSystem());
+        } finally {
+            service.close();
+        }
+    }
+
+    private static Stream<Arguments> existingBucketModeMismatches() {
+        return Stream.of(
+                Arguments.of(
+                        "existing_fixed_configured_postpone",
+                        primaryKeySchema("4"),
+                        "postpone",
+                        null,
+                        BucketMode.HASH_FIXED,
+                        BucketMode.POSTPONE_MODE),
+                Arguments.of(
+                        "existing_postpone_configured_fixed",
+                        primaryKeySchema("-2"),
+                        "fixed",
+                        4,
+                        BucketMode.POSTPONE_MODE,
+                        BucketMode.HASH_FIXED),
+                Arguments.of(
+                        "existing_postpone_configured_dynamic",
+                        crossPartitionSchema("-2"),
+                        "dynamic",
+                        null,
+                        BucketMode.POSTPONE_MODE,
+                        BucketMode.KEY_DYNAMIC));
+    }
+
+    @ParameterizedTest(name = "{0}: matching {4}")
+    @MethodSource("matchingExistingBucketModes")
+    void matchingExistingBucketModeMustNotWarn(
+            String tableName,
+            Schema existingSchema,
+            String configuredMode,
+            Integer configuredBucketCount,
+            BucketMode expectedMode)
+            throws Exception {
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+        catalog.createTable(identifier, existingSchema, false);
+        FileStoreTable before = (FileStoreTable) catalog.getTable(identifier);
+        Map<String, String> optionsBefore = new HashMap<>(before.options());
+        Long snapshotBefore = before.snapshotManager().latestSnapshotIdFromFileSystem();
+        PaimonConfig config = config(tableName);
+        config.setBucketMode(configuredMode);
+        config.setBucketCount(configuredBucketCount);
+        Log log = mock(Log.class);
+        PaimonService service = service(config, catalog, log);
+
+        try {
+            assertFalse(service.createTable(new TapTable(tableName)));
+            FileStoreTable after = (FileStoreTable) catalog.getTable(identifier);
+            assertEquals(expectedMode, after.bucketMode());
+            assertEquals(optionsBefore, after.options());
+            assertEquals(snapshotBefore, after.snapshotManager().latestSnapshotIdFromFileSystem());
+            verifyNoInteractions(log);
+        } finally {
+            service.close();
+        }
+    }
+
+    private static Stream<Arguments> matchingExistingBucketModes() {
+        return Stream.of(
+                Arguments.of(
+                        "matching_bucket_unaware",
+                        appendOnlySchema("-1"),
+                        "dynamic",
+                        null,
+                        BucketMode.BUCKET_UNAWARE),
+                Arguments.of(
+                        "matching_hash_dynamic",
+                        primaryKeySchema("-1"),
+                        "dynamic",
+                        null,
+                        BucketMode.HASH_DYNAMIC),
+                Arguments.of(
+                        "matching_key_dynamic",
+                        crossPartitionSchema("-1"),
+                        "dynamic",
+                        null,
+                        BucketMode.KEY_DYNAMIC),
+                Arguments.of(
+                        "matching_postpone",
+                        primaryKeySchema("-2"),
+                        "postpone",
+                        null,
+                        BucketMode.POSTPONE_MODE),
+                Arguments.of(
+                        "matching_fixed_different_count",
+                        primaryKeySchema("4"),
+                        "fixed",
+                        8,
+                        BucketMode.HASH_FIXED));
+    }
+
+    @Test
+    void tablePropertyBucketOverrideMustDriveExistingModeComparison() throws Exception {
+        String tableName = "existing_postpone_property_override";
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+        catalog.createTable(identifier, primaryKeySchema("-2"), false);
+        FileStoreTable before = (FileStoreTable) catalog.getTable(identifier);
+        Map<String, String> optionsBefore = new HashMap<>(before.options());
+        Long snapshotBefore = before.snapshotManager().latestSnapshotIdFromFileSystem();
+        PaimonConfig config = config(tableName);
+        config.setBucketMode("fixed");
+        config.setBucketCount(4);
+        config.setTableProperties(
+                Collections.singletonList(property(CoreOptions.BUCKET.key(), "-2")));
+        Log log = mock(Log.class);
+        PaimonService service = service(config, catalog, log);
+
+        try {
+            assertFalse(service.createTable(new TapTable(tableName)));
+            FileStoreTable after = (FileStoreTable) catalog.getTable(identifier);
+            assertEquals(BucketMode.POSTPONE_MODE, after.bucketMode());
+            assertEquals(optionsBefore, after.options());
+            assertEquals(snapshotBefore, after.snapshotManager().latestSnapshotIdFromFileSystem());
+            verifyNoInteractions(log);
+        } finally {
+            service.close();
+        }
+    }
+
     @ParameterizedTest(name = "{0} => {2}")
     @MethodSource("physicalBucketModes")
     void derivedBucketModeMustMatchMaterializedFileStoreTable(
@@ -594,7 +763,11 @@ class PaimonServiceCreateTableValidationTest {
     }
 
     private PaimonService service(PaimonConfig config, Catalog catalog) throws Exception {
-        PaimonService service = new PaimonService(config, mock(Log.class));
+        return service(config, catalog, mock(Log.class));
+    }
+
+    private PaimonService service(PaimonConfig config, Catalog catalog, Log log) throws Exception {
+        PaimonService service = new PaimonService(config, log);
         Field field = PaimonService.class.getDeclaredField("catalog");
         field.setAccessible(true);
         field.set(service, catalog);
@@ -627,6 +800,31 @@ class PaimonServiceCreateTableValidationTest {
         return new TapTable(tableName)
                 .add(new TapField("id", "INT"))
                 .add(new TapField("value", "STRING"));
+    }
+
+    private static Schema appendOnlySchema(String bucket) {
+        return Schema.newBuilder()
+                .column("id", DataTypes.INT())
+                .option(CoreOptions.BUCKET.key(), bucket)
+                .build();
+    }
+
+    private static Schema primaryKeySchema(String bucket) {
+        return Schema.newBuilder()
+                .column("id", DataTypes.INT())
+                .primaryKey("id")
+                .option(CoreOptions.BUCKET.key(), bucket)
+                .build();
+    }
+
+    private static Schema crossPartitionSchema(String bucket) {
+        return Schema.newBuilder()
+                .column("id", DataTypes.INT())
+                .column("pt", DataTypes.INT())
+                .partitionKeys("pt")
+                .primaryKey("id")
+                .option(CoreOptions.BUCKET.key(), bucket)
+                .build();
     }
 
     private static LinkedHashMap<String, String> property(String key, String value) {

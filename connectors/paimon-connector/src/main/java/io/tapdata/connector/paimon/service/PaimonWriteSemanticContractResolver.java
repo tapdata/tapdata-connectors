@@ -12,7 +12,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -318,6 +317,11 @@ final class PaimonWriteSemanticContractResolver {
     static BucketMode deriveBucketMode(Schema schema) {
         Objects.requireNonNull(schema, "schema");
         int bucket = CoreOptions.fromMap(schema.options()).bucket();
+        return deriveBucketMode(TableSchema.create(0L, schema), bucket);
+    }
+
+    static BucketMode deriveBucketMode(TableSchema schema, int bucket) {
+        Objects.requireNonNull(schema, "schema");
 
         // Paimon 1.3.1 AppendOnlyFileStore#bucketMode treats only bucket=-1 as
         // BUCKET_UNAWARE when no primary key exists; all other values use HASH_FIXED.
@@ -335,15 +339,13 @@ final class PaimonWriteSemanticContractResolver {
         // Sources:
         // https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/schema/TableSchema.java#L200-L205
         // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
-        boolean crossPartitionUpdate =
-                !schema.partitionKeys().isEmpty()
-                        && !new HashSet<>(schema.primaryKeys())
-                                .containsAll(new HashSet<>(schema.partitionKeys()));
         if (bucket == BucketMode.POSTPONE_BUCKET) {
             return BucketMode.POSTPONE_MODE;
         }
         if (bucket == -1) {
-            return crossPartitionUpdate ? BucketMode.KEY_DYNAMIC : BucketMode.HASH_DYNAMIC;
+            return schema.crossPartitionUpdate()
+                    ? BucketMode.KEY_DYNAMIC
+                    : BucketMode.HASH_DYNAMIC;
         }
         return BucketMode.HASH_FIXED;
     }

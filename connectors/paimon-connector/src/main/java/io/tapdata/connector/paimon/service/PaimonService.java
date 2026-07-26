@@ -656,18 +656,22 @@ public class PaimonService implements AutoCloseable {
 
 		// Check if table already exists
 		try {
-			catalog.getTable(identifier);
-			// Table exists, check if bucket mode matches
-			boolean existingIsDynamic = isTableDynamicBucket(identifier);
-			boolean configIsDynamic = "dynamic".equalsIgnoreCase(config.getBucketMode(tableName));
+			Table existingTable = catalog.getTable(identifier);
+			if (existingTable instanceof FileStoreTable) {
+				FileStoreTable existingFileStoreTable = (FileStoreTable) existingTable;
+				BucketMode existingMode = existingFileStoreTable.bucketMode();
+				BucketMode configuredMode =
+						PaimonWriteSemanticContractResolver.deriveBucketMode(
+								existingFileStoreTable.schema(), resolveEffectiveBucket(tableName));
 
-			if (existingIsDynamic != configIsDynamic) {
-				// Bucket mode mismatch, log warning and continue with existing table
-				String existingMode = existingIsDynamic ? "dynamic" : "fixed";
-				String configMode = configIsDynamic ? "dynamic" : "fixed";
-				log.warn("Table {} already exists with {} bucket mode, but config specifies {} bucket mode. " +
-								"Cannot switch bucket mode for existing table. Using existing table configuration.",
-						tableName, existingMode, configMode);
+				if (existingMode != configuredMode) {
+					// Bucket mode mismatch is informational only. Paimon does not support changing
+					// the physical bucket model by recreating an already existing table here.
+					log.warn("Table {} already exists with Paimon bucket mode {}, but " +
+									"effective config resolves to {}. Cannot switch bucket mode " +
+									"for existing table. Using existing table configuration.",
+							tableName, existingMode, configuredMode);
+				}
 			}
 			// Table exists, no need to recreate
 			return false;
@@ -706,17 +710,18 @@ public class PaimonService implements AutoCloseable {
 			schemaBuilder.partitionKeys(config.getPartitionKey(tableName));
 		}
 
-		// Map the Connector's first-class dynamic/postpone/fixed choice to Paimon's native bucket
-		// values before tableProperties applies its documented override. Paimon defines -1 as
+		// Resolve the Connector's first-class dynamic/postpone/fixed choice plus any later native
+		// tableProperties.bucket override to Paimon's final bucket value. Paimon defines -1 as
 		// dynamic, -2 as postpone, and positive values as fixed; PaimonConfig rejects every other
-		// first-class combination instead of silently falling back.
+		// first-class combination instead of silently falling back. The generic tableProperties loop
+		// below persists the same final override together with the remaining native options.
 		// Sources:
 		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
 		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
 		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
 		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#L72-L75
 		schemaBuilder.option(
-				CoreOptions.BUCKET.key(), Integer.toString(config.resolveBucket(tableName)));
+				CoreOptions.BUCKET.key(), Integer.toString(resolveEffectiveBucket(tableName)));
 		if (EmptyKit.isNotBlank(config.getFileFormat(tableName))) {
 			// The final Schema is preflighted with Paimon's FileFormat provider discovery before
 			// Catalog#createTable. Use the canonical option constant so first-class and
@@ -1082,19 +1087,30 @@ public class PaimonService implements AutoCloseable {
 	}
 
 	/**
-	 * Check if table is using dynamic bucket mode
+	 * Resolve the effective native bucket option after applying the same tableProperties precedence
+	 * used by new-table Schema construction.
 	 *
-	 * @param identifier table identifier
-	 * @return true if dynamic bucket mode, false if fixed bucket mode
-	 * @throws Exception if check fails
+	 * <p>The Connector always writes a first-class bucket value, so Catalog table defaults cannot
+	 * override it. A later explicit {@code tableProperties.bucket} entry wins, matching repeated
+	 * {@link Schema.Builder#option(String, String)} calls.
+	 *
+	 * <p>Sources:
+	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
+	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/schema/Schema.java#L367-L376
 	 */
-	private boolean isTableDynamicBucket(Identifier identifier) throws Exception {
-		Table paimonTable = catalog.getTable(identifier);
-		if (!(paimonTable instanceof FileStoreTable)) {
-			return false;
+	private int resolveEffectiveBucket(String tableName) {
+		Map<String, String> bucketOption = new HashMap<>();
+		bucketOption.put(
+				CoreOptions.BUCKET.key(), Integer.toString(config.resolveBucket(tableName)));
+		if (EmptyKit.isNotEmpty(config.getTableProperties(tableName))) {
+			for (Map<String, String> property : config.getTableProperties(tableName)) {
+				if (CoreOptions.BUCKET.key().equals(property.get("propKey"))
+						&& StringUtils.isNotEmpty(property.get("propValue"))) {
+					bucketOption.put(CoreOptions.BUCKET.key(), property.get("propValue"));
+				}
+			}
 		}
-		BucketMode mode = ((FileStoreTable) paimonTable).bucketMode();
-		return PaimonBucketWriterStrategyFactory.requiresOrderedSingleWriterIngress(mode);
+		return CoreOptions.fromMap(bucketOption).bucket();
 	}
 
 	public void afterInitialSync(TapConnectorContext connectorContext, TapTable tapTable) throws Exception {
