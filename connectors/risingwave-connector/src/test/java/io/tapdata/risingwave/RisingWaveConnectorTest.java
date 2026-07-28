@@ -53,6 +53,21 @@ class RisingWaveConnectorTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void providesTheSameMessageKeysForEverySupportedLocale() throws Exception {
+        Map<String, Object> spec;
+        try (InputStream input = getClass().getResourceAsStream("/spec_risingwave.json")) {
+            spec = new ObjectMapper().readValue(
+                    input, new TypeReference<LinkedHashMap<String, Object>>() { });
+        }
+
+        Map<String, Object> messages = (Map<String, Object>) spec.get("messages");
+        Map<String, Object> english = (Map<String, Object>) messages.get("en_US");
+        assertEquals(english.keySet(), ((Map<String, Object>) messages.get("zh_CN")).keySet());
+        assertEquals(english.keySet(), ((Map<String, Object>) messages.get("zh_TW")).keySet());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void advertisesOnlyTheDmlPoliciesImplementedByTheConnector() throws Exception {
         Map<String, Object> spec;
         try (InputStream input = getClass().getResourceAsStream("/spec_risingwave.json")) {
