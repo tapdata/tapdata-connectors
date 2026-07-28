@@ -8,22 +8,13 @@
         <groupId>io.tapdata</groupId>
         <artifactId>connectors</artifactId>
         <version>1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <groupId>io.tapdata.connector.risingwave</groupId>
     <artifactId>risingwave-connector</artifactId>
-    <version>1.0-SNAPSHOT</version>
-    <packaging>jar</packaging>
 
     <name>RisingWave Tapdata Connector</name>
     <description>Tapdata PDK connector for RisingWave streaming database</description>
-
-    <licenses>
-        <license>
-            <name>Apache License, Version 2.0</name>
-            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
-        </license>
-    </licenses>
 
     <properties>
         <java.version>11</java.version>
@@ -58,6 +49,11 @@
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>
         </dependency>
@@ -69,7 +65,6 @@
     </dependencies>
 
     <build>
-        <finalName>${connector.file.name}</finalName>
         <plugins>
             <plugin>
                 <groupId>io.github.git-commit-id</groupId>
@@ -90,6 +85,8 @@
                     <generateGitPropertiesFile>false</generateGitPropertiesFile>
                     <useNativeGit>true</useNativeGit>
                     <includeOnlyProperties>
+                        <includeOnlyProperty>^git.branch$</includeOnlyProperty>
+                        <includeOnlyProperty>^git.build.time$</includeOnlyProperty>
                         <includeOnlyProperty>^git.commit.id.full$</includeOnlyProperty>
                         <includeOnlyProperty>^git.dirty$</includeOnlyProperty>
                     </includeOnlyProperties>
@@ -116,6 +113,9 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
                 <version>3.5.1</version>
+                <configuration>
+                    <finalName>${connector.file.name}</finalName>
+                </configuration>
                 <executions>
                     <execution>
                         <phase>package</phase>
@@ -151,16 +151,21 @@
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <manifestEntries>
-                                        <Implementation-Title>risingwave-connector</Implementation-Title>
-                                        <Implementation-Vendor>io.tapdata</Implementation-Vendor>
+                                        <Implementation-Title>${project.artifactId}</Implementation-Title>
                                         <Implementation-Version>${project.version}</Implementation-Version>
-                                        <Git-Build-Time>${maven.build.timestamp}</Git-Build-Time>
-                                        <Git-Commit>${git.commit.id.full}</Git-Commit>
-                                        <Git-Dirty>${git.dirty}</Git-Dirty>
+                                        <Implementation-Vendor>${project.groupId}</Implementation-Vendor>
+                                        <Build-OS>${os.name} ${os.version}</Build-OS>
+                                        <Build-Java>Java ${java.version}</Build-Java>
+                                        <PDK-Runner-Version>${tapdata.pdk.runner.version}</PDK-Runner-Version>
                                         <PDK-API-Version>${tapdata.pdk.api.version}</PDK-API-Version>
                                         <Tapdata-API-Version>${tapdata.pdk.api.version}</Tapdata-API-Version>
+                                        <Version>${project.version}</Version>
                                         <Authentication>Beta</Authentication>
                                         <PayMode>${pay.mode}</PayMode>
+                                        <Git-Build-Time>${git.build.time}</Git-Build-Time>
+                                        <Git-Branch>${git.branch}</Git-Branch>
+                                        <Git-Commit-Id>${git.commit.id.full}</Git-Commit-Id>
+                                        <Git-Dirty>${git.dirty}</Git-Dirty>
                                     </manifestEntries>
                                 </transformer>
                             </transformers>
@@ -180,10 +185,10 @@
                             <goal>copy-resources</goal>
                         </goals>
                         <configuration>
-                            <outputDirectory>../dist</outputDirectory>
+                            <outputDirectory>${basedir}/../dist/</outputDirectory>
                             <resources>
                                 <resource>
-                                    <directory>${project.build.directory}</directory>
+                                    <directory>${basedir}/target/</directory>
                                     <includes>
                                         <include>${connector.file.name}.jar</include>
                                     </includes>
