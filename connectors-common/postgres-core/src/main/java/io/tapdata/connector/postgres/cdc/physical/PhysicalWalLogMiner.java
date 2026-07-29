@@ -86,6 +86,10 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
 
     private String slotName;
     private String startLsn;
+    private int savedTimeline;       // timeline ID from the restored offset, or 0 if unknown
+    private int currentTimeline;     // current PG timeline from pg_control_checkpoint()
+    private boolean timelineChanged; // true when timeline changed — skips look-back
+    private String timelineHistoryReadError;
     private Long filterStartTimeMs; // Time-based filtering: drop events before this timestamp
     private RelationCatalog catalog;
     private final Set<String> allowTables = new HashSet<>();
@@ -275,7 +279,20 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     @Override
     public PhysicalWalLogMiner offset(Object offsetState) {
         if (offsetState instanceof String && EmptyKit.isNotBlank((String) offsetState)) {
-            this.startLsn = ((String) offsetState).split(",")[0];
+            String raw = (String) offsetState;
+            String[] parts = raw.split(",");
+            this.startLsn = parts[0];
+            // Parse timeline annotation if present: "LSN,timeline=N"
+            for (int i = 1; i < parts.length; i++) {
+                String part = parts[i].trim();
+                if (part.startsWith("timeline=")) {
+                    try {
+                        this.savedTimeline = Integer.parseInt(part.substring("timeline=".length()));
+                    } catch (NumberFormatException ignored) {
+                        // leave savedTimeline at 0 (unknown)
+                    }
+                }
+            }
         }
         return this;
     }
@@ -345,6 +362,68 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             startLsn = queryCurrentLsn();
         }
         emitFromLsn = LogSequenceNumber.valueOf(startLsn).asLong();
+        // Timeline-change detection (failover / pg_rewind / switchover).
+        // When a saved offset carries a timeline annotation, verify it matches
+        // the server's current timeline. After an EFM switchover or pg_rewind
+        // the timeline increments and WAL segment names encode the new timeline
+        // ID — PG will reject START_REPLICATION for the old-timeline LSN with
+        // "requested WAL segment ... has already been removed" even when the
+        // corresponding segment exists under the old timeline.
+        currentTimeline = queryCurrentTimeline();
+        if (currentTimeline <= 0) {
+            String msg = "Physical WAL miner cannot determine the current PostgreSQL timeline. Timeline-aware "
+                    + "offsets are required to safely resume after EFM switchover / promote without skipping "
+                    + "WAL. Grant EXECUTE on pg_control_checkpoint() or ensure pg_walfile_name() is available "
+                    + "to the connection user, then restart the task.";
+            tapLogger.error(msg);
+            throw new IllegalStateException(msg);
+        }
+        if (savedTimeline > 0 && savedTimeline != currentTimeline) {
+            tapLogger.warn("Physical WAL miner detected a timeline change: saved offset was written on "
+                    + "timeline {} but the server is now on timeline {}. This typically follows an EFM "
+                    + "switchover, pg_rewind, or PITR recovery. The saved offset LSN {} may refer to a "
+                    + "WAL segment that does not exist on the new timeline.",
+                    savedTimeline, currentTimeline, startLsn);
+            long switchPoint = queryTimelineSwitchPoint(currentTimeline, savedTimeline);
+            if (switchPoint > 0) {
+                if (emitFromLsn < switchPoint) {
+                    String msg = "Physical WAL miner cannot safely restart after a timeline change "
+                            + "(saved timeline " + savedTimeline + " → current timeline " + currentTimeline + "): "
+                            + "saved offset " + startLsn + " is before the timeline fork point " + lsnStr(switchPoint)
+                            + ". Advancing to the fork point would skip committed WAL. Restart from an earlier "
+                            + "snapshot or provide an offset at/after the fork point.";
+                    tapLogger.error(msg);
+                    throw new IllegalStateException(msg);
+                }
+                String switchLsn = lsnStr(switchPoint);
+                tapLogger.info("Physical WAL miner read the timeline {} history chain: timeline {} forks at {}. "
+                        + "Resetting the emit position from saved {} to the switch point. If the current "
+                        + "timeline does not contain that partial WAL segment, the miner will fail fast "
+                        + "rather than advance and risk skipping committed WAL.",
+                        currentTimeline, savedTimeline, switchLsn, startLsn);
+                startLsn = switchLsn;
+                emitFromLsn = switchPoint;
+                timelineChanged = true;
+            } else {
+                // Cannot read the history file (pg_read_file may require superuser /
+                // pg_read_server_files). DO NOT silently advance past the gap — that
+                // would skip committed data written on the new timeline between the
+                // switch point and the current WAL position ("拿少"). Fail fast so the
+                // operator can grant the required privilege and retry.
+                String msg = "Physical WAL miner cannot safely restart after a timeline change "
+                        + "(saved timeline " + savedTimeline + " → current timeline " + currentTimeline + ") "
+                        + "because the current timeline history file could not be read or does not contain "
+                        + "a fork record for the saved timeline. Without the exact switch point the miner "
+                        + "cannot guarantee that no committed data is lost. "
+                        + (EmptyKit.isNotBlank(timelineHistoryReadError)
+                        ? "History read error: " + timelineHistoryReadError + ". " : "")
+                        + "Grant pg_read_server_files to the connection user (or EXECUTE on "
+                        + "pg_read_file) and restart the task. "
+                        + "SQL: GRANT pg_read_server_files TO <user>;";
+                tapLogger.error(msg);
+                throw new IllegalStateException(msg);
+            }
+        }
         // PageStateCache is cold on (re)start. To reconstruct the FPI-less
         // UPDATE/DELETE records we are about to emit we begin *reading* at a
         // checkpoint redo at/before emitFromLsn so every page's first
@@ -361,7 +440,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             // source nothing, is the only option on a hot standby, and avoids the
             // checkpoint-redo boundary race entirely — being strictly in the past,
             // every hot page has been modified (and so written an FPI) after it.
-            if (priorRedoLsn > 0 && priorRedoLsn <= emitFromLsn) {
+            if (!timelineChanged && priorRedoLsn > 0 && priorRedoLsn <= emitFromLsn) {
                 anchor = priorRedoLsn;
                 anchorSrc = "existing checkpoint redo";
             }
@@ -376,7 +455,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             // forced redo seeds via newRedo; preSeedLsn (the position captured before
             // forcing) is the last resort when pg_control_checkpoint() is not granted
             // so neither redo is readable.
-            if (anchor <= 0) {
+            if (anchor <= 0 && !timelineChanged) {
                 seedCheckpointed = forceSeedCheckpoint();
                 if (seedCheckpointed) {
                     if (freshStart) {
@@ -418,7 +497,19 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             // checkpoint boundary whose FPIs will seed the page cache. The
             // stream-open below validates; if WAL was recycled the retry loop
             // advances forward until a readable position is found.
-            if (anchor <= 0 && restartLsn == 0) {
+            //
+            // After a timeline change (EFM switchover / pg_rewind / promote) the
+            // look-back would cross into old-timeline territory whose WAL segments
+            // are not named under the new timeline — PG cannot read them. Skip
+            // the look-back entirely; the page cache starts cold (same as a fresh
+            // physical-slot start). UPDATE/DELETE before-images may be null for
+            // the first checkpoint cycle on the new timeline.
+            //
+            // This is a quality-of-before-image tradeoff, not data loss: every
+            // committed row-change on the new timeline is still emitted, but the
+            // old-values column may be null where the page overlay cannot be
+            // reconstructed from a preceding FPI.
+            if (anchor <= 0 && restartLsn == 0 && !timelineChanged) {
                 int lookbackSegs = getLookbackSegments();
                 long lookback = lookbackSegs * segSize;
                 long candidate = emitFromLsn > lookback ? emitFromLsn - lookback : 0L;
@@ -441,6 +532,21 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 // replay, the cache warms in-line as the stream advances.
                 tapLogger.info("Physical WAL miner emits from {} which sits on the {} {}; the page cache warms in-line.",
                         startLsn, anchorSrc, lsnStr(anchor));
+            } else if (timelineChanged) {
+                // Timeline change detected (EFM switchover / pg_rewind): WAL segments
+                // from the old timeline aren't readable under the new timeline name,
+                // so the look-back was skipped. The page cache starts cold just like
+                // a fresh physical-slot start. No committed data is lost — every
+                // row-change on the new timeline is emitted — but UPDATE/DELETE
+                // before-images on hot pages may be null until the stream crosses
+                // the new timeline's first checkpoint cycle.
+                tapLogger.warn("Physical WAL miner starts with a cold page cache after a timeline change "
+                                + "(saved timeline {}, current {}). No FPI pre-warming was possible because the old "
+                                + "timeline's WAL segments are not named under the new timeline. UPDATE/DELETE "
+                                + "before-images on hot pages may be null until the first checkpoint on the new "
+                                + "timeline completes. For full before-image coverage after switchover, consider "
+                                + "REPLICA IDENTITY FULL or wal_level=logical on heavily-updated tables.",
+                        savedTimeline, currentTimeline);
             } else {
                 // No checkpoint redo at or before the emit position is reachable: a
                 // saved offset stranded behind a checkpoint that fired while the task
@@ -518,6 +624,14 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 if (msg != null && (msg.contains("requested WAL segment")
                         || msg.contains("has already been removed"))) {
                     lastRemoved = e;
+                    if (timelineChanged) {
+                        tapLogger.error("Physical WAL miner cannot safely start after timeline change (saved={} current={}). "
+                                        + "The switch-point page {} is not readable on the current timeline. The miner "
+                                        + "will not advance to a later WAL segment because that could skip committed "
+                                        + "changes between the switch point and the next segment boundary.",
+                                savedTimeline, currentTimeline, lsnStr(currentStart));
+                        throw e;
+                    }
                     if (currentStart >= emitStart) {
                         throw e; // even the page containing emitLsn is unreachable
                     }
@@ -558,7 +672,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         // Frame from startLsnLong (possibly the checkpoint redo) but report offsets
         // only from emitFromLsn so the saved resume point never moves backwards
         // while the cache-warming prefix is being replayed.
-        String initialOffset = lsnStr(emitFromLsn);
+        String initialOffset = formatOffsetWithTimeline(emitFromLsn);
         long[] lastStatusUpdateMs = {0L};
         try (ConcurrentProcessor<WalPageDecoder.RawRecord, Decoded> processor =
                      TapExecutors.createSimple(DECODE_THREADS, DECODE_QUEUE_SIZE, "physical-wal-miner")) {
@@ -759,7 +873,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * ConcurrentProcessorApplyException on get() and kill the entire miner. */
     private Decoded decodeUnit(WalPageDecoder.RawRecord raw) {
         Decoded d = new Decoded();
-        d.offset = lsnStr(raw.nextLsn);
+        d.offset = formatOffsetWithTimeline(raw.nextLsn);
         d.nextLsn = raw.nextLsn;
         try {
             XLogRecord rec = XLogRecord.parse(raw);
@@ -2784,6 +2898,93 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 "SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END",
                 rs -> lsn[0] = rs.getString(1)));
         return lsn[0];
+    }
+
+    /* Current timeline ID from the control file, falling back to the timeline
+     * encoded in the current WAL file name. Returns 0 when both probes fail. */
+    private int queryCurrentTimeline() {
+        int[] tli = {0};
+        ErrorKit.ignoreAnyError(() -> postgresJdbcContext.queryWithNext(
+                "SELECT timeline_id FROM pg_control_checkpoint()",
+                rs -> tli[0] = rs.getInt(1)));
+        if (tli[0] > 0) {
+            return tli[0];
+        }
+        ErrorKit.ignoreAnyError(() -> postgresJdbcContext.queryWithNext(
+                "SELECT substring(pg_walfile_name(CASE WHEN pg_is_in_recovery() "
+                        + "THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END), 1, 8)",
+                rs -> {
+                    String hex = rs.getString(1);
+                    if (EmptyKit.isNotBlank(hex)) {
+                        tli[0] = Integer.parseUnsignedInt(hex, 16);
+                    }
+                }));
+        return tli[0];
+    }
+
+    /* Read the PG timeline history file for the current timeline and locate the
+     * switch-point LSN where savedTimeline forked into the current history chain.
+     * Uses pg_read_file() which requires superuser or pg_read_server_files;
+     * returns 0 on any failure so callers fail fast. */
+    private long queryTimelineSwitchPoint(int currentTimeline, int savedTimeline) {
+        if (currentTimeline <= 0 || savedTimeline <= 0 || savedTimeline == currentTimeline) {
+            return 0L;
+        }
+        String historyFile = String.format("pg_wal/%08X.history", currentTimeline);
+        String[] content = {null};
+        timelineHistoryReadError = null;
+        try {
+            postgresJdbcContext.queryWithNext(
+                    "SELECT pg_read_file('" + historyFile + "')",
+                    rs -> content[0] = rs.getString(1));
+        } catch (Exception t) {
+            timelineHistoryReadError = t.getMessage();
+        }
+        return parseTimelineSwitchPoint(content[0], savedTimeline);
+    }
+
+    static long parseTimelineSwitchPoint(String historyContent, int savedTimeline) {
+        if (EmptyKit.isBlank(historyContent) || savedTimeline <= 0) {
+            return 0L;
+        }
+        String[] lines = historyContent.split("\n");
+        for (String rawLine : lines) {
+            String line = rawLine.trim();
+            if (line.isEmpty()) {
+                continue;
+            }
+            String[] parts = line.split("\\s+");
+            if (parts.length < 2) {
+                continue;
+            }
+            int parentTimeline;
+            try {
+                parentTimeline = Integer.parseInt(parts[0]);
+            } catch (RuntimeException ignored) {
+                continue;
+            }
+            if (parentTimeline == savedTimeline) {
+                try {
+                    return LogSequenceNumber.valueOf(parts[1].trim()).asLong();
+                } catch (RuntimeException ignored) {
+                    return 0L;
+                }
+            }
+        }
+        return 0L;
+    }
+
+    /* Encode the current timeline into the offset string so a future restart
+     * can detect timeline changes. Format: "LSN,timeline=N". Backward-
+     * compatible: older offsets without the annotation are parsed as
+     * savedTimeline=0 (unknown) and skip the timeline check. */
+    private String formatOffsetWithTimeline(long lsn) {
+        if (currentTimeline <= 0) {
+            // Guard: timeline not yet queried — emit bare LSN so the offset
+            // is still valid (just without timeline protection).
+            return lsnStr(lsn);
+        }
+        return lsnStr(lsn) + ",timeline=" + currentTimeline;
     }
 
     /* Best-effort LSN string -> long; 0 on blank/parse failure so callers can

@@ -453,6 +453,10 @@ public class PostgresConnector extends CommonDbConnector {
      */
     private Long parseLsn(String lsnString) {
         lsnString = lsnString.trim();
+        int annotationStart = lsnString.indexOf(',');
+        if (annotationStart >= 0) {
+            lsnString = lsnString.substring(0, annotationStart).trim();
+        }
 
         // 格式 1: PostgreSQL 标准格式 "segment/offset" (如 "0/1234567")
         if (lsnString.contains("/")) {

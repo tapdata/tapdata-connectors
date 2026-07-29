@@ -1,7 +1,10 @@
 package io.tapdata.connector.postgres.cdc.physical;
 
+import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.connector.postgres.cdc.NormalRedo;
+import io.tapdata.connector.postgres.config.PostgresConfig;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -16,6 +19,8 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for the deterministic helper logic of {@link PhysicalWalLogMiner}:
@@ -213,6 +218,51 @@ public class PhysicalWalLogMinerTest {
             long asLong = org.postgresql.replication.LogSequenceNumber.valueOf(s).asLong();
             assertEquals(normalize(s), PhysicalWalLogMiner.lsnStr(asLong));
         }
+    }
+
+    @Test
+    public void testTimelineHistoryFindsSavedTimelineForkPoint() {
+        String history = "94\t117/6A000010\tbefore 95\n"
+                + "95\t117/6A000AF0\tbefore 96\n"
+                + "96\t117/6B000020\tbefore 97\n";
+
+        long switchPoint = PhysicalWalLogMiner.parseTimelineSwitchPoint(history, 95);
+
+        assertEquals(org.postgresql.replication.LogSequenceNumber.valueOf("117/6A000AF0").asLong(), switchPoint);
+    }
+
+    @Test
+    public void testTimelineHistoryDoesNotUseLastLineBlindly() {
+        String history = "95\t117/6A000AF0\tbefore 96\n"
+                + "96\t117/6B000020\tbefore 97\n";
+
+        long switchPoint = PhysicalWalLogMiner.parseTimelineSwitchPoint(history, 95);
+
+        assertNotEquals(org.postgresql.replication.LogSequenceNumber.valueOf("117/6B000020").asLong(), switchPoint);
+        assertEquals(org.postgresql.replication.LogSequenceNumber.valueOf("117/6A000AF0").asLong(), switchPoint);
+    }
+
+    @Test
+    public void testTimelineHistorySkipsMalformedNonTargetLines() {
+        String history = "# generated history\n"
+                + "bad-line\n"
+                + "95\t117/6A000AF0\tbefore 96\n";
+
+        long switchPoint = PhysicalWalLogMiner.parseTimelineSwitchPoint(history, 95);
+
+        assertEquals(org.postgresql.replication.LogSequenceNumber.valueOf("117/6A000AF0").asLong(), switchPoint);
+    }
+
+    @Test
+    public void testOffsetParsesTimelineAnnotation() {
+        PostgresJdbcContext ctx = mock(PostgresJdbcContext.class);
+        when(ctx.getConfig()).thenReturn(new PostgresConfig());
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(ctx, null);
+
+        miner.offset("117/6A000AF0,timeline=96");
+
+        assertEquals("117/6A000AF0", ReflectionTestUtils.getField(miner, "startLsn"));
+        assertEquals(96, ReflectionTestUtils.getField(miner, "savedTimeline"));
     }
 
     @Test
