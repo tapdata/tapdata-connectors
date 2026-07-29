@@ -4,6 +4,7 @@ import com.amazonaws.transform.MapEntry;
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.util.MatchUtil;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
@@ -188,6 +189,8 @@ public abstract class FileConnector extends ConnectorBase {
                     reconnectStorage();
                     lastConnectAt = System.currentTimeMillis();
                     tapLogger.info(TAG, "Storage connection refreshed by periodic reconnect");
+                    // after each successful reconnect, emit a heartbeat carrying the current time so the incremental delay is reset
+                    consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis())), fileOffset);
                 } catch (Exception e) {
                     // keep the old connection and retry next cycle (do not advance lastConnectAt)
                     tapLogger.warn(TAG, "Periodic reconnect failed, keep old connection and retry next cycle: {}", e.getMessage());
