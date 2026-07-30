@@ -387,27 +387,30 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             long switchPoint = queryTimelineSwitchPoint(currentTimeline, savedTimeline);
             if (switchPoint > 0) {
                 if (emitFromLsn < switchPoint) {
-                    // Saved LSN is before the timeline fork point. The data
-                    // between savedLsn and switchPoint was consumed on the old
-                    // timeline before promote; the new timeline starts at the
-                    // switch point. Emit from switchPoint — no committed data
-                    // exists before switchPoint on the new timeline, so this
-                    // does not skip anything ("拿多不拿少" guarantee holds).
-                    tapLogger.warn("Physical WAL miner detected that saved offset {} on timeline {} "
-                                    + "is before the timeline {} fork point {}. "
-                                    + "Resetting emit position to the fork point. "
-                                    + "The gap ({} → {}) was consumed on the old master before "
-                                    + "promote and is no longer available on the new timeline.",
-                            startLsn, savedTimeline, currentTimeline, lsnStr(switchPoint),
-                            startLsn, lsnStr(switchPoint));
+                    // Saved LSN is before the timeline fork point. The offset
+                    // represents CDC's last confirmed position, NOT the database
+                    // replay position. Data between savedLsn and switchPoint may
+                    // have been consumed by the old master but NOT yet confirmed
+                    // by CDC downstream. Advancing silently would "拿少" (skip
+                    // committed data). Fail fast — the operator must verify CDC
+                    // caught up before the switchover, or provide an offset at
+                    // or past the switch point.
+                    String msg = "Physical WAL miner cannot safely restart after a timeline change "
+                            + "(saved timeline " + savedTimeline + " → current timeline " + currentTimeline + "): "
+                            + "saved offset " + startLsn + " is before the timeline fork point " + lsnStr(switchPoint)
+                            + ". Advancing to the fork point would risk skipping committed WAL that "
+                            + "CDC may not have confirmed yet. To proceed, (1) verify CDC confirmed "
+                            + "all data up to the switch point, then (2) manually update the task "
+                            + "offset to a value at or after " + lsnStr(switchPoint) + ".";
+                    tapLogger.error(msg);
+                    throw new IllegalStateException(msg);
                 }
                 String switchLsn = lsnStr(switchPoint);
                 tapLogger.info("Physical WAL miner read the timeline {} history chain: timeline {} forks at {}. "
-                        + "Resetting the emit position from saved {} to the switch point.{}",
-                        currentTimeline, savedTimeline, switchLsn, startLsn,
-                        emitFromLsn < switchPoint ? "" : " If the current timeline does not contain that "
-                                + "partial WAL segment, the miner will fail fast rather than advance "
-                                + "and risk skipping committed WAL.");
+                        + "Emit position {} is at or past the fork point — no gap. If the current "
+                        + "timeline does not contain that partial WAL segment, the miner will fail fast "
+                        + "rather than advance and risk skipping committed WAL.",
+                        currentTimeline, savedTimeline, switchLsn, startLsn);
                 startLsn = switchLsn;
                 emitFromLsn = switchPoint;
                 timelineChanged = true;
@@ -2907,8 +2910,10 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return lsn[0];
     }
 
-    /* Current timeline ID from the control file, falling back to the timeline
-     * encoded in the current WAL file name. Returns 0 when both probes fail. */
+    /* Current timeline ID, probed from the running WAL file name first (which
+     * always reflects the actual timeline even before the first checkpoint after
+     * promote), falling back to pg_control_checkpoint(). Returns 0 when both
+     * probes fail. */
     private int queryCurrentTimeline() {
         int[] tli = {0};
         // Use the WAL file name first — after promote (e.g. EFM switchover),
