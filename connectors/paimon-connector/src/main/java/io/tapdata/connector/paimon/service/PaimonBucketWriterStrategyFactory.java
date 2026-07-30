@@ -12,7 +12,7 @@ import java.util.Set;
  *
  * <p>The explicit mapping intentionally follows Paimon's own exhaustive sink selection and never
  * falls back to native writes for an unknown future mode:
- * https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/FlinkSinkBuilder.java
+ * https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/FlinkSinkBuilder.java#L219-L308
  */
 final class PaimonBucketWriterStrategyFactory {
 

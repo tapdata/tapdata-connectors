@@ -10,12 +10,15 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.table.BucketMode;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -26,6 +29,291 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 class PaimonDmlImageValidatorTest {
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("primaryKeyBucketModes")
+    void deduplicateUpdateAfterMustRequireCompleteImageInEveryPrimaryKeyBucketMode(
+            BucketMode bucketMode) {
+        PaimonWriteSemanticContract contract =
+                contract(
+                        bucketMode,
+                        MergeEngine.DEDUPLICATE,
+                        false,
+                        Arrays.asList("id", "pt", "value"),
+                        set("id"),
+                        Collections.emptySet(),
+                        set("id"),
+                        set("pt"),
+                        null,
+                        -1);
+
+        // Paimon 1.3.1 DeduplicateMergeFunction#add replaces the complete value with the latest
+        // record. Sparse UPDATE_AFTER is therefore unsafe in every primary-key BucketMode,
+        // independently of the full-changelog routing contract.
+        // Source:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/mergetree/compact/DeduplicateMergeFunction.java#L27-L48
+        PaimonFatalWriteException thrown =
+                assertThrows(
+                        PaimonFatalWriteException.class,
+                        () ->
+                                PaimonDmlImageValidator.validateUpdate(
+                                        "default.t",
+                                        contract,
+                                        PaimonGeneratedFieldDependencies.none(),
+                                        tapTable("id", "pt", "value"),
+                                        null,
+                                        map("id", 1, "pt", "A")));
+
+        assertTrue(
+                thrown.getMessage()
+                        .contains("PAIMON_DEDUPLICATE_INCOMPLETE_UPDATE_AFTER"));
+        assertTrue(thrown.getMessage().contains("missingFields=[value]"));
+        assertTrue(thrown.getMessage().contains("bucketMode=" + bucketMode));
+    }
+
+    private static Stream<BucketMode> primaryKeyBucketModes() {
+        return Stream.of(
+                BucketMode.HASH_FIXED,
+                BucketMode.HASH_DYNAMIC,
+                BucketMode.KEY_DYNAMIC,
+                BucketMode.POSTPONE_MODE);
+    }
+
+    @Test
+    void deduplicateUpdateAfterMustClassifyEveryInvalidFieldWithoutLeakingValues() {
+        PaimonWriteSemanticContract contract =
+                contract(
+                        BucketMode.KEY_DYNAMIC,
+                        MergeEngine.DEDUPLICATE,
+                        false,
+                        Arrays.asList(
+                                "id",
+                                "missing_value",
+                                "required_null",
+                                "defaulted_null",
+                                "target_only"),
+                        set("id", "required_null"),
+                        set("defaulted_null"),
+                        set("id"),
+                        Collections.emptySet(),
+                        null,
+                        -1);
+        String secret = "SECRET-TARGET-VALUE";
+
+        PaimonFatalWriteException thrown =
+                assertThrows(
+                        PaimonFatalWriteException.class,
+                        () ->
+                                PaimonDmlImageValidator.validateUpdate(
+                                        "default.t",
+                                        contract,
+                                        PaimonGeneratedFieldDependencies.none(),
+                                        tapTable(
+                                                "id",
+                                                "missing_value",
+                                                "required_null",
+                                                "defaulted_null"),
+                                        null,
+                                        map(
+                                                "id",
+                                                1,
+                                                "required_null",
+                                                null,
+                                                "defaulted_null",
+                                                null,
+                                                "target_only",
+                                                secret)));
+
+        assertTrue(thrown.getMessage().contains("unmappedFields=[target_only]"));
+        assertTrue(thrown.getMessage().contains("missingFields=[missing_value]"));
+        assertTrue(thrown.getMessage().contains("nullFields=[required_null]"));
+        assertTrue(thrown.getMessage().contains("defaultedNullFields=[defaulted_null]"));
+        assertFalse(thrown.getMessage().contains(secret));
+        assertFalse(thrown.getMessage().contains("{"));
+    }
+
+    @Test
+    void deduplicateUpdateAfterMustAllowExplicitNullableNullWithoutSchemaDefault() {
+        PaimonWriteSemanticContract contract =
+                contract(
+                        BucketMode.HASH_FIXED,
+                        MergeEngine.DEDUPLICATE,
+                        false,
+                        Arrays.asList("id", "nullable_value"),
+                        set("id"),
+                        Collections.emptySet(),
+                        set("id"),
+                        Collections.emptySet(),
+                        null,
+                        -1);
+
+        assertDoesNotThrow(
+                () ->
+                        PaimonDmlImageValidator.validateUpdate(
+                                "default.t",
+                                contract,
+                                PaimonGeneratedFieldDependencies.none(),
+                                tapTable("id", "nullable_value"),
+                                null,
+                                map("id", 1, "nullable_value", null)));
+    }
+
+    @Test
+    void deduplicateUpdateAfterMustClassifyNonNullFieldWithDefaultInBothNullSets() {
+        PaimonWriteSemanticContract contract =
+                contract(
+                        BucketMode.HASH_FIXED,
+                        MergeEngine.DEDUPLICATE,
+                        false,
+                        Arrays.asList("id", "required_defaulted_value"),
+                        set("id", "required_defaulted_value"),
+                        set("required_defaulted_value"),
+                        set("id"),
+                        Collections.emptySet(),
+                        null,
+                        -1);
+
+        PaimonFatalWriteException thrown =
+                assertThrows(
+                        PaimonFatalWriteException.class,
+                        () ->
+                                PaimonDmlImageValidator.validateUpdate(
+                                        "default.t",
+                                        contract,
+                                        PaimonGeneratedFieldDependencies.none(),
+                                        tapTable("id", "required_defaulted_value"),
+                                        null,
+                                        map(
+                                                "id",
+                                                1,
+                                                "required_defaulted_value",
+                                                null)));
+
+        assertTrue(
+                thrown.getMessage()
+                        .contains("nullFields=[required_defaulted_value]"));
+        assertTrue(
+                thrown.getMessage()
+                        .contains("defaultedNullFields=[required_defaulted_value]"));
+    }
+
+    @Test
+    void deduplicateCompletenessRuleMustNotApplyToInsertOrOptionalUpdateBefore() {
+        PaimonWriteSemanticContract contract =
+                contract(
+                        BucketMode.KEY_DYNAMIC,
+                        MergeEngine.DEDUPLICATE,
+                        false,
+                        Arrays.asList("id", "pt", "value"),
+                        set("id"),
+                        Collections.emptySet(),
+                        set("id"),
+                        set("pt"),
+                        null,
+                        -1);
+        TapTable table = tapTable("id", "pt", "value");
+
+        assertDoesNotThrow(
+                () ->
+                        PaimonDmlImageValidator.validateInsert(
+                                "default.t",
+                                contract,
+                                PaimonGeneratedFieldDependencies.none(),
+                                table,
+                                map("id", 1)));
+        assertDoesNotThrow(
+                () ->
+                        PaimonDmlImageValidator.validateUpdate(
+                                "default.t",
+                                contract,
+                                PaimonGeneratedFieldDependencies.none(),
+                                table,
+                                map("id", 1),
+                                map("id", 1, "pt", "A", "value", "latest")));
+    }
+
+    @Test
+    void sparseUpdateMustRemainAllowedOutsidePrimaryKeyDeduplicateContract() {
+        PaimonWriteSemanticContract partialUpdate =
+                contract(
+                        BucketMode.HASH_DYNAMIC,
+                        MergeEngine.PARTIAL_UPDATE,
+                        false,
+                        Arrays.asList("id", "value"),
+                        set("id"),
+                        Collections.emptySet(),
+                        set("id"),
+                        Collections.emptySet(),
+                        null,
+                        -1);
+        PaimonWriteSemanticContract noPrimaryKey =
+                contract(
+                        BucketMode.HASH_FIXED,
+                        MergeEngine.DEDUPLICATE,
+                        false,
+                        Arrays.asList("id", "value"),
+                        Collections.emptySet(),
+                        Collections.emptySet(),
+                        Collections.emptySet(),
+                        Collections.emptySet(),
+                        null,
+                        -1);
+
+        assertDoesNotThrow(
+                () ->
+                        PaimonDmlImageValidator.validateUpdate(
+                                "default.partial",
+                                partialUpdate,
+                                PaimonGeneratedFieldDependencies.none(),
+                                tapTable("id", "value"),
+                                null,
+                                map("id", 1)));
+        assertDoesNotThrow(
+                () ->
+                        PaimonDmlImageValidator.validateUpdate(
+                                "default.append",
+                                noPrimaryKey,
+                                PaimonGeneratedFieldDependencies.none(),
+                                tapTable("id", "value"),
+                                null,
+                                map("id", 1)));
+    }
+
+    @Test
+    void deduplicateUpdateAfterMustValidateGeneratedFieldSourceDependencies() {
+        PaimonWriteSemanticContract contract =
+                contract(
+                        BucketMode.HASH_DYNAMIC,
+                        MergeEngine.DEDUPLICATE,
+                        false,
+                        Arrays.asList("_hash_key", "value"),
+                        set("_hash_key"),
+                        Collections.emptySet(),
+                        set("_hash_key"),
+                        Collections.emptySet(),
+                        null,
+                        -1);
+        Map<String, java.util.Collection<String>> dependencies = new LinkedHashMap<>();
+        dependencies.put("_hash_key", Arrays.asList("pk1", "pk2"));
+
+        PaimonFatalWriteException thrown =
+                assertThrows(
+                        PaimonFatalWriteException.class,
+                        () ->
+                                PaimonDmlImageValidator.validateUpdate(
+                                        "default.t",
+                                        contract,
+                                        PaimonGeneratedFieldDependencies.of(dependencies),
+                                        tapTable("pk1", "pk2", "value"),
+                                        null,
+                                        map("pk1", 1, "value", "latest")));
+
+        assertTrue(
+                thrown.getMessage()
+                        .contains("PAIMON_DEDUPLICATE_INCOMPLETE_UPDATE_AFTER"));
+        assertTrue(thrown.getMessage().contains("missingFields=[pk2]"));
+        assertFalse(thrown.getMessage().contains("_hash_key="));
+    }
 
     @Test
     void batchValidationMustCompileRequirementsOnceAndValidateEveryEvent() {
@@ -223,6 +511,15 @@ class PaimonDmlImageValidatorTest {
                                 PaimonGeneratedFieldDependencies.none(),
                                 tapTable("id", "pt", "value"),
                                 map("id", 1, "pt", "A", "value", "v")));
+        assertDoesNotThrow(
+                () ->
+                        PaimonDmlImageValidator.validateUpdate(
+                                "default.t",
+                                contract,
+                                PaimonGeneratedFieldDependencies.none(),
+                                tapTable("id", "pt", "value"),
+                                map("id", 1, "pt", "A", "value", "old"),
+                                map("id", 1, "pt", "A", "value", "new")));
     }
 
     @Test
@@ -263,9 +560,12 @@ class PaimonDmlImageValidatorTest {
     void optionalContractMustPreserveAfterOnlyAndPartialImageBehavior() {
         PaimonWriteSemanticContract optional =
                 contract(
+                        BucketMode.HASH_FIXED,
+                        MergeEngine.PARTIAL_UPDATE,
                         false,
                         Arrays.asList("id", "pt", "value"),
                         set("id"),
+                        Collections.emptySet(),
                         set("id"),
                         set("pt"),
                         null,
@@ -319,14 +619,39 @@ class PaimonDmlImageValidatorTest {
             java.util.Set<String> partitionKeys,
             String rowKindField,
             int rowKindIndex) {
-        return new PaimonWriteSemanticContract(
+        return contract(
                 BucketMode.HASH_FIXED,
-                true,
                 MergeEngine.DEDUPLICATE,
+                full,
+                fields,
+                nonNull,
+                Collections.emptySet(),
+                primaryKeys,
+                partitionKeys,
+                rowKindField,
+                rowKindIndex);
+    }
+
+    private static PaimonWriteSemanticContract contract(
+            BucketMode bucketMode,
+            MergeEngine mergeEngine,
+            boolean full,
+            java.util.List<String> fields,
+            java.util.Set<String> nonNull,
+            java.util.Set<String> defaulted,
+            java.util.Set<String> primaryKeys,
+            java.util.Set<String> partitionKeys,
+            String rowKindField,
+            int rowKindIndex) {
+        return new PaimonWriteSemanticContract(
+                bucketMode,
+                true,
+                mergeEngine,
                 ChangelogProducer.NONE,
                 full,
                 fields,
                 nonNull,
+                defaulted,
                 primaryKeys,
                 partitionKeys,
                 rowKindField,

@@ -13,9 +13,9 @@ import java.util.Objects;
  * Global key-index routing strategy for cross-partition primary-key updates.
  *
  * <p>Open, bootstrap, emitted DELETE/INSERT ordering and snapshot fencing follow Paimon 1.3.1:
- * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java
+ * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L114-L273
  * and
- * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/crosspartition/IndexBootstrap.java
+ * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/crosspartition/IndexBootstrap.java#L72-L125
  */
 final class KeyDynamicBucketWriterStrategy extends AbstractPaimonBucketWriterStrategy {
 

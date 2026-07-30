@@ -20,7 +20,18 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-/** Durable, versioned Paimon commit-user and identifier state for one physical table. */
+/**
+ * Versioned task-state binding for one physical table's stable commit user and next identifier.
+ *
+ * <p>The stable user mirrors Paimon Flink's {@code commit_user_state}; restart reconciliation
+ * takes the maximum of task state and the latest retained same-user snapshot:
+ * https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/CommitterOperator.java#L114-L147
+ * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/utils/SnapshotManager.java#L590-L614
+ *
+ * <p>This state contains neither source offsets nor serialized CommitMessages. KVMap's API also
+ * exposes no transactional flush/offset-binding primitive, so read-after-write visibility here
+ * must not be treated as proof of end-to-end exactly-once recovery.
+ */
 final class PaimonCommitStateStore implements PaimonTableWriteContext.CommitStateStore {
 
     private static final int VERSION = 1;
@@ -71,6 +82,9 @@ final class PaimonCommitStateStore implements PaimonTableWriteContext.CommitStat
         Optional<Snapshot> latest =
                 table.snapshotManager()
                         .latestSnapshotOfUserFromFilesystem(winner.commitUser);
+        // Reconciliation repairs "snapshot committed, task-state update failed" while that
+        // same-user snapshot is still retained. It cannot recreate an expired snapshot's pending
+        // CommitMessages or determine whether the source offset advanced with that snapshot.
         long snapshotNext = latest.map(PaimonCommitStateStore::nextIdentifier).orElse(0L);
         long reconciledNext = Math.max(winner.nextCommitIdentifier, snapshotNext);
         if (reconciledNext != winner.nextCommitIdentifier) {
@@ -101,6 +115,8 @@ final class PaimonCommitStateStore implements PaimonTableWriteContext.CommitStat
         stateMap.put(
                 stateKey,
                 encode(new State(VERSION, commitUser, nextCommitIdentifier)));
+        // KVMap offers put/get visibility but no fsync/checkpoint acknowledgement in its public
+        // interface; this check detects adapter inconsistency, not storage-layer durability.
         State verified = parse(stateMap.get(stateKey));
         if (!commitUser.equals(verified.commitUser)
                 || verified.nextCommitIdentifier != nextCommitIdentifier) {

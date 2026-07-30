@@ -121,6 +121,11 @@ final class PaimonTableWriteContextFactory {
             throw new IllegalArgumentException(
                     "Paimon write semantic contract mode mismatch for " + tableKey);
         }
+        // Build writer and committer from the same StreamWriteBuilder so both carry one stable
+        // commitUser. Paimon 1.3.1's builder forwards that user to both newWrite and newCommit;
+        // separating builders/users would break filterAndCommit recovery.
+        // Source:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/table/sink/StreamWriteBuilderImpl.java#L64-L76
         StreamWriteBuilder builder =
                 fileStoreTable.newStreamWriteBuilder().withCommitUser(commitUser);
         boolean requiresIoManager =

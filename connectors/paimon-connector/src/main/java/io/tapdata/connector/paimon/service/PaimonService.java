@@ -24,6 +24,7 @@ import io.tapdata.pdk.core.utils.CommonUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.*;
 import org.apache.paimon.data.*;
@@ -108,7 +109,9 @@ public class PaimonService implements AutoCloseable {
 	 * 表级规范写上下文，Key 为 {@code database.tableName}。
 	 *
 	 * <p>每个物理表只允许一个上下文持有 writer、committer、动态桶 router 和 commit identifier，
-	 * 避免同表不同写入对象的路由索引或提交状态相互分离。
+	 * 避免同表不同写入对象的路由索引或提交状态相互分离。多表任务因此是“一表一写入、一表一提交器”，
+	 * 但各表 snapshot 依次提交，并不构成跨表原子事务；Paimon Flink 多表提交器也按表分组并逐表提交：
+	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/StoreMultiCommitter.java#L150-L176
 	 */
 	private final Map<String, PaimonTableWriteContext> tableWriteContexts = new ConcurrentHashMap<>();
 	/** Key 为逻辑表标识，Value 为其物理表路径摘要，用于释放 JVM 内的物理表 owner。 */
@@ -164,7 +167,9 @@ public class PaimonService implements AutoCloseable {
 	 * 动态桶表的源事件入口保护器，Key 为逻辑表标识。
 	 *
 	 * <p>PDK 2.0.8 不提供可排序的 source sequence，因此禁止同一动态桶表的重叠入口把锁竞争顺序
-	 * 误当成事件顺序；不同表以及 fixed/append 表仍可保持原有并发能力。
+	 * 误当成事件顺序；不同表以及 fixed/append 表仍可保持原有并发能力。注意后者只表示桶路由允许
+	 * 并发，不证明无 sequence.field 的主键更新可以乱序到达；同一主键若被重叠 callback 更新，
+	 * commitLocks 的抢锁顺序仍可能不同于源事件顺序。
 	 */
 	private final Map<String, DynamicIngressGuard> dynamicSourceIngressGuards = new ConcurrentHashMap<>();
 
@@ -365,6 +370,11 @@ public class PaimonService implements AutoCloseable {
 				}
 				break;
 			case "oss":
+				// REVIEW: these keys match Paimon OSSLoader, but this connector module does not
+				// package paimon-oss 1.3.1, so options alone cannot register the oss:// FileIO.
+				// Add the matching loader artifact (or remove the advertised storage type).
+				// Source:
+				// https://github.com/apache/paimon/blob/release-1.3.1/paimon-filesystems/paimon-oss/src/main/java/org/apache/paimon/oss/OSSLoader.java#L52-L68
 				options.set("fs.oss.endpoint", config.getOssEndpoint());
 				options.set("fs.oss.accessKeyId", config.getOssAccessKey());
 				options.set("fs.oss.accessKeySecret", config.getOssSecretKey());
@@ -646,18 +656,22 @@ public class PaimonService implements AutoCloseable {
 
 		// Check if table already exists
 		try {
-			catalog.getTable(identifier);
-			// Table exists, check if bucket mode matches
-			boolean existingIsDynamic = isTableDynamicBucket(identifier);
-			boolean configIsDynamic = "dynamic".equalsIgnoreCase(config.getBucketMode(tableName));
+			Table existingTable = catalog.getTable(identifier);
+			if (existingTable instanceof FileStoreTable) {
+				FileStoreTable existingFileStoreTable = (FileStoreTable) existingTable;
+				BucketMode existingMode = existingFileStoreTable.bucketMode();
+				BucketMode configuredMode =
+						PaimonWriteSemanticContractResolver.deriveBucketMode(
+								existingFileStoreTable.schema(), resolveEffectiveBucket(tableName));
 
-			if (existingIsDynamic != configIsDynamic) {
-				// Bucket mode mismatch, log warning and continue with existing table
-				String existingMode = existingIsDynamic ? "dynamic" : "fixed";
-				String configMode = configIsDynamic ? "dynamic" : "fixed";
-				log.warn("Table {} already exists with {} bucket mode, but config specifies {} bucket mode. " +
-								"Cannot switch bucket mode for existing table. Using existing table configuration.",
-						tableName, existingMode, configMode);
+				if (existingMode != configuredMode) {
+					// Bucket mode mismatch is informational only. Paimon does not support changing
+					// the physical bucket model by recreating an already existing table here.
+					log.warn("Table {} already exists with Paimon bucket mode {}, but " +
+									"effective config resolves to {}. Cannot switch bucket mode " +
+									"for existing table. Using existing table configuration.",
+							tableName, existingMode, configuredMode);
+				}
 			}
 			// Table exists, no need to recreate
 			return false;
@@ -696,24 +710,37 @@ public class PaimonService implements AutoCloseable {
 			schemaBuilder.partitionKeys(config.getPartitionKey(tableName));
 		}
 
-		// Set bucket configuration based on bucket mode
-		if ("dynamic".equalsIgnoreCase(config.getBucketMode(tableName))) {
-			// Dynamic bucket mode: set bucket to -1
-			// This mode provides better flexibility
-			schemaBuilder.option("bucket", "-1");
-		} else {
-			// Fixed bucket mode: set specific bucket count
-			Integer bucketCount = config.getBucketCount(tableName);
-			if (bucketCount == null || bucketCount <= 0) {
-				bucketCount = 4; // Default to 4 buckets if not configured
-			}
-			schemaBuilder.option("bucket", String.valueOf(bucketCount));
-		}
+		// Resolve the Connector's first-class dynamic/postpone/fixed choice plus any later native
+		// tableProperties.bucket override to Paimon's final bucket value. Paimon defines -1 as
+		// dynamic, -2 as postpone, and positive values as fixed; PaimonConfig rejects every other
+		// first-class combination instead of silently falling back. The generic tableProperties loop
+		// below persists the same final override together with the remaining native options.
+		// Sources:
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#L72-L75
+		schemaBuilder.option(
+				CoreOptions.BUCKET.key(), Integer.toString(resolveEffectiveBucket(tableName)));
 		if (EmptyKit.isNotBlank(config.getFileFormat(tableName))) {
-			schemaBuilder.option("file.format", config.getFileFormat(tableName));
+			// The final Schema is preflighted with Paimon's FileFormat provider discovery before
+			// Catalog#createTable. Use the canonical option constant so first-class and
+			// tableProperties values share the same final key.
+			// Sources:
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L160-L162
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L229-L238
+			schemaBuilder.option(
+					CoreOptions.FILE_FORMAT.key(), config.getFileFormat(tableName));
 		}
 		if (EmptyKit.isNotBlank(config.getCompression(tableName))) {
-			schemaBuilder.option("compression", config.getCompression(tableName));
+			// Paimon 1.3.1 CoreOptions#fileCompression reads only FILE_COMPRESSION. Using the
+			// canonical constant prevents the Connector field name "compression" from becoming an
+			// unknown Schema option that Paimon silently ignores.
+			// Sources:
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L259-L264
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L2237-L2240
+			schemaBuilder.option(
+					CoreOptions.FILE_COMPRESSION.key(), config.getCompression(tableName));
 		}
 
 		// ===== Performance Optimization Options =====
@@ -741,7 +768,11 @@ public class PaimonService implements AutoCloseable {
 				// Enable full compaction for better query performance
 				schemaBuilder.option("compaction.optimization-interval", config.getCompactionIntervalMinutes(tableName) + "min");
 
-				// Set compaction strategy
+				// REVIEW: Paimon 1.3.1 rejects any non-NONE changelog producer on a table without
+				// primary keys. With the current default enableAutoCompaction=true, creation of an
+				// append-only/BUCKET_UNAWARE table reaches this option and fails schema validation.
+				// Source:
+				// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L120-L126
 				schemaBuilder.option("changelog-producer", "input");
 
 				// Compact small files more aggressively
@@ -753,8 +784,9 @@ public class PaimonService implements AutoCloseable {
 			}
 		}
 
-		// 4. Snapshot settings for better performance
-		// Keep more snapshots in memory for faster access
+		// These are on-disk snapshot-expiration bounds, not an in-memory cache. The hard-coded
+		// 2..5 / 30-minute window also bounds how long commit-user snapshot reconciliation and
+		// streaming-read offsets can rely on old snapshots after a prolonged outage.
 		schemaBuilder.option("snapshot.num-retained.min", "2");
 		schemaBuilder.option("snapshot.num-retained.max", "5");
 		schemaBuilder.option("snapshot.time-retained", "30min");
@@ -769,9 +801,6 @@ public class PaimonService implements AutoCloseable {
 		// 7. Changelog settings for CDC scenarios
 		schemaBuilder.option("changelog-producer.lookup-wait", "false"); // Don't wait for lookup
 
-		// 8. Memory settings
-		schemaBuilder.option("sink.parallelism", String.valueOf(config.getWriteThreads()));
-
 		if (EmptyKit.isNotEmpty(config.getTableProperties(tableName))) {
 			config.getTableProperties(tableName).forEach(v -> {
 				if (StringUtils.isEmpty(v.get("propKey"))
@@ -783,12 +812,26 @@ public class PaimonService implements AutoCloseable {
 				}
 			});
 		}
-		// Create table
-		catalog.createTable(identifier, schemaBuilder.build(), false);
+		Schema finalSchema = schemaBuilder.build();
+		// Paimon 1.3.1 AbstractCatalog#createTable copies Catalog table-default options into
+		// Schema#options with putIfAbsent immediately before creating the table. Mirror that exact
+		// mutation order so the connector validates the same effective options, while preserving
+		// explicit tableProperties overrides and rejecting before Catalog state is changed.
+		// Sources:
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/CatalogUtils.java#L99-L101
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/AbstractCatalog.java#L380-L405
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/AbstractCatalog.java#L649-L650
+		CatalogUtils.tableDefaultOptions(catalog.options())
+				.forEach(finalSchema.options()::putIfAbsent);
+		PaimonWriteSemanticContractResolver.validateNewTable(
+				identifier.getFullName(), finalSchema);
+
+		// Create only after the final Paimon write contract has passed validation.
+		catalog.createTable(identifier, finalSchema, false);
 
 		// log schema builder variables
 		Gson gson = new GsonBuilder().setPrettyPrinting().create();
-		log.info("Created table {} with schema: {}", identifier.getFullName(), gson.toJson(schemaBuilder.build()));
+		log.info("Created table {} with schema: {}", identifier.getFullName(), gson.toJson(finalSchema));
 
 		return true;
 	}
@@ -904,7 +947,7 @@ public class PaimonService implements AutoCloseable {
 		Identifier identifier = Identifier.create(database, tableName);
 
 		try {
-			runTableDdl(tableKey, () -> catalog.dropTable(identifier, true));
+			runTableDdl(tableKey, tableName, () -> catalog.dropTable(identifier, true));
 		} catch (Catalog.TableNotExistException e) {
 			// Table does not exist, do nothing
 		}
@@ -932,7 +975,7 @@ public class PaimonService implements AutoCloseable {
 
 		// Drain and invalidate the old writer before changing table contents. Native truncate keeps
 		// partition keys, options, UUID and physical location intact.
-		runTableDdl(tableKey, () -> {
+		runTableDdl(tableKey, tableName, () -> {
 			Table currentTable = catalog.getTable(identifier);
 			try (BatchTableCommit commit = currentTable.newBatchWriteBuilder().newCommit()) {
 				commit.truncateTable();
@@ -940,7 +983,8 @@ public class PaimonService implements AutoCloseable {
 		});
 	}
 
-	private void runTableDdl(String tableKey, TableDdlAction action) throws Exception {
+	private void runTableDdl(String tableKey, String tableName, TableDdlAction action)
+			throws Exception {
 		throwIfStickyWriteFailure();
 		Object lock = commitLocks.computeIfAbsent(tableKey, ignored -> new Object());
 		synchronized (lock) {
@@ -958,6 +1002,7 @@ public class PaimonService implements AutoCloseable {
 				}
 				action.run();
 			} finally {
+				invalidateTableDerivedCaches(tableKey, tableName);
 				// Keep ownership through the Catalog DDL itself. Releasing it before action.run()
 				// would let a second local service create a writer against a half-mutated table.
 				unregisterPhysicalTableOwner(tableKey);
@@ -968,6 +1013,33 @@ public class PaimonService implements AutoCloseable {
 				drainingTables.remove(tableKey);
 			}
 		}
+	}
+
+	/**
+	 * Invalidate Connector-owned metadata derived from one logical table generation.
+	 *
+	 * <p>Paimon 1.3.1 {@code CachingCatalog#dropTable} invalidates Paimon's own table and
+	 * partition caches after a successful drop. Connector policy additionally invalidates these
+	 * independent row-layout and legacy-hash caches after every DDL attempt, including failures,
+	 * so a later table generation cannot reuse stale field positions or source primary keys.
+	 * This helper runs inside the existing per-table lifecycle lock.
+	 *
+	 * <p>Source:
+	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/CachingCatalog.java#L184-L197
+	 */
+	private void invalidateTableDerivedCaches(String tableKey, String tableName) {
+		paimonFieldCache.remove(tableKey);
+		fieldIndexCache.remove(tableKey);
+		computeHashKey.remove(tableName);
+		primaryKeyMap.remove(tableName);
+	}
+
+	/** Clear the same Connector-owned derived-cache set during whole-service cleanup. */
+	private void clearAllTableDerivedCaches() {
+		paimonFieldCache.clear();
+		fieldIndexCache.clear();
+		computeHashKey.clear();
+		primaryKeyMap.clear();
 	}
 
 	@FunctionalInterface
@@ -1005,11 +1077,6 @@ public class PaimonService implements AutoCloseable {
 		beginSourceIngress(ingressGuard, "writeRecords", tableKey);
 		boolean successful = false;
 		try {
-			computeHashKey.computeIfAbsent(tableName,
-					ignored -> Boolean.TRUE.equals(config.getHashKey(tableName))
-							&& EmptyKit.isNotEmpty(table.primaryKeys(true))
-							&& table.primaryKeys(true).size() > 5);
-			primaryKeyMap.putIfAbsent(tableName, table.primaryKeys(true));
 			WriteListResult<TapRecordEvent> result =
 					writeRecordsWithStreamWriteInternal(recordEvents, table, connectorContext);
 			successful = true;
@@ -1020,19 +1087,30 @@ public class PaimonService implements AutoCloseable {
 	}
 
 	/**
-	 * Check if table is using dynamic bucket mode
+	 * Resolve the effective native bucket option after applying the same tableProperties precedence
+	 * used by new-table Schema construction.
 	 *
-	 * @param identifier table identifier
-	 * @return true if dynamic bucket mode, false if fixed bucket mode
-	 * @throws Exception if check fails
+	 * <p>The Connector always writes a first-class bucket value, so Catalog table defaults cannot
+	 * override it. A later explicit {@code tableProperties.bucket} entry wins, matching repeated
+	 * {@link Schema.Builder#option(String, String)} calls.
+	 *
+	 * <p>Sources:
+	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
+	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/schema/Schema.java#L367-L376
 	 */
-	private boolean isTableDynamicBucket(Identifier identifier) throws Exception {
-		Table paimonTable = catalog.getTable(identifier);
-		if (!(paimonTable instanceof FileStoreTable)) {
-			return false;
+	private int resolveEffectiveBucket(String tableName) {
+		Map<String, String> bucketOption = new HashMap<>();
+		bucketOption.put(
+				CoreOptions.BUCKET.key(), Integer.toString(config.resolveBucket(tableName)));
+		if (EmptyKit.isNotEmpty(config.getTableProperties(tableName))) {
+			for (Map<String, String> property : config.getTableProperties(tableName)) {
+				if (CoreOptions.BUCKET.key().equals(property.get("propKey"))
+						&& StringUtils.isNotEmpty(property.get("propValue"))) {
+					bucketOption.put(CoreOptions.BUCKET.key(), property.get("propValue"));
+				}
+			}
 		}
-		BucketMode mode = ((FileStoreTable) paimonTable).bucketMode();
-		return PaimonBucketWriterStrategyFactory.requiresOrderedSingleWriterIngress(mode);
+		return CoreOptions.fromMap(bucketOption).bucket();
 	}
 
 	public void afterInitialSync(TapConnectorContext connectorContext, TapTable tapTable) throws Exception {
@@ -1128,6 +1206,7 @@ public class PaimonService implements AutoCloseable {
 						lastCommitTime.computeIfAbsent(tableKey, k -> new AtomicLong())
 								.set(System.currentTimeMillis());
 					}
+					cacheSourceDerivedState(tableName, table);
 					// Validate the whole source batch before allocating a writer, IOManager or
 					// dynamic-bucket RocksDB state. An existing context supplies the immutable
 					// contract it was created with; a first write resolves it from the target table.
@@ -1197,6 +1276,11 @@ public class PaimonService implements AutoCloseable {
 					if (cdcStage && !ASYNC_OFFSET_CONTRACT_VERIFIED) {
 						// Current PDK does not define a durable callback acknowledgement or a sequence
 						// for concurrent calls. Confirm the Paimon snapshot before every CDC return.
+						// This narrows the loss window but is not Flink-style end-to-end exactly-once:
+						// Flink checkpoints source progress together with pending committables, while
+						// this connector cannot atomically bind a Paimon snapshot to the Tap source
+						// offset exposed by PDK 2.0.8.
+						// https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/RestoreCommittableStateManager.java#L36-L87
 						shouldCommit = true;
 					} else if (flushOffsetCallback == null && cdcStage) {
 						shouldCommit = true;
@@ -1295,6 +1379,22 @@ public class PaimonService implements AutoCloseable {
 		}
 	}
 
+	/**
+	 * Cache source metadata used by the Connector's legacy synthetic-key path.
+	 *
+	 * <p>The caller holds the same per-table lifecycle lock as {@link #runTableDdl}. Keeping
+	 * population under that lock prevents an ingress waiting behind DDL from publishing metadata
+	 * for the old table generation after the DDL finally block has invalidated it. This changes
+	 * only cache timing; the legacy MD5 encoding and {@code VARCHAR(32)} contract are unchanged.
+	 */
+	private void cacheSourceDerivedState(String tableName, TapTable table) {
+		computeHashKey.computeIfAbsent(tableName,
+				ignored -> Boolean.TRUE.equals(config.getHashKey(tableName))
+						&& EmptyKit.isNotEmpty(table.primaryKeys(true))
+						&& table.primaryKeys(true).size() > 5);
+		primaryKeyMap.putIfAbsent(tableName, table.primaryKeys(true));
+	}
+
 	private boolean isPaimonConflict(Throwable e) {
 		Throwable t = e;
 		while (t != null) {
@@ -1368,9 +1468,8 @@ public class PaimonService implements AutoCloseable {
 		drainingTables.clear();
 		asyncCommitEligibleTables.clear();
 
-		// Clear Paimon field cache
-		paimonFieldCache.clear();
-		fieldIndexCache.clear();
+		// Clear every Connector-owned table-derived cache, matching the single-table DDL path.
+		clearAllTableDerivedCaches();
 
 		// Close old catalog if exists
 		if (catalog != null) {
@@ -1639,6 +1738,11 @@ public class PaimonService implements AutoCloseable {
 	}
 
 	private void registerPhysicalTableOwner(String tableKey, FileStoreTable table) {
+		// Paimon explicitly disallows concurrent HASH_DYNAMIC writers and KEY_DYNAMIC owns a local
+		// full-key index. This registry enforces the connector's 1/1/0 topology only inside this
+		// JVM; deployment must provide an external single-writer lease to cover other processes.
+		// Source:
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L40-L55
 		String physicalHash = PaimonCommitStateStore.physicalTableHash(
 				table.location().toUri().toString());
 		String owner = serviceWriterOwner + ':' + tableKey;

@@ -185,6 +185,7 @@ class KeyDynamicBucketWriterStrategyTest {
                         false,
                         Arrays.asList("pt", "id", "rk"),
                         Collections.singleton("id"),
+                        Collections.emptySet(),
                         Collections.singleton("id"),
                         Collections.singleton("pt"),
                         "rk",
