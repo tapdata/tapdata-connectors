@@ -1,11 +1,11 @@
 {
   "properties": {
-    "name": "Paimon",
-    "realName": "Apache Paimon",
+    "name": "Paimon Plus",
+    "realName": "Apache Paimon Plus",
     "icon": "icons/paimon.png",
     "doc": "${doc}",
     "tags": ["Database"],
-    "id": "paimon"
+    "id": "paimon-plus"
   },
   "configOptions": {
     "capabilities": [

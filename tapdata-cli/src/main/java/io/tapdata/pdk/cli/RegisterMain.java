@@ -102,7 +102,7 @@ public class RegisterMain {
         MYSQL_PXC(BETA),
         OCEANBASE_MYSQL(GA, TAG_JDBC),
         OPENGAUSS(ALPHA, TAG_JDBC),
-        PAIMON(ALPHA),
+        PAIMON_PLUS(ALPHA),
         POLAR_DB_MYSQL(BETA, TAG_JDBC),
         POLAR_DB_POSTGRES(BETA, TAG_JDBC),
         POSTGRES(GA, TAG_JDBC),

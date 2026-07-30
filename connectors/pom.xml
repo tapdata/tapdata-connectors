@@ -71,7 +71,7 @@
 		<module>vastbase-connector</module>
 		<module>highgo-connector</module>
 		<module>file-stream-connector</module>
-		<module>paimon-connector</module>
+		<module>paimon-plus-connector</module>
 		<module>snowflake-connector</module>
 		<module>risingwave-connector</module>
 	</modules>
