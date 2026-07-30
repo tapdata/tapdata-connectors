@@ -387,20 +387,27 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             long switchPoint = queryTimelineSwitchPoint(currentTimeline, savedTimeline);
             if (switchPoint > 0) {
                 if (emitFromLsn < switchPoint) {
-                    String msg = "Physical WAL miner cannot safely restart after a timeline change "
-                            + "(saved timeline " + savedTimeline + " → current timeline " + currentTimeline + "): "
-                            + "saved offset " + startLsn + " is before the timeline fork point " + lsnStr(switchPoint)
-                            + ". Advancing to the fork point would skip committed WAL. Restart from an earlier "
-                            + "snapshot or provide an offset at/after the fork point.";
-                    tapLogger.error(msg);
-                    throw new IllegalStateException(msg);
+                    // Saved LSN is before the timeline fork point. The data
+                    // between savedLsn and switchPoint was consumed on the old
+                    // timeline before promote; the new timeline starts at the
+                    // switch point. Emit from switchPoint — no committed data
+                    // exists before switchPoint on the new timeline, so this
+                    // does not skip anything ("拿多不拿少" guarantee holds).
+                    tapLogger.warn("Physical WAL miner detected that saved offset {} on timeline {} "
+                                    + "is before the timeline {} fork point {}. "
+                                    + "Resetting emit position to the fork point. "
+                                    + "The gap ({} → {}) was consumed on the old master before "
+                                    + "promote and is no longer available on the new timeline.",
+                            startLsn, savedTimeline, currentTimeline, lsnStr(switchPoint),
+                            startLsn, lsnStr(switchPoint));
                 }
                 String switchLsn = lsnStr(switchPoint);
                 tapLogger.info("Physical WAL miner read the timeline {} history chain: timeline {} forks at {}. "
-                        + "Resetting the emit position from saved {} to the switch point. If the current "
-                        + "timeline does not contain that partial WAL segment, the miner will fail fast "
-                        + "rather than advance and risk skipping committed WAL.",
-                        currentTimeline, savedTimeline, switchLsn, startLsn);
+                        + "Resetting the emit position from saved {} to the switch point.{}",
+                        currentTimeline, savedTimeline, switchLsn, startLsn,
+                        emitFromLsn < switchPoint ? "" : " If the current timeline does not contain that "
+                                + "partial WAL segment, the miner will fail fast rather than advance "
+                                + "and risk skipping committed WAL.");
                 startLsn = switchLsn;
                 emitFromLsn = switchPoint;
                 timelineChanged = true;
@@ -2904,12 +2911,10 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * encoded in the current WAL file name. Returns 0 when both probes fail. */
     private int queryCurrentTimeline() {
         int[] tli = {0};
-        ErrorKit.ignoreAnyError(() -> postgresJdbcContext.queryWithNext(
-                "SELECT timeline_id FROM pg_control_checkpoint()",
-                rs -> tli[0] = rs.getInt(1)));
-        if (tli[0] > 0) {
-            return tli[0];
-        }
+        // Use the WAL file name first — after promote (e.g. EFM switchover),
+        // pg_control_checkpoint() may still reflect the OLD timeline until the
+        // first checkpoint completes. The WAL file name always carries the
+        // actual running timeline ID, making it the reliable primary source.
         ErrorKit.ignoreAnyError(() -> postgresJdbcContext.queryWithNext(
                 "SELECT substring(pg_walfile_name(CASE WHEN pg_is_in_recovery() "
                         + "THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END), 1, 8)",
@@ -2919,6 +2924,14 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                         tli[0] = Integer.parseUnsignedInt(hex, 16);
                     }
                 }));
+        if (tli[0] > 0) {
+            return tli[0];
+        }
+        // Fallback: pg_control_checkpoint() — usable only after the first
+        // checkpoint on the current timeline catches up the control file.
+        ErrorKit.ignoreAnyError(() -> postgresJdbcContext.queryWithNext(
+                "SELECT timeline_id FROM pg_control_checkpoint()",
+                rs -> tli[0] = rs.getInt(1)));
         return tli[0];
     }
 
