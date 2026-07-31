@@ -40,7 +40,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -100,31 +99,30 @@ class RisingWaveConnectorTest {
 
     @Test
     void parsesRisingWaveVersionFromPostgresCompatibleVersionString() {
-        assertArrayEquals(new int[]{3, 0, 0}, RisingWaveConnectionTester.parseRisingWaveVersion(
+        assertEquals("3.0.0", RisingWaveConnectionTester.parseRisingWaveVersionString(
                 "PostgreSQL 13.14.0-RisingWave-3.0.0 (abc123)"));
-        assertArrayEquals(new int[]{3, 2, 1}, RisingWaveConnectionTester.parseRisingWaveVersion(
-                "PostgreSQL 13.14.0-RisingWave-3.2.1-alpha"));
         assertEquals("3.2.1", RisingWaveConnectionTester.parseRisingWaveVersionString(
                 "PostgreSQL 13.14.0-RisingWave-3.2.1-alpha"));
         assertEquals("3.2.0", RisingWaveConnectionTester.parseRisingWaveVersionString(
                 "PostgreSQL 13.14.0-RisingWave-3.2"));
+        assertEquals("2.8.5", RisingWaveConnectionTester.parseRisingWaveVersionString(
+                "PostgreSQL 13.14.0-RisingWave-2.8.5 "
+                        + "(e244a164b76016057684984ffb9a55a1aef7327a)"));
     }
 
     @Test
-    void acceptsSupportedWebSocketVersions() {
-        assertTrue(RisingWaveConnectionTester.supportsWebSocketIngest(
-                "PostgreSQL 13.14.0-RisingWave-3.0.0"));
-        assertTrue(RisingWaveConnectionTester.supportsWebSocketIngest(
-                "PostgreSQL 13.14.0-RisingWave-4.1.0"));
+    void identifiesRisingWaveWithoutImposingAMinimumVersion() {
+        assertTrue(RisingWaveConnectionTester.isRisingWaveServer(
+                "PostgreSQL 13.14.0-RisingWave-2.8.5 (e244a164)"));
+        assertTrue(RisingWaveConnectionTester.isRisingWaveServer(
+                "PostgreSQL 13.14.0-RisingWave-3.0.0-alpha"));
+        assertFalse(RisingWaveConnectionTester.isRisingWaveServer("PostgreSQL 16.2"));
+        assertFalse(RisingWaveConnectionTester.isRisingWaveServer(null));
     }
 
     @Test
-    void rejectsUnsupportedOrUnknownWebSocketVersions() {
-        assertFalse(RisingWaveConnectionTester.supportsWebSocketIngest(
-                "PostgreSQL 13.14.0-RisingWave-2.9.9"));
-        assertFalse(RisingWaveConnectionTester.supportsWebSocketIngest("PostgreSQL 16.2"));
-        assertFalse(RisingWaveConnectionTester.supportsWebSocketIngest(null));
-        assertNull(RisingWaveConnectionTester.parseRisingWaveVersion("unknown"));
+    void returnsNullForUnknownRisingWaveVersions() {
+        assertNull(RisingWaveConnectionTester.parseRisingWaveVersionString("unknown"));
     }
 
     @Test

@@ -84,7 +84,15 @@ class RisingWaveConnectionTestIT {
         assertEquals("127.0.0.1:4566/dev/public", options.getConnectionString());
         assertEquals(64, options.getInstanceUniqueId().length());
         assertEquals(java.util.Collections.singletonList("public"), options.getNamespaces());
-        assertEquals("3.1.0", options.getDbVersion());
+        try (Connection connection = rootConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("SELECT version()")) {
+            assertTrue(resultSet.next());
+            String expectedVersion = RisingWaveConnectionTester.parseRisingWaveVersionString(
+                    resultSet.getString(1));
+            assertNotNull(expectedVersion);
+            assertEquals(expectedVersion, options.getDbVersion());
+        }
     }
 
     @Test

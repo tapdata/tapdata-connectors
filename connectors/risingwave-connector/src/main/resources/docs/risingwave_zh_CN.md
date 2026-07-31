@@ -6,8 +6,8 @@
 
 | 模式 | 适用场景 | 要求 |
 |---|---|---|
-| **WebSocket streaming** | 带主键的插入、更新和删除。默认推荐。 | RisingWave 3.0+，并且表有主键 |
-| **WebSocket JSONB append-only** | 无主键的仅插入数据流 | RisingWave 3.0+；不支持更新和删除 |
+| **WebSocket streaming** | 带主键的插入、更新和删除。默认推荐。 | RisingWave 3.0+，或支持 WebSocket ingest 的兼容版本；要求主键 |
+| **WebSocket JSONB append-only** | 无主键的仅插入数据流 | RisingWave 3.0+，或支持 WebSocket ingest 的兼容版本；仅支持插入 |
 | **JDBC** | 兼容回退 | 可访问 PostgreSQL 兼容 SQL 端点 |
 
 WebSocket streaming 通常有更好的吞吐和延迟。所有模式仍使用 JDBC 检查版本、schema、
@@ -52,7 +52,9 @@ Cloud WebSocket ingest 使用 443 端口，WSS 使用 Java trust store。JDBC `s
 - 建表、删表和写入权限；
 - WebSocket 模式还会检查 endpoint、可选的签名初始化、一次 DML 写入及 RisingWave ACK。
 
-WebSocket 模式要求 RisingWave 3.0 或更高版本。旧版兼容 RisingWave 仍可使用 JDBC。
+推荐使用 RisingWave 3.0 或更高版本。较早版本如果已经支持或 backport WebSocket ingest
+也可以使用。连接测试会通过真实 DML 写入和 ACK 验证 WebSocket 支持。无法使用 WebSocket
+ingest 时仍可选择 JDBC。
 
 ### 可选 Webhook Secret
 

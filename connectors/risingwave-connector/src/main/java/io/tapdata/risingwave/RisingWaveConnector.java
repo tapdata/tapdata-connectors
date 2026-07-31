@@ -57,7 +57,6 @@ public class RisingWaveConnector implements TapConnector {
 
     static final String SCHEMA_TEST_ITEM = "schema";
     static final String INGEST_ENDPOINT_TEST_ITEM = "ingest_endpoint";
-    static final String MINIMUM_WEBSOCKET_VERSION = "3.0.0";
     static final String MODE_JDBC = "jdbc";
     static final String MODE_STREAMING = "streaming";
     static final String MODE_STREAMING_JSONB = "streaming_jsonb";

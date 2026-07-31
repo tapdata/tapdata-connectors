@@ -6,8 +6,8 @@ This is a target-only connector. It writes TapData snapshot and CDC events to Ri
 
 | Mode | Use it for | Requirements |
 |---|---|---|
-| **WebSocket streaming** | Keyed inserts, updates, and deletes. Default and recommended. | RisingWave 3.0+ and a primary key |
-| **WebSocket JSONB append-only** | Keyless insert streams | RisingWave 3.0+; updates and deletes are rejected |
+| **WebSocket streaming** | Keyed inserts, updates, and deletes. Default and recommended. | RisingWave 3.0+, or a compatible version with WebSocket ingest; primary key required |
+| **WebSocket JSONB append-only** | Keyless insert streams | RisingWave 3.0+, or a compatible version with WebSocket ingest; inserts only |
 | **JDBC** | Compatibility fallback | PostgreSQL-compatible SQL endpoint |
 
 WebSocket streaming normally provides the best throughput and latency. JDBC is still used in every
@@ -53,8 +53,9 @@ The test checks:
 - for WebSocket modes, endpoint connectivity, signed initialization when configured, a DML write,
   and a RisingWave ACK.
 
-WebSocket modes require RisingWave 3.0 or later. JDBC remains available for older compatible
-versions.
+RisingWave 3.0 or later is recommended. Earlier compatible versions with WebSocket ingest
+backported are also supported. The connection test verifies WebSocket support with a real DML
+write and ACK. JDBC remains available when WebSocket ingest is unavailable.
 
 ### Optional webhook secret
 

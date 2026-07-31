@@ -24,6 +24,7 @@ import java.util.regex.Pattern;
 final class RisingWaveConnectionTester {
     private static final Pattern VERSION_PATTERN = Pattern.compile(
             "(?i)RisingWave[-/\\s]+v?(\\d+)\\.(\\d+)(?:\\.(\\d+))?");
+    private static final Pattern PRODUCT_PATTERN = Pattern.compile("(?i)\\bRisingWave\\b");
 
     private RisingWaveConnectionTester() {
     }
@@ -51,10 +52,14 @@ final class RisingWaveConnectionTester {
                 + " ingestMode=" + config.ingestMode());
         try (Connection connection = RisingWaveJdbc.open(config)) {
             consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY,
-                    "Connected to RisingWave"));
-            String version = testVersion(connection, config.ingestMode(), consumer);
-            if (version != null) {
-                options.setDbVersion(parseRisingWaveVersionString(version));
+                    "Connected to the SQL endpoint"));
+            String version = testVersion(connection, consumer);
+            if (version == null) {
+                return options;
+            }
+            String parsedVersion = parseRisingWaveVersionString(version);
+            if (parsedVersion != null) {
+                options.setDbVersion(parsedVersion);
             }
             if (testSchema(connection, config.schema(), consumer)) {
                 if (RisingWaveConnector.isWebSocketMode(config.ingestMode())) {
@@ -82,21 +87,18 @@ final class RisingWaveConnectionTester {
         return options;
     }
 
-    private static String testVersion(
-            Connection connection, String mode, Consumer<TestItem> consumer) {
+    private static String testVersion(Connection connection, Consumer<TestItem> consumer) {
         try (Statement statement = connection.createStatement();
              ResultSet resultSet = statement.executeQuery("SELECT version()")) {
             String version = resultSet.next() ? resultSet.getString(1) : "unknown";
             RisingWaveConnector.debugLog("connectionTest() version=" + version);
-            if (RisingWaveConnector.isWebSocketMode(mode) && !supportsWebSocketIngest(version)) {
+            if (!isRisingWaveServer(version)) {
                 consumer.accept(new TestItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED,
-                        "WebSocket streaming requires RisingWave "
-                                + RisingWaveConnector.MINIMUM_WEBSOCKET_VERSION
-                                + " or later; server reported: " + version));
-            } else {
-                consumer.accept(new TestItem(TestItem.ITEM_VERSION,
-                        TestItem.RESULT_SUCCESSFULLY, version));
+                        "The connected server does not identify itself as RisingWave: " + version));
+                return null;
             }
+            consumer.accept(new TestItem(TestItem.ITEM_VERSION,
+                    TestItem.RESULT_SUCCESSFULLY, version));
             return version;
         } catch (Exception e) {
             RisingWaveConnector.debugLog("connectionTest() version ERROR: "
@@ -271,22 +273,6 @@ final class RisingWaveConnectionTester {
         }
     }
 
-    static boolean supportsWebSocketIngest(String versionOutput) {
-        int[] version = parseRisingWaveVersion(versionOutput);
-        return version != null
-                && (version[0] > 3 || (version[0] == 3 && version[1] >= 0));
-    }
-
-    static int[] parseRisingWaveVersion(String versionOutput) {
-        String version = parseRisingWaveVersionString(versionOutput);
-        if (version == null) {
-            return null;
-        }
-        String[] components = version.split("\\.");
-        return new int[]{Integer.parseInt(components[0]), Integer.parseInt(components[1]),
-                Integer.parseInt(components[2])};
-    }
-
     static String parseRisingWaveVersionString(String versionOutput) {
         if (versionOutput == null) {
             return null;
@@ -297,6 +283,10 @@ final class RisingWaveConnectionTester {
         }
         int patch = matcher.group(3) == null ? 0 : Integer.parseInt(matcher.group(3));
         return matcher.group(1) + "." + matcher.group(2) + "." + patch;
+    }
+
+    static boolean isRisingWaveServer(String versionOutput) {
+        return versionOutput != null && PRODUCT_PATTERN.matcher(versionOutput).find();
     }
 
     private static void dropProbeTable(Connection connection, String qualifiedTable) {
