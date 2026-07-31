@@ -1035,6 +1035,10 @@ public class PostgresConnector extends CommonDbConnector {
 
     private void checkCdcSlaveConnected(PhysicalWalLogMiner miner) throws SQLException {
         if (Boolean.TRUE.equals(postgresConfig.getCheckCdcSlave())) {
+            if (postgresTest != null && postgresTest.masterConnected) {
+                tapLogger.warn("No standby PostgreSQL node is available, keep CDC connected to the master node");
+                return;
+            }
             ensureCdcConnectedToSlave(miner);
             asyncCheckSlaveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "slave-async-check");

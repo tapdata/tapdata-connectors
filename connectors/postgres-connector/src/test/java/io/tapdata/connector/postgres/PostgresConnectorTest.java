@@ -2,9 +2,12 @@ package io.tapdata.connector.postgres;
 
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.JdbcContext;
+import io.tapdata.connector.postgres.config.PostgresConfig;
+import io.tapdata.connector.postgres.cdc.physical.PhysicalWalLogMiner;
 import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
 import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
@@ -248,5 +251,18 @@ public class PostgresConnectorTest {
 
         postgresConnector.discoverPartitionInfo(Collections.emptyList());
         verify(postgresPartitionContext, times(1)).discoverPartitionInfo(anyList());
+    }
+
+    @Test
+    void testCheckCdcSlaveConnectedSkipsRetryWhenNoStandbyAvailable() throws SQLException {
+        PostgresConnector postgresConnector = new PostgresConnector();
+        PostgresConfig config = new PostgresConfig();
+        config.setCheckCdcSlave(true);
+        ReflectionTestUtils.setField(postgresConnector, "postgresConfig", config);
+        ReflectionTestUtils.setField(postgresConnector, "postgresTest", new PostgresTest());
+        ReflectionTestUtils.setField(postgresConnector, "tapLogger", mock(Log.class));
+
+        Assertions.assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(postgresConnector,
+                "checkCdcSlaveConnected", (PhysicalWalLogMiner) null));
     }
 }
