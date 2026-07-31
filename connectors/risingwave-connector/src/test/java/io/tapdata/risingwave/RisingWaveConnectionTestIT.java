@@ -84,7 +84,8 @@ class RisingWaveConnectionTestIT {
         assertEquals("127.0.0.1:4566/dev/public", options.getConnectionString());
         assertEquals(64, options.getInstanceUniqueId().length());
         assertEquals(java.util.Collections.singletonList("public"), options.getNamespaces());
-        assertEquals("3.1.0", options.getDbVersion());
+        assertNotNull(options.getDbVersion());
+        assertTrue(options.getDbVersion().matches("\\d+\\.\\d+\\.\\d+"));
     }
 
     @Test

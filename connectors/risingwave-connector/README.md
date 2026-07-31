@@ -7,8 +7,8 @@ TapData source.
 
 | Mode | Use it for | Requirements |
 |---|---|---|
-| WebSocket streaming | Keyed inserts, updates, and deletes. Default and recommended. | RisingWave 3.0+ and a primary key |
-| WebSocket JSONB append-only | Keyless insert streams such as Kafka events | RisingWave 3.0+; inserts only |
+| WebSocket streaming | Keyed inserts, updates, and deletes. Default and recommended. | RisingWave 3.0+, or a compatible version with WebSocket ingest; primary key required |
+| WebSocket JSONB append-only | Keyless insert streams such as Kafka events | RisingWave 3.0+, or a compatible version with WebSocket ingest; inserts only |
 | JDBC | Compatibility fallback | PostgreSQL-compatible SQL endpoint |
 
 WebSocket streaming normally provides the best throughput and latency. JDBC is used in every mode
@@ -69,9 +69,9 @@ SSL Mode: prefer or disable
 Do not use `localhost` to reach the Docker host. Leaving **Ingest Endpoint** blank uses
 `ws://<Host>:4560`.
 
-Click **Test** before saving. WebSocket modes check the SQL connection, RisingWave version, schema,
-DDL and write privileges, WebSocket endpoint, signed initialization when configured, and a durable
-RisingWave ACK.
+Click **Test** before saving. RisingWave 3.0 or later is recommended. Earlier compatible versions
+with WebSocket ingest backported are also supported. The connection test verifies the SQL
+connection, schema, permissions, WebSocket endpoint, DML write, and ACK.
 
 ## Create a task
 
