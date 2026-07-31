@@ -739,6 +739,7 @@ public class PostgresConnector extends CommonDbConnector {
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
             postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
             postgresJdbcContext.refresh();
+            tapLogger.info("Postgres cdc connected to node: {}:{}", postgresConfig.getHost(), postgresConfig.getPort());
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
@@ -1032,8 +1033,9 @@ public class PostgresConnector extends CommonDbConnector {
         return new PostgresOffset();
     }
 
-    private void checkCdcSlaveConnected(PhysicalWalLogMiner miner) {
-        if (postgresConfig.getCheckCdcSlave()) {
+    private void checkCdcSlaveConnected(PhysicalWalLogMiner miner) throws SQLException {
+        if (Boolean.TRUE.equals(postgresConfig.getCheckCdcSlave())) {
+            ensureCdcConnectedToSlave(miner);
             asyncCheckSlaveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "slave-async-check");
                 t.setDaemon(true);
@@ -1045,14 +1047,69 @@ public class PostgresConnector extends CommonDbConnector {
                         boolean isInRecovery = resultSet.getBoolean(1);
                         if (!isInRecovery) {
                             tapLogger.warn("The node cdc connected to is master node, we need switch to slave node");
-                            miner.setThreadException(new TapPdkRetryableEx("postgres", new RuntimeException("Master node detected, please switch to slave node for CDC")));
+                            requestSlaveReconnect(miner);
                         }
                     });
                 } catch (Exception e) {
                     tapLogger.warn("Failed to check PostgreSQL server recovery status: {}", e.getMessage());
                 }
-            }, 300, 300, TimeUnit.SECONDS);
+            }, 30, 30, TimeUnit.SECONDS);
         }
+    }
+
+    private void ensureCdcConnectedToSlave(PhysicalWalLogMiner miner) throws SQLException {
+        postgresJdbcContext.queryWithNext("SELECT pg_is_in_recovery()", resultSet -> {
+            boolean isInRecovery = resultSet.getBoolean(1);
+            if (!isInRecovery) {
+                tapLogger.warn("The node cdc connected to is master node, we need switch to slave node");
+                if (switchCdcConnectionToSlave()) {
+                    return;
+                }
+                requestSlaveReconnect(miner);
+                throw newSlavePreferredRetryableException("No available slave node found for CDC");
+            }
+        });
+    }
+
+    private boolean switchCdcConnectionToSlave() {
+        if (!"master-slave".equals(postgresConfig.getDeploymentMode())) {
+            return false;
+        }
+        boolean selected = postgresTest.testHostPortForMasterSlave(false);
+        postgresJdbcContext.refresh();
+        if (!selected) {
+            tapLogger.warn("Postgres CDC slave-preferred mode could not find an available slave node");
+            return false;
+        }
+        try {
+            AtomicBoolean isSlave = new AtomicBoolean(false);
+            postgresJdbcContext.queryWithNext("SELECT pg_is_in_recovery()", resultSet -> isSlave.set(resultSet.getBoolean(1)));
+            if (isSlave.get()) {
+                tapLogger.info("Postgres CDC switched to slave node: {}:{}", postgresConfig.getHost(), postgresConfig.getPort());
+                return true;
+            }
+        } catch (Exception e) {
+            tapLogger.warn("Postgres CDC failed to verify selected slave node {}:{}: {}",
+                    postgresConfig.getHost(), postgresConfig.getPort(), e.getMessage());
+        }
+        tapLogger.warn("Postgres CDC selected node {}:{} is not a slave node",
+                postgresConfig.getHost(), postgresConfig.getPort());
+        return false;
+    }
+
+    private void requestSlaveReconnect(PhysicalWalLogMiner miner) {
+        miner.stopWithException(newSlavePreferredRetryableException());
+        if (asyncCheckSlaveExecutor != null) {
+            asyncCheckSlaveExecutor.shutdownNow();
+        }
+    }
+
+    private TapPdkRetryableEx newSlavePreferredRetryableException() {
+        return newSlavePreferredRetryableException("Master node detected, please switch to slave node for CDC");
+    }
+
+    private TapPdkRetryableEx newSlavePreferredRetryableException(String message) {
+        return new TapPdkRetryableEx("postgres", new RuntimeException(message));
     }
 
     private String getTimestampOffset(Long offsetStartTime) throws SQLException {

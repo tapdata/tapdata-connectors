@@ -3,6 +3,7 @@ package io.tapdata.connector.postgres.cdc.physical;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.connector.postgres.cdc.NormalRedo;
 import io.tapdata.connector.postgres.config.PostgresConfig;
+import io.tapdata.entity.logger.Log;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -10,6 +11,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -254,6 +256,156 @@ public class PhysicalWalLogMinerTest {
     }
 
     @Test
+    public void testTimelineHistoryFindsCurrentTimelineStartPoint() {
+        String history = "1\t0/404ADD8\tbefore 2\n"
+                + "2\t0/6022198\tbefore 3\n"
+                + "3\t0/842A910\tbefore 4\n"
+                + "4\t0/8855250\tbefore 5\n"
+                + "5\t0/B000578\tbefore 6\n";
+
+        long switchPoint = PhysicalWalLogMiner.parseLastTimelineSwitchPoint(history);
+
+        assertEquals(org.postgresql.replication.LogSequenceNumber.valueOf("0/B000578").asLong(), switchPoint);
+    }
+
+    @Test
+    public void testTimelineSourcesPreferCurrentNodeAndDeduplicateEntries() {
+        PostgresConfig config = new PostgresConfig();
+        config.setHost("postgres-master");
+        config.setPort(5433);
+        config.setDeploymentMode("master-slave");
+        ArrayList<LinkedHashMap<String, Object>> nodes = new ArrayList<>();
+        nodes.add(node("postgres-slave1", 5434));
+        nodes.add(node("postgres-master", 5433));
+        nodes.add(node("postgres-slave2", 5435));
+        config.setMasterSlaveAddress((ArrayList) nodes);
+
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        ReflectionTestUtils.setField(miner, "postgresConfig", config);
+
+        @SuppressWarnings("unchecked")
+        List<Object> sources = (List<Object>) ReflectionTestUtils.invokeMethod(miner, "timelineSources");
+
+        assertEquals(3, sources.size());
+        assertEquals("postgres-master", ReflectionTestUtils.getField(sources.get(0), "host"));
+        assertEquals(5433, ReflectionTestUtils.getField(sources.get(0), "port"));
+        assertEquals("postgres-slave1", ReflectionTestUtils.getField(sources.get(1), "host"));
+        assertEquals("postgres-slave2", ReflectionTestUtils.getField(sources.get(2), "host"));
+    }
+
+    @Test
+    public void testRemovedSegmentErrorMatchesNestedCauseChain() {
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        RuntimeException nested = new RuntimeException("requested WAL segment 000000060000000000000008 has already been removed");
+        RuntimeException wrapper = new RuntimeException("outer", nested);
+
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(miner, "isRemovedSegmentError", wrapper));
+    }
+
+    @Test
+    public void testMissingReplicationSlotErrorMatchesNestedCauseChain() {
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        RuntimeException nested = new RuntimeException("ERROR: replication slot \"tapdata_cdc\" does not exist");
+        RuntimeException wrapper = new RuntimeException("outer", nested);
+
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(miner, "isMissingReplicationSlotError", wrapper));
+    }
+
+    @Test
+    public void testParseOffsetLsnKeepsExactLsnWithTimelineAnnotation() {
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+
+        long parsed = (Long) ReflectionTestUtils.invokeMethod(miner, "parseOffsetLsn", "0/1900A123,timeline=9");
+
+        assertEquals(org.postgresql.replication.LogSequenceNumber.valueOf("0/1900A123").asLong(), parsed);
+    }
+
+    @Test
+    public void testTimelineHistoryLastSwitchPointSkipsMalformedLines() {
+        String history = "bad-line\n"
+                + "4\t0/8855250\tbefore 5\n"
+                + "# comment\n"
+                + "5\t0/B000578\tbefore 6\n";
+
+        long switchPoint = PhysicalWalLogMiner.parseLastTimelineSwitchPoint(history);
+
+        assertEquals(org.postgresql.replication.LogSequenceNumber.valueOf("0/B000578").asLong(), switchPoint);
+    }
+
+    @Test
+    public void testTimelineForLsnFollowsHistoryChain() {
+        String history = "4\t0/8855250\tbefore 5\n"
+                + "5\t0/B000578\tbefore 6\n";
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        ReflectionTestUtils.setField(miner, "timelineChanged", true);
+        ReflectionTestUtils.setField(miner, "savedTimeline", 4);
+        ReflectionTestUtils.setField(miner, "currentTimeline", 6);
+        ReflectionTestUtils.setField(miner, "timelineHistoryChain", PhysicalWalLogMiner.parseTimelineHistoryChain(history));
+
+        int beforeFirstFork = (Integer) ReflectionTestUtils.invokeMethod(miner, "timelineForLsn",
+                org.postgresql.replication.LogSequenceNumber.valueOf("0/8854000").asLong());
+        int betweenForks = (Integer) ReflectionTestUtils.invokeMethod(miner, "timelineForLsn",
+                org.postgresql.replication.LogSequenceNumber.valueOf("0/A000000").asLong());
+        int currentTimeline = (Integer) ReflectionTestUtils.invokeMethod(miner, "timelineForLsn",
+                org.postgresql.replication.LogSequenceNumber.valueOf("0/B000578").asLong());
+
+        assertEquals(4, beforeFirstFork);
+        assertEquals(5, betweenForks);
+        assertEquals(6, currentTimeline);
+    }
+
+    @Test
+    public void testTimelineCatchupOnStandbySchedulesPrimaryRestoreWhenSlavePreferredDisabled() {
+        PostgresConfig config = new PostgresConfig();
+        config.setHost("postgres-master");
+        config.setPort(5433);
+        config.setDeploymentMode("master-slave");
+        config.setCheckCdcSlave(false);
+        ArrayList<LinkedHashMap<String, Object>> nodes = new ArrayList<>();
+        nodes.add(node("postgres-slave1", 5434));
+        config.setMasterSlaveAddress((ArrayList) nodes);
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        ReflectionTestUtils.setField(miner, "postgresConfig", config);
+        ReflectionTestUtils.setField(miner, "timelineChanged", true);
+        ReflectionTestUtils.setField(miner, "currentTimelineStartPoint",
+                org.postgresql.replication.LogSequenceNumber.valueOf("0/B000578").asLong());
+        @SuppressWarnings("unchecked")
+        List<Object> sources = (List<Object>) ReflectionTestUtils.invokeMethod(miner, "timelineSources");
+        Object primary = sources.get(0);
+        Object standby = sources.get(1);
+
+        ReflectionTestUtils.invokeMethod(miner, "configurePrimaryRestoreAfterTimelineCatchup", standby, primary);
+
+        assertEquals(true, ReflectionTestUtils.getField(miner, "restorePrimaryAfterTimelineCatchup"));
+        assertEquals("postgres-slave1:5434", ReflectionTestUtils.getField(miner, "timelineCatchupSourceId"));
+    }
+
+    @Test
+    public void testTimelineCatchupKeepsStandbyWhenSlavePreferredEnabled() {
+        PostgresConfig config = new PostgresConfig();
+        config.setHost("postgres-master");
+        config.setPort(5433);
+        config.setDeploymentMode("master-slave");
+        config.setCheckCdcSlave(true);
+        ArrayList<LinkedHashMap<String, Object>> nodes = new ArrayList<>();
+        nodes.add(node("postgres-slave1", 5434));
+        config.setMasterSlaveAddress((ArrayList) nodes);
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), null);
+        ReflectionTestUtils.setField(miner, "postgresConfig", config);
+        ReflectionTestUtils.setField(miner, "timelineChanged", true);
+        ReflectionTestUtils.setField(miner, "currentTimelineStartPoint",
+                org.postgresql.replication.LogSequenceNumber.valueOf("0/B000578").asLong());
+        @SuppressWarnings("unchecked")
+        List<Object> sources = (List<Object>) ReflectionTestUtils.invokeMethod(miner, "timelineSources");
+        Object primary = sources.get(0);
+        Object standby = sources.get(1);
+
+        ReflectionTestUtils.invokeMethod(miner, "configurePrimaryRestoreAfterTimelineCatchup", standby, primary);
+
+        assertEquals(false, ReflectionTestUtils.getField(miner, "restorePrimaryAfterTimelineCatchup"));
+    }
+
+    @Test
     public void testOffsetParsesTimelineAnnotation() {
         PostgresJdbcContext ctx = mock(PostgresJdbcContext.class);
         when(ctx.getConfig()).thenReturn(new PostgresConfig());
@@ -337,6 +489,13 @@ public class PhysicalWalLogMinerTest {
         r.setSourceXid(sourceXid);
         r.setCdcSequenceId(lsn);
         return r;
+    }
+
+    private static LinkedHashMap<String, Object> node(String host, int port) {
+        LinkedHashMap<String, Object> map = new LinkedHashMap<>();
+        map.put("host", host);
+        map.put("port", port);
+        return map;
     }
 
     private static Map<String, Object> map(Object... kv) {
