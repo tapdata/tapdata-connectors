@@ -4,8 +4,11 @@ import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.connector.postgres.cdc.NormalRedo;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.exception.TapPdkRetryableEx;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.postgresql.util.PSQLException;
+import org.postgresql.util.PSQLState;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -312,12 +315,51 @@ public class PhysicalWalLogMinerTest {
     }
 
     @Test
+    public void testSourceUnavailableBeforeStreamingMatchesNestedConnectException() {
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        RuntimeException wrapper = new RuntimeException("outer",
+                new java.net.ConnectException("Connection refused"));
+
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(miner, "isSourceUnavailableBeforeStreaming", wrapper));
+    }
+
+    @Test
+    public void testSourceUnavailableBeforeStreamingDoesNotMatchCopyWriteFailure() {
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        PSQLException copyFailure = new PSQLException("Database connection failed when writing to copy",
+                PSQLState.CONNECTION_FAILURE);
+
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(miner, "isSourceUnavailableBeforeStreaming", copyFailure));
+    }
+
+    @Test
     public void testParseOffsetLsnKeepsExactLsnWithTimelineAnnotation() {
         PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
 
         long parsed = (Long) ReflectionTestUtils.invokeMethod(miner, "parseOffsetLsn", "0/1900A123,timeline=9");
 
         assertEquals(org.postgresql.replication.LogSequenceNumber.valueOf("0/1900A123").asLong(), parsed);
+    }
+
+    @Test
+    public void testBuildStartPhysicalReplicationQueryIncludesTimeline() {
+        String query = PhysicalWalLogMiner.buildStartPhysicalReplicationQuery("tapdata_cdc",
+                org.postgresql.replication.LogSequenceNumber.valueOf("0/3E038628"), 19);
+
+        assertEquals("START_REPLICATION SLOT tapdata_cdc PHYSICAL 0/3E038628 TIMELINE 19", query);
+    }
+
+    @Test
+    public void testStopWithExceptionStopsConsumerLoopCondition() {
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(miner, "shouldContinueConsuming",
+                (java.util.function.Supplier<Boolean>) () -> true));
+
+        RuntimeException retryable = new RuntimeException("switch to slave");
+        miner.stopWithException(retryable);
+
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(miner, "shouldContinueConsuming",
+                (java.util.function.Supplier<Boolean>) () -> true));
     }
 
     @Test
@@ -367,6 +409,10 @@ public class PhysicalWalLogMinerTest {
         PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
         ReflectionTestUtils.setField(miner, "postgresConfig", config);
         ReflectionTestUtils.setField(miner, "timelineChanged", true);
+        ReflectionTestUtils.setField(miner, "savedTimeline", 5);
+        ReflectionTestUtils.setField(miner, "currentTimeline", 6);
+        ReflectionTestUtils.setField(miner, "timelineHistoryChain",
+                PhysicalWalLogMiner.parseTimelineHistoryChain("5\t0/B000578\tbefore 6\n"));
         ReflectionTestUtils.setField(miner, "currentTimelineStartPoint",
                 org.postgresql.replication.LogSequenceNumber.valueOf("0/B000578").asLong());
         @SuppressWarnings("unchecked")
@@ -374,7 +420,8 @@ public class PhysicalWalLogMinerTest {
         Object primary = sources.get(0);
         Object standby = sources.get(1);
 
-        ReflectionTestUtils.invokeMethod(miner, "configurePrimaryRestoreAfterTimelineCatchup", standby, primary);
+        ReflectionTestUtils.invokeMethod(miner, "configurePrimaryRestoreAfterTimelineCatchup", standby, primary,
+                org.postgresql.replication.LogSequenceNumber.valueOf("0/A000000").asLong());
 
         assertEquals(true, ReflectionTestUtils.getField(miner, "restorePrimaryAfterTimelineCatchup"));
         assertEquals("postgres-slave1:5434", ReflectionTestUtils.getField(miner, "timelineCatchupSourceId"));
@@ -390,9 +437,13 @@ public class PhysicalWalLogMinerTest {
         ArrayList<LinkedHashMap<String, Object>> nodes = new ArrayList<>();
         nodes.add(node("postgres-slave1", 5434));
         config.setMasterSlaveAddress((ArrayList) nodes);
-        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), null);
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
         ReflectionTestUtils.setField(miner, "postgresConfig", config);
         ReflectionTestUtils.setField(miner, "timelineChanged", true);
+        ReflectionTestUtils.setField(miner, "savedTimeline", 5);
+        ReflectionTestUtils.setField(miner, "currentTimeline", 6);
+        ReflectionTestUtils.setField(miner, "timelineHistoryChain",
+                PhysicalWalLogMiner.parseTimelineHistoryChain("5\t0/B000578\tbefore 6\n"));
         ReflectionTestUtils.setField(miner, "currentTimelineStartPoint",
                 org.postgresql.replication.LogSequenceNumber.valueOf("0/B000578").asLong());
         @SuppressWarnings("unchecked")
@@ -400,9 +451,56 @@ public class PhysicalWalLogMinerTest {
         Object primary = sources.get(0);
         Object standby = sources.get(1);
 
-        ReflectionTestUtils.invokeMethod(miner, "configurePrimaryRestoreAfterTimelineCatchup", standby, primary);
+        ReflectionTestUtils.invokeMethod(miner, "configurePrimaryRestoreAfterTimelineCatchup", standby, primary,
+                org.postgresql.replication.LogSequenceNumber.valueOf("0/A000000").asLong());
 
+        assertEquals(true, ReflectionTestUtils.getField(miner, "restorePrimaryAfterTimelineCatchup"));
+        assertEquals("postgres-slave1:5434", ReflectionTestUtils.getField(miner, "timelineCatchupSourceId"));
+    }
+
+    @Test
+    public void testTimelineCatchupRetryMessageUsesStandbyWhenSlavePreferredEnabled() {
+        PostgresConfig config = new PostgresConfig();
+        config.setCheckCdcSlave(true);
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        ReflectionTestUtils.setField(miner, "postgresConfig", config);
+        ReflectionTestUtils.setField(miner, "restorePrimaryAfterTimelineCatchup", true);
+        ReflectionTestUtils.setField(miner, "restorePrimaryAtLsn",
+                org.postgresql.replication.LogSequenceNumber.valueOf("0/B000578").asLong());
+        ReflectionTestUtils.setField(miner, "timelineCatchupSourceId", "postgres-slave1:5434");
+
+        TapPdkRetryableEx retryable = assertThrows(TapPdkRetryableEx.class,
+                () -> ReflectionTestUtils.invokeMethod(miner, "maybeRestorePrimaryAfterTimelineCatchup",
+                        "0/B000578,timeline=6"));
+
+        assertEquals("TimelineCatchupRetryException", retryable.getCause().getClass().getSimpleName());
+        assertTrue(retryable.getCause().getMessage().contains("current-timeline standby node"));
+    }
+
+    @Test
+    public void testSwitchToCurrentTimelineResumeClearsAncestorTimelineState() {
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        long resumeLsn = org.postgresql.replication.LogSequenceNumber.valueOf("0/B000578").asLong();
+        ReflectionTestUtils.setField(miner, "timelineChanged", true);
+        ReflectionTestUtils.setField(miner, "savedTimeline", 5);
+        ReflectionTestUtils.setField(miner, "currentTimeline", 6);
+        ReflectionTestUtils.setField(miner, "timelineHistoryChain",
+                PhysicalWalLogMiner.parseTimelineHistoryChain("5\t0/B000578\tbefore 6\n"));
+        ReflectionTestUtils.setField(miner, "currentTimelineStartPoint", resumeLsn);
+        ReflectionTestUtils.setField(miner, "restorePrimaryAfterTimelineCatchup", true);
+        ReflectionTestUtils.setField(miner, "restorePrimaryAtLsn", resumeLsn);
+        ReflectionTestUtils.setField(miner, "timelineCatchupSourceId", "postgres-slave1:5434");
+        ReflectionTestUtils.setField(miner, "emitFromLsn",
+                org.postgresql.replication.LogSequenceNumber.valueOf("0/A000000").asLong());
+
+        ReflectionTestUtils.invokeMethod(miner, "switchToCurrentTimelineResume", resumeLsn);
+
+        assertEquals(false, ReflectionTestUtils.getField(miner, "timelineChanged"));
+        assertEquals(6, ReflectionTestUtils.getField(miner, "savedTimeline"));
+        assertEquals(Collections.emptyList(), ReflectionTestUtils.getField(miner, "timelineHistoryChain"));
+        assertEquals(0L, ReflectionTestUtils.getField(miner, "currentTimelineStartPoint"));
         assertEquals(false, ReflectionTestUtils.getField(miner, "restorePrimaryAfterTimelineCatchup"));
+        assertEquals(resumeLsn, ReflectionTestUtils.getField(miner, "emitFromLsn"));
     }
 
     @Test

@@ -2,6 +2,7 @@ package io.tapdata.connector.postgres;
 
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.JdbcContext;
+import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.cdc.physical.PhysicalWalLogMiner;
 import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
@@ -29,10 +30,12 @@ import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.sql.SQLException;
+import java.sql.ResultSet;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -254,15 +257,27 @@ public class PostgresConnectorTest {
     }
 
     @Test
-    void testCheckCdcSlaveConnectedSkipsRetryWhenNoStandbyAvailable() throws SQLException {
+    void testCheckCdcSlaveConnectedKeepsCheckingWhenNoStandbyAvailable() throws Exception {
         PostgresConnector postgresConnector = new PostgresConnector();
         PostgresConfig config = new PostgresConfig();
         config.setCheckCdcSlave(true);
         ReflectionTestUtils.setField(postgresConnector, "postgresConfig", config);
-        ReflectionTestUtils.setField(postgresConnector, "postgresTest", new PostgresTest());
+        PostgresJdbcContext jdbcContext = mock(PostgresJdbcContext.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        when(resultSet.getBoolean(1)).thenReturn(false);
+        doAnswer(invocation -> {
+            ((ResultSetConsumer) invocation.getArgument(1)).accept(resultSet);
+            return null;
+        }).when(jdbcContext).queryWithNext(anyString(), any());
+        ReflectionTestUtils.setField(postgresConnector, "postgresJdbcContext", jdbcContext);
         ReflectionTestUtils.setField(postgresConnector, "tapLogger", mock(Log.class));
 
         Assertions.assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(postgresConnector,
                 "checkCdcSlaveConnected", (PhysicalWalLogMiner) null));
+
+        ScheduledExecutorService executor = (ScheduledExecutorService) ReflectionTestUtils.getField(postgresConnector,
+                "asyncCheckSlaveExecutor");
+        Assertions.assertNotNull(executor);
+        executor.shutdownNow();
     }
 }

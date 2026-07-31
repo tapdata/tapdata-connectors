@@ -28,8 +28,12 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import org.postgresql.PGConnection;
 import org.postgresql.PGProperty;
+import org.postgresql.copy.CopyDual;
+import org.postgresql.core.BaseConnection;
 import org.postgresql.replication.LogSequenceNumber;
 import org.postgresql.replication.PGReplicationStream;
+import org.postgresql.replication.ReplicationType;
+import org.postgresql.core.v3.replication.V3PGReplicationStream;
 import org.postgresql.util.PSQLException;
 
 import java.io.*;
@@ -41,6 +45,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -597,13 +602,35 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             throw new IllegalStateException("Physical WAL miner has no available PostgreSQL source nodes to probe");
         }
         Throwable lastRemoved = null;
+        Throwable lastUnavailable = null;
         if (timelineChanged) {
+            boolean continueOnCurrentTimeline = false;
             for (TimelineSource source : sources) {
                 try {
-                    configurePrimaryRestoreAfterTimelineCatchup(source, sources.get(0));
+                    configurePrimaryRestoreAfterTimelineCatchup(source, sources.get(0), currentStart);
                     openStreamExactOnSource(source, currentStart, segSize, isAlive);
                     return;
                 } catch (Throwable e) {
+                    if (e instanceof StreamReadStartedException) {
+                        Throwable streamFailure = e.getCause();
+                        if (isTimelineCatchupRetry(streamFailure)) {
+                            long resumeLsn = parseOffsetLsn(lastPersistedStreamOffset);
+                            if (resumeLsn <= 0) {
+                                throw streamFailure;
+                            }
+                            tapLogger.info("Physical WAL miner caught up ancestor timeline WAL to {}. "
+                                            + "Continuing in the same CDC run on the current timeline from {}.",
+                                    lsnStr(resumeLsn), lsnStr(resumeLsn));
+                            switchToCurrentTimelineResume(resumeLsn);
+                            currentStart = pageAlignDown(resumeLsn);
+                            emitStart = currentStart;
+                            lastRemoved = null;
+                            lastUnavailable = null;
+                            continueOnCurrentTimeline = true;
+                            break;
+                        }
+                        throw streamFailure;
+                    }
                     if (e instanceof TapPdkRetryableEx) {
                         throw e;
                     }
@@ -622,10 +649,16 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                         }
                         continue;
                     }
+                    if (isSourceUnavailableBeforeStreaming(e)) {
+                        lastUnavailable = e;
+                        tapLogger.warn("Physical WAL miner could not connect to timeline-aware source {}:{}: {}",
+                                source.host, source.port, e.getMessage());
+                        continue;
+                    }
                     throw e;
                 }
             }
-            if (isUnsafeTimelineResumeEnabled()) {
+            if (!continueOnCurrentTimeline && isUnsafeTimelineResumeEnabled()) {
                 long unsafeResumeLsn = queryUnsafeTimelineResumeLsn(currentStart);
                 if (unsafeResumeLsn > currentStart) {
                     tapLogger.warn("Physical WAL miner uses UNSAFE timeline resume after timeline change "
@@ -640,20 +673,29 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     return;
                 }
             }
-            if (lastRemoved != null) {
-                throw lastRemoved;
+            if (!continueOnCurrentTimeline) {
+                if (lastRemoved != null) {
+                    throw lastRemoved;
+                }
+                if (lastUnavailable != null) {
+                    throw lastUnavailable;
+                }
+                throw new IllegalStateException("Physical WAL miner could not open the saved WAL on any configured "
+                        + "PostgreSQL node after a timeline change. The cluster may still have ancestor WAL on disk, "
+                        + "but the configured nodes did not expose a readable source for it.");
             }
-            throw new IllegalStateException("Physical WAL miner could not open the saved WAL on any configured "
-                    + "PostgreSQL node after a timeline change. The cluster may still have ancestor WAL on disk, "
-                    + "but the configured nodes did not expose a readable source for it.");
         }
         clearPrimaryRestoreAfterTimelineCatchup();
         lastRemoved = null;
+        lastUnavailable = null;
         for (TimelineSource source : sources) {
             try {
                 openStreamWithWarmRetryOnSource(source, currentStart, emitStart, segSize, isAlive, false);
                 return;
             } catch (Throwable e) {
+                if (e instanceof StreamReadStartedException) {
+                    throw e.getCause();
+                }
                 if (e instanceof TapPdkRetryableEx) {
                     throw e;
                 }
@@ -663,21 +705,32 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                             source.host, source.port, e.getMessage());
                     continue;
                 }
+                if (isSourceUnavailableBeforeStreaming(e)) {
+                    lastUnavailable = e;
+                    tapLogger.warn("Physical WAL miner could not connect to source {}:{}: {}",
+                            source.host, source.port, e.getMessage());
+                    continue;
+                }
                 throw e;
             }
         }
         if (lastRemoved != null) {
             throw lastRemoved;
         }
+        if (lastUnavailable != null) {
+            throw lastUnavailable;
+        }
         throw new IllegalStateException("Physical WAL miner stream open retry exhausted without opening a stream");
     }
 
-    private void configurePrimaryRestoreAfterTimelineCatchup(TimelineSource source, TimelineSource primarySource) {
+    private void configurePrimaryRestoreAfterTimelineCatchup(TimelineSource source, TimelineSource primarySource,
+                                                             long streamStartLsn) {
         clearPrimaryRestoreAfterTimelineCatchup();
-        if (!timelineChanged || source == null || primarySource == null || source.id().equals(primarySource.id())) {
+        if (!timelineChanged || source == null || primarySource == null) {
             return;
         }
-        if (Boolean.TRUE.equals(postgresConfig.getCheckCdcSlave())) {
+        int streamTimeline = timelineForLsn(streamStartLsn);
+        if (streamTimeline <= 0 || streamTimeline == currentTimeline) {
             return;
         }
         if (currentTimelineStartPoint <= 0) {
@@ -686,16 +739,28 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         restorePrimaryAfterTimelineCatchup = true;
         restorePrimaryAtLsn = currentTimelineStartPoint;
         timelineCatchupSourceId = source.id();
-        tapLogger.info("Physical WAL miner temporarily reads ancestor timeline WAL from {}. "
-                        + "After the saved offset catches up to the current timeline start {}, it will retry "
-                        + "so the connector can reconnect to the primary node.",
-                timelineCatchupSourceId, lsnStr(restorePrimaryAtLsn));
+        String reconnectTarget = Boolean.TRUE.equals(postgresConfig.getCheckCdcSlave())
+                ? "a current-timeline standby node" : "the current-timeline primary node";
+        tapLogger.info("Physical WAL miner temporarily reads ancestor timeline {} WAL from {}. "
+                        + "After the saved offset catches up to the current timeline start {}, it will switch "
+                        + "to {}.",
+                streamTimeline, timelineCatchupSourceId, lsnStr(restorePrimaryAtLsn), reconnectTarget);
     }
 
     private void clearPrimaryRestoreAfterTimelineCatchup() {
         restorePrimaryAfterTimelineCatchup = false;
         restorePrimaryAtLsn = 0L;
         timelineCatchupSourceId = null;
+    }
+
+    private void switchToCurrentTimelineResume(long resumeLsn) {
+        clearPrimaryRestoreAfterTimelineCatchup();
+        timelineChanged = false;
+        savedTimeline = currentTimeline;
+        timelineHistoryChain = Collections.emptyList();
+        currentTimelineSwitchPoint = 0L;
+        currentTimelineStartPoint = 0L;
+        emitFromLsn = Math.max(emitFromLsn, resumeLsn);
     }
 
     private void openStreamExactOnSource(TimelineSource source, long startLsn, long segSize,
@@ -726,55 +791,88 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             lastPersistedStreamOffset = formatOffsetWithTimeline(emitFromLsn, timelineForLsn(emitFromLsn));
             try (Connection conn = DriverManager.getConnection(
                     source.config.getDatabaseUrl(), replicationProps(source.config))) {
-                PGConnection pg = conn.unwrap(PGConnection.class);
-                PGReplicationStream stream = pg.getReplicationAPI()
-                        .replicationStream()
-                        .physical()
-                        .withSlotName(slotName)
-                        .withStartPosition(LogSequenceNumber.valueOf(currentStart))
-                        .start();
-                run(stream, currentStart, segSize, isAlive);
+                PGReplicationStream stream;
+                try {
+                    stream = startPhysicalStream(conn, source, currentStart);
+                } catch (PSQLException e) {
+                    String msg = e.getMessage();
+                    if (isMissingReplicationSlotError(e) && !retriedAfterSlotCreate
+                            && ensurePhysicalReplicationSlotOnSource(source)) {
+                        retriedAfterSlotCreate = true;
+                        attempt--;
+                        tapLogger.info("Physical WAL miner created missing physical replication slot {} on {}:{} "
+                                        + "and will retry opening the stream.",
+                                slotName, source.host, source.port);
+                        continue;
+                    }
+                    if (msg != null && (msg.contains("requested WAL segment")
+                            || msg.contains("has already been removed"))) {
+                        lastRemoved = e;
+                        if (exactOnly || currentStart >= emitStart) {
+                            throw e;
+                        }
+                        long remaining = emitStart - currentStart;
+                        long step = Math.max(remaining / 2, segSize);
+                        currentStart = currentStart + step;
+                        // Page-align: WalPageDecoder must start at a page boundary so
+                        // resync() can handle XLP_FIRST_IS_CONTRECORD and readLogical()
+                        // can correctly skip page headers. A non-page-aligned start
+                        // lands mid-record and yields garbage xl_tot_len values.
+                        currentStart = pageAlignDown(currentStart);
+                        if (currentStart >= emitStart) {
+                            currentStart = emitStart;
+                        }
+                        if (attempt >= maxAttempts - 2) {
+                            currentStart = emitStart;
+                        }
+                        continue;
+                    }
+                    throw e;
+                }
+                try {
+                    run(stream, currentStart, segSize, isAlive);
+                } catch (Throwable t) {
+                    throw new StreamReadStartedException(t);
+                }
                 return;
-            } catch (PSQLException e) {
-                String msg = e.getMessage();
-                if (isMissingReplicationSlotError(e) && !retriedAfterSlotCreate
-                        && ensurePhysicalReplicationSlotOnSource(source)) {
-                    retriedAfterSlotCreate = true;
-                    attempt--;
-                    tapLogger.info("Physical WAL miner created missing physical replication slot {} on {}:{} "
-                                    + "and will retry opening the stream.",
-                            slotName, source.host, source.port);
-                    continue;
-                }
-                if (msg != null && (msg.contains("requested WAL segment")
-                        || msg.contains("has already been removed"))) {
-                    lastRemoved = e;
-                    if (exactOnly || currentStart >= emitStart) {
-                        throw e;
-                    }
-                    long remaining = emitStart - currentStart;
-                    long step = Math.max(remaining / 2, segSize);
-                    currentStart = currentStart + step;
-                    // Page-align: WalPageDecoder must start at a page boundary so
-                    // resync() can handle XLP_FIRST_IS_CONTRECORD and readLogical()
-                    // can correctly skip page headers. A non-page-aligned start
-                    // lands mid-record and yields garbage xl_tot_len values.
-                    currentStart = pageAlignDown(currentStart);
-                    if (currentStart >= emitStart) {
-                        currentStart = emitStart;
-                    }
-                    if (attempt >= maxAttempts - 2) {
-                        currentStart = emitStart;
-                    }
-                    continue;
-                }
-                throw e;
             }
         }
         if (lastRemoved != null) {
             throw lastRemoved;
         }
         throw new IllegalStateException("Physical WAL miner stream open retry exhausted without opening a stream");
+    }
+
+    private PGReplicationStream startPhysicalStream(Connection conn, TimelineSource source, long startLsn) throws SQLException {
+        LogSequenceNumber startPosition = LogSequenceNumber.valueOf(startLsn);
+        int streamTimeline = timelineForLsn(startLsn);
+        if (!timelineChanged || streamTimeline <= 0 || streamTimeline == currentTimeline) {
+            PGConnection pg = conn.unwrap(PGConnection.class);
+            return pg.getReplicationAPI()
+                    .replicationStream()
+                    .physical()
+                    .withSlotName(slotName)
+                    .withStartPosition(startPosition)
+                    .start();
+        }
+        String query = buildStartPhysicalReplicationQuery(slotName, startPosition, streamTimeline);
+        tapLogger.info("Physical WAL miner opens ancestor timeline stream on {}:{} at lsn {} timeline {}",
+                source.host, source.port, startPosition.asString(), streamTimeline);
+        BaseConnection baseConnection = conn.unwrap(BaseConnection.class);
+        CopyDual copyDual = (CopyDual) baseConnection.getQueryExecutor().startCopy(query, true);
+        return new V3PGReplicationStream(copyDual, startPosition, TimeUnit.SECONDS.toMillis(10), ReplicationType.PHYSICAL);
+    }
+
+    static String buildStartPhysicalReplicationQuery(String slotName, LogSequenceNumber startPosition, int timeline) {
+        StringBuilder query = new StringBuilder("START_REPLICATION");
+        if (EmptyKit.isNotBlank(slotName)) {
+            query.append(" SLOT ").append(slotName);
+        }
+        query.append(" PHYSICAL ").append(startPosition.asString());
+        if (timeline > 0) {
+            query.append(" TIMELINE ").append(timeline);
+        }
+        return query.toString();
     }
 
     /* Reader thread: serially frames the WAL byte stream (WalPageDecoder is
@@ -948,7 +1046,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         long lastHeartbeat = System.currentTimeMillis();
         lastPersistedStreamOffset = initialOffset;
         try {
-            while (isAlive.get()) {
+            while (shouldContinueConsuming(isAlive)) {
                 Decoded d;
                 try {
                     d = processor.get(1, TimeUnit.SECONDS);
@@ -997,6 +1095,10 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
     }
 
+    private boolean shouldContinueConsuming(Supplier<Boolean> isAlive) {
+        return isAlive.get() && threadException.get() == null;
+    }
+
     private void rememberPersistedStreamOffset(String offset) {
         if (EmptyKit.isNotBlank(offset)) {
             lastPersistedStreamOffset = offset;
@@ -1013,10 +1115,12 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
         String sourceId = timelineCatchupSourceId;
         String restoreAt = lsnStr(restorePrimaryAtLsn);
+        String reconnectTarget = Boolean.TRUE.equals(postgresConfig.getCheckCdcSlave())
+                ? "a current-timeline standby node" : "the current-timeline primary node";
         clearPrimaryRestoreAfterTimelineCatchup();
-        throw new TapPdkRetryableEx("postgres", new RuntimeException("Physical WAL miner has caught up ancestor "
-                + "timeline WAL from " + sourceId + " to the current timeline start " + restoreAt
-                + ". Retrying CDC so the connector can reconnect to the primary node."));
+        throw new TapPdkRetryableEx("postgres", new TimelineCatchupRetryException("Physical WAL miner has caught up "
+                + "ancestor timeline WAL from " + sourceId + " to the current timeline start " + restoreAt
+                + ". Switching CDC to " + reconnectTarget + "."));
     }
 
     private long parseOffsetLsn(String offset) {
@@ -3262,6 +3366,30 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return false;
     }
 
+    private boolean isSourceUnavailableBeforeStreaming(Throwable t) {
+        Throwable cur = t;
+        while (cur != null) {
+            if (cur instanceof java.net.ConnectException
+                    || cur instanceof java.net.SocketTimeoutException
+                    || cur instanceof java.net.NoRouteToHostException) {
+                return true;
+            }
+            cur = cur.getCause();
+        }
+        return false;
+    }
+
+    private boolean isTimelineCatchupRetry(Throwable t) {
+        Throwable cur = t;
+        while (cur != null) {
+            if (cur instanceof TimelineCatchupRetryException) {
+                return true;
+            }
+            cur = cur.getCause();
+        }
+        return false;
+    }
+
     private boolean ensurePhysicalReplicationSlotOnSource(TimelineSource source) {
         if (source == null || EmptyKit.isBlank(slotName)) {
             return false;
@@ -3395,6 +3523,18 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
         int offsetTimeline = timeline > 0 ? timeline : currentTimeline;
         return lsnStr(lsn) + ",timeline=" + offsetTimeline;
+    }
+
+    private static final class StreamReadStartedException extends Exception {
+        private StreamReadStartedException(Throwable cause) {
+            super(cause);
+        }
+    }
+
+    private static final class TimelineCatchupRetryException extends RuntimeException {
+        private TimelineCatchupRetryException(String message) {
+            super(message);
+        }
     }
 
     /* Best-effort LSN string -> long; 0 on blank/parse failure so callers can

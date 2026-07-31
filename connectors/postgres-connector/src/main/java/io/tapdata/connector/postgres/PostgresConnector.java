@@ -1035,10 +1035,6 @@ public class PostgresConnector extends CommonDbConnector {
 
     private void checkCdcSlaveConnected(PhysicalWalLogMiner miner) throws SQLException {
         if (Boolean.TRUE.equals(postgresConfig.getCheckCdcSlave())) {
-            if (postgresTest != null && postgresTest.masterConnected) {
-                tapLogger.warn("No standby PostgreSQL node is available, keep CDC connected to the master node");
-                return;
-            }
             ensureCdcConnectedToSlave(miner);
             asyncCheckSlaveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "slave-async-check");
@@ -1051,7 +1047,11 @@ public class PostgresConnector extends CommonDbConnector {
                         boolean isInRecovery = resultSet.getBoolean(1);
                         if (!isInRecovery) {
                             tapLogger.warn("The node cdc connected to is master node, we need switch to slave node");
-                            requestSlaveReconnect(miner);
+                            if (switchCdcConnectionToSlave()) {
+                                requestSlaveReconnect(miner);
+                            } else {
+                                tapLogger.warn("No standby PostgreSQL node is available, keep CDC connected to the master node");
+                            }
                         }
                     });
                 } catch (Exception e) {
@@ -1069,8 +1069,7 @@ public class PostgresConnector extends CommonDbConnector {
                 if (switchCdcConnectionToSlave()) {
                     return;
                 }
-                requestSlaveReconnect(miner);
-                throw newSlavePreferredRetryableException("No available slave node found for CDC");
+                tapLogger.warn("No standby PostgreSQL node is available, keep CDC connected to the master node");
             }
         });
     }
