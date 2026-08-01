@@ -23,6 +23,7 @@ final class PaimonWriteSemanticContract {
     private final boolean fullChangelogRequired;
     private final List<String> targetFields;
     private final Set<String> nonNullTargetFields;
+    private final Set<String> defaultedTargetFields;
     private final Set<String> primaryKeys;
     private final Set<String> partitionKeys;
     private final @Nullable String rowKindField;
@@ -36,6 +37,7 @@ final class PaimonWriteSemanticContract {
             boolean fullChangelogRequired,
             List<String> targetFields,
             Set<String> nonNullTargetFields,
+            Set<String> defaultedTargetFields,
             Set<String> primaryKeys,
             Set<String> partitionKeys,
             @Nullable String rowKindField,
@@ -49,6 +51,7 @@ final class PaimonWriteSemanticContract {
                 Collections.unmodifiableList(
                         new ArrayList<>(Objects.requireNonNull(targetFields, "targetFields")));
         this.nonNullTargetFields = immutableSet(nonNullTargetFields, "nonNullTargetFields");
+        this.defaultedTargetFields = immutableSet(defaultedTargetFields, "defaultedTargetFields");
         this.primaryKeys = immutableSet(primaryKeys, "primaryKeys");
         this.partitionKeys = immutableSet(partitionKeys, "partitionKeys");
         this.rowKindField = rowKindField;
@@ -86,6 +89,10 @@ final class PaimonWriteSemanticContract {
 
     Set<String> nonNullTargetFields() {
         return nonNullTargetFields;
+    }
+
+    Set<String> defaultedTargetFields() {
+        return defaultedTargetFields;
     }
 
     Set<String> primaryKeys() {

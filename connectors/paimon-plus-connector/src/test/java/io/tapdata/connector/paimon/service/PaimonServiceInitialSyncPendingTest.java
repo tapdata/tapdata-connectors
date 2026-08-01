@@ -1,6 +1,8 @@
 package io.tapdata.connector.paimon.service;
 
 import io.tapdata.connector.paimon.config.PaimonConfig;
+import io.tapdata.entity.event.TapCallbackOffset;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.Log;
@@ -27,19 +29,26 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -48,12 +57,53 @@ import static org.mockito.Mockito.when;
 class PaimonServiceInitialSyncPendingTest {
 
     @Test
+    void emptyTableAfterInitialSyncMustStillForceOneCompletionCommit() throws Exception {
+        PaimonConfig config = new PaimonConfig();
+        config.setDatabase("default");
+        PaimonService service =
+                new PaimonService(config, mock(Log.class), () -> 123L, () -> { });
+        service.startForTest();
+        PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
+        PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
+        when(strategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
+        when(strategy.writeSemanticContract())
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED));
+        when(strategy.prepareCommit(0L)).thenReturn(Collections.emptyList());
+        when(committer.filterAndCommit(anyMap())).thenReturn(0);
+        PaimonTableWriteContext context =
+                new PaimonTableWriteContext(
+                        "default.t",
+                        "t",
+                        "stable-user",
+                        strategy,
+                        committer,
+                        null,
+                        Collections.emptyList(),
+                        0L);
+        tableContexts(service).put("default.t", context);
+        TapTable tapTable = mock(TapTable.class);
+        when(tapTable.getName()).thenReturn("t");
+        TapConnectorContext connectorContext = mock(TapConnectorContext.class);
+        when(connectorContext.getStateMap()).thenReturn(mock(KVMap.class));
+
+        service.afterInitialSync(connectorContext, tapTable);
+
+        verify(strategy, times(1)).prepareCommit(0L);
+        verify(committer, times(1)).filterAndCommit(anyMap());
+        assertEquals(
+                Long.valueOf(123L),
+                tableState(service, "default.t").commitIntervalBaseTimeMs());
+        context.close();
+    }
+
+    @Test
     void syntheticHashKeyMustBeMaterializedBeforeDynamicRoutingValidation() throws Exception {
         PaimonConfig config = new PaimonConfig();
         config.setDatabase("default");
         config.setHashKey(true);
         config.setBatchAccumulationSize(0);
         PaimonService service = new PaimonService(config, mock(Log.class));
+        service.startForTest();
 
         List<String> sourcePrimaryKeys =
                 Arrays.asList("pk1", "pk2", "pk3", "pk4", "pk5", "pk6");
@@ -95,6 +145,7 @@ class PaimonServiceInitialSyncPendingTest {
         TapInsertRecordEvent event =
                 new TapInsertRecordEvent().init().table("t").after(sourceData);
         event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+        event.addInfo("nodeIds", Collections.singletonList("source-a"));
 
         service.writeRecords(Collections.singletonList(event), tapTable, connectorContext);
 
@@ -114,8 +165,31 @@ class PaimonServiceInitialSyncPendingTest {
     void concurrentSourceIngressMustFenceInsteadOfUsingThreadOrder() throws Exception {
         PaimonConfig config = new PaimonConfig();
         config.setDatabase("default");
-        config.setBatchAccumulationSize(0);
-        PaimonService service = new PaimonService(config, mock(Log.class));
+        config.setBatchAccumulationSize(100);
+        config.setCommitIntervalMs(1_000);
+        AtomicLong clock = new AtomicLong(100L);
+        AtomicReference<Runnable> scheduledTask = new AtomicReference<>();
+        ScheduledExecutorService schedulerExecutor = mock(ScheduledExecutorService.class);
+        when(schedulerExecutor.schedule(any(Runnable.class), anyLong(), eq(TimeUnit.MILLISECONDS)))
+                .thenAnswer(invocation -> {
+                    scheduledTask.set(invocation.getArgument(0));
+                    ScheduledFuture<?> future = mock(ScheduledFuture.class);
+                    when(future.isDone()).thenReturn(false);
+                    when(future.isCancelled()).thenReturn(false);
+                    return future;
+                });
+        when(schedulerExecutor.awaitTermination(anyLong(), any(TimeUnit.class)))
+                .thenReturn(true);
+        PaimonService service =
+                new PaimonService(
+                        config,
+                        mock(Log.class),
+                        clock::get,
+                        () -> { },
+                        () -> schedulerExecutor);
+        AtomicInteger callbackCount = new AtomicInteger();
+        service.setFlushOffsetCallback(ignored -> callbackCount.incrementAndGet());
+        service.startForTest();
 
         PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
@@ -129,6 +203,8 @@ class PaimonServiceInitialSyncPendingTest {
         when(strategy.bucketMode()).thenReturn(BucketMode.KEY_DYNAMIC);
         when(strategy.writeSemanticContract())
                 .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.KEY_DYNAMIC));
+        when(strategy.prepareCommit(0L)).thenReturn(Collections.emptyList());
+        when(committer.filterAndCommit(anyMap())).thenReturn(0);
         PaimonTableWriteContext context =
                 new PaimonTableWriteContext(
                         "default.t",
@@ -154,6 +230,8 @@ class PaimonServiceInitialSyncPendingTest {
                         .init()
                         .table("t")
                         .after(Collections.singletonMap("id", 1));
+        event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+        event.addInfo(TapCallbackOffset.KEY_NODE_IDS, Collections.singletonList("source-a"));
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
@@ -175,11 +253,35 @@ class PaimonServiceInitialSyncPendingTest {
             assertTrue(firstFailure.getCause().getMessage().contains("fenced after an ingress failure"));
             verify(strategy, times(1)).write(any());
 
+            assertTrue(scheduledTask.get() != null);
+            clock.set(1_100L);
+            scheduledTask.get().run();
+            verify(strategy, never()).prepareCommit(anyLong());
+
             IllegalStateException fenced = assertThrows(
                     IllegalStateException.class,
                     () -> service.writeRecords(
                             Collections.singletonList(event), tapTable, connectorContext));
             assertTrue(fenced.getMessage().contains("fenced after an ingress failure"));
+
+            HeartbeatEvent heartbeat = new HeartbeatEvent().init().referenceTime(2L);
+            heartbeat.addInfo(TapCallbackOffset.KEY_SYNC_STAGE, "CDC");
+            heartbeat.addInfo(TapCallbackOffset.KEY_STREAM_OFFSET, "offset-1");
+            heartbeat.addInfo(TapCallbackOffset.KEY_SOURCE_TIME, 1L);
+            heartbeat.addInfo(
+                    TapCallbackOffset.KEY_NODE_IDS,
+                    Collections.singletonList("source-a"));
+            IllegalStateException heartbeatFailure = assertThrows(
+                    IllegalStateException.class,
+                    () -> service.processHeartbeat(heartbeat));
+            assertSame(overlap, heartbeatFailure);
+            assertEquals(0, callbackCount.get());
+
+            IllegalStateException closeFailure = assertThrows(
+                    IllegalStateException.class,
+                    service::close);
+            assertSame(overlap, closeFailure);
+            assertEquals(0, callbackCount.get());
         } finally {
             allowFirstWriteToFinish.countDown();
             executor.shutdownNow();
@@ -193,6 +295,7 @@ class PaimonServiceInitialSyncPendingTest {
         config.setDatabase("default");
         config.setBatchAccumulationSize(0);
         PaimonService service = new PaimonService(config, mock(Log.class));
+        service.startForTest();
 
         PaimonBucketWriterStrategy strategy1 = mock(PaimonBucketWriterStrategy.class);
         PaimonBucketWriterStrategy strategy2 = mock(PaimonBucketWriterStrategy.class);
@@ -236,6 +339,8 @@ class PaimonServiceInitialSyncPendingTest {
                 .after(Collections.singletonMap("id", 1));
         TapInsertRecordEvent event2 = new TapInsertRecordEvent().init().table("t2")
                 .after(Collections.singletonMap("id", 2));
+        event1.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "INITIAL_SYNC");
+        event2.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "INITIAL_SYNC");
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
@@ -261,6 +366,7 @@ class PaimonServiceInitialSyncPendingTest {
         config.setDatabase("default");
         config.setBatchAccumulationSize(0);
         PaimonService service = new PaimonService(config, mock(Log.class));
+        service.startForTest();
 
         PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
@@ -298,12 +404,13 @@ class PaimonServiceInitialSyncPendingTest {
                         .init()
                         .table("t")
                         .after(Collections.singletonMap("id", 1));
+        event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "INITIAL_SYNC");
 
         service.writeRecords(Collections.singletonList(event), tapTable, connectorContext);
 
         verify(strategy, times(1)).write(any());
         assertFalse(context.hasPendingCommit());
-        assertEquals(1, accumulatedCounts(service).get("default.t").get());
+        assertEquals(1L, tableState(service, "default.t").bufferedRecordCount());
         context.close();
     }
 
@@ -313,6 +420,7 @@ class PaimonServiceInitialSyncPendingTest {
         config.setDatabase("default");
         config.setBatchAccumulationSize(0);
         PaimonService service = new PaimonService(config, mock(Log.class));
+        service.startForTest();
 
         PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
@@ -354,13 +462,14 @@ class PaimonServiceInitialSyncPendingTest {
                         .table("t")
                         .after(Collections.singletonMap("id", 1));
         event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+        event.addInfo("nodeIds", Collections.singletonList("source-a"));
 
         service.writeRecords(Collections.singletonList(event), tapTable, connectorContext);
 
         verify(strategy, times(1)).write(any());
         verify(strategy, times(1)).prepareCommit(1L);
         assertFalse(context.hasPendingCommit());
-        assertEquals(0, accumulatedCounts(service).get("default.t").get());
+        assertEquals(0L, tableState(service, "default.t").accumulatedRecordCount());
         context.close();
     }
 
@@ -369,6 +478,7 @@ class PaimonServiceInitialSyncPendingTest {
         PaimonConfig config = new PaimonConfig();
         config.setDatabase("default");
         PaimonService service = new PaimonService(config, mock(Log.class));
+        service.startForTest();
         Catalog catalog = mock(Catalog.class);
         PaimonDynamicBucketPollutedException polluted =
                 new PaimonDynamicBucketPollutedException(
@@ -387,6 +497,7 @@ class PaimonServiceInitialSyncPendingTest {
                         .init()
                         .table("t")
                         .after(Collections.singletonMap("id", 1));
+        event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "INITIAL_SYNC");
 
         PaimonDynamicBucketPollutedException thrown = assertThrows(
                 PaimonDynamicBucketPollutedException.class,
@@ -400,6 +511,7 @@ class PaimonServiceInitialSyncPendingTest {
         PaimonConfig config = new PaimonConfig();
         config.setDatabase("default");
         PaimonService service = new PaimonService(config, mock(Log.class));
+        service.startForTest();
 
         PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.KEY_DYNAMIC);
@@ -439,6 +551,7 @@ class PaimonServiceInitialSyncPendingTest {
                         .init()
                         .table("t")
                         .after(Collections.singletonMap("pt", 1));
+        event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "INITIAL_SYNC");
 
         PaimonFatalWriteException thrown = assertThrows(
                 PaimonFatalWriteException.class,
@@ -464,12 +577,11 @@ class PaimonServiceInitialSyncPendingTest {
         return (Map<String, List<DataField>>) field.get(service);
     }
 
-    @SuppressWarnings("unchecked")
-    private static Map<String, AtomicInteger> accumulatedCounts(PaimonService service)
-            throws Exception {
-        Field field = PaimonService.class.getDeclaredField("accumulatedRecordCount");
+    private static PaimonMicroBatchCoordinator.TableSnapshot tableState(
+            PaimonService service, String tableKey) throws Exception {
+        Field field = PaimonService.class.getDeclaredField("microBatchCoordinator");
         field.setAccessible(true);
-        return (Map<String, AtomicInteger>) field.get(service);
+        return ((PaimonMicroBatchCoordinator) field.get(service)).tableSnapshot(tableKey);
     }
 
     private static void setCatalog(PaimonService service, Catalog catalog) throws Exception {

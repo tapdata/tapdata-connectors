@@ -17,8 +17,11 @@ import java.util.Map;
  *
  * <p>Bucket-specific routing and raw writer ownership belong exclusively to {@link
  * PaimonBucketWriterStrategy}; raw commit ownership belongs exclusively to {@link
- * PaimonTableCommitter}. This context only coordinates prepare, pending retry and durable commit
- * identity.
+ * PaimonTableCommitter}. This context only coordinates prepare, pending retry and task-state commit
+ * identity. {@link #pendingCommits} is deliberately the in-process retry envelope for one table;
+ * unlike Paimon's Flink sink it is not operator state and cannot restore CommitMessages after a
+ * process crash:
+ * https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/RestoreCommittableStateManager.java#L36-L87
  */
 final class PaimonTableWriteContext implements AutoCloseable {
 
@@ -30,6 +33,10 @@ final class PaimonTableWriteContext implements AutoCloseable {
     private final CommitStateStore commitStateStore;
     private final IOManager ioManager;
     private final List<String> spillDirs;
+    // Keep the exact identifier/message pair across an ambiguous in-process retry. Paimon's
+    // filterAndCommit filters snapshots already committed by this commitUser + identifier before
+    // committing the remainder:
+    // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/table/sink/TableCommitImpl.java#L261-L278
     private final Map<Long, List<CommitMessage>> pendingCommits = new LinkedHashMap<>();
 
     private long nextCommitIdentifier;
@@ -189,6 +196,10 @@ final class PaimonTableWriteContext implements AutoCloseable {
                         "Paimon commit identifier is exhausted for " + tableKey);
             }
             try {
+                // All bucket strategies eventually use TableWriteImpl#prepareCommit; the dynamic
+                // hash strategy first persists its bucket-assignment delta with the same identifier.
+                // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java#L260-L263
+                // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/index/HashBucketAssigner.java#L101-L114
                 List<CommitMessage> messages = writerStrategy.prepareCommit(identifier);
                 pendingCommits.put(identifier, messages);
             } catch (Exception e) {

@@ -3,6 +3,8 @@ package io.tapdata.connector.paimon.service;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -21,6 +23,9 @@ import static org.apache.paimon.types.DataTypeFamily.CHARACTER_STRING;
 /** Resolves and validates the Paimon 1.3.1 write semantics before writer resources are allocated. */
 final class PaimonWriteSemanticContractResolver {
 
+    private static final String LEGACY_COMPRESSION_OPTION = "compression";
+    private static final String FLINK_SINK_PARALLELISM_OPTION = "sink.parallelism";
+
     private PaimonWriteSemanticContractResolver() {}
 
     static PaimonWriteSemanticContract resolve(String tableKey, FileStoreTable table) {
@@ -36,6 +41,9 @@ final class PaimonWriteSemanticContractResolver {
         boolean primaryKeyTable = !schema.primaryKeys().isEmpty();
         boolean fixedOrPostpone =
                 bucketMode == BucketMode.HASH_FIXED || bucketMode == BucketMode.POSTPONE_MODE;
+
+        validateKeyDynamicIgnoreDeleteConflict(
+                tableKey, bucketMode, mergeEngine, options.ignoreDelete());
 
         // Fixed and postpone writes are routed directly to (partition, bucket). Unlike
         // KEY_DYNAMIC, they do not have GlobalIndexAssigner state to retract an old partition:
@@ -71,13 +79,24 @@ final class PaimonWriteSemanticContractResolver {
         RowType rowType = schema.logicalRowType();
         List<String> targetFields = rowType.getFieldNames();
         Set<String> nonNullTargetFields = new LinkedHashSet<>();
+        Set<String> defaultedTargetFields = new LinkedHashSet<>();
         for (DataField field : rowType.getFields()) {
             if (!field.type().isNullable()) {
                 nonNullTargetFields.add(field.name());
             }
+            if (field.defaultValue() != null) {
+                defaultedTargetFields.add(field.name());
+            }
         }
         nonNullTargetFields.addAll(schema.primaryKeys());
 
+        // Paimon 1.3.1 TableWriteImpl#writeAndReturn checks non-null fields before wrapping the
+        // row in DefaultValueRow. For nullable fields, DefaultValueRow substitutes schema
+        // defaults when the converted row is null, so the immutable contract must preserve
+        // DataField#defaultValue metadata for validation against the original source Map.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java#L187-L213
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/casting/DefaultValueRow.java#L209-L228
         Optional<String> configuredRowKindField = options.rowkindField();
         String rowKindField = configuredRowKindField.orElse(null);
         int rowKindFieldIndex = -1;
@@ -128,10 +147,242 @@ final class PaimonWriteSemanticContractResolver {
                 fullChangelogRequired,
                 targetFields,
                 nonNullTargetFields,
+                defaultedTargetFields,
                 new LinkedHashSet<>(schema.primaryKeys()),
                 new LinkedHashSet<>(schema.partitionKeys()),
                 rowKindField,
                 rowKindFieldIndex);
+    }
+
+    static void validateNewTable(String tableKey, Schema schema) {
+        Objects.requireNonNull(tableKey, "tableKey");
+        Objects.requireNonNull(schema, "schema");
+        validateNoLegacyCompressionOption(tableKey, schema);
+        validateNoFlinkSinkParallelism(tableKey, schema);
+        CoreOptions options = CoreOptions.fromMap(schema.options());
+        validateBucketConfiguration(tableKey, schema, options);
+        validateFileFormatProvider(options);
+        validateKeyDynamicIgnoreDeleteConflict(
+                tableKey,
+                deriveBucketMode(schema),
+                options.mergeEngine(),
+                options.ignoreDelete());
+    }
+
+    private static void validateNoLegacyCompressionOption(String tableKey, Schema schema) {
+        if (!schema.options().containsKey(LEGACY_COMPRESSION_OPTION)) {
+            return;
+        }
+
+        // Paimon 1.3.1 defines and reads only "file.compression". Its generic schema validation
+        // still has a TODO for validating every option key, so "compression" is otherwise
+        // accepted but ignored. Reject the legacy key after tableProperties and Catalog defaults
+        // are merged, while the Catalog still has no table state.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L259-L264
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L2237-L2240
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L93-L101
+        throw new PaimonFatalWriteException(
+                "PAIMON_LEGACY_COMPRESSION_OPTION"
+                        + " table="
+                        + tableKey
+                        + ", option="
+                        + LEGACY_COMPRESSION_OPTION
+                        + ", use="
+                        + CoreOptions.FILE_COMPRESSION.key());
+    }
+
+    private static void validateNoFlinkSinkParallelism(String tableKey, Schema schema) {
+        if (!schema.options().containsKey(FLINK_SINK_PARALLELISM_OPTION)) {
+            return;
+        }
+
+        // Connector product constraint: sink.parallelism belongs to Paimon's Flink connector and
+        // is consumed while the Flink sink graph is built. This connector allocates Paimon Core
+        // StreamTableWrite instances directly, so persisting the option would promise write
+        // concurrency that the current runtime never creates.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/FlinkConnectorOptions.java#L93-L100
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/FlinkTableSinkBase.java#L138-L150
+        throw new PaimonFatalWriteException(
+                "PAIMON_FLINK_ONLY_SINK_PARALLELISM"
+                        + " table="
+                        + tableKey
+                        + ", option="
+                        + FLINK_SINK_PARALLELISM_OPTION
+                        + " is only consumed by Paimon's Flink sink and cannot configure this "
+                        + "Connector's Core writer");
+    }
+
+    private static void validateFileFormatProvider(CoreOptions options) {
+        // Paimon 1.3.1 SchemaValidation uses FileFormat.fromIdentifier with the complete table
+        // options. Calling the same public API here performs ServiceLoader provider discovery
+        // before Catalog#createTable. Do not duplicate a Connector-side provider allowlist:
+        // packaged or future providers remain defined by the actual Paimon classpath.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L160-L162
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/format/FileFormat.java#L76-L92
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/factories/FormatFactoryUtil.java#L39-L60
+        FileFormat.fromIdentifier(options.formatType(), options.toConfiguration());
+    }
+
+    private static void validateBucketConfiguration(
+            String tableKey, Schema schema, CoreOptions options) {
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        int bucket = options.bucket();
+
+        // This is a scoped equivalent of Paimon 1.3.1's private
+        // SchemaValidation#validateBucket. It runs against final options after tableProperties
+        // and Catalog defaults, before Catalog#createTable. Keep every branch aligned with the
+        // upstream method instead of expanding this class into a generic Paimon option validator.
+        // Source:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L556-L604
+        if (bucket == -1) {
+            if (options.toMap().get(CoreOptions.BUCKET_KEY.key()) != null) {
+                throw invalidBucket(
+                        tableKey,
+                        bucket,
+                        "bucket-key cannot be defined for dynamic bucket mode");
+            }
+            if (tableSchema.primaryKeys().isEmpty()
+                    && options.toMap()
+                                    .get(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key())
+                            != null) {
+                throw invalidBucket(
+                        tableKey,
+                        bucket,
+                        "append-only dynamic bucket does not support "
+                                + CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key());
+            }
+            return;
+        }
+
+        boolean primaryKeyPostpone =
+                bucket == BucketMode.POSTPONE_BUCKET
+                        && !tableSchema.primaryKeys().isEmpty();
+        if (bucket < 1 && !primaryKeyPostpone) {
+            throw invalidBucket(
+                    tableKey,
+                    bucket,
+                    "bucket must be -1, -2 for a primary-key table, or greater than 0");
+        }
+
+        if (tableSchema.primaryKeys().isEmpty() && tableSchema.bucketKeys().isEmpty()) {
+            throw invalidBucket(
+                    tableKey,
+                    bucket,
+                    "bucketed append-only table requires bucket-key");
+        }
+
+        List<String> nestedBucketKeys =
+                tableSchema.fields().stream()
+                        .filter(
+                                field ->
+                                        tableSchema.bucketKeys().contains(field.name())
+                                                && isNestedBucketKeyType(field.type()))
+                        .map(DataField::name)
+                        .collect(java.util.stream.Collectors.toList());
+        if (!nestedBucketKeys.isEmpty()) {
+            throw invalidBucket(
+                    tableKey,
+                    bucket,
+                    "nested type cannot be used as bucket-key: " + nestedBucketKeys);
+        }
+    }
+
+    private static boolean isNestedBucketKeyType(DataType dataType) {
+        switch (dataType.getTypeRoot()) {
+            case ARRAY:
+            case MULTISET:
+            case MAP:
+            case ROW:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static PaimonFatalWriteException invalidBucket(
+            String tableKey, int bucket, String reason) {
+        return new PaimonFatalWriteException(
+                "PAIMON_INVALID_BUCKET_CONFIGURATION"
+                        + " table="
+                        + tableKey
+                        + ", bucket="
+                        + bucket
+                        + ", reason="
+                        + reason);
+    }
+
+    static BucketMode deriveBucketMode(Schema schema) {
+        Objects.requireNonNull(schema, "schema");
+        int bucket = CoreOptions.fromMap(schema.options()).bucket();
+        return deriveBucketMode(TableSchema.create(0L, schema), bucket);
+    }
+
+    static BucketMode deriveBucketMode(TableSchema schema, int bucket) {
+        Objects.requireNonNull(schema, "schema");
+
+        // Paimon 1.3.1 AppendOnlyFileStore#bucketMode treats only bucket=-1 as
+        // BUCKET_UNAWARE when no primary key exists; all other values use HASH_FIXED.
+        // Source:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#L72-L75
+        if (schema.primaryKeys().isEmpty()) {
+            return bucket == -1 ? BucketMode.BUCKET_UNAWARE : BucketMode.HASH_FIXED;
+        }
+
+        // Paimon 1.3.1 TableSchema#crossPartitionUpdate and
+        // KeyValueFileStore#bucketMode select KEY_DYNAMIC only for bucket=-1 when a
+        // partition key is not covered by the primary key. Mirroring both methods here keeps
+        // the pre-create guard identical to the materialized FileStoreTable; an approximation
+        // could either miss the unsafe synthetic DELETE path or reject a valid table.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/schema/TableSchema.java#L200-L205
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
+        if (bucket == BucketMode.POSTPONE_BUCKET) {
+            return BucketMode.POSTPONE_MODE;
+        }
+        if (bucket == -1) {
+            return schema.crossPartitionUpdate()
+                    ? BucketMode.KEY_DYNAMIC
+                    : BucketMode.HASH_DYNAMIC;
+        }
+        return BucketMode.HASH_FIXED;
+    }
+
+    private static void validateKeyDynamicIgnoreDeleteConflict(
+            String tableKey,
+            BucketMode bucketMode,
+            MergeEngine mergeEngine,
+            boolean ignoreDelete) {
+        if (bucketMode != BucketMode.KEY_DYNAMIC
+                || mergeEngine != MergeEngine.DEDUPLICATE
+                || !ignoreDelete) {
+            return;
+        }
+
+        // Paimon 1.3.1 ExistingProcessor#create selects DeleteExistingProcessor for
+        // KEY_DYNAMIC + DEDUPLICATE, and DeleteExistingProcessor#processExists emits a DELETE
+        // for the old partition. RowKindFilter#test drops that DELETE when ignore-delete=true,
+        // which can leave the same primary key in two partitions; reject before any writer or
+        // global-index resource is allocated. CoreOptions#ignoreDelete is used by both callers
+        // so canonical and historical fallback keys have the same effective semantics.
+        // Sources:
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/crosspartition/ExistingProcessor.java#L59-L75
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/crosspartition/DeleteExistingProcessor.java#L46-L55
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/utils/RowKindFilter.java#L37-L63
+        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L2317-L2331
+        throw new PaimonFatalWriteException(
+                "PAIMON_KEY_DYNAMIC_IGNORE_DELETE_CONFLICT"
+                        + " table="
+                        + tableKey
+                        + ", bucketMode="
+                        + bucketMode
+                        + ", mergeEngine="
+                        + mergeEngine
+                        + ", ignore-delete="
+                        + ignoreDelete
+                        + ", reason=ignore-delete filters the old-partition synthetic DELETE");
     }
 
     private static PaimonFatalWriteException fatal(

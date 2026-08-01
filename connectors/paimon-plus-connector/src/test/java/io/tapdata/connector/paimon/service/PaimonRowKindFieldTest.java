@@ -28,6 +28,7 @@ class PaimonRowKindFieldTest {
                         true,
                         Arrays.asList("id", "rk"),
                         Collections.singleton("id"),
+                        Collections.emptySet(),
                         Collections.singleton("id"),
                         Collections.emptySet(),
                         "rk",

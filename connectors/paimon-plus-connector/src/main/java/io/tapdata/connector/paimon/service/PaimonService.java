@@ -8,6 +8,7 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
@@ -24,6 +25,7 @@ import io.tapdata.pdk.core.utils.CommonUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.*;
 import org.apache.paimon.data.*;
@@ -44,7 +46,6 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.ByteArrayOutputStream;
-import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
@@ -55,10 +56,9 @@ import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -77,13 +77,6 @@ public class PaimonService implements AutoCloseable {
 	private static final String TAG = PaimonService.class.getName();
 	/** 原始主键字段过多且启用 hashKey 时，在目标表中使用的合成主键字段名。 */
 	private static final String HASH_KEY = "_hash_key";
-	/**
-	 * PDK 异步 offset 协议开关。
-	 *
-	 * <p>PDK 2.0.8 的 callback 没有持久化确认和源事件顺序契约，因此当前固定为 false，
-	 * 强制 CDC 在返回前同步提交，避免数据尚未落入 Paimon 时 offset 已经前移。
-	 */
-	private static final boolean ASYNC_OFFSET_CONTRACT_VERIFIED = false;
 	/**
 	 * 当前 JVM 内物理表写入所有权注册表。
 	 *
@@ -108,7 +101,9 @@ public class PaimonService implements AutoCloseable {
 	 * 表级规范写上下文，Key 为 {@code database.tableName}。
 	 *
 	 * <p>每个物理表只允许一个上下文持有 writer、committer、动态桶 router 和 commit identifier，
-	 * 避免同表不同写入对象的路由索引或提交状态相互分离。
+	 * 避免同表不同写入对象的路由索引或提交状态相互分离。多表任务因此是“一表一写入、一表一提交器”，
+	 * 但各表 snapshot 依次提交，并不构成跨表原子事务；Paimon Flink 多表提交器也按表分组并逐表提交：
+	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/StoreMultiCommitter.java#L150-L176
 	 */
 	private final Map<String, PaimonTableWriteContext> tableWriteContexts = new ConcurrentHashMap<>();
 	/** Key 为逻辑表标识，Value 为其物理表路径摘要，用于释放 JVM 内的物理表 owner。 */
@@ -116,37 +111,23 @@ public class PaimonService implements AutoCloseable {
 	/** 当前 Service 实例的唯一写入 owner 标识，用于区分同 JVM 内的不同连接或任务。 */
 	private final String serviceWriterOwner = UUID.randomUUID().toString();
 
-	// ===== Batch Accumulation for Performance =====
-	/** Key 为逻辑表标识，Value 为该表自上次成功提交后累计的记录数。 */
-	private final Map<String, AtomicInteger> accumulatedRecordCount = new ConcurrentHashMap<>();
-	/** Key 为逻辑表标识，Value 为该表最近一次成功提交或初始化提交计时的毫秒时间戳。 */
-	private final Map<String, AtomicLong> lastCommitTime = new ConcurrentHashMap<>();
 	/**
 	 * 表级写入生命周期锁；串行化同一表的写入、prepare/commit、DDL drain 和资源关闭操作。
 	 */
 	private final Map<String, Object> commitLocks = new ConcurrentHashMap<>();
 	/** 正在执行 DDL drain 的逻辑表集合；集合中的表禁止创建或继续使用写上下文。 */
 	private final Set<String> drainingTables = ConcurrentHashMap.newKeySet();
-	/**
-	 * 已进入 CDC 阶段、理论上可参与异步 flush 的表集合。
-	 *
-	 * <p>当前 {@link #ASYNC_OFFSET_CONTRACT_VERIFIED} 为 false，因此仅保留该状态供未来协议验证后使用。
-	 */
-	private final Set<String> asyncCommitEligibleTables = ConcurrentHashMap.newKeySet();
-
-	// ===== Async Commit Support =====
-	/** 定时扫描并提交已累计数据的单线程执行器；当前同步 offset 模式下不会创建。 */
-	private ScheduledExecutorService asyncCommitExecutor;
-	/**
-	 * 按到达顺序保存每张表尚未回调的首个 offset；同步 Map 维持多表回调队列的可见性。
-	 * 当前平台托管 offset 模式下不再填充，仅保留兼容逻辑。
-	 */
-	private final Map<String, TapCallbackOffset> firstOffsetByTable;
-	/** 已完成 Paimon 提交、允许从全局 offset 队列头部回调的平台表集合。 */
-	private final Set<String> committedOffsetTables = new HashSet<>();
-	/** 串行化多表 offset 回调及队列头部推进，防止回调乱序。 */
-	private final Object offsetCallbackLock = new Object();
-	/** Connector 管理 offset 时使用的回调；当前 setter 会忽略传入值并保持为 null。 */
+	// ===== Micro-batch, offset barrier, scheduler, and lifecycle =====
+	private final PaimonMicroBatchCoordinator microBatchCoordinator;
+	private final PaimonServiceLifecycle lifecycle = new PaimonServiceLifecycle();
+	private final PaimonAsyncCommitScheduler asyncCommitScheduler;
+	private final LongSupplier clock;
+	private final RetryWaiter retryWaiter;
+	private final Object callbackExecutionLock = new Object();
+	private final Object closeLock = new Object();
+	private final AtomicReference<InterruptedException> cleanupInterruption =
+			new AtomicReference<>();
+	/** Connector 注入的 offset 回调；只允许在 NEW 状态绑定，运行后不可替换。 */
 	private Consumer<Object> flushOffsetCallback;
 	/** 最近一次执行写入的任务上下文，供兼容的异步线程取得任务日志；跨线程读取需要 volatile。 */
 	private volatile TapConnectorContext activeConnectorContext;
@@ -164,7 +145,9 @@ public class PaimonService implements AutoCloseable {
 	 * 动态桶表的源事件入口保护器，Key 为逻辑表标识。
 	 *
 	 * <p>PDK 2.0.8 不提供可排序的 source sequence，因此禁止同一动态桶表的重叠入口把锁竞争顺序
-	 * 误当成事件顺序；不同表以及 fixed/append 表仍可保持原有并发能力。
+	 * 误当成事件顺序；不同表以及 fixed/append 表仍可保持原有并发能力。注意后者只表示桶路由允许
+	 * 并发，不证明无 sequence.field 的主键更新可以乱序到达；同一主键若被重叠 callback 更新，
+	 * commitLocks 的抢锁顺序仍可能不同于源事件顺序。
 	 */
 	private final Map<String, DynamicIngressGuard> dynamicSourceIngressGuards = new ConcurrentHashMap<>();
 
@@ -203,9 +186,41 @@ public class PaimonService implements AutoCloseable {
 	private Log log;
 
 	public PaimonService(PaimonConfig config, Log log) {
+		this(config, log, System::currentTimeMillis, RetryWaiter.INTERRUPTIBLE_ONE_SECOND);
+	}
+
+	PaimonService(
+			PaimonConfig config,
+			Log log,
+			LongSupplier clock,
+			RetryWaiter retryWaiter) {
+		this(
+				config,
+				log,
+				clock,
+				retryWaiter,
+				PaimonAsyncCommitScheduler::newDaemonExecutor);
+	}
+
+	PaimonService(
+			PaimonConfig config,
+			Log log,
+			LongSupplier clock,
+			RetryWaiter retryWaiter,
+			PaimonAsyncCommitScheduler.ExecutorFactory schedulerExecutorFactory) {
 		this.log = log;
 		this.config = config;
-		this.firstOffsetByTable = Collections.synchronizedMap(new LinkedHashMap<>());
+		this.clock = Objects.requireNonNull(clock, "clock");
+		this.retryWaiter = Objects.requireNonNull(retryWaiter, "retryWaiter");
+		this.microBatchCoordinator = new PaimonMicroBatchCoordinator(
+				config.getBatchAccumulationSize(), config.getCommitIntervalMs());
+		this.asyncCommitScheduler = new PaimonAsyncCommitScheduler(
+				Boolean.TRUE.equals(config.getEnableAsyncCommit()) && config.getCommitIntervalMs() > 0,
+				microBatchCoordinator,
+				clock::getAsLong,
+				schedulerExecutorFactory,
+				this::flushScheduledTable,
+				this::recordStickyFailure);
 	}
 
 	/**
@@ -213,8 +228,14 @@ public class PaimonService implements AutoCloseable {
 	 *
 	 * @throws Exception if initialization fails
 	 */
-	public void init() throws Exception {
-		config.validate();
+	public synchronized void init() throws Exception {
+		if (lifecycle.state() != PaimonServiceLifecycle.State.NEW) {
+			throw new IllegalStateException(
+					"Paimon service cannot initialize while lifecycle is "
+							+ lifecycle.state());
+		}
+		try {
+			config.validate();
 
 		// Clean up stale paimon-io-* spill dirs left by abnormally terminated JVMs (OOM/crash/SIGKILL),
 		// which would otherwise accumulate and exhaust local disk. Live dirs owned by active sibling
@@ -232,10 +253,18 @@ public class PaimonService implements AutoCloseable {
 		CatalogContext context = CatalogContext.create(options, hadoopConf);
 
 		// Create catalog
-		catalog = CatalogFactory.createCatalog(context);
+			catalog = CatalogFactory.createCatalog(context);
+			lifecycle.publishRunning();
+		} catch (Throwable failure) {
+			recordStickyFailure(failure);
+			cleanupAfterInitializationFailure(failure);
+			rethrow(failure);
+		}
+	}
 
-		// Initialize async commit if enabled
-		initAsyncCommit();
+	/** Package-private lifecycle publication for unit tests with injected table contexts. */
+	void startForTest() {
+		lifecycle.publishRunning();
 	}
 
 	/**
@@ -258,61 +287,6 @@ public class PaimonService implements AutoCloseable {
 			}
 		} catch (Exception e) {
 			log.warn("Failed to clean up stale Paimon spill dirs: {}", e.getMessage());
-		}
-	}
-
-	/**
-	 * Initialize async commit executor if enabled in config
-	 */
-	private void initAsyncCommit() {
-		Boolean enableAsync = config.getEnableAsyncCommit();
-		Integer commitInterval = config.getCommitIntervalMs();
-		if (!ASYNC_OFFSET_CONTRACT_VERIFIED) {
-			if (Boolean.TRUE.equals(enableAsync)) {
-				log.warn(
-						"Paimon async commit is disabled because the current PDK does not expose "
-								+ "a durable offset acknowledgement/source-order contract; CDC writes will commit synchronously");
-			}
-			return;
-		}
-
-		if (flushOffsetCallback != null
-				&& enableAsync != null && enableAsync && commitInterval != null && commitInterval > 0) {
-			// Create scheduled executor with single thread
-			asyncCommitExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-				Thread t = new Thread(r, "paimon-async-commit");
-				t.setDaemon(true); // Daemon thread won't prevent JVM shutdown
-				return t;
-			});
-
-			// Schedule periodic commit task
-			asyncCommitExecutor.scheduleAtFixedRate(() -> {
-				if (stickyWriteFailure.get() != null) {
-					return;
-				}
-				try {
-					// Commit all tables that have accumulated data
-					for (String tableKey : new ArrayList<>(accumulatedRecordCount.keySet())) {
-						if (!asyncCommitEligibleTables.contains(tableKey)) {
-							continue;
-						}
-						AtomicInteger count = accumulatedRecordCount.get(tableKey);
-						if (count != null && count.get() > 0) {
-							// Check if enough time has passed since last commit
-							AtomicLong lastCommit = lastCommitTime.get(tableKey);
-							if (lastCommit != null) {
-								long timeSinceLastCommit = System.currentTimeMillis() - lastCommit.get();
-								if (timeSinceLastCommit >= commitInterval) {
-									flushTable(tableKey);
-								}
-							}
-						}
-					}
-				} catch (Exception e) {
-					stickyWriteFailure.compareAndSet(null, e);
-					getAsyncCommitLog().warn("Error in async commit: {}", e.getMessage(), e);
-				}
-			}, commitInterval, commitInterval, TimeUnit.MILLISECONDS);
 		}
 	}
 
@@ -365,6 +339,11 @@ public class PaimonService implements AutoCloseable {
 				}
 				break;
 			case "oss":
+				// REVIEW: these keys match Paimon OSSLoader, but this connector module does not
+				// package paimon-oss 1.3.1, so options alone cannot register the oss:// FileIO.
+				// Add the matching loader artifact (or remove the advertised storage type).
+				// Source:
+				// https://github.com/apache/paimon/blob/release-1.3.1/paimon-filesystems/paimon-oss/src/main/java/org/apache/paimon/oss/OSSLoader.java#L52-L68
 				options.set("fs.oss.endpoint", config.getOssEndpoint());
 				options.set("fs.oss.accessKeyId", config.getOssAccessKey());
 				options.set("fs.oss.accessKeySecret", config.getOssSecretKey());
@@ -631,6 +610,12 @@ public class PaimonService implements AutoCloseable {
 	 * @throws Exception if creation fails
 	 */
 	public boolean createTable(TapTable tapTable) throws Exception {
+		try (PaimonServiceLifecycle.Ingress ignored = lifecycle.enter("createTable")) {
+			return createTableInternal(tapTable);
+		}
+	}
+
+	private boolean createTableInternal(TapTable tapTable) throws Exception {
 		String database = config.getDatabase();
 		String tableName = tapTable.getName();
 
@@ -646,18 +631,22 @@ public class PaimonService implements AutoCloseable {
 
 		// Check if table already exists
 		try {
-			catalog.getTable(identifier);
-			// Table exists, check if bucket mode matches
-			boolean existingIsDynamic = isTableDynamicBucket(identifier);
-			boolean configIsDynamic = "dynamic".equalsIgnoreCase(config.getBucketMode(tableName));
+			Table existingTable = catalog.getTable(identifier);
+			if (existingTable instanceof FileStoreTable) {
+				FileStoreTable existingFileStoreTable = (FileStoreTable) existingTable;
+				BucketMode existingMode = existingFileStoreTable.bucketMode();
+				BucketMode configuredMode =
+						PaimonWriteSemanticContractResolver.deriveBucketMode(
+								existingFileStoreTable.schema(), resolveEffectiveBucket(tableName));
 
-			if (existingIsDynamic != configIsDynamic) {
-				// Bucket mode mismatch, log warning and continue with existing table
-				String existingMode = existingIsDynamic ? "dynamic" : "fixed";
-				String configMode = configIsDynamic ? "dynamic" : "fixed";
-				log.warn("Table {} already exists with {} bucket mode, but config specifies {} bucket mode. " +
-								"Cannot switch bucket mode for existing table. Using existing table configuration.",
-						tableName, existingMode, configMode);
+				if (existingMode != configuredMode) {
+					// Bucket mode mismatch is informational only. Paimon does not support changing
+					// the physical bucket model by recreating an already existing table here.
+					log.warn("Table {} already exists with Paimon bucket mode {}, but " +
+									"effective config resolves to {}. Cannot switch bucket mode " +
+									"for existing table. Using existing table configuration.",
+							tableName, existingMode, configuredMode);
+				}
 			}
 			// Table exists, no need to recreate
 			return false;
@@ -696,24 +685,37 @@ public class PaimonService implements AutoCloseable {
 			schemaBuilder.partitionKeys(config.getPartitionKey(tableName));
 		}
 
-		// Set bucket configuration based on bucket mode
-		if ("dynamic".equalsIgnoreCase(config.getBucketMode(tableName))) {
-			// Dynamic bucket mode: set bucket to -1
-			// This mode provides better flexibility
-			schemaBuilder.option("bucket", "-1");
-		} else {
-			// Fixed bucket mode: set specific bucket count
-			Integer bucketCount = config.getBucketCount(tableName);
-			if (bucketCount == null || bucketCount <= 0) {
-				bucketCount = 4; // Default to 4 buckets if not configured
-			}
-			schemaBuilder.option("bucket", String.valueOf(bucketCount));
-		}
+		// Resolve the Connector's first-class dynamic/postpone/fixed choice plus any later native
+		// tableProperties.bucket override to Paimon's final bucket value. Paimon defines -1 as
+		// dynamic, -2 as postpone, and positive values as fixed; PaimonConfig rejects every other
+		// first-class combination instead of silently falling back. The generic tableProperties loop
+		// below persists the same final override together with the remaining native options.
+		// Sources:
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#L72-L75
+		schemaBuilder.option(
+				CoreOptions.BUCKET.key(), Integer.toString(resolveEffectiveBucket(tableName)));
 		if (EmptyKit.isNotBlank(config.getFileFormat(tableName))) {
-			schemaBuilder.option("file.format", config.getFileFormat(tableName));
+			// The final Schema is preflighted with Paimon's FileFormat provider discovery before
+			// Catalog#createTable. Use the canonical option constant so first-class and
+			// tableProperties values share the same final key.
+			// Sources:
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L160-L162
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L229-L238
+			schemaBuilder.option(
+					CoreOptions.FILE_FORMAT.key(), config.getFileFormat(tableName));
 		}
 		if (EmptyKit.isNotBlank(config.getCompression(tableName))) {
-			schemaBuilder.option("compression", config.getCompression(tableName));
+			// Paimon 1.3.1 CoreOptions#fileCompression reads only FILE_COMPRESSION. Using the
+			// canonical constant prevents the Connector field name "compression" from becoming an
+			// unknown Schema option that Paimon silently ignores.
+			// Sources:
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L259-L264
+			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L2237-L2240
+			schemaBuilder.option(
+					CoreOptions.FILE_COMPRESSION.key(), config.getCompression(tableName));
 		}
 
 		// ===== Performance Optimization Options =====
@@ -741,7 +743,11 @@ public class PaimonService implements AutoCloseable {
 				// Enable full compaction for better query performance
 				schemaBuilder.option("compaction.optimization-interval", config.getCompactionIntervalMinutes(tableName) + "min");
 
-				// Set compaction strategy
+				// REVIEW: Paimon 1.3.1 rejects any non-NONE changelog producer on a table without
+				// primary keys. With the current default enableAutoCompaction=true, creation of an
+				// append-only/BUCKET_UNAWARE table reaches this option and fails schema validation.
+				// Source:
+				// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L120-L126
 				schemaBuilder.option("changelog-producer", "input");
 
 				// Compact small files more aggressively
@@ -753,8 +759,9 @@ public class PaimonService implements AutoCloseable {
 			}
 		}
 
-		// 4. Snapshot settings for better performance
-		// Keep more snapshots in memory for faster access
+		// These are on-disk snapshot-expiration bounds, not an in-memory cache. The hard-coded
+		// 2..5 / 30-minute window also bounds how long commit-user snapshot reconciliation and
+		// streaming-read offsets can rely on old snapshots after a prolonged outage.
 		schemaBuilder.option("snapshot.num-retained.min", "2");
 		schemaBuilder.option("snapshot.num-retained.max", "5");
 		schemaBuilder.option("snapshot.time-retained", "30min");
@@ -769,9 +776,6 @@ public class PaimonService implements AutoCloseable {
 		// 7. Changelog settings for CDC scenarios
 		schemaBuilder.option("changelog-producer.lookup-wait", "false"); // Don't wait for lookup
 
-		// 8. Memory settings
-		schemaBuilder.option("sink.parallelism", String.valueOf(config.getWriteThreads()));
-
 		if (EmptyKit.isNotEmpty(config.getTableProperties(tableName))) {
 			config.getTableProperties(tableName).forEach(v -> {
 				if (StringUtils.isEmpty(v.get("propKey"))
@@ -783,12 +787,26 @@ public class PaimonService implements AutoCloseable {
 				}
 			});
 		}
-		// Create table
-		catalog.createTable(identifier, schemaBuilder.build(), false);
+		Schema finalSchema = schemaBuilder.build();
+		// Paimon 1.3.1 AbstractCatalog#createTable copies Catalog table-default options into
+		// Schema#options with putIfAbsent immediately before creating the table. Mirror that exact
+		// mutation order so the connector validates the same effective options, while preserving
+		// explicit tableProperties overrides and rejecting before Catalog state is changed.
+		// Sources:
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/CatalogUtils.java#L99-L101
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/AbstractCatalog.java#L380-L405
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/AbstractCatalog.java#L649-L650
+		CatalogUtils.tableDefaultOptions(catalog.options())
+				.forEach(finalSchema.options()::putIfAbsent);
+		PaimonWriteSemanticContractResolver.validateNewTable(
+				identifier.getFullName(), finalSchema);
+
+		// Create only after the final Paimon write contract has passed validation.
+		catalog.createTable(identifier, finalSchema, false);
 
 		// log schema builder variables
 		Gson gson = new GsonBuilder().setPrettyPrinting().create();
-		log.info("Created table {} with schema: {}", identifier.getFullName(), gson.toJson(schemaBuilder.build()));
+		log.info("Created table {} with schema: {}", identifier.getFullName(), gson.toJson(finalSchema));
 
 		return true;
 	}
@@ -904,7 +922,7 @@ public class PaimonService implements AutoCloseable {
 		Identifier identifier = Identifier.create(database, tableName);
 
 		try {
-			runTableDdl(tableKey, () -> catalog.dropTable(identifier, true));
+			runTableDdl(tableKey, tableName, () -> catalog.dropTable(identifier, true));
 		} catch (Catalog.TableNotExistException e) {
 			// Table does not exist, do nothing
 		}
@@ -921,53 +939,88 @@ public class PaimonService implements AutoCloseable {
 		String tableKey = database + "." + tableName;
 		Identifier identifier = Identifier.create(database, tableName);
 
-		// Get table, if not exists, return
-		Table table;
 		try {
-			table = catalog.getTable(identifier);
+			// Enter the lifecycle gate before touching Catalog state. Native truncate keeps
+			// partition keys, options, UUID and physical location intact.
+			runTableDdl(tableKey, tableName, () -> {
+				Table currentTable = catalog.getTable(identifier);
+				try (BatchTableCommit commit = currentTable.newBatchWriteBuilder().newCommit()) {
+					commit.truncateTable();
+				}
+			});
 		} catch (Catalog.TableNotExistException e) {
 			// Table does not exist, nothing to clear
-			return;
 		}
-
-		// Drain and invalidate the old writer before changing table contents. Native truncate keeps
-		// partition keys, options, UUID and physical location intact.
-		runTableDdl(tableKey, () -> {
-			Table currentTable = catalog.getTable(identifier);
-			try (BatchTableCommit commit = currentTable.newBatchWriteBuilder().newCommit()) {
-				commit.truncateTable();
-			}
-		});
 	}
 
-	private void runTableDdl(String tableKey, TableDdlAction action) throws Exception {
-		throwIfStickyWriteFailure();
-		Object lock = commitLocks.computeIfAbsent(tableKey, ignored -> new Object());
-		synchronized (lock) {
-			if (!drainingTables.add(tableKey)) {
-				throw new IllegalStateException("Table DDL is already in progress for " + tableKey);
+	private void runTableDdl(String tableKey, String tableName, TableDdlAction action)
+			throws Exception {
+		try (PaimonServiceLifecycle.Ingress ignored = lifecycle.enter("DDL")) {
+			throwIfStickyWriteFailure();
+			List<PaimonMicroBatchCoordinator.CallbackReservation> ready = new ArrayList<>();
+			Exception ddlFailure = null;
+			boolean drainSucceeded = false;
+			Object lock = commitLocks.computeIfAbsent(tableKey, key -> new Object());
+			synchronized (lock) {
+				if (!drainingTables.add(tableKey)) {
+					throw new IllegalStateException("Table DDL is already in progress for " + tableKey);
+				}
+				try {
+					ready.addAll(flushTableLocked(tableKey, "DDL", false));
+					drainSucceeded = true;
+					PaimonTableWriteContext context = tableWriteContexts.remove(tableKey);
+					if (context != null) {
+						context.close();
+					}
+					action.run();
+				} catch (Exception failure) {
+					ddlFailure = failure;
+					recordStickyFailure(failure);
+				} finally {
+					invalidateTableDerivedCaches(tableKey, tableName);
+					unregisterPhysicalTableOwner(tableKey);
+					if (drainSucceeded) {
+						microBatchCoordinator.clearWriterDerivedStateAfterDdl(tableKey);
+					}
+					dynamicSourceIngressGuards.remove(tableKey);
+					drainingTables.remove(tableKey);
+				}
 			}
-			try {
-				AtomicInteger count = accumulatedRecordCount.get(tableKey);
-				if (count != null && count.get() > 0) {
-					flushTable(tableKey);
-				}
-				PaimonTableWriteContext context = tableWriteContexts.remove(tableKey);
-				if (context != null) {
-					context.close();
-				}
-				action.run();
-			} finally {
-				// Keep ownership through the Catalog DDL itself. Releasing it before action.run()
-				// would let a second local service create a writer against a half-mutated table.
-				unregisterPhysicalTableOwner(tableKey);
-				accumulatedRecordCount.remove(tableKey);
-				lastCommitTime.remove(tableKey);
-				asyncCommitEligibleTables.remove(tableKey);
-				dynamicSourceIngressGuards.remove(tableKey);
-				drainingTables.remove(tableKey);
+			if (drainSucceeded) {
+				executeCallbacks(ready, false);
+			}
+			asyncCommitScheduler.stateChanged();
+			if (ddlFailure != null) {
+				throw ddlFailure;
 			}
 		}
+	}
+
+	/**
+	 * Invalidate Connector-owned metadata derived from one logical table generation.
+	 *
+	 * <p>Paimon 1.3.1 {@code CachingCatalog#dropTable} invalidates Paimon's own table and
+	 * partition caches after a successful drop. Connector policy additionally invalidates these
+	 * independent row-layout and legacy-hash caches after every DDL attempt, including failures,
+	 * so a later table generation cannot reuse stale field positions or source primary keys.
+	 * This helper runs inside the existing per-table lifecycle lock.
+	 *
+	 * <p>Source:
+	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/CachingCatalog.java#L184-L197
+	 */
+	private void invalidateTableDerivedCaches(String tableKey, String tableName) {
+		paimonFieldCache.remove(tableKey);
+		fieldIndexCache.remove(tableKey);
+		computeHashKey.remove(tableName);
+		primaryKeyMap.remove(tableName);
+	}
+
+	/** Clear the same Connector-owned derived-cache set during whole-service cleanup. */
+	private void clearAllTableDerivedCaches() {
+		paimonFieldCache.clear();
+		fieldIndexCache.clear();
+		computeHashKey.clear();
+		primaryKeyMap.clear();
 	}
 
 	@FunctionalInterface
@@ -999,74 +1052,94 @@ public class PaimonService implements AutoCloseable {
 	public WriteListResult<TapRecordEvent> writeRecords(List<TapRecordEvent> recordEvents,
 												TapTable table,
 												TapConnectorContext connectorContext) throws Exception {
-		String tableName = table.getName();
-		String tableKey = config.getDatabase() + "." + tableName;
-		DynamicIngressGuard ingressGuard = dynamicSourceIngressGuard(tableKey, tableName);
-		beginSourceIngress(ingressGuard, "writeRecords", tableKey);
-		boolean successful = false;
-		try {
-			computeHashKey.computeIfAbsent(tableName,
-					ignored -> Boolean.TRUE.equals(config.getHashKey(tableName))
-							&& EmptyKit.isNotEmpty(table.primaryKeys(true))
-							&& table.primaryKeys(true).size() > 5);
-			primaryKeyMap.putIfAbsent(tableName, table.primaryKeys(true));
-			WriteListResult<TapRecordEvent> result =
-					writeRecordsWithStreamWriteInternal(recordEvents, table, connectorContext);
-			successful = true;
-			return result;
-		} finally {
-			endSourceIngress(ingressGuard, successful);
+		throwIfConcurrentIngressStickyFailure();
+		try (PaimonServiceLifecycle.Ingress ignored = lifecycle.enter("writeRecords")) {
+			if (recordEvents == null || recordEvents.isEmpty()) {
+				return new WriteListResult<>();
+			}
+			DmlMetadata metadata;
+			try {
+				metadata = validateDmlMetadata(recordEvents);
+			} catch (PaimonFatalWriteException failure) {
+				recordStickyFailure(failure);
+				throw failure;
+			}
+			String tableName = table.getName();
+			String tableKey = config.getDatabase() + "." + tableName;
+			DynamicIngressGuard ingressGuard = dynamicSourceIngressGuard(tableKey, tableName);
+			beginSourceIngress(ingressGuard, "writeRecords", tableKey);
+			boolean successful = false;
+			try {
+				WriteListResult<TapRecordEvent> result =
+						writeRecordsWithStreamWriteInternal(
+								recordEvents, table, connectorContext, metadata);
+				successful = true;
+				return result;
+			} finally {
+				endSourceIngress(ingressGuard, successful);
+			}
 		}
 	}
 
 	/**
-	 * Check if table is using dynamic bucket mode
+	 * Resolve the effective native bucket option after applying the same tableProperties precedence
+	 * used by new-table Schema construction.
 	 *
-	 * @param identifier table identifier
-	 * @return true if dynamic bucket mode, false if fixed bucket mode
-	 * @throws Exception if check fails
+	 * <p>The Connector always writes a first-class bucket value, so Catalog table defaults cannot
+	 * override it. A later explicit {@code tableProperties.bucket} entry wins, matching repeated
+	 * {@link Schema.Builder#option(String, String)} calls.
+	 *
+	 * <p>Sources:
+	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
+	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/schema/Schema.java#L367-L376
 	 */
-	private boolean isTableDynamicBucket(Identifier identifier) throws Exception {
-		Table paimonTable = catalog.getTable(identifier);
-		if (!(paimonTable instanceof FileStoreTable)) {
-			return false;
+	private int resolveEffectiveBucket(String tableName) {
+		Map<String, String> bucketOption = new HashMap<>();
+		bucketOption.put(
+				CoreOptions.BUCKET.key(), Integer.toString(config.resolveBucket(tableName)));
+		if (EmptyKit.isNotEmpty(config.getTableProperties(tableName))) {
+			for (Map<String, String> property : config.getTableProperties(tableName)) {
+				if (CoreOptions.BUCKET.key().equals(property.get("propKey"))
+						&& StringUtils.isNotEmpty(property.get("propValue"))) {
+					bucketOption.put(CoreOptions.BUCKET.key(), property.get("propValue"));
+				}
+			}
 		}
-		BucketMode mode = ((FileStoreTable) paimonTable).bucketMode();
-		return PaimonBucketWriterStrategyFactory.requiresOrderedSingleWriterIngress(mode);
+		return CoreOptions.fromMap(bucketOption).bucket();
 	}
 
 	public void afterInitialSync(TapConnectorContext connectorContext, TapTable tapTable) throws Exception {
-		String tableName = tapTable.getName();
-		String database = config.getDatabase();
-		String tableKey = database + "." + tableName;
-		DynamicIngressGuard ingressGuard = dynamicSourceIngressGuard(tableKey, tableName);
-		beginSourceIngress(ingressGuard, "afterInitialSync", tableKey);
-		boolean successful = false;
-		try {
-			bindTaskState(connectorContext);
-			Identifier identifier = Identifier.create(database, tableName);
-			Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
+		try (PaimonServiceLifecycle.Ingress ignored = lifecycle.enter("afterInitialSync")) {
+			String tableName = tapTable.getName();
+			String database = config.getDatabase();
+			String tableKey = database + "." + tableName;
+			DynamicIngressGuard ingressGuard = dynamicSourceIngressGuard(tableKey, tableName);
+			beginSourceIngress(ingressGuard, "afterInitialSync", tableKey);
+			boolean successful = false;
 			try {
+				bindTaskState(connectorContext);
+				Identifier identifier = Identifier.create(database, tableName);
+				Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
 				synchronized (lock) {
 					PaimonTableWriteContext writeContext =
 							getOrCreateTableWriteContext(tableKey, tableName, identifier, connectorContext);
-					writeContext.commit();
-					commitCallback(tableName);
-					AtomicInteger count = accumulatedRecordCount.get(tableKey);
-					if (count != null) {
-						count.set(0);
+					if (writeContext.hasPendingCommit()) {
+						confirmPendingCommitLocked(writeContext, tableKey, "initial-pending");
+					} else {
+						// afterInitialSync is a per-table completion boundary. Preserve the
+						// existing forced commit even when this table received no rows.
+						commitTableLocked(writeContext, tableKey, "initial");
 					}
-					lastCommitTime.computeIfAbsent(tableKey, k -> new AtomicLong()).set(System.currentTimeMillis());
 				}
-			} catch (Exception e) {
-				stickyWriteFailure.compareAndSet(null, e);
-				throw e;
+				successful = true;
+			} catch (Exception failure) {
+				recordStickyFailure(failure);
+				throw failure;
+			} finally {
+				endSourceIngress(ingressGuard, successful);
 			}
-			successful = true;
-		} finally {
-			endSourceIngress(ingressGuard, successful);
+			asyncCommitScheduler.stateChanged();
 		}
-//		initAsyncCommit();
 	}
 
 	/**
@@ -1077,12 +1150,11 @@ public class PaimonService implements AutoCloseable {
 	 * @return write result
 	 * @throws Exception if write fails
 	 */
-	private WriteListResult<TapRecordEvent> writeRecordsWithStreamWriteInternal(List<TapRecordEvent> recordEvents,
-																TapTable table,
-																TapConnectorContext connectorContext) throws Exception {
-		if (recordEvents == null || recordEvents.isEmpty()) {
-			return new WriteListResult<>();
-		}
+	private WriteListResult<TapRecordEvent> writeRecordsWithStreamWriteInternal(
+			List<TapRecordEvent> recordEvents,
+			TapTable table,
+			TapConnectorContext connectorContext,
+			DmlMetadata metadata) throws Exception {
 		throwIfStickyWriteFailure();
 		bindTaskState(connectorContext);
 		connectorContext.configContext();
@@ -1091,208 +1163,429 @@ public class PaimonService implements AutoCloseable {
 		String database = config.getDatabase();
 		String tableName = table.getName();
 		String tableKey = database + "." + tableName;
-		Map<String, Object> firstEventInfo = recordEvents.get(0).getInfo();
-		boolean cdcStage = "CDC".equals(
-				firstEventInfo == null ? null : firstEventInfo.get(TapRecordEvent.INFO_KEY_SYNC_STAGE));
-		if (cdcStage) {
-			asyncCommitEligibleTables.add(tableKey);
+		WriteListResult<TapRecordEvent> result = new WriteListResult<>();
+		Identifier identifier = Identifier.create(database, tableName);
+		List<PaimonMicroBatchCoordinator.CallbackReservation> readyCallbacks = new ArrayList<>();
+		boolean writerIngressStarted = false;
+		try {
+			Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
+			synchronized (lock) {
+				PaimonTableWriteContext writeContext = tableWriteContexts.get(tableKey);
+				if (writeContext != null && writeContext.hasPendingCommit()) {
+					readyCallbacks.addAll(confirmPendingCommitLocked(
+							writeContext, tableKey, "pending-retry"));
+				}
+				cacheSourceDerivedState(tableName, table);
+				DmlBatchPreflight preflight =
+						resolveAndValidateDmlBatch(tableKey, identifier, table, recordEvents);
+				if (writeContext == null) {
+					writeContext = getOrCreateTableWriteContext(
+							tableKey,
+							tableName,
+							identifier,
+							connectorContext,
+							preflight.fileStoreTable,
+							preflight.writeSemanticContract);
+				}
+				writerIngressStarted = true;
+				for (TapRecordEvent event : recordEvents) {
+					if (event instanceof TapInsertRecordEvent) {
+						handleStreamInsert((TapInsertRecordEvent) event, writeContext, table, currentLog);
+						result.incrementInserted(1);
+					} else if (event instanceof TapUpdateRecordEvent) {
+						handleStreamUpdate((TapUpdateRecordEvent) event, writeContext, table, currentLog);
+						result.incrementModified(1);
+					} else if (event instanceof TapDeleteRecordEvent) {
+						handleStreamDelete((TapDeleteRecordEvent) event, writeContext, table, currentLog);
+						result.incrementRemove(1);
+					}
+				}
+
+				if (metadata.cdc) {
+					PaimonMicroBatchCoordinator.BatchDecision decision =
+							microBatchCoordinator.acceptCdc(
+									tableKey,
+									recordEvents.size(),
+									metadata.sourceLanes,
+									clock.getAsLong());
+					if (decision.shouldCommit()) {
+						readyCallbacks.addAll(commitTableLocked(
+								writeContext,
+								tableKey,
+								decision.shouldCommitBySize() ? "size" : "time"));
+					}
+				} else {
+					microBatchCoordinator.acceptInitial(tableKey, recordEvents.size());
+				}
+			}
+		} catch (Exception failure) {
+			if (failure instanceof PaimonDynamicBucketPollutedException
+					|| failure instanceof PaimonFatalWriteException
+					|| writerIngressStarted) {
+				recordStickyFailure(failure);
+			}
+			throw failure;
 		}
 
-		// Use loop instead of recursion for retry
-		int maxRetries = 3;
+		executeCallbacks(readyCallbacks, false);
+		asyncCommitScheduler.stateChanged();
+		return result;
+	}
 
-		writeAttempt:
-		while (true) {
-			WriteListResult<TapRecordEvent> result = new WriteListResult<>();
-			Identifier identifier = Identifier.create(database, tableName);
-			PaimonTableWriteContext writeContext = null;
-			boolean pendingBeforeBatch = false;
-			boolean ingressStarted = false;
+	private DmlMetadata validateDmlMetadata(List<TapRecordEvent> recordEvents) {
+		Boolean cdc = null;
+		Set<String> sourceLanes = new LinkedHashSet<>();
+		for (TapRecordEvent event : recordEvents) {
+			Map<String, Object> info = event.getInfo();
+			Object rawStage = info == null ? null : info.get(TapRecordEvent.INFO_KEY_SYNC_STAGE);
+			String stage = normalizeSyncStage(rawStage);
+			boolean eventCdc = "CDC".equals(stage);
+			if (cdc != null && cdc != eventCdc) {
+				throw new PaimonFatalWriteException(
+						"Mixed INITIAL_SYNC and CDC events are not allowed in one Paimon batch");
+			}
+			cdc = eventCdc;
+			if (!eventCdc) {
+				continue;
+			}
 
-			try {
-				// One context owns writer, committer, dynamic bucket state and commit identifiers.
-				Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
-				synchronized (lock) {
-					writeContext = tableWriteContexts.get(tableKey);
-					pendingBeforeBatch =
-							writeContext != null && writeContext.hasPendingCommit();
-					if (pendingBeforeBatch) {
-						// Preserve the existing recovery order: first make an older prepared commit
-						// durable, then inspect the new source batch.
-						writeContext.retryPendingCommit();
-						commitCallback(tableName);
-						AtomicInteger previousCount = accumulatedRecordCount.get(tableKey);
-						if (previousCount != null) {
-							previousCount.set(0);
-						}
-						lastCommitTime.computeIfAbsent(tableKey, k -> new AtomicLong())
-								.set(System.currentTimeMillis());
-					}
-					// Validate the whole source batch before allocating a writer, IOManager or
-					// dynamic-bucket RocksDB state. An existing context supplies the immutable
-					// contract it was created with; a first write resolves it from the target table.
-					DmlBatchPreflight preflight =
-							resolveAndValidateDmlBatch(
-									tableKey, identifier, table, recordEvents);
-					if (writeContext == null) {
-						writeContext = getOrCreateTableWriteContext(
-								tableKey,
-								tableName,
-								identifier,
-								connectorContext,
-								preflight.fileStoreTable,
-								preflight.writeSemanticContract);
-					}
-					ingressStarted = true;
-					for (TapRecordEvent event : recordEvents) {
-						if (flushOffsetCallback != null && !firstOffsetByTable.containsKey(tableName)) {
-							TapCallbackOffset tapOffset = new TapCallbackOffset();
-							// 从 TapRecordEvent.info 中提取 offset 信息
-							// 这些信息由 HazelcastTargetPdkBaseNode.handleTapdataEventDML 方法添加
-							Object batchOffset = event.getInfo("batchOffset");
-							Object streamOffset = event.getInfo("streamOffset");
-							Object syncStage = event.getInfo("syncStage");
-							Object sourceTime = event.getInfo("sourceTime");
-							Object nodeIds = event.getInfo("nodeIds");
-
-							// 填充 TapOffset
-							tapOffset.batchOffset(batchOffset)
-									.streamOffset(streamOffset)
-									.tableId(event.getTableId())
-									.syncStage(syncStage != null ? syncStage.toString() : null)
-									.sourceTime(sourceTime instanceof Long ? (Long) sourceTime : null)
-									.eventTime(event.getReferenceTime())
-									.nodeIds(nodeIds);
-							if (tapOffset.hasValidOffset()) {
-								firstOffsetByTable.put(tableName, tapOffset);
-							}
-						}
-						if (event instanceof TapInsertRecordEvent) {
-							handleStreamInsert((TapInsertRecordEvent) event, writeContext, table, currentLog);
-							result.incrementInserted(1);
-						} else if (event instanceof TapUpdateRecordEvent) {
-							handleStreamUpdate((TapUpdateRecordEvent) event, writeContext, table, currentLog);
-							result.incrementModified(1);
-						} else if (event instanceof TapDeleteRecordEvent) {
-							handleStreamDelete((TapDeleteRecordEvent) event, writeContext, table, currentLog);
-							result.incrementRemove(1);
-						}
-					}
-
-					// Update accumulated record count
-					AtomicInteger recordCount = accumulatedRecordCount.computeIfAbsent(tableKey, k -> new AtomicInteger(0));
-					int currentCount = recordCount.addAndGet(recordEvents.size());
-
-					// Initialize last commit time if not exists
-					AtomicLong lastCommit = lastCommitTime.computeIfAbsent(tableKey, k -> new AtomicLong(System.currentTimeMillis()));
-
-					// Determine if we should commit based on:
-					// 1. Accumulated record count exceeds threshold
-					// 2. Time since last commit exceeds interval
-					// 3. Batch accumulation is disabled (size = 0)
-					boolean shouldCommit = false;
-					Integer batchSize = config.getBatchAccumulationSize();
-					Integer commitInterval = config.getCommitIntervalMs();
-
-					if (cdcStage && !ASYNC_OFFSET_CONTRACT_VERIFIED) {
-						// Current PDK does not define a durable callback acknowledgement or a sequence
-						// for concurrent calls. Confirm the Paimon snapshot before every CDC return.
-						shouldCommit = true;
-					} else if (flushOffsetCallback == null && cdcStage) {
-						shouldCommit = true;
-					} else if (batchSize == null || batchSize <= 0) {
-						// Batch accumulation disabled, commit immediately
-						shouldCommit = true;
-					} else if (currentCount >= batchSize) {
-						// Record count threshold reached
-						shouldCommit = true;
-					} else if (commitInterval != null && commitInterval > 0) {
-						// Check time-based commit
-						long timeSinceLastCommit = System.currentTimeMillis() - lastCommit.get();
-						if (timeSinceLastCommit >= commitInterval) {
-							shouldCommit = true;
-						}
-					}
-
-					// Perform commit if needed
-					if (shouldCommit) {
-						// init sync stage just commit once, for batch commit + spill disk
-						if (!cdcStage) {
-							// Any historical pending commit was confirmed before the event loop. The
-							// current initial-sync batch is already buffered exactly once and is committed
-							// by afterInitialSync; re-entering here would duplicate the whole batch.
-							return result;
-						}
-						// Double-check if we still need to commit (another thread might have committed)
-						int finalCount = recordCount.get();
-						if (finalCount > 0) {
-							long commitStartTime = System.currentTimeMillis();
-							writeContext.commit();
-							commitCallback(tableName);
-							// Reset counters after successful commit
-							recordCount.set(0);
-							lastCommit.set(System.currentTimeMillis());
-
-							long commitDuration = System.currentTimeMillis() - commitStartTime;
-							currentLog.debug("Committed {} accumulated records for table {} in {} ms",
-									finalCount, tableKey, commitDuration);
-						}
-					}
+			Object nodeIds = info.get(TapCallbackOffset.KEY_NODE_IDS);
+			String sourceLane = firstSourceLane(nodeIds, "CDC DML");
+			sourceLanes.add(sourceLane);
+			Object streamOffset = info.get(TapCallbackOffset.KEY_STREAM_OFFSET);
+			if (streamOffset != null) {
+				if (!(info.get(TapCallbackOffset.KEY_SOURCE_TIME) instanceof Long)) {
+					throw new PaimonFatalWriteException(
+							"Offset-bearing CDC DML requires a Long sourceTime");
 				}
-
-				// The canonical table write context is reused until table drain or service close.
-				return result;
-
-			} catch (Exception e) {
-				if (e instanceof PaimonDynamicBucketPollutedException
-						|| e instanceof PaimonFatalWriteException) {
-					// A deterministic table contract or input-image failure is task-fatal even
-					// when it occurs before the first writer call. Retrying another table in the
-					// same multi-table task could otherwise advance offsets past the bad event.
-					stickyWriteFailure.compareAndSet(null, e);
-					throw e;
+				if (flushOffsetCallback == null) {
+					throw new PaimonFatalWriteException(
+							"Offset-bearing CDC DML requires flushOffsetCallback before writing");
 				}
-				// If commit outcome is ambiguous, retry the prepared messages before considering
-				// catalog recreation or source-batch replay. This is the Paimon idempotent path.
-				if (writeContext != null && writeContext.hasPendingCommit()) {
-					Exception pendingError = e;
-					for (int pendingRetry = 0; pendingRetry < maxRetries; pendingRetry++) {
-						try {
-							writeContext.retryPendingCommit();
-							commitCallback(tableName);
-							AtomicInteger count = accumulatedRecordCount.get(tableKey);
-							if (count != null) {
-								count.set(0);
-							}
-							lastCommitTime.computeIfAbsent(tableKey, k -> new AtomicLong())
-									.set(System.currentTimeMillis());
-							// Re-enter only when the failure happened while confirming the historical
-							// pending commit, before this source batch reached the writer. If the
-							// current batch already entered (and its own ambiguous commit was just
-							// confirmed), replaying the loop would write the whole batch twice.
-							if (pendingBeforeBatch && !ingressStarted) {
-								continue writeAttempt;
-							}
-							return result;
-						} catch (Exception retryError) {
-							pendingError.addSuppressed(retryError);
-							CommonUtils.ignoreAnyError(() -> TimeUnit.SECONDS.sleep(1L), TAG);
-						}
-					}
-					if (ingressStarted) {
-						stickyWriteFailure.compareAndSet(null, pendingError);
-					}
-					throw new TapPdkRetryableEx("paimon", ErrorKit.getLastCause(pendingError));
-				}
-				// A row-routing/write failure may have advanced an in-memory dynamic index. Do not
-				// replay in-place or rebuild every table: fail this task so its durable source offset
-				// controls replay and every router is reconstructed from a committed snapshot.
-				if (ingressStarted) {
-					stickyWriteFailure.compareAndSet(null, e);
-				}
-				throw new TapPdkRetryableEx("paimon", ErrorKit.getLastCause(e));
 			}
 		}
+		return new DmlMetadata(Boolean.TRUE.equals(cdc), sourceLanes);
+	}
+
+	private static String normalizeSyncStage(Object rawStage) {
+		return normalizeSyncStage(rawStage, "Paimon DML");
+	}
+
+	private static String normalizeSyncStage(Object rawStage, String payloadType) {
+		String stage;
+		if (rawStage instanceof String) {
+			stage = (String) rawStage;
+		} else if (rawStage instanceof Enum) {
+			stage = ((Enum<?>) rawStage).name();
+		} else {
+			throw new PaimonFatalWriteException(
+					payloadType + " syncStage must be INITIAL_SYNC or CDC");
+		}
+		if (!"INITIAL_SYNC".equals(stage) && !"CDC".equals(stage)) {
+			throw new PaimonFatalWriteException(
+					payloadType + " syncStage must be INITIAL_SYNC or CDC: " + stage);
+		}
+		return stage;
+	}
+
+	private static String firstSourceLane(Object nodeIds, String payloadType) {
+		if (!(nodeIds instanceof List) || ((List<?>) nodeIds).isEmpty()) {
+			throw new PaimonFatalWriteException(
+					payloadType + " requires a non-empty nodeIds list");
+		}
+		Object first = ((List<?>) nodeIds).get(0);
+		if (!(first instanceof String) || StringUtils.isBlank((String) first)) {
+			throw new PaimonFatalWriteException(
+					payloadType + " requires a non-blank nodeIds[0]");
+		}
+		return (String) first;
+	}
+
+	public void processHeartbeat(HeartbeatEvent heartbeat) throws Exception {
+		try (PaimonServiceLifecycle.Ingress ignored = lifecycle.enter("heartbeat")) {
+			try {
+				if (heartbeat == null) {
+					throw new PaimonFatalWriteException("Paimon Heartbeat must not be null");
+				}
+				Map<String, Object> info = heartbeat.getInfo();
+				Object rawStage = info == null
+						? null
+						: info.get(TapCallbackOffset.KEY_SYNC_STAGE);
+				String stage = normalizeSyncStage(rawStage, "Paimon Heartbeat");
+				if ("INITIAL_SYNC".equals(stage)) {
+					return;
+				}
+				if (flushOffsetCallback == null) {
+					throw new PaimonFatalWriteException(
+							"CDC Heartbeat requires flushOffsetCallback");
+				}
+				Object streamOffset = info.get(TapCallbackOffset.KEY_STREAM_OFFSET);
+				if (streamOffset == null) {
+					throw new PaimonFatalWriteException(
+							"CDC Heartbeat requires streamOffset");
+				}
+				Object sourceTime = info.get(TapCallbackOffset.KEY_SOURCE_TIME);
+				if (!(sourceTime instanceof Long)) {
+					throw new PaimonFatalWriteException(
+							"CDC Heartbeat requires a Long sourceTime");
+				}
+				Object nodeIds = info.get(TapCallbackOffset.KEY_NODE_IDS);
+				String sourceLane = firstSourceLane(nodeIds, "CDC Heartbeat");
+				TapCallbackOffset payload = new TapCallbackOffset()
+						.streamOffset(streamOffset)
+						.syncStage("CDC")
+						.sourceTime((Long) sourceTime)
+						.nodeIds(nodeIds);
+				payload.put(TapCallbackOffset.KEY_EVENT_TIME, heartbeat.getReferenceTime());
+				PaimonMicroBatchCoordinator.CallbackReservation reservation =
+						microBatchCoordinator.registerHeartbeat(sourceLane, payload);
+				if (reservation != null) {
+					executeCallbacks(Collections.singletonList(reservation), false);
+				}
+			} catch (PaimonFatalWriteException failure) {
+				recordStickyFailure(failure);
+				throw failure;
+			}
+		}
+	}
+
+	private List<PaimonMicroBatchCoordinator.CallbackReservation> commitTableLocked(
+			PaimonTableWriteContext writeContext, String tableKey, String trigger) throws Exception {
+		return commitTableLocked(writeContext, tableKey, trigger, false);
+	}
+
+	private List<PaimonMicroBatchCoordinator.CallbackReservation> commitTableLocked(
+			PaimonTableWriteContext writeContext,
+			String tableKey,
+			String trigger,
+			boolean uninterruptibleCleanup) throws Exception {
+		PaimonMicroBatchCoordinator.CommitTarget target =
+				microBatchCoordinator.captureCommitTarget(tableKey);
+		return commitOrConfirmLocked(
+				writeContext, target, true, trigger, uninterruptibleCleanup);
+	}
+
+	private List<PaimonMicroBatchCoordinator.CallbackReservation> confirmPendingCommitLocked(
+			PaimonTableWriteContext writeContext, String tableKey, String trigger) throws Exception {
+		return confirmPendingCommitLocked(writeContext, tableKey, trigger, false);
+	}
+
+	private List<PaimonMicroBatchCoordinator.CallbackReservation> confirmPendingCommitLocked(
+			PaimonTableWriteContext writeContext,
+			String tableKey,
+			String trigger,
+			boolean uninterruptibleCleanup) throws Exception {
+		if (!writeContext.hasPendingCommit()) {
+			return Collections.emptyList();
+		}
+		PaimonMicroBatchCoordinator.CommitTarget target =
+				microBatchCoordinator.pendingCommitTarget(tableKey);
+		if (target == null) {
+			target = microBatchCoordinator.captureCommitTarget(tableKey);
+			microBatchCoordinator.markPendingCommit(target);
+		}
+		return commitOrConfirmLocked(
+				writeContext, target, false, trigger, uninterruptibleCleanup);
+	}
+
+	private List<PaimonMicroBatchCoordinator.CallbackReservation> commitOrConfirmLocked(
+			PaimonTableWriteContext writeContext,
+			PaimonMicroBatchCoordinator.CommitTarget target,
+			boolean newCommit,
+			String trigger,
+			boolean uninterruptibleCleanup) throws Exception {
+		long startedAt = clock.getAsLong();
+		try {
+			if (newCommit) {
+				writeContext.commit();
+			} else {
+				writeContext.retryPendingCommit();
+			}
+			return publishSuccessfulCommit(target, trigger, startedAt);
+		} catch (Exception firstFailure) {
+			if (!writeContext.hasPendingCommit()) {
+				recordStickyFailure(firstFailure);
+				throw firstFailure;
+			}
+			microBatchCoordinator.markPendingCommit(target);
+			int retry = 1;
+			while (retry <= 3) {
+				try {
+					while (true) {
+						try {
+							retryWaiter.awaitRetry();
+							break;
+						} catch (InterruptedException interrupted) {
+							if (!uninterruptibleCleanup) {
+								Thread.currentThread().interrupt();
+								interrupted.addSuppressed(firstFailure);
+								recordStickyFailure(interrupted);
+								throw interrupted;
+							}
+							cleanupInterruption.compareAndSet(null, interrupted);
+							Thread.interrupted();
+						}
+					}
+					if (!writeContext.hasPendingCommit()) {
+						IllegalStateException missingPending = new IllegalStateException(
+								"Paimon pending commit disappeared before confirmation for " + target.tableKey());
+						firstFailure.addSuppressed(missingPending);
+						break;
+					}
+					writeContext.retryPendingCommit();
+					return publishSuccessfulCommit(target, trigger + "-retry-" + retry, startedAt);
+				} catch (InterruptedException interrupted) {
+					throw interrupted;
+				} catch (Exception retryFailure) {
+					firstFailure.addSuppressed(retryFailure);
+					retry++;
+				}
+			}
+			recordStickyFailure(firstFailure);
+			throw firstFailure;
+		}
+	}
+
+	private List<PaimonMicroBatchCoordinator.CallbackReservation> publishSuccessfulCommit(
+			PaimonMicroBatchCoordinator.CommitTarget target, String trigger, long startedAt) {
+		long completedAt = clock.getAsLong();
+		getAsyncCommitLog().debug(
+				"Committed Paimon table {} trigger={} records={} generation={} durationMs={}",
+				target.tableKey(),
+				trigger,
+				target.bufferedRecordCount(),
+				target.acceptedGeneration(),
+				Math.max(0L, completedAt - startedAt));
+		return microBatchCoordinator.publishCommit(target, completedAt);
+	}
+
+	private void executeCallbacks(
+			Collection<PaimonMicroBatchCoordinator.CallbackReservation> reservations,
+			boolean stopDrain) throws Exception {
+		Deque<PaimonMicroBatchCoordinator.CallbackReservation> ready =
+				new ArrayDeque<>(reservations);
+		while (!ready.isEmpty()) {
+			PaimonMicroBatchCoordinator.CallbackReservation reservation = ready.removeFirst();
+			synchronized (callbackExecutionLock) {
+				PaimonServiceLifecycle.ConsumerPermit permit = lifecycle.tryStartConsumer(
+						stopDrain,
+						() -> {
+							if (!microBatchCoordinator.markConsumerStarted(reservation)) {
+								throw new IllegalStateException(
+										"Paimon callback reservation is no longer active");
+							}
+						});
+				if (permit == null) {
+					return;
+				}
+				try (PaimonServiceLifecycle.ConsumerPermit ignored = permit) {
+					try {
+						Consumer<Object> callback = flushOffsetCallback;
+						if (callback == null) {
+							throw new IllegalStateException(
+									"flushOffsetCallback is unavailable for a ready CDC Heartbeat");
+						}
+						callback.accept(reservation.payload());
+						PaimonMicroBatchCoordinator.CallbackReservation next =
+								microBatchCoordinator.completeCallback(reservation);
+						if (next != null) {
+							ready.addFirst(next);
+						}
+					} catch (Throwable callbackFailure) {
+						microBatchCoordinator.failCallback(reservation);
+						recordStickyFailure(callbackFailure);
+						rethrow(callbackFailure);
+					}
+				}
+			}
+		}
+	}
+
+	private void flushScheduledTable(String tableKey) throws Exception {
+		try {
+			try (PaimonServiceLifecycle.Ingress ignored = lifecycle.enter("scheduler")) {
+				List<PaimonMicroBatchCoordinator.CallbackReservation> ready =
+						Collections.emptyList();
+				Object lock = commitLocks.computeIfAbsent(tableKey, key -> new Object());
+				synchronized (lock) {
+					if (microBatchCoordinator.isDue(tableKey, clock.getAsLong())) {
+						ready = flushTableLocked(tableKey, "scheduler", false);
+					}
+				}
+				executeCallbacks(ready, false);
+			}
+		} catch (IllegalStateException rejection) {
+			PaimonServiceLifecycle.State state = lifecycle.state();
+			if (state == PaimonServiceLifecycle.State.STOPPING
+					|| state == PaimonServiceLifecycle.State.CLOSED) {
+				// close won the lifecycle race after this scheduler task was dispatched.
+				// Stop drain owns any remaining buffer, so this is normal cancellation.
+				return;
+			}
+			throw rejection;
+		}
+	}
+
+	private void recordStickyFailure(Throwable failure) {
+		if (failure == null) {
+			return;
+		}
+		stickyWriteFailure.compareAndSet(null, failure);
+		lifecycle.fail(stickyWriteFailure.get());
+	}
+
+	private static void rethrow(Throwable failure) throws Exception {
+		if (failure instanceof Exception) {
+			throw (Exception) failure;
+		}
+		if (failure instanceof Error) {
+			throw (Error) failure;
+		}
+		throw new IllegalStateException("Paimon service failed", failure);
+	}
+
+	private void cleanupAfterInitializationFailure(Throwable primary) {
+		try {
+			cleanupAllResources();
+		} catch (Throwable cleanupFailure) {
+			primary.addSuppressed(cleanupFailure);
+		} finally {
+			flushOffsetCallback = null;
+			lifecycle.publishClosed(primary);
+		}
+	}
+
+	private static final class DmlMetadata {
+		private final boolean cdc;
+		private final Set<String> sourceLanes;
+
+		private DmlMetadata(boolean cdc, Set<String> sourceLanes) {
+			this.cdc = cdc;
+			this.sourceLanes = Collections.unmodifiableSet(new LinkedHashSet<>(sourceLanes));
+		}
+	}
+
+	@FunctionalInterface
+	interface RetryWaiter {
+		RetryWaiter INTERRUPTIBLE_ONE_SECOND = () -> TimeUnit.SECONDS.sleep(1L);
+
+		void awaitRetry() throws InterruptedException;
+	}
+
+	/**
+	 * Cache source metadata used by the Connector's legacy synthetic-key path.
+	 *
+	 * <p>The caller holds the same per-table lifecycle lock as {@link #runTableDdl}. Keeping
+	 * population under that lock prevents an ingress waiting behind DDL from publishing metadata
+	 * for the old table generation after the DDL finally block has invalidated it. This changes
+	 * only cache timing; the legacy MD5 encoding and {@code VARCHAR(32)} contract are unchanged.
+	 */
+	private void cacheSourceDerivedState(String tableName, TapTable table) {
+		computeHashKey.computeIfAbsent(tableName,
+				ignored -> Boolean.TRUE.equals(config.getHashKey(tableName))
+						&& EmptyKit.isNotEmpty(table.primaryKeys(true))
+						&& table.primaryKeys(true).size() > 5);
+		primaryKeyMap.putIfAbsent(tableName, table.primaryKeys(true));
 	}
 
 	private boolean isPaimonConflict(Throwable e) {
@@ -1318,42 +1611,40 @@ public class PaimonService implements AutoCloseable {
 	}
 
 	/**
-	 * Reinitialize the Paimon catalog.
-	 * This is used to recover from ThreadGroup destroyed errors caused by classloader unloading.
-	 * This method completely rebuilds all resources including catalog and all cached writers/commits.
-	 *
-	 * @throws Exception if reinitialization fails
-	 */
-	private synchronized void reinitCatalog() throws Exception {
-		// Clean up all resources
-		cleanupAllResources();
-
-		// Reinitialize catalog
-		init();
-	}
-
-	/**
 	 * Clean up all cached resources including writers, commits, and catalog.
-	 * This method ensures proper cleanup with delays to allow internal threads to terminate.
+	 * Material cleanup failures are aggregated instead of being downgraded to log-only success.
 	 */
-	private void cleanupAllResources() {
-		// Shutdown async commit executor first
-		if (asyncCommitExecutor != null) {
-			asyncCommitExecutor.shutdown();
-			try {
-				if (!asyncCommitExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-					asyncCommitExecutor.shutdownNow();
-				}
-			} catch (InterruptedException e) {
-				asyncCommitExecutor.shutdownNow();
-				Thread.currentThread().interrupt();
+	private void cleanupAllResources() throws Exception {
+		Throwable failure = null;
+		boolean interrupted = false;
+
+		// Never forcibly interrupt a Paimon commit running on the scheduler worker.
+		try {
+			if (!asyncCommitScheduler.shutdownAndAwait(5L, TimeUnit.SECONDS)) {
+				failure = appendFailure(
+						failure,
+						new IllegalStateException(
+								"Timed out waiting for the Paimon commit scheduler to terminate"));
 			}
-			asyncCommitExecutor = null;
+		} catch (InterruptedException interruption) {
+			failure = appendFailure(failure, interruption);
+			interrupted = true;
+			Thread.interrupted();
 		}
 
 		// Close all canonical table write contexts first.
 		for (String tableKey : new ArrayList<>(tableWriteContexts.keySet())) {
-			cleanupTableResources(tableKey);
+			PaimonTableWriteContext context = tableWriteContexts.remove(tableKey);
+			try {
+				if (context != null) {
+					context.close();
+				}
+			} catch (Throwable contextFailure) {
+				failure = appendFailure(failure, contextFailure);
+			} finally {
+				unregisterPhysicalTableOwner(tableKey);
+				dynamicSourceIngressGuards.remove(tableKey);
+			}
 		}
 
 		tableWriteContexts.clear();
@@ -1361,16 +1652,12 @@ public class PaimonService implements AutoCloseable {
 			unregisterPhysicalTableOwner(tableKey);
 		}
 
-		// Clear batch accumulation tracking
-		accumulatedRecordCount.clear();
-		lastCommitTime.clear();
 		commitLocks.clear();
 		drainingTables.clear();
-		asyncCommitEligibleTables.clear();
+		microBatchCoordinator.clear();
 
-		// Clear Paimon field cache
-		paimonFieldCache.clear();
-		fieldIndexCache.clear();
+		// Clear every Connector-owned table-derived cache, matching the single-table DDL path.
+		clearAllTableDerivedCaches();
 
 		// Close old catalog if exists
 		if (catalog != null) {
@@ -1383,19 +1670,25 @@ public class PaimonService implements AutoCloseable {
 						FileIO fileIO = null;
 						try {
 							fileIO = fileSystemCatalog.fileIO();
-						} catch (Throwable ignore) {
-							// Ignore fileIO lookup errors
+						} catch (Throwable fileIoLookupFailure) {
+							failure = appendFailure(failure, fileIoLookupFailure);
 						}
 
-						// Best-effort close: proactively close FileSystem instances cached by HadoopFileIO
+						// Proactively close FileSystem instances cached by HadoopFileIO before FileIO.
 						closeHadoopFileIOCachedFileSystems(fileIO);
-						closeQuietly(fileIO);
+						if (fileIO != null) {
+							try {
+								fileIO.close();
+							} catch (Throwable fileIoCloseFailure) {
+								failure = appendFailure(failure, fileIoCloseFailure);
+							}
+						}
 					}
 				}
 
 				catalog.close();
-			} catch (Throwable e) {
-				// Ignore close errors
+			} catch (Throwable catalogCloseFailure) {
+				failure = appendFailure(failure, catalogCloseFailure);
 			} finally {
 				catalog = null;
 			}
@@ -1405,19 +1698,17 @@ public class PaimonService implements AutoCloseable {
 		// This is critical to avoid ThreadGroup destroyed errors
 		try {
 			Thread.sleep(500);
-		} catch (InterruptedException e) {
+		} catch (InterruptedException interruption) {
+			failure = appendFailure(failure, interruption);
+			interrupted = true;
+			Thread.interrupted();
+		}
+
+		if (interrupted) {
 			Thread.currentThread().interrupt();
 		}
-	}
-
-	private void closeQuietly(Closeable closeable) {
-		if (closeable == null) {
-			return;
-		}
-		try {
-			closeable.close();
-		} catch (Exception ignore) {
-			// Ignore close errors
+		if (failure != null) {
+			rethrow(failure);
 		}
 	}
 
@@ -1639,6 +1930,11 @@ public class PaimonService implements AutoCloseable {
 	}
 
 	private void registerPhysicalTableOwner(String tableKey, FileStoreTable table) {
+		// Paimon explicitly disallows concurrent HASH_DYNAMIC writers and KEY_DYNAMIC owns a local
+		// full-key index. This registry enforces the connector's 1/1/0 topology only inside this
+		// JVM; deployment must provide an external single-writer lease to cover other processes.
+		// Source:
+		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L40-L55
 		String physicalHash = PaimonCommitStateStore.physicalTableHash(
 				table.location().toUri().toString());
 		String owner = serviceWriterOwner + ':' + tableKey;
@@ -1655,24 +1951,6 @@ public class PaimonService implements AutoCloseable {
 		if (physicalHash != null) {
 			ACTIVE_PHYSICAL_TABLE_OWNERS.remove(
 					physicalHash, serviceWriterOwner + ':' + tableKey);
-		}
-	}
-
-	/** Remove and close the one canonical context for a physical table. */
-	private void cleanupTableResources(String tableKey) {
-		PaimonTableWriteContext context = tableWriteContexts.remove(tableKey);
-		try {
-			if (context == null) {
-				return;
-			}
-			try {
-				context.close();
-			} catch (Exception e) {
-				log.warn("Failed to close Paimon write context for table {}", tableKey, e);
-			}
-		} finally {
-			unregisterPhysicalTableOwner(tableKey);
-			dynamicSourceIngressGuards.remove(tableKey);
 		}
 	}
 
@@ -2223,39 +2501,60 @@ public class PaimonService implements AutoCloseable {
 	 * @param tableKey table key (database.tableName)
 	 */
 	public void flushTable(String tableKey) throws Exception {
-		throwIfStickyWriteFailure();
-		AtomicInteger recordCount = accumulatedRecordCount.get(tableKey);
-		if (recordCount == null || recordCount.get() <= 0) {
-			return; // Nothing to flush
+		try (PaimonServiceLifecycle.Ingress ignored = lifecycle.enter("flushTable")) {
+			List<PaimonMicroBatchCoordinator.CallbackReservation> ready =
+					flushTableInternal(tableKey, "manual");
+			executeCallbacks(ready, false);
+			asyncCommitScheduler.stateChanged();
 		}
+	}
 
-		PaimonTableWriteContext writeContext = tableWriteContexts.get(tableKey);
+	private List<PaimonMicroBatchCoordinator.CallbackReservation> flushTableInternal(
+			String tableKey, String trigger) throws Exception {
+		return flushTableInternal(tableKey, trigger, false);
+	}
 
-		if (writeContext == null) {
-			throw new IllegalStateException(
-					"Accumulated records exist but Paimon write context is missing for table " + tableKey);
-		}
-
-		// Use lock to ensure thread safety
+	private List<PaimonMicroBatchCoordinator.CallbackReservation> flushTableInternal(
+			String tableKey, String trigger, boolean uninterruptibleCleanup) throws Exception {
 		Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
-		try {
-			synchronized (lock) {
-				int finalCount = recordCount.get();
-				if (finalCount > 0) {
-					writeContext.commit();
-					commitCallback(writeContext.tableName());
-					// Reset counters
-					recordCount.set(0);
-					AtomicLong lastCommit = lastCommitTime.get(tableKey);
-					if (lastCommit != null) {
-						lastCommit.set(System.currentTimeMillis());
-					}
-				}
-			}
-		} catch (Exception e) {
-			stickyWriteFailure.compareAndSet(null, e);
-			throw e;
+		synchronized (lock) {
+			return flushTableLocked(tableKey, trigger, uninterruptibleCleanup);
 		}
+	}
+
+	private List<PaimonMicroBatchCoordinator.CallbackReservation> flushTableLocked(
+			String tableKey, String trigger, boolean uninterruptibleCleanup) throws Exception {
+		Object lock = commitLocks.get(tableKey);
+		if (lock == null || !Thread.holdsLock(lock)) {
+			throw new IllegalStateException(
+					"Paimon table flush requires the table lock for " + tableKey);
+		}
+
+		PaimonMicroBatchCoordinator.TableSnapshot snapshot =
+				microBatchCoordinator.tableSnapshot(tableKey);
+		PaimonTableWriteContext writeContext = tableWriteContexts.get(tableKey);
+		if (writeContext == null) {
+			if (snapshot.bufferedRecordCount() == 0 && !snapshot.hasPendingCommit()) {
+				return Collections.emptyList();
+			}
+			throw new IllegalStateException(
+					"Buffered records exist but Paimon write context is missing for table " + tableKey);
+		}
+
+		List<PaimonMicroBatchCoordinator.CallbackReservation> ready = new ArrayList<>();
+		if (writeContext.hasPendingCommit()) {
+			ready.addAll(confirmPendingCommitLocked(
+					writeContext,
+					tableKey,
+					trigger + "-pending",
+					uninterruptibleCleanup));
+		}
+		snapshot = microBatchCoordinator.tableSnapshot(tableKey);
+		if (snapshot.bufferedRecordCount() > 0) {
+			ready.addAll(commitTableLocked(
+					writeContext, tableKey, trigger, uninterruptibleCleanup));
+		}
+		return ready;
 	}
 
 	private void throwIfStickyWriteFailure() {
@@ -2264,6 +2563,12 @@ public class PaimonService implements AutoCloseable {
 			throw new IllegalStateException(
 					"Paimon write service is fenced after an ingress failure; restart the task before retrying",
 					failure);
+		}
+	}
+
+	private void throwIfConcurrentIngressStickyFailure() {
+		if (stickyWriteFailure.get() instanceof ConcurrentSourceIngressException) {
+			throwIfStickyWriteFailure();
 		}
 	}
 
@@ -2291,10 +2596,10 @@ public class PaimonService implements AutoCloseable {
 			synchronized (ingressGuard) {
 				throwIfStickyWriteFailure();
 				if (ingressGuard.active) {
-					IllegalStateException failure = new IllegalStateException(
+					IllegalStateException failure = new ConcurrentSourceIngressException(
 							"Concurrent Paimon source ingress is unsupported without an ordered PDK "
 									+ "source sequence: " + operation + " on " + tableKey);
-					stickyWriteFailure.compareAndSet(null, failure);
+					recordStickyFailure(failure);
 					throw failure;
 				}
 				ingressGuard.active = true;
@@ -2317,6 +2622,12 @@ public class PaimonService implements AutoCloseable {
 
 	private static final class DynamicIngressGuard {
 		private boolean active;
+	}
+
+	private static final class ConcurrentSourceIngressException extends IllegalStateException {
+		private ConcurrentSourceIngressException(String message) {
+			super(message);
+		}
 	}
 
 	/**
@@ -3182,98 +3493,134 @@ public class PaimonService implements AutoCloseable {
 	}
 
 	@Override
-	public void close() throws Exception {
-		Exception failure = null;
-		try {
-			flushAll();
-		} catch (Exception e) {
-			failure = e;
-		}
-
-		// Close contexts explicitly so resource failures are not hidden by best-effort catalog cleanup.
-		for (String tableKey : new ArrayList<>(tableWriteContexts.keySet())) {
-			PaimonTableWriteContext context = tableWriteContexts.remove(tableKey);
-			try {
-				if (context == null) {
-					continue;
+	public synchronized void close() throws Exception {
+		synchronized (closeLock) {
+			if (lifecycle.state() == PaimonServiceLifecycle.State.CLOSED) {
+				Throwable previous = lifecycle.terminalOutcome();
+				if (previous != null) {
+					rethrow(previous);
 				}
-				try {
-					context.close();
-				} catch (Exception e) {
-					if (failure == null) {
-						failure = e;
-					} else {
-						failure.addSuppressed(e);
-					}
-				}
-			} finally {
-				unregisterPhysicalTableOwner(tableKey);
+				return;
 			}
-		}
 
-		cleanupAllResources();
-		dynamicSourceIngressGuards.clear();
-		activeConnectorContext = null;
-		boundTaskStateMap = null;
-		if (failure != null) {
-			throw failure;
-		}
-	}
-
-	public void setFlushOffsetCallback(Consumer<Object> flushOffsetCallback) {
-		if (flushOffsetCallback != null) {
-			log.warn(
-					"Ignoring connector-managed offset callback: Paimon runs in synchronous PLATFORM_MANAGED mode");
-		}
-		this.flushOffsetCallback = null;
-	}
-
-	public Map<String, TapCallbackOffset> getFirstOffsetByTable() {
-		return firstOffsetByTable;
-	}
-
-	private void commitCallback(String tableName) throws Exception {
-		if (flushOffsetCallback == null) {
-			return;
-		}
-
-		// Serialize callbacks and drain only the committed prefix of the global arrival order.
-		// A callback failure keeps the offset at the head for a later retry.
-		synchronized (offsetCallbackLock) {
-			synchronized (firstOffsetByTable) {
-				committedOffsetTables.add(tableName);
+			Throwable failure = lifecycle.firstFailure();
+			boolean interrupted = false;
+			if (lifecycle.state() == PaimonServiceLifecycle.State.RUNNING) {
+				lifecycle.beginStopping();
 			}
+
 			while (true) {
-				Map.Entry<String, TapCallbackOffset> firstEntry;
-				synchronized (firstOffsetByTable) {
-					firstEntry = firstOffsetByTable.entrySet().stream().findFirst().orElse(null);
-					if (firstEntry == null || !committedOffsetTables.contains(firstEntry.getKey())) {
-						return;
+				try {
+					if (asyncCommitScheduler.shutdownAndAwait(5L, TimeUnit.SECONDS)) {
+						break;
 					}
+				} catch (InterruptedException interruption) {
+					failure = appendFailure(failure, interruption);
+					interrupted = true;
+					Thread.interrupted();
 				}
+			}
 
-				TapCallbackOffset offset = firstEntry.getValue();
-				if (offset != null && offset.hasValidOffset()) {
-					try {
-						TapCallbackOffset callbackOffset = new TapCallbackOffset();
-						callbackOffset.putAll(offset);
-						flushOffsetCallback.accept(callbackOffset);
-					} catch (Exception e) {
-						IllegalStateException callbackFailure = new IllegalStateException(
-								"Failed to flush committed Paimon offset", e);
-						stickyWriteFailure.compareAndSet(null, callbackFailure);
-						throw callbackFailure;
-					}
+			while (!lifecycle.isQuiescent()) {
+				try {
+					lifecycle.awaitQuiescence();
+				} catch (InterruptedException interruption) {
+					failure = appendFailure(failure, interruption);
+					interrupted = true;
+					Thread.interrupted();
 				}
+			}
 
-				synchronized (firstOffsetByTable) {
-					TapCallbackOffset current = firstOffsetByTable.get(firstEntry.getKey());
-					if (current == firstEntry.getValue()) {
-						firstOffsetByTable.remove(firstEntry.getKey());
-						committedOffsetTables.remove(firstEntry.getKey());
-					}
+			boolean allTablesDrained = failure == null;
+			for (String tableKey : new ArrayList<>(tableWriteContexts.keySet())) {
+				try {
+					flushTableInternal(tableKey, "stop", true);
+				} catch (Throwable drainFailure) {
+					failure = appendFailure(failure, drainFailure);
+					allTablesDrained = false;
 				}
+			}
+			InterruptedException retryInterruption = cleanupInterruption.getAndSet(null);
+			if (retryInterruption != null) {
+				failure = appendFailure(failure, retryInterruption);
+				interrupted = true;
+			}
+
+			Throwable stickyAfterDrain = lifecycle.firstFailure();
+			if (stickyAfterDrain != null) {
+				failure = appendFailure(failure, stickyAfterDrain);
+				allTablesDrained = false;
+			}
+			if (allTablesDrained) {
+				try {
+					List<PaimonMicroBatchCoordinator.CallbackReservation> ready =
+							new ArrayList<>(
+									microBatchCoordinator.reservedButNotStartedCallbacks());
+					ready.addAll(microBatchCoordinator.reserveReadyCallbacks());
+					executeCallbacks(ready, true);
+				} catch (Throwable callbackFailure) {
+					failure = appendFailure(failure, callbackFailure);
+				}
+			}
+
+			for (String tableKey : new ArrayList<>(tableWriteContexts.keySet())) {
+				PaimonTableWriteContext context = tableWriteContexts.remove(tableKey);
+				try {
+					if (context != null) {
+						context.close();
+					}
+				} catch (Throwable contextFailure) {
+					failure = appendFailure(failure, contextFailure);
+				} finally {
+					unregisterPhysicalTableOwner(tableKey);
+				}
+			}
+
+			try {
+				cleanupAllResources();
+			} catch (Throwable cleanupFailure) {
+				failure = appendFailure(failure, cleanupFailure);
+			}
+			dynamicSourceIngressGuards.clear();
+			activeConnectorContext = null;
+			boundTaskStateMap = null;
+			flushOffsetCallback = null;
+			lifecycle.publishClosed(failure);
+			if (interrupted) {
+				Thread.currentThread().interrupt();
+			}
+			if (failure != null) {
+				rethrow(failure);
 			}
 		}
 	}
+
+	private static Throwable appendFailure(Throwable primary, Throwable additional) {
+		if (additional == null || additional == primary) {
+			return primary;
+		}
+		if (primary == null) {
+			return additional;
+		}
+		for (Throwable suppressed : primary.getSuppressed()) {
+			if (suppressed == additional) {
+				return primary;
+			}
+		}
+		primary.addSuppressed(additional);
+		return primary;
+	}
+
+	public synchronized void setFlushOffsetCallback(Consumer<Object> flushOffsetCallback) {
+		PaimonServiceLifecycle.State state = lifecycle.state();
+		if (state != PaimonServiceLifecycle.State.NEW) {
+			if (this.flushOffsetCallback == flushOffsetCallback) {
+				return;
+			}
+			throw new IllegalStateException(
+					"flushOffsetCallback cannot be replaced while Paimon service is " + state);
+		}
+		this.flushOffsetCallback = flushOffsetCallback;
+	}
+
 }

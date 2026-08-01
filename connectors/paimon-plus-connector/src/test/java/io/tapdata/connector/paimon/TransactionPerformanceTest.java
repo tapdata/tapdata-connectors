@@ -181,7 +181,6 @@
 //        schemaBuilder.option("bucket", "-1")                    // 动态分桶
 //                .option("target-file-size", "256mb")            // 目标文件大小
 //                .option("write-buffer-size", "512mb")           // 写入缓冲区
-//                .option("sink.parallelism", "8")                // 并发度
 //                .option("compaction.async.enabled", "true")     // 异步 Compaction
 //                .option("compaction.optimization-interval", "10min")
 //                .option("num-sorted-run.compaction-trigger", "4")
@@ -220,7 +219,6 @@
 //        schemaBuilder.option("bucket", "-1")
 //                .option("target-file-size", "256mb")
 //                .option("write-buffer-size", "512mb")
-//                .option("sink.parallelism", "8")
 //                .option("compaction.async.enabled", "true")
 //                .option("compaction.optimization-interval", "10min")
 //                .option("num-sorted-run.compaction-trigger", "4")
@@ -259,7 +257,6 @@
 //        schemaBuilder.option("bucket", "-1")
 //                .option("target-file-size", "256mb")
 //                .option("write-buffer-size", "512mb")
-//                .option("sink.parallelism", "8")
 //                .option("compaction.async.enabled", "true")
 //                .option("compaction.optimization-interval", "10min")
 //                .option("num-sorted-run.compaction-trigger", "4")

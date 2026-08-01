@@ -42,6 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -107,6 +108,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
                             .init()
                             .table("synthetic_initial_t")
                             .after(sourceData);
+            event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "INITIAL_SYNC");
 
             service.writeRecords(
                     Collections.singletonList(event), tapTable, connectorContext);
@@ -280,6 +282,335 @@ class PaimonServiceDynamicBucketIntegrationTest {
             assertEquals("new", rows.get(0).getString(2).toString());
         } finally {
             restarted.close();
+        }
+    }
+
+    @Test
+    void hashFixedDeduplicateBatchMustRejectDefaultedNullBeforeCreatingWriter()
+            throws Exception {
+        PaimonConfig config = config("fixed-deduplicate-default-null");
+        Map<String, Object> persistedState = new ConcurrentHashMap<>();
+        TapTable tapTable =
+                new TapTable("fixed_default_null_t")
+                        .add(new TapField("value", "STRING"))
+                        .add(new TapField("id", "INT").primaryKeyPos(1));
+
+        PaimonService service = service(config);
+        try {
+            createFixedDefaultedTable(catalog(service), "fixed_default_null_t");
+            FileStoreTable target =
+                    (FileStoreTable)
+                            catalog(service)
+                                    .getTable(
+                                            Identifier.create(
+                                                    DATABASE, "fixed_default_null_t"));
+
+            // Paimon 1.3.1 DefaultValueRow would replace the second event's explicit null with
+            // the schema default. The connector must reject the entire batch before the first
+            // valid event creates a TableWriteImpl or advances a commit identifier.
+            // Sources:
+            // https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/casting/DefaultValueRow.java#L209-L228
+            // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java#L187-L213
+            PaimonFatalWriteException failure =
+                    assertThrows(
+                            PaimonFatalWriteException.class,
+                            () ->
+                                    service.writeRecords(
+                                            java.util.Arrays.asList(
+                                                    cdcInsert(
+                                                            "fixed_default_null_t",
+                                                            map(
+                                                                    "value",
+                                                                    "valid-first",
+                                                                    "id",
+                                                                    1)),
+                                                    cdcUpdateAfter(
+                                                            "fixed_default_null_t",
+                                                            map("value", null, "id", 1))),
+                                            tapTable,
+                                            context(stateMap(persistedState))));
+
+            assertTrue(
+                    failure.getMessage()
+                            .contains(
+                                    "PAIMON_DEDUPLICATE_INCOMPLETE_UPDATE_AFTER"));
+            assertTrue(
+                    failure.getMessage()
+                            .contains("defaultedNullFields=[value]"));
+            assertNull(target.snapshotManager().latestSnapshotIdFromFileSystem());
+            assertEquals(0, tableWriteContextCount(service));
+            assertTrue(persistedState.isEmpty());
+        } finally {
+            assertThrows(PaimonFatalWriteException.class, service::close);
+        }
+    }
+
+    @Test
+    void hashFixedDeduplicateUpdateAfterMustPersistNullableNullWithoutDefault()
+            throws Exception {
+        PaimonConfig config = config("fixed-deduplicate-null");
+        TapTable tapTable =
+                new TapTable("fixed_nullable_null_t")
+                        .add(new TapField("value", "STRING"))
+                        .add(new TapField("id", "INT").primaryKeyPos(1));
+
+        PaimonService service = service(config);
+        try {
+            createFixedNonPartitionedTable(catalog(service), "fixed_nullable_null_t");
+            TapConnectorContext connectorContext = context(stateMap());
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert(
+                                    "fixed_nullable_null_t",
+                                    map("value", "old", "id", 1))),
+                    tapTable,
+                    connectorContext);
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcUpdateAfter(
+                                    "fixed_nullable_null_t",
+                                    map("value", null, "id", 1))),
+                    tapTable,
+                    connectorContext);
+
+            // Paimon 1.3.1 DeduplicateMergeFunction#add keeps the latest complete value.
+            // With no DataField default, an explicit nullable null must remain a real null.
+            // Source:
+            // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/mergetree/compact/DeduplicateMergeFunction.java#L27-L48
+            List<InternalRow> rows =
+                    readRows(
+                            catalog(service)
+                                    .getTable(
+                                            Identifier.create(
+                                                    DATABASE, "fixed_nullable_null_t")));
+            assertEquals(1, rows.size());
+            assertEquals(1, rows.get(0).getInt(0));
+            assertTrue(rows.get(0).isNullAt(1));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void connectorDropRecreateMustUseNewPhysicalFieldOrder() throws Exception {
+        PaimonConfig config = config("ddl-schema-generation");
+        TapTable tapTable =
+                new TapTable("ddl_schema_t")
+                        .add(new TapField("left_value", "STRING"))
+                        .add(new TapField("id", "INT").primaryKeyPos(1))
+                        .add(new TapField("right_value", "STRING"));
+
+        PaimonService service = service(config);
+        try {
+            Catalog catalog = catalog(service);
+            createFixedSchemaOrderTable(catalog, "ddl_schema_t", false);
+            TapConnectorContext connectorContext = context(stateMap());
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert(
+                                    "ddl_schema_t",
+                                    map(
+                                            "id",
+                                            1,
+                                            "left_value",
+                                            "old-left",
+                                            "right_value",
+                                            "old-right"))),
+                    tapTable,
+                    connectorContext);
+
+            service.dropTable("ddl_schema_t");
+            createFixedSchemaOrderTable(catalog, "ddl_schema_t", true);
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert(
+                                    "ddl_schema_t",
+                                    map(
+                                            "id",
+                                            2,
+                                            "left_value",
+                                            "new-left",
+                                            "right_value",
+                                            "new-right"))),
+                    tapTable,
+                    connectorContext);
+
+            // Paimon 1.3.1 CachingCatalog#dropTable invalidates Paimon's own cached Table.
+            // Connector policy must independently invalidate the cached DataField order so the
+            // recreated generation is converted as right_value,id,left_value.
+            // Source:
+            // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/CachingCatalog.java#L184-L197
+            List<InternalRow> rows =
+                    readRows(
+                            catalog.getTable(
+                                    Identifier.create(DATABASE, "ddl_schema_t")));
+            assertEquals(1, rows.size());
+            assertEquals("new-right", rows.get(0).getString(0).toString());
+            assertEquals(2, rows.get(0).getInt(1));
+            assertEquals("new-left", rows.get(0).getString(2).toString());
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void connectorDropRecreateMustRecomputeHashModeAndSourcePrimaryKeys()
+            throws Exception {
+        PaimonConfig config = config("ddl-hash-generation");
+        config.setHashKey(false);
+        Map<String, Object> persistedState = new ConcurrentHashMap<>();
+        TapConnectorContext connectorContext = context(stateMap(persistedState));
+        PaimonService service = service(config);
+        try {
+            Catalog catalog = catalog(service);
+            createFixedNonPartitionedTable(catalog, "ddl_hash_t");
+            TapTable simpleTable =
+                    new TapTable("ddl_hash_t")
+                            .add(new TapField("value", "STRING"))
+                            .add(new TapField("id", "INT").primaryKeyPos(1));
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert(
+                                    "ddl_hash_t",
+                                    map("value", "without-hash", "id", 1))),
+                    simpleTable,
+                    connectorContext);
+
+            service.dropTable("ddl_hash_t");
+            config.setHashKey(true);
+            createSyntheticHashFixedTable(catalog, "ddl_hash_t");
+            TapTable syntheticTable = syntheticHashTapTable("ddl_hash_t", false);
+            Map<String, Object> syntheticData = syntheticHashData("with-hash");
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert("ddl_hash_t", syntheticData)),
+                    syntheticTable,
+                    connectorContext);
+
+            List<InternalRow> hashedRows =
+                    readRows(
+                            catalog.getTable(
+                                    Identifier.create(DATABASE, "ddl_hash_t")));
+            assertEquals(1, hashedRows.size());
+            assertEquals(
+                    service.toHash(syntheticTable.primaryKeys(true), syntheticData),
+                    hashedRows.get(0).getString(1).toString());
+
+            service.dropTable("ddl_hash_t");
+            config.setHashKey(false);
+            createFixedNonPartitionedTable(catalog, "ddl_hash_t");
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert(
+                                    "ddl_hash_t",
+                                    map("value", "without-hash-again", "id", 2))),
+                    simpleTable,
+                    connectorContext);
+
+            // The two DDL boundaries must force false -> true -> false recomputation and replace
+            // the six-field source PK dependency set with the recreated table's single id key.
+            assertEquals(
+                    Boolean.FALSE,
+                    derivedCache(service, "computeHashKey").get("ddl_hash_t"));
+            Object cachedPrimaryKeys =
+                    derivedCache(service, "primaryKeyMap").get("ddl_hash_t");
+            assertTrue(cachedPrimaryKeys instanceof java.util.Collection);
+            assertEquals(
+                    Collections.singletonList("id"),
+                    new ArrayList<>((java.util.Collection<?>) cachedPrimaryKeys));
+            List<InternalRow> plainRows =
+                    readRows(
+                            catalog.getTable(
+                                    Identifier.create(DATABASE, "ddl_hash_t")));
+            assertEquals(1, plainRows.size());
+            assertEquals(2, plainRows.get(0).getInt(0));
+            assertEquals(
+                    "without-hash-again",
+                    plainRows.get(0).getString(1).toString());
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void keyDynamicDeduplicateBatchMustRejectLaterSparseUpdateWithoutSnapshotAdvance()
+            throws Exception {
+        PaimonConfig config = config("key-deduplicate-sparse-batch");
+        Map<String, Object> persistedState = new ConcurrentHashMap<>();
+        TapTable tapTable =
+                new TapTable("key_sparse_batch_t")
+                        .add(new TapField("value", "STRING"))
+                        .add(new TapField("id", "INT").primaryKeyPos(1))
+                        .add(new TapField("pt", "INT"));
+
+        PaimonService service = service(config);
+        boolean fenced = false;
+        try {
+            createKeyDynamicTable(catalog(service), "key_sparse_batch_t");
+            TapConnectorContext connectorContext = context(stateMap(persistedState));
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert(
+                                    "key_sparse_batch_t",
+                                    map("value", "old", "id", 10, "pt", 1))),
+                    tapTable,
+                    connectorContext);
+            FileStoreTable target =
+                    (FileStoreTable)
+                            catalog(service)
+                                    .getTable(
+                                            Identifier.create(
+                                                    DATABASE, "key_sparse_batch_t"));
+            Long snapshotBeforeFailure =
+                    target.snapshotManager().latestSnapshotIdFromFileSystem();
+            Map<String, Object> stateBeforeFailure = new LinkedHashMap<>(persistedState);
+
+            // Paimon 1.3.1 DeduplicateMergeFunction#add treats each UPDATE_AFTER as the latest
+            // complete value. Batch preflight must catch the later sparse image before the
+            // earlier complete partition move reaches the KEY_DYNAMIC writer.
+            // Source:
+            // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/mergetree/compact/DeduplicateMergeFunction.java#L27-L48
+            PaimonFatalWriteException failure =
+                    assertThrows(
+                            PaimonFatalWriteException.class,
+                            () ->
+                                    service.writeRecords(
+                                            java.util.Arrays.asList(
+                                                    cdcUpdateAfter(
+                                                            "key_sparse_batch_t",
+                                                            map(
+                                                                    "value",
+                                                                    "would-move",
+                                                                    "id",
+                                                                    10,
+                                                                    "pt",
+                                                                    2)),
+                                                    cdcUpdateAfter(
+                                                            "key_sparse_batch_t",
+                                                            map("id", 10, "pt", 3))),
+                                            tapTable,
+                                            connectorContext));
+            fenced = true;
+
+            assertTrue(
+                    failure.getMessage()
+                            .contains(
+                                    "PAIMON_DEDUPLICATE_INCOMPLETE_UPDATE_AFTER"));
+            assertTrue(failure.getMessage().contains("missingFields=[value]"));
+            assertEquals(
+                    snapshotBeforeFailure,
+                    target.snapshotManager().latestSnapshotIdFromFileSystem());
+            assertEquals(stateBeforeFailure, persistedState);
+            List<InternalRow> rows = readRows(target);
+            assertEquals(1, rows.size());
+            assertEquals(1, rows.get(0).getInt(0));
+            assertEquals("old", rows.get(0).getString(2).toString());
+        } finally {
+            if (fenced) {
+                assertThrows(PaimonFatalWriteException.class, service::close);
+            } else {
+                service.close();
+            }
         }
     }
 
@@ -462,7 +793,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
             assertEquals("old", rows.get(0).getString(2).toString());
         } finally {
             if (fenced) {
-                assertThrows(IllegalStateException.class, service::close);
+                assertThrows(PaimonFatalWriteException.class, service::close);
             } else {
                 service.close();
             }
@@ -587,7 +918,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
             assertTrue(failure.getMessage().contains("value"));
             assertNull(target.snapshotManager().latestSnapshotIdFromFileSystem());
         } finally {
-            insertService.close();
+            assertThrows(PaimonFatalWriteException.class, insertService::close);
         }
 
         TapTable deleteTable =
@@ -632,7 +963,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
                     target.snapshotManager().latestSnapshotIdFromFileSystem());
             assertEquals(1, readRows(target).size());
         } finally {
-            assertThrows(IllegalStateException.class, deleteService::close);
+            assertThrows(PaimonFatalWriteException.class, deleteService::close);
         }
     }
 
@@ -677,7 +1008,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
             assertNull(target.snapshotManager().latestSnapshotIdFromFileSystem());
             assertTrue(persistedState.isEmpty());
         } finally {
-            service.close();
+            assertThrows(PaimonFatalWriteException.class, service::close);
         }
     }
 
@@ -777,7 +1108,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
             assertTrue(thrown.getMessage().contains("PAIMON_INCOMPLETE_BEFORE_IMAGE"));
         } finally {
             if (fenced) {
-                assertThrows(IllegalStateException.class, service::close);
+                assertThrows(PaimonFatalWriteException.class, service::close);
             } else {
                 service.close();
             }
@@ -963,7 +1294,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
                     target.snapshotManager().latestSnapshotIdFromFileSystem());
             assertEquals(1, readRows(target).size());
         } finally {
-            assertThrows(IllegalStateException.class, service::close);
+            assertThrows(PaimonFatalWriteException.class, service::close);
         }
     }
 
@@ -1004,9 +1335,9 @@ class PaimonServiceDynamicBucketIntegrationTest {
                             .add(new TapField("id", "INT").primaryKeyPos(1))
                             .add(new TapField("pt", "INT"));
 
-            IllegalStateException fenced =
+            PaimonFatalWriteException fenced =
                     assertThrows(
-                            IllegalStateException.class,
+                            PaimonFatalWriteException.class,
                             () ->
                                     service.writeRecords(
                                             Collections.singletonList(
@@ -1021,9 +1352,9 @@ class PaimonServiceDynamicBucketIntegrationTest {
                                                                     1))),
                                             otherTable,
                                             context(stateMap)));
-            assertTrue(fenced.getMessage().contains("fenced after an ingress failure"));
+            assertSame(thrown, fenced);
         } finally {
-            service.close();
+            assertThrows(PaimonFatalWriteException.class, service::close);
         }
     }
 
@@ -1088,7 +1419,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
         } finally {
             IllegalStateException closeFailure =
                     assertThrows(IllegalStateException.class, defaultService::close);
-            assertTrue(containsMessage(closeFailure, "fenced after an ingress failure"));
+            assertTrue(containsMessage(closeFailure, "Append only writer can not accept"));
         }
 
         // An ingress write error intentionally fences a service instance. A restarted instance
@@ -1284,6 +1615,66 @@ class PaimonServiceDynamicBucketIntegrationTest {
                 false);
     }
 
+    private void createFixedDefaultedTable(Catalog catalog, String tableName)
+            throws Exception {
+        catalog.createTable(
+                Identifier.create(DATABASE, tableName),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        // Paimon 1.3.1 DataField#defaultValue is consumed by
+                        // DefaultValueRow#create when TableWriteImpl is constructed.
+                        // Sources:
+                        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/types/DataField.java#L50-L91
+                        // https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/casting/DefaultValueRow.java#L209-L228
+                        .column("value", DataTypes.STRING(), null, "'fallback'")
+                        .primaryKey("id")
+                        .option("bucket", "2")
+                        .option("write-buffer-size", "8mb")
+                        .build(),
+                false);
+    }
+
+    private void createFixedSchemaOrderTable(
+            Catalog catalog, String tableName, boolean reordered) throws Exception {
+        Schema.Builder builder = Schema.newBuilder();
+        if (reordered) {
+            builder.column("right_value", DataTypes.STRING())
+                    .column("id", DataTypes.INT())
+                    .column("left_value", DataTypes.STRING());
+        } else {
+            builder.column("id", DataTypes.INT())
+                    .column("left_value", DataTypes.STRING())
+                    .column("right_value", DataTypes.STRING());
+        }
+        catalog.createTable(
+                Identifier.create(DATABASE, tableName),
+                builder.primaryKey("id")
+                        .option("bucket", "2")
+                        .option("write-buffer-size", "8mb")
+                        .build(),
+                false);
+    }
+
+    private void createSyntheticHashFixedTable(Catalog catalog, String tableName)
+            throws Exception {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("value", DataTypes.STRING())
+                        // Paimon stores the Connector's legacy MD5 key in the existing
+                        // VARCHAR(32) physical contract; F4 only refreshes its dependencies.
+                        .column("_hash_key", DataTypes.VARCHAR(32));
+        for (int i = 1; i <= 6; i++) {
+            builder.column("pk" + i, DataTypes.INT());
+        }
+        catalog.createTable(
+                Identifier.create(DATABASE, tableName),
+                builder.primaryKey("_hash_key")
+                        .option("bucket", "2")
+                        .option("write-buffer-size", "8mb")
+                        .build(),
+                false);
+    }
+
     private void createInputRowKindTable(Catalog catalog, String tableName) throws Exception {
         catalog.createTable(
                 Identifier.create(DATABASE, tableName),
@@ -1393,12 +1784,14 @@ class PaimonServiceDynamicBucketIntegrationTest {
     private TapInsertRecordEvent cdcInsert(String table, Map<String, Object> after) {
         TapInsertRecordEvent event = new TapInsertRecordEvent().init().table(table).after(after);
         event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+        event.addInfo("nodeIds", Collections.singletonList("test-source"));
         return event;
     }
 
     private TapUpdateRecordEvent cdcUpdateAfter(String table, Map<String, Object> after) {
         TapUpdateRecordEvent event = new TapUpdateRecordEvent().init().table(table).after(after);
         event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+        event.addInfo("nodeIds", Collections.singletonList("test-source"));
         return event;
     }
 
@@ -1411,6 +1804,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
                         .before(before)
                         .after(after);
         event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+        event.addInfo("nodeIds", Collections.singletonList("test-source"));
         return event;
     }
 
@@ -1418,6 +1812,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
         TapDeleteRecordEvent event =
                 new TapDeleteRecordEvent().init().table(table).before(before);
         event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+        event.addInfo("nodeIds", Collections.singletonList("test-source"));
         return event;
     }
 
@@ -1507,6 +1902,20 @@ class PaimonServiceDynamicBucketIntegrationTest {
         Field field = PaimonService.class.getDeclaredField("catalog");
         field.setAccessible(true);
         return (Catalog) field.get(service);
+    }
+
+    private int tableWriteContextCount(PaimonService service) throws Exception {
+        Field field = PaimonService.class.getDeclaredField("tableWriteContexts");
+        field.setAccessible(true);
+        return ((Map<?, ?>) field.get(service)).size();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> derivedCache(PaimonService service, String fieldName)
+            throws Exception {
+        Field field = PaimonService.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return (Map<String, Object>) field.get(service);
     }
 
     private boolean containsMessage(Throwable error, String text) {

@@ -2,11 +2,13 @@ package io.tapdata.connector.paimon.config;
 
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.kit.EmptyKit;
+import org.apache.paimon.table.BucketMode;
 
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -47,9 +49,17 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     private Boolean hashKey = false;
     private List<String> partitionKey;
 
-    // Bucket mode: "dynamic" or "fixed"
-    // Dynamic mode: better for general use, uses StreamTableWrite
-    // Fixed mode: better performance, uses BatchTableWrite
+    /*
+     * Connector-level bucket choice. All modes use one StreamTableWrite per physical table.
+     * "dynamic" writes bucket=-1, "postpone" writes bucket=-2, and "fixed" requires a positive
+     * bucket count. Paimon materializes the final BucketMode from the schema and table shape.
+     *
+     * Sources:
+     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
+     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
+     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
+     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#L72-L75
+     */
     private String bucketMode = "dynamic";
 
     // Bucket count for fixed bucket mode (only used when bucketMode = "fixed")
@@ -74,21 +84,15 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     private String diskTmpDir = "/tmp";
 
-    // Batch accumulation size before commit (default: 10000 records)
+    // Batch accumulation size before commit (default: 100000 records)
     // 0 = commit immediately (no batching)
     private Integer batchAccumulationSize = 100000;
 
-    // Commit interval in milliseconds (default: 30000ms = 30s)
-    // 0 = no time-based commit, only size-based
+    // CDC commit interval in milliseconds (default: 30000)
     private Integer commitIntervalMs = 30000;
 
-    // Enable async commit (default: true)
-    // Async commit improves throughput by not blocking writes
+    // Enable background deadline commits for low-traffic CDC tables (default: true)
     private Boolean enableAsyncCommit = true;
-
-    // Number of write threads for parallel writing (default: 4)
-    // More threads = better parallelism but more resource usage
-    private Integer writeThreads = 4;
 
     // Enable auto compaction (default: true)
     // Compaction merges small files for better query performance
@@ -269,6 +273,46 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     }
 
     /**
+     * Resolve the first-class bucket configuration for one logical table to Paimon's native
+     * {@code bucket} value.
+     *
+     * <p>Paimon 1.3.1 defines -1 as dynamic, -2 as postpone, and positive values as fixed bucket
+     * mode. A non-positive fixed count is never reinterpreted as another mode.
+     *
+     * <p>Sources:
+     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
+     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
+     *
+     * @param tableName logical table name used for per-table configuration lookup
+     * @return Paimon's native bucket value
+     */
+    public int resolveBucket(String tableName) {
+        return resolveBucket(getBucketMode(tableName), getBucketCount(tableName));
+    }
+
+    private static int resolveBucket(String mode, Integer fixedBucketCount) {
+        if (mode == null || mode.trim().isEmpty()) {
+            throw new IllegalArgumentException("Bucket mode is required");
+        }
+
+        switch (mode.trim().toLowerCase(Locale.ROOT)) {
+            case "dynamic":
+                return -1;
+            case "postpone":
+                return BucketMode.POSTPONE_BUCKET;
+            case "fixed":
+                if (fixedBucketCount == null || fixedBucketCount <= 0) {
+                    throw new IllegalArgumentException(
+                            "Bucket count must be greater than 0 when using fixed bucket mode");
+                }
+                return fixedBucketCount;
+            default:
+                throw new IllegalArgumentException(
+                        "Bucket mode must be one of 'dynamic', 'postpone', or 'fixed'");
+        }
+    }
+
+    /**
      * Check if using dynamic bucket mode
      *
      * @return true if using dynamic bucket mode
@@ -350,7 +394,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     }
 
     public Integer getBatchAccumulationSize() {
-        return batchAccumulationSize;
+        return batchAccumulationSize == null ? 100000 : batchAccumulationSize;
     }
 
     public void setBatchAccumulationSize(Integer batchAccumulationSize) {
@@ -358,7 +402,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     }
 
     public Integer getCommitIntervalMs() {
-        return commitIntervalMs;
+        return commitIntervalMs == null ? 30000 : commitIntervalMs;
     }
 
     public void setCommitIntervalMs(Integer commitIntervalMs) {
@@ -366,19 +410,11 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     }
 
     public Boolean getEnableAsyncCommit() {
-        return enableAsyncCommit;
+        return enableAsyncCommit == null ? Boolean.TRUE : enableAsyncCommit;
     }
 
     public void setEnableAsyncCommit(Boolean enableAsyncCommit) {
         this.enableAsyncCommit = enableAsyncCommit;
-    }
-
-    public Integer getWriteThreads() {
-        return writeThreads;
-    }
-
-    public void setWriteThreads(Integer writeThreads) {
-        this.writeThreads = writeThreads;
     }
 
     public Boolean getEnableAutoCompaction() {
@@ -446,6 +482,14 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
      * @return true if paimon-s3 is available, false otherwise
      */
     private static boolean isPaimonS3Available() {
+        /*
+         * REVIEW: paimon-s3 1.3.1 packages S3FileIO below the nested paimon-plugin-s3 directory and
+         * exposes the root-classpath S3Loader as the FileIOLoader. Class.forName(S3FileIO) therefore
+         * returns false with the connector's current artifact, selecting s3a:// even though the
+         * native loader is packaged. Capability detection should use FileIO loader discovery.
+         * Source:
+         * https://github.com/apache/paimon/blob/release-1.3.1/paimon-filesystems/paimon-s3/src/main/java/org/apache/paimon/s3/S3Loader.java#L35-L83
+         */
         try {
             Class.forName("org.apache.paimon.s3.S3FileIO");
             return true;
@@ -553,20 +597,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
             throw new IllegalArgumentException("Storage type is required");
         }
 
-        if (bucketMode == null || bucketMode.trim().isEmpty()) {
-            throw new IllegalArgumentException("Bucket mode is required");
-        }
-
-        if (!"dynamic".equalsIgnoreCase(bucketMode) && !"fixed".equalsIgnoreCase(bucketMode)) {
-            throw new IllegalArgumentException("Bucket mode must be either 'dynamic' or 'fixed'");
-        }
-
-        // Validate bucket count only for fixed mode
-        if ("fixed".equalsIgnoreCase(bucketMode)) {
-            if (bucketCount == null || bucketCount <= 0) {
-                throw new IllegalArgumentException("Bucket count must be greater than 0 when using fixed bucket mode");
-            }
-        }
+        resolveBucket(bucketMode, bucketCount);
         
         switch (storageType.toLowerCase()) {
             case "s3":
@@ -604,4 +635,3 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         }
     }
 }
-

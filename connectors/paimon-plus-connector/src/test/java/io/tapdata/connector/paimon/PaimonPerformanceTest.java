@@ -250,7 +250,6 @@ public class PaimonPerformanceTest {
         schemaBuilder.option("compaction.max.file-num", "999999");
 
         // 并行度
-        schemaBuilder.option("sink.parallelism", "16");
         schemaBuilder.option("write-parallelism", "8");
         schemaBuilder.option("write-buffer-spillable", "true");
         schemaBuilder.option("write-buffer-for-append", "true");
