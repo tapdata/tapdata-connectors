@@ -16,6 +16,9 @@
       {
         "id": "dml_update_policy",
         "alternatives": ["ignore_on_nonexists"]
+      },
+      {
+        "id": "flush_offset_callback"
       }
     ],
     "connection": {
@@ -692,7 +695,7 @@
       "diskMaxSize": "Disk overflow capacity (GB)",
       "diskTmpDir": "Disk temporary directory",
       "batchAccumulationSize": "Batch Accumulation Size",
-      "batchAccumulationSize_placeholder": "Records to accumulate before commit (0=immediate, default: 10000)",
+      "batchAccumulationSize_placeholder": "Records to accumulate before commit (0=immediate, default: 100000)",
       "commitIntervalMs": "Commit Interval (ms)",
       "commitIntervalMs_placeholder": "Time interval for commits in milliseconds (default: 30000)",
       "enableAsyncCommit": "Enable Async Commit",
@@ -749,7 +752,7 @@
       "diskMaxSize": "磁盘溢写容量(GB)",
       "diskTmpDir": "磁盘临时目录",
       "batchAccumulationSize": "批量累积大小",
-      "batchAccumulationSize_placeholder": "提交前累积的记录数（0=立即提交，默认：10000）",
+      "batchAccumulationSize_placeholder": "提交前累积的记录数（0=立即提交，默认：100000）",
       "commitIntervalMs": "提交间隔（毫秒）",
       "commitIntervalMs_placeholder": "提交的时间间隔（毫秒，默认：30000）",
       "enableAsyncCommit": "启用异步提交",
@@ -806,7 +809,7 @@
       "diskMaxSize": "磁盤溢寫容量(GB)",
       "diskTmpDir": "磁盤臨時目錄",
       "batchAccumulationSize": "批量累積大小",
-      "batchAccumulationSize_placeholder": "提交前累積的記錄數（0=立即提交，默認：10000）",
+      "batchAccumulationSize_placeholder": "提交前累積的記錄數（0=立即提交，默認：100000）",
       "commitIntervalMs": "提交間隔（毫秒）",
       "commitIntervalMs_placeholder": "提交的時間間隔（毫秒，默認：30000）",
       "enableAsyncCommit": "啟用異步提交",
@@ -948,4 +951,3 @@
     }
   }
 }
-

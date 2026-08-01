@@ -6,6 +6,7 @@ import io.tapdata.connector.paimon.service.PaimonService;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.ControlEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
@@ -70,6 +71,7 @@ public class PaimonConnector extends ConnectorBase {
         }
         // Initialize Paimon service
         paimonService = new PaimonService(paimonConfig, connectionContext.getLog());
+        paimonService.setFlushOffsetCallback(connectionContext.getFlushOffsetCallback());
         paimonService.init();
         
         connectionContext.getLog().info("Paimon connector started successfully");
@@ -481,9 +483,15 @@ public class PaimonConnector extends ConnectorBase {
         }
     }
 
-    protected void processControl(TapConnectorContext tapConnectorContext, ControlEvent controlEvent) {
-        // PLATFORM_MANAGED offset mode: writeRecords confirms every CDC snapshot before return.
-        // The current PDK has no global source sequence for safely interleaving heartbeat and
-        // multi-table DML callbacks, so this connector intentionally does not advance offsets here.
+    protected void processControl(TapConnectorContext tapConnectorContext, ControlEvent controlEvent)
+            throws Throwable {
+        if (controlEvent instanceof HeartbeatEvent) {
+            PaimonService service = paimonService;
+            if (service == null) {
+                throw new IllegalStateException(
+                        "Paimon service is unavailable while processing a Heartbeat");
+            }
+            service.processHeartbeat((HeartbeatEvent) controlEvent);
+        }
     }
 }

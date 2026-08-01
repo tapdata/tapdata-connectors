@@ -743,7 +743,7 @@ class PaimonServiceCreateTableValidationTest {
             assertTrue(mapField(service, "physicalTableByLogicalTable").isEmpty());
             assertNull(target.snapshotManager().latestSnapshotIdFromFileSystem());
         } finally {
-            service.close();
+            assertThrows(PaimonFatalWriteException.class, service::close);
         }
     }
 
@@ -771,6 +771,7 @@ class PaimonServiceCreateTableValidationTest {
         Field field = PaimonService.class.getDeclaredField("catalog");
         field.setAccessible(true);
         field.set(service, catalog);
+        service.startForTest();
         return service;
     }
 
@@ -839,6 +840,7 @@ class PaimonServiceCreateTableValidationTest {
         TapInsertRecordEvent event =
                 new TapInsertRecordEvent().init().table(tableName).after(after);
         event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+        event.addInfo("nodeIds", Collections.singletonList("test-source"));
         return event;
     }
 

@@ -21,6 +21,30 @@ import static org.junit.jupiter.api.Assertions.*;
 public class PaimonConfigTest {
 
     @Test
+    void microBatchDefaultsMustSurviveExplicitNullValues() {
+        PaimonConfig config = new PaimonConfig();
+        config.setBatchAccumulationSize(null);
+        config.setCommitIntervalMs(null);
+        config.setEnableAsyncCommit(null);
+
+        assertEquals(100000, config.getBatchAccumulationSize());
+        assertEquals(30000, config.getCommitIntervalMs());
+        assertTrue(config.getEnableAsyncCommit());
+    }
+
+    @Test
+    void explicitMicroBatchOverridesMustBePreserved() {
+        PaimonConfig config = new PaimonConfig();
+        config.setBatchAccumulationSize(0);
+        config.setCommitIntervalMs(-1);
+        config.setEnableAsyncCommit(false);
+
+        assertEquals(0, config.getBatchAccumulationSize());
+        assertEquals(-1, config.getCommitIntervalMs());
+        assertFalse(config.getEnableAsyncCommit());
+    }
+
+    @Test
     public void testLocalStorageWarehousePath() {
         PaimonConfig config = new PaimonConfig();
         config.setWarehouse("/tmp/paimon");

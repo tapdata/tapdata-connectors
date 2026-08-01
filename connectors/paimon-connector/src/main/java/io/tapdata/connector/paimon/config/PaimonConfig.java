@@ -84,16 +84,14 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     private String diskTmpDir = "/tmp";
 
-    // Batch accumulation size before commit (default: 10000 records)
+    // Batch accumulation size before commit (default: 100000 records)
     // 0 = commit immediately (no batching)
     private Integer batchAccumulationSize = 100000;
 
-    // Initial-sync buffer timing knob. CDC currently commits synchronously before every callback
-    // return because PDK 2.0.8 exposes no verified durable asynchronous-offset contract.
+    // CDC commit interval in milliseconds (default: 30000)
     private Integer commitIntervalMs = 30000;
 
-    // Reserved compatibility knob: PaimonService intentionally disables asynchronous CDC commit
-    // until source-offset acknowledgement and ordering can be proven durable.
+    // Enable background deadline commits for low-traffic CDC tables (default: true)
     private Boolean enableAsyncCommit = true;
 
     // Enable auto compaction (default: true)
@@ -396,7 +394,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     }
 
     public Integer getBatchAccumulationSize() {
-        return batchAccumulationSize;
+        return batchAccumulationSize == null ? 100000 : batchAccumulationSize;
     }
 
     public void setBatchAccumulationSize(Integer batchAccumulationSize) {
@@ -404,7 +402,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     }
 
     public Integer getCommitIntervalMs() {
-        return commitIntervalMs;
+        return commitIntervalMs == null ? 30000 : commitIntervalMs;
     }
 
     public void setCommitIntervalMs(Integer commitIntervalMs) {
@@ -412,7 +410,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     }
 
     public Boolean getEnableAsyncCommit() {
-        return enableAsyncCommit;
+        return enableAsyncCommit == null ? Boolean.TRUE : enableAsyncCommit;
     }
 
     public void setEnableAsyncCommit(Boolean enableAsyncCommit) {

@@ -21,6 +21,48 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PaimonSpecTest {
 
     @Test
+    void microBatchDefaultsAndPlaceholdersMustStayAligned() throws Exception {
+        JsonObject spec = loadSpec();
+        JsonObject properties =
+                spec.getAsJsonObject("configOptions")
+                        .getAsJsonObject("node")
+                        .getAsJsonObject("properties");
+
+        assertEquals(100000, properties.getAsJsonObject("batchAccumulationSize").get("default").getAsInt());
+        assertEquals(30000, properties.getAsJsonObject("commitIntervalMs").get("default").getAsInt());
+        assertTrue(properties.getAsJsonObject("enableAsyncCommit").get("default").getAsBoolean());
+
+        JsonObject messages = spec.getAsJsonObject("messages");
+        for (String locale : Arrays.asList("en_US", "zh_CN", "zh_TW")) {
+            String placeholder =
+                    messages.getAsJsonObject(locale)
+                            .get("batchAccumulationSize_placeholder")
+                            .getAsString();
+            assertTrue(placeholder.contains("100000"), locale + " placeholder must show 100000");
+            assertFalse(placeholder.contains("10000)"), locale + " placeholder must not show 10000");
+            assertFalse(placeholder.contains("10000）"), locale + " placeholder must not show 10000");
+        }
+    }
+
+    @Test
+    void flushOffsetCallbackCapabilityMustBeAdvertisedExactlyOnce() throws Exception {
+        JsonArray capabilities =
+                loadSpec()
+                        .getAsJsonObject("configOptions")
+                        .getAsJsonArray("capabilities");
+
+        int count = 0;
+        for (JsonElement capability : capabilities) {
+            if ("flush_offset_callback".equals(
+                    capability.getAsJsonObject().get("id").getAsString())) {
+                count++;
+            }
+        }
+
+        assertEquals(1, count);
+    }
+
+    @Test
     void fileFormatOptionsMustOnlyExposePackagedProviders() throws Exception {
         JsonObject spec = loadSpec();
         JsonArray formatOptions =
