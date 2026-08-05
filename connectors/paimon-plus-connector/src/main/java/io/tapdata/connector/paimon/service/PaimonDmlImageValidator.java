@@ -43,15 +43,6 @@ final class PaimonDmlImageValidator {
                         false);
             } else if (event instanceof TapUpdateRecordEvent) {
                 TapUpdateRecordEvent update = (TapUpdateRecordEvent) event;
-                validateImage(
-                        tableKey,
-                        contract,
-                        requirements,
-                        update.getBefore(),
-                        "UPDATE_BEFORE",
-                        "PAIMON_INCOMPLETE_BEFORE_IMAGE",
-                        contract.requiresFullChangelog(),
-                        false);
                 validateUpdateAfter(tableKey, contract, requirements, update.getAfter());
             } else if (event instanceof TapDeleteRecordEvent) {
                 validateImage(
