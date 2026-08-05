@@ -1,6 +1,7 @@
 package io.tapdata.connector.postgres.cdc.physical;
 
 import com.google.common.collect.Lists;
+import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.common.concurrent.ConcurrentProcessor;
 import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.common.concurrent.exception.ConcurrentProcessorApplyException;
@@ -82,6 +83,18 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private static final long PENDING_WARN_INTERVAL_MS = 30_000L;
     private static final long REPLICATION_STATUS_INTERVAL_MS = 5_000L;
     private static final int SPILL_STREAM_RESET_INTERVAL = 10_000;
+    /* Consecutive failed timeline probes before a stalled WAL stream hands the
+     * restart to the task framework (see probeStallIfDue). */
+    private static final int STALL_PROBE_FAILURE_LIMIT = 3;
+    /* Consecutive rapid stall-recovery cycles before the miner gives up and
+     * hands the restart to the task framework (see startMiner recovery loop). */
+    private static final int STALL_RECOVERY_LIMIT = 3;
+    /* Consecutive idle probes in ancestor catch-up mode before the miner
+     * abandons the catch-up: the ancestor WAL segments are missing on every
+     * node (recycled or overwritten by the same-numbered segment on a later
+     * timeline), so the walsender can never deliver past the gap and the
+     * catch-up can never converge. Waiting longer does not help. */
+    private static final int ANCESTOR_CATCHUP_STALL_LIMIT = 3;
     /* Per-xid in-memory limit before spilling to disk to survive multi-million-row
      * transactions without OOM. ObjectOutputStream writes NormalRedo sequentially
      * (NormalRedo is already Serializable); the files are read back via streaming
@@ -91,6 +104,14 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     /* How often to surface the running tally of UPDATE/DELETE whose before-image
      * could not be recovered (page-state cache miss under wal_level=replica). */
     private static final long NULL_IMAGE_WARN_INTERVAL_MS = 30_000L;
+    /* One-off probe SQL shared by the base-context and per-node timeline/LSN
+     * queries below. */
+    private static final String CURRENT_WAL_FLUSH_LSN_SQL =
+            "SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END";
+    private static final String TIMELINE_FROM_WAL_FILE_SQL =
+            "SELECT substring(pg_walfile_name(CASE WHEN pg_is_in_recovery() "
+                    + "THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END), 1, 8)";
+    private static final String TIMELINE_FROM_CONTROL_SQL = "SELECT timeline_id FROM pg_control_checkpoint()";
 
     private String slotName;
     private String startLsn;
@@ -106,6 +127,19 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private volatile String timelineCatchupSourceId;
     private volatile String lastPersistedStreamOffset;
     private volatile PGReplicationStream activeStream;
+    /* The configured node the live WAL stream is currently connected to. The
+     * stall probe and the recovery loop must check THIS node's timeline, not
+     * the base JDBC context's node, which may differ in multi-address
+     * master/slave deployments (e.g. the stream fell through to a standby). */
+    private volatile TimelineSource activeTimelineSource;
+    /* Stalled-stream detection state (see probeStallIfDue); reset per stream open. */
+    private long lastStallProbeMs;
+    private int stallProbeFailures;
+    private boolean stallIdleLogged;
+    /* Consecutive idle probes observed while the stream is in ancestor
+     * catch-up mode (restorePrimaryAfterTimelineCatchup). Reaching
+     * ANCESTOR_CATCHUP_STALL_LIMIT abandons the catch-up. */
+    private int ancestorCatchupStallCount;
     private Long filterStartTimeMs; // Time-based filtering: drop events before this timestamp
     private RelationCatalog catalog;
     private final Set<String> allowTables = new HashSet<>();
@@ -397,29 +431,12 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             tapLogger.error(msg);
             throw new IllegalStateException(msg);
         }
-        if (savedTimeline > 0 && savedTimeline != currentTimeline) {
-            tapLogger.warn("Physical WAL miner detected a timeline change: saved offset was written on "
-                    + "timeline {} but the server is now on timeline {}. This typically follows an EFM "
-                    + "switchover, pg_rewind, or PITR recovery. The saved offset LSN {} may refer to a "
-                    + "WAL segment that does not exist on the new timeline.",
-                    savedTimeline, currentTimeline, startLsn);
-            String timelineHistoryContent = queryTimelineHistoryContent(currentTimeline);
-            timelineHistoryChain = parseTimelineHistoryChain(timelineHistoryContent);
-            currentTimelineSwitchPoint = parseTimelineSwitchPoint(timelineHistoryContent, savedTimeline);
-            currentTimelineStartPoint = parseLastTimelineSwitchPoint(timelineHistoryContent);
-            if (currentTimelineSwitchPoint > 0) {
-                tapLogger.info("Physical WAL miner read the timeline {} history chain: timeline {} forks at {}. "
-                                + "The miner will probe all configured PG nodes and use any node that can still "
-                                + "read the saved offset directly.",
-                        currentTimeline, savedTimeline, lsnStr(currentTimelineSwitchPoint));
-            } else {
-                tapLogger.warn("Physical WAL miner could not read the current timeline history file for "
-                                + "timeline {} → {}. It will still probe other configured PG nodes before "
-                                + "falling back to an unsafe resume decision.",
-                        savedTimeline, currentTimeline);
-            }
-            timelineChanged = true;
-        }
+        // Fresh-start tasks (offsetState==null) and bare-LSN offsets carry no
+        // timeline tag, leaving savedTimeline==0. Seed the baseline with the
+        // server's current timeline so the first failover is still detectable
+        // (detectTimelineChange() requires savedTimeline > 0).
+        seedSavedTimelineBaseline();
+        detectTimelineChange();
         // PageStateCache is cold on (re)start. To reconstruct the FPI-less
         // UPDATE/DELETE records we are about to emit we begin *reading* at a
         // checkpoint redo at/before emitFromLsn so every page's first
@@ -571,11 +588,205 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
         consumer.streamReadStarted();
         try {
-            openStreamWithWarmRetry(readFromLsn, emitFromLsn, segSize, isAlive);
+            // Stream-lifecycle loop. Normally openStreamWithWarmRetry blocks for
+            // the lifetime of the task. When the WAL stream stalls because the
+            // cluster failed over under it (the source node's timeline moved while
+            // the replication stream was connected), the reader thread raises a
+            // stall signal wrapped in TapPdkRetryableEx; we re-detect the timeline
+            // and re-open the stream from the last persisted offset — the same
+            // recovery a manual task restart performs, without one. Any other
+            // retryable failure propagates to the task framework unchanged.
+            long lastStallRecoveryMs = 0L;
+            int consecutiveStallRecoveries = 0;
+            while (isAlive.get() && threadException.get() == null) {
+                try {
+                    openStreamWithWarmRetry(readFromLsn, emitFromLsn, segSize, isAlive);
+                    break;
+                } catch (TapPdkRetryableEx e) {
+                    if (!isStallRecoverySignal(e)) {
+                        throw e;
+                    }
+                    // Bound rapid reopen-stall cycles (e.g. a flapping failover or a
+                    // persistent timeline mismatch): after a few quick recoveries,
+                    // hand the restart to the task framework instead of looping.
+                    long now = System.currentTimeMillis();
+                    if (lastStallRecoveryMs > 0 && now - lastStallRecoveryMs < 2 * getStallTimeoutMs()) {
+                        consecutiveStallRecoveries++;
+                    } else {
+                        consecutiveStallRecoveries = 1;
+                    }
+                    lastStallRecoveryMs = now;
+                    if (consecutiveStallRecoveries > STALL_RECOVERY_LIMIT) {
+                        tapLogger.error("Physical WAL miner has performed {} rapid stall-recovery cycles; handing "
+                                        + "the restart to the task framework.",
+                                consecutiveStallRecoveries);
+                        throw e;
+                    }
+                    currentTimeline = queryMaxTimelineAcrossSources();
+                    if (currentTimeline <= 0) {
+                        tapLogger.error("Physical WAL miner WAL stream stalled but the current timeline cannot be "
+                                + "determined. Handing the restart to the task framework.");
+                        throw e;
+                    }
+                    if (isAncestorCatchupStallSignal(e)) {
+                        // The ancestor catch-up cannot converge: its pre-fork WAL
+                        // segments are gone from every node. Skip the catch-up
+                        // entirely and resume on the current timeline from its start
+                        // point, otherwise detectTimelineChange() would report no
+                        // change (the source node's timeline did not move again) and
+                        // the recovery would be handed back to the task framework.
+                        long resumeLsn = restorePrimaryAtLsn > 0 ? restorePrimaryAtLsn : currentTimelineStartPoint;
+                        if (resumeLsn <= 0) {
+                            tapLogger.error("Physical WAL miner ancestor catch-up stalled but no current-timeline "
+                                    + "resume point is known. Handing the restart to the task framework.");
+                            throw e;
+                        }
+                        long persisted = parseOffsetLsn(lastPersistedStreamOffset);
+                        if (persisted > resumeLsn) {
+                            resumeLsn = persisted;
+                        }
+                        switchToCurrentTimelineResume(resumeLsn);
+                        emitFromLsn = Math.max(emitFromLsn, resumeLsn);
+                        readFromLsn = pageAlignDown(emitFromLsn);
+                        resetSpillStateForRecovery();
+                        resetCachesForRecovery();
+                        threadException.set(null);
+                        tapLogger.warn("Physical WAL miner abandoned the ancestor timeline catch-up: the ancestor "
+                                        + "WAL segments are no longer available on any node. Resuming from the "
+                                        + "current timeline start {} on timeline {}. Any changes committed "
+                                        + "between the saved offset {} and {} were already consumed or are "
+                                        + "outside the retained WAL.",
+                                lsnStr(resumeLsn), currentTimeline, lastPersistedStreamOffset, lsnStr(resumeLsn));
+                        continue;
+                    }
+                    if (!detectTimelineChange()) {
+                        tapLogger.error("Physical WAL miner WAL stream stalled but no timeline change was detected "
+                                + "on the connected node. Handing the restart to the task framework.");
+                        throw e;
+                    }
+                    long resume = parseOffsetLsn(lastPersistedStreamOffset);
+                    if (resume > emitFromLsn) {
+                        emitFromLsn = resume;
+                    }
+                    readFromLsn = pageAlignDown(emitFromLsn);
+                    // The stalled stream may have left in-flight spill writers, and the
+                    // page overlays hold old-timeline page states whose before-images no
+                    // longer apply on the new timeline. Reset both before re-opening,
+                    // mirroring the clean state a full task restart would have.
+                    resetSpillStateForRecovery();
+                    resetCachesForRecovery();
+                    threadException.set(null);
+                    tapLogger.warn("Physical WAL miner auto-resumes after a detected failover: saved timeline {}, "
+                                    + "current timeline {}, continuing from the last persisted offset {}. "
+                                    + "WAL before this point was already consumed and is not re-emitted; any "
+                                    + "failover-window gap is covered by the configured replication semantics "
+                                    + "(synchronous replication ⇒ zero gap).",
+                            savedTimeline, currentTimeline, lsnStr(emitFromLsn));
+                }
+            }
         } finally {
             consumer.streamReadEnded();
             cleanupAllSpills();
         }
+    }
+
+    /* Seed the saved-timeline baseline for a fresh start (offsetState==null)
+     * or a bare-LSN offset that carries no timeline tag: those leave
+     * savedTimeline==0, which detectTimelineChange() treats as "unknown" and
+     * never fires on the first failover — handing the recovery to the task
+     * framework instead of resuming in-process. The startup position was read
+     * from the current timeline, so seed with it. */
+    private void seedSavedTimelineBaseline() {
+        if (savedTimeline <= 0) {
+            savedTimeline = currentTimeline;
+        }
+    }
+
+    /* After an in-process failover recovery the stream is (re)opened on the
+     * current timeline, but the saved-timeline baseline still carries the
+     * pre-failover value. A second failover would then resolve its switch
+     * point against the wrong fork (parseTimelineSwitchPoint anchors on
+     * savedTimeline), and an intervening task restart would restore an offset
+     * whose timeline tag no longer matches the stream. When this stream opened
+     * directly on the current timeline — not on an ancestor timeline for
+     * catch-up — advance the baseline and clear the change flag, the same
+     * convergence switchToCurrentTimelineResume() performs once a catch-up
+     * stream crosses the fork point. The ancestor catch-up path keeps the old
+     * baseline until then so timelineForLsn() can still tag ancestor-timeline
+     * offsets. */
+    private void advanceSavedTimelineBaseline() {
+        if (timelineChanged && savedTimeline > 0 && savedTimeline != currentTimeline
+                && !restorePrimaryAfterTimelineCatchup) {
+            savedTimeline = currentTimeline;
+            timelineChanged = false;
+            timelineHistoryChain = Collections.emptyList();
+            currentTimelineSwitchPoint = 0L;
+            currentTimelineStartPoint = 0L;
+        }
+    }
+
+    /* Compare the saved offset's timeline annotation against the current node
+     * timeline (failover / pg_rewind / switchover). Populates the timeline-history
+     * state used by timeline-aware stream opens and returns true when the cluster
+     * moved to a new timeline. Callers must refresh {@link #currentTimeline}
+     * before invoking. */
+    private boolean detectTimelineChange() {
+        timelineChanged = false;
+        currentTimelineSwitchPoint = 0L;
+        currentTimelineStartPoint = 0L;
+        timelineHistoryChain = Collections.emptyList();
+        if (savedTimeline > 0 && savedTimeline != currentTimeline) {
+            tapLogger.warn("Physical WAL miner detected a timeline change: saved offset was written on "
+                    + "timeline {} but the server is now on timeline {}. This typically follows an EFM "
+                    + "switchover, pg_rewind, or PITR recovery. The saved offset LSN {} may refer to a "
+                    + "WAL segment that does not exist on the new timeline.",
+                    savedTimeline, currentTimeline, startLsn);
+            String timelineHistoryContent = queryTimelineHistoryContent(currentTimeline);
+            timelineHistoryChain = parseTimelineHistoryChain(timelineHistoryContent);
+            currentTimelineSwitchPoint = parseTimelineSwitchPoint(timelineHistoryContent, savedTimeline);
+            currentTimelineStartPoint = parseLastTimelineSwitchPoint(timelineHistoryContent);
+            if (currentTimelineSwitchPoint > 0) {
+                tapLogger.info("Physical WAL miner read the timeline {} history chain: timeline {} forks at {}. "
+                                + "The miner will probe all configured PG nodes and use any node that can still "
+                                + "read the saved offset directly.",
+                        currentTimeline, savedTimeline, lsnStr(currentTimelineSwitchPoint));
+            } else {
+                tapLogger.warn("Physical WAL miner could not read the current timeline history file for "
+                                + "timeline {} → {}. It will still probe other configured PG nodes before "
+                                + "falling back to an unsafe resume decision.",
+                        savedTimeline, currentTimeline);
+            }
+            timelineChanged = true;
+            return true;
+        }
+        return false;
+    }
+
+    /* True when a retryable failure carries a {@link StreamStalledException} or
+     * {@link AncestorCatchupStalledException} in its cause chain — i.e. the WAL
+     * stream stalled and the miner should attempt an in-process recovery instead
+     * of handing the restart to the task framework. */
+    private boolean isStallRecoverySignal(Throwable t) {
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            if (cur instanceof StreamStalledException || cur instanceof AncestorCatchupStalledException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /* True when a retryable failure carries an {@link AncestorCatchupStalledException}
+     * — the ancestor catch-up cannot converge because the pre-fork WAL segments are
+     * no longer available on any node. The recovery loop then skips the catch-up
+     * entirely and resumes on the current timeline instead of re-probing ancestor
+     * timelines (detectTimelineChange would report no change). */
+    private boolean isAncestorCatchupStallSignal(Throwable t) {
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            if (cur instanceof AncestorCatchupStalledException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -603,8 +814,8 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
         Throwable lastRemoved = null;
         Throwable lastUnavailable = null;
+        boolean continueOnCurrentTimeline = false;
         if (timelineChanged) {
-            boolean continueOnCurrentTimeline = false;
             for (TimelineSource source : sources) {
                 try {
                     configurePrimaryRestoreAfterTimelineCatchup(source, sources.get(0), currentStart);
@@ -688,13 +899,36 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         clearPrimaryRestoreAfterTimelineCatchup();
         lastRemoved = null;
         lastUnavailable = null;
+        if (continueOnCurrentTimeline) {
+            // The ancestor catch-up just completed on a node that may itself be a
+            // stranded standby (old timeline, upstream primary stopped). Its WAL
+            // will never advance, so continuing the stream there would go idle and
+            // stall again. Prefer any configured node that actually reports the
+            // current timeline (usually the new primary).
+            sources = prioritizeCurrentTimelineSources(sources);
+        }
         for (TimelineSource source : sources) {
             try {
                 openStreamWithWarmRetryOnSource(source, currentStart, emitStart, segSize, isAlive, false);
                 return;
             } catch (Throwable e) {
                 if (e instanceof StreamReadStartedException) {
-                    throw e.getCause();
+                    Throwable cause = e.getCause();
+                    // A stream that opened successfully can still die with
+                    // "requested WAL segment ... has already been removed" when the
+                    // server recycled the WAL behind the read position — the
+                    // look-back anchor (old-timeline checkpoint redo right after a
+                    // switchover/promote) is the common case. Treat it like an
+                    // open-time removal: move on to the next configured node, which
+                    // may still hold the older WAL (e.g. a standby that has not yet
+                    // recycled it). All nodes failing is surfaced as lastRemoved.
+                    if (isRemovedSegmentError(cause)) {
+                        lastRemoved = cause;
+                        tapLogger.warn("Physical WAL miner could not keep the WAL stream open on {}:{}: {}",
+                                source.host, source.port, cause.getMessage());
+                        continue;
+                    }
+                    throw cause;
                 }
                 if (e instanceof TapPdkRetryableEx) {
                     throw e;
@@ -780,7 +1014,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     lsnStr(startLsn), lsnStr(currentStart), lsnStr(emitLsn), lsnStr(emitStart));
         }
         int maxAttempts = exactOnly ? 1 : 8; // binary search over ~10 segments → within 1 segment
-        PSQLException lastRemoved = null;
+        Throwable lastRemoved = null;
         boolean retriedAfterSlotCreate = false;
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             if (attempt > 0) {
@@ -808,20 +1042,31 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     if (msg != null && (msg.contains("requested WAL segment")
                             || msg.contains("has already been removed"))) {
                         lastRemoved = e;
-                        if (exactOnly || currentStart >= emitStart) {
+                        // Ancestor catch-up mode: the pre-fork segment needed to read the
+                        // saved offset is gone on this node. Advancing toward emitStart is
+                        // pointless (the whole ancestor range is lost) — abandon the
+                        // catch-up and resume from the current timeline start, exactly like
+                        // an idle ancestor stream that can never converge. Handing a raw
+                        // PSQLException up would fail the task instead.
+                        if (restorePrimaryAfterTimelineCatchup) {
+                            throw ancestorCatchupStalled(e);
+                        }
+                        if (exactOnly) {
                             throw e;
                         }
-                        long remaining = emitStart - currentStart;
-                        long step = Math.max(remaining / 2, segSize);
-                        currentStart = currentStart + step;
-                        // Page-align: WalPageDecoder must start at a page boundary so
-                        // resync() can handle XLP_FIRST_IS_CONTRECORD and readLogical()
-                        // can correctly skip page headers. A non-page-aligned start
-                        // lands mid-record and yields garbage xl_tot_len values.
-                        currentStart = pageAlignDown(currentStart);
                         if (currentStart >= emitStart) {
-                            currentStart = emitStart;
+                            // Already at the emit position and the segment is still gone:
+                            // the persisted offset's WAL has been recycled. Last resort is
+                            // to resume from this node's current readable position, or fail.
+                            long resume = tryResumeFromRecycledOffset(source);
+                            if (resume > 0) {
+                                emitStart = resume;
+                                currentStart = resume;
+                                continue;
+                            }
+                            throw e;
                         }
+                        currentStart = advanceStartPastRemoved(currentStart, emitStart, segSize);
                         if (attempt >= maxAttempts - 2) {
                             currentStart = emitStart;
                         }
@@ -830,8 +1075,46 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     throw e;
                 }
                 try {
+                    activeTimelineSource = source;
                     run(stream, currentStart, segSize, isAlive);
                 } catch (Throwable t) {
+                    // A stream that opened successfully can still fail with
+                    // "requested WAL segment ... has already been removed" once the
+                    // server checks the requested segment. The common trigger after a
+                    // native switchover/promote is the look-back anchor: the
+                    // checkpoint-redo from the old timeline is no longer readable on
+                    // the new primary because the segment was recycled. That anchor
+                    // only warms the page cache — records before emitFromLsn are
+                    // dropped at the commit gate — so recover by advancing the start
+                    // toward emitStart and re-opening, exactly like an open-time
+                    // removal. Only when the start is already at emitStart (no WAL
+                    // left to skip) is the removal fatal and handed up.
+                    if (isRemovedSegmentError(t) && restorePrimaryAfterTimelineCatchup) {
+                        // Same ancestor catch-up degradation as open-time removal: the
+                        // pre-fork segments are gone, so skipping the ancestor stream and
+                        // resuming on the current timeline is the only convergent path.
+                        throw ancestorCatchupStalled(t);
+                    }
+                    if (isRemovedSegmentError(t) && !exactOnly) {
+                        if (currentStart < emitStart) {
+                            lastRemoved = t;
+                            currentStart = advanceStartPastRemoved(currentStart, emitStart, segSize);
+                            tapLogger.warn("Physical WAL miner WAL stream was removed mid-stream on {}:{}: {}. "
+                                            + "Advancing the start toward the emit position {} and re-opening "
+                                            + "(page-cache look-back anchor is lost; before-images before the emit "
+                                            + "position may be incomplete).",
+                                    source.host, source.port, t.getMessage(), lsnStr(emitStart));
+                            continue;
+                        }
+                        // Mid-stream removal already at the emit position: the persisted
+                        // offset's WAL is recycled. Same last-resort resume as open-time.
+                        long resume = tryResumeFromRecycledOffset(source);
+                        if (resume > 0) {
+                            emitStart = resume;
+                            currentStart = resume;
+                            continue;
+                        }
+                    }
                     throw new StreamReadStartedException(t);
                 }
                 return;
@@ -841,6 +1124,20 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             throw lastRemoved;
         }
         throw new IllegalStateException("Physical WAL miner stream open retry exhausted without opening a stream");
+    }
+
+    /* Ancestor catch-up cannot read the saved offset's pre-fork WAL on any node
+     * (the segment was recycled under the new timeline). Raise a retryable stall
+     * signal so startMiner's recovery loop abandons the catch-up and resumes from
+     * the current timeline start instead of failing the task. */
+    private TapPdkRetryableEx ancestorCatchupStalled(Throwable cause) {
+        tapLogger.warn("Physical WAL miner ancestor timeline catch-up cannot proceed on node: {}. "
+                        + "Abandoning the ancestor catch-up and resuming from the current timeline "
+                        + "start {}. Any changes between the saved offset and that point were already "
+                        + "consumed or are outside the retained WAL.",
+                cause.getMessage(), lsnStr(restorePrimaryAtLsn));
+        return new TapPdkRetryableEx("postgres", new AncestorCatchupStalledException(
+                "ancestor timeline WAL segments are no longer available: " + cause.getMessage()));
     }
 
     private PGReplicationStream startPhysicalStream(Connection conn, TimelineSource source, long startLsn) throws SQLException {
@@ -881,6 +1178,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * transaction buffer and emitted LSN sequence stay correct. */
     private void run(PGReplicationStream stream, long startLsnLong, long segSize, Supplier<Boolean> isAlive) throws Throwable {
         activeStream = stream;
+        advanceSavedTimelineBaseline();
         WalPageDecoder decoder = null;
         EdbTdeWalDecryptor walDecryptor = newWalDecryptorIfConfigured(startLsnLong);
         long nextChunkLsn = startLsnLong;
@@ -889,6 +1187,15 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         // while the cache-warming prefix is being replayed.
         String initialOffset = formatOffsetWithTimeline(emitFromLsn, timelineForLsn(emitFromLsn));
         long[] lastStatusUpdateMs = {0L};
+        // Stalled-stream detection: after a cluster failover the connected standby
+        // is re-joined to the new primary on a different timeline and its walsender
+        // may stop delivering WAL — the stream stays "live" (slot active, no
+        // error) but consumes nothing, forever. Track how long we have received no
+        // WAL data; when the stall exceeds the configured timeout the source
+        // timeline is probed and a failover triggers an in-process recovery (see
+        // probeStallIfDue) instead of waiting for a manual task restart.
+        resetStallDetection();
+        long lastDataMs = System.currentTimeMillis();
         try (ConcurrentProcessor<WalPageDecoder.RawRecord, Decoded> processor =
                      TapExecutors.createSimple(DECODE_THREADS, DECODE_QUEUE_SIZE, "physical-wal-miner")) {
             Thread consumerThread = new Thread(() -> consumeLoop(processor, isAlive, initialOffset));
@@ -898,7 +1205,13 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 while (isAlive.get() && threadException.get() == null) {
                     ByteBuffer buf = stream.readPending();
                     if (buf == null) {
+                        // Idle: no WAL data. This is also where a failover-induced
+                        // stall surfaces — the stream stays live (slot active) but
+                        // the walsender stops delivering. Probe here, NOT in the
+                        // data-received branch where lastDataMs is always fresh,
+                        // so a silent stall is detected and auto-recovered.
                         updateReplicationStatusIfDue(stream, lastStatusUpdateMs, false);
+                        probeStallIfDue(lastDataMs);
                         TimeUnit.MILLISECONDS.sleep(10);
                         continue;
                     }
@@ -907,6 +1220,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                         lastReceiveLsnForStatus.set(recv.asLong());
                         updateReplicationStatusIfDue(stream, lastStatusUpdateMs, false);
                     }
+                    lastDataMs = System.currentTimeMillis();
                     int n = buf.remaining();
                     byte[] arr = new byte[n];
                     buf.get(arr);
@@ -962,6 +1276,184 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         PGReplicationStream stream = activeStream;
         if (stream != null) {
             ErrorKit.ignoreAnyError(stream::close);
+        }
+    }
+
+    private void resetStallDetection() {
+        lastStallProbeMs = 0L;
+        stallProbeFailures = 0;
+        stallIdleLogged = false;
+        ancestorCatchupStallCount = 0;
+    }
+
+    /* Close and drop spill state left behind by the stalled stream. The files
+     * themselves stay in place (the spill dir is removed by the outer finally);
+     * a re-delivered xid after recovery starts a fresh in-memory bucket and
+     * writes a new spill file. */
+    private void resetSpillStateForRecovery() {
+        for (SpillState ss : spillStates.values()) {
+            closeSpillWriterQuietly(ss);
+        }
+        spillStates.clear();
+    }
+
+    /* A failover moves the WAL source onto a new timeline; the page overlays
+     * hold old-timeline page states whose reconstructed before-images no longer
+     * apply. Recreate the page caches, decode context and DDL-watch catalog
+     * overlay before re-opening the stream — the same clean state a task
+     * restart gets. buildDdlWatch() re-queries the catalog on the current node;
+     * if it cannot reach it (it should — the stall probe just succeeded) it
+     * keeps the previous overlay and logs a warning. */
+    private void resetCachesForRecovery() {
+        pageCache = walLevelLogical ? null : new PageStateCache(getPageCacheCapacity());
+        decodeCtx = new HeapRmgrDecoder.Ctx(pageCache, walLevelLogical,
+                isWalDebugEnabled() ? tapLogger::info : null);
+        buildDdlWatch();
+    }
+
+    /* Stall detection for the reader loop: when no WAL data has arrived for
+     * longer than the stall timeout, probe the source node's current timeline.
+     *
+     * - timeline moved (known vs. live): the cluster failed over under this
+     *   stream. Signal the recovery loop via stopWithException(TapPdkRetryableEx)
+     *   wrapping StreamStalledException so the stream is closed cleanly, the
+     *   reader/consumer threads exit, and the miner re-detects the timeline and
+     *   re-opens from the last persisted offset.
+     * - timeline unchanged: a healthy idle cluster (no writes) — keep waiting.
+     * - probe failed: the connected node is unreachable; after a few consecutive
+     *   failures hand the restart to the task framework (same signal path).
+     */
+    private void probeStallIfDue(long lastDataMs) {
+        long now = System.currentTimeMillis();
+        if (now - lastDataMs < getStallTimeoutMs()) {
+            return; // WAL is flowing, or the stall window has not elapsed yet
+        }
+        if (now - lastStallProbeMs < getStallProbeIntervalMs()) {
+            return; // probe at most once per interval while stalled
+        }
+        lastStallProbeMs = now;
+        long idleMs = now - lastDataMs;
+        int liveTimeline = queryActiveTimeline();
+        int clusterTimeline = queryMaxTimelineAcrossSources();
+        // Reference the timeline the stream is currently expected to run on (the
+        // recovery loop refreshes currentTimeline after each recovery) rather than
+        // the persisted offset's tag: right after a recovery the offset still
+        // carries its old-timeline tag until the first commit, so comparing against
+        // it would miss a failback to the offset's original timeline.
+        int knownTimeline = currentTimeline > 0 ? currentTimeline : savedTimeline;
+        if (clusterTimeline > 0 && knownTimeline > 0 && clusterTimeline > knownTimeline) {
+            // The cluster has already advanced to a higher timeline while the node
+            // this stream is connected to is still stranded on the old one — its
+            // upstream primary was promoted away or stopped and a native PG cluster
+            // does not rejoin standbys automatically. No WAL can ever flow on this
+            // stream: hand the recovery loop the signal so it re-probes every
+            // configured node and re-opens on the current primary.
+            tapLogger.warn("Physical WAL miner WAL stream has been idle for {} ms and the cluster has advanced "
+                            + "to timeline {} while this stream's node still reports {} — the node is stranded "
+                            + "behind the current primary (a native PG cluster does not rejoin standbys "
+                            + "automatically). The miner will re-open the stream on the current timeline "
+                            + "from the last persisted offset {}.",
+                    idleMs, clusterTimeline, liveTimeline > 0 ? liveTimeline : "unknown",
+                    lastPersistedStreamOffset);
+            stopWithException(new TapPdkRetryableEx("postgres", new StreamStalledException(
+                    "Physical WAL stream stalled: the connected node is stranded on timeline "
+                            + knownTimeline + " while the cluster is on " + clusterTimeline)));
+            return;
+        }
+        if (liveTimeline > 0 && knownTimeline > 0 && liveTimeline != knownTimeline) {
+            tapLogger.warn("Physical WAL miner WAL stream has been idle for {} ms and the source node timeline "
+                            + "changed from {} to {} — the cluster failed over while the stream was connected. "
+                            + "The miner will re-detect the timeline and re-open the stream from the last "
+                            + "persisted offset {}.",
+                    idleMs, knownTimeline, liveTimeline, lastPersistedStreamOffset);
+            stopWithException(new TapPdkRetryableEx("postgres", new StreamStalledException(
+                    "Physical WAL stream stalled after timeline change " + knownTimeline + " -> " + liveTimeline)));
+            return;
+        }
+        if (restorePrimaryAfterTimelineCatchup && liveTimeline > 0) {
+            // Ancestor catch-up mode with an idle stream. The stream is reading
+            // pre-fork WAL from an old timeline, but nothing is flowing: the
+            // ancestor segments are usually missing on every node (recycled, or
+            // overwritten by the same-numbered segment on a later timeline, e.g.
+            // timeline 6's segment 5 was replaced by timeline 7's segment 5), so
+            // the walsender can never deliver past the gap and the catch-up can
+            // never reach restorePrimaryAtLsn. Waiting longer will not help;
+            // after a few idle probes abandon the catch-up and resume on the
+            // current timeline, skipping the already-unavailable ancestor range.
+            ancestorCatchupStallCount++;
+            if (ancestorCatchupStallCount >= ANCESTOR_CATCHUP_STALL_LIMIT) {
+                long resumeAt = currentTimelineStartPoint > 0 ? currentTimelineStartPoint : restorePrimaryAtLsn;
+                tapLogger.warn("Physical WAL miner ancestor catch-up stream has been idle for {} ms across {} "
+                                + "probes while trying to catch up to the current timeline start {} — the "
+                                + "ancestor WAL segments are no longer available on any node (recycled or "
+                                + "overwritten by later timelines). Abandoning the ancestor catch-up; WAL "
+                                + "between the saved offset {} and the current timeline start {} is skipped.",
+                        idleMs, ancestorCatchupStallCount, lsnStr(restorePrimaryAtLsn),
+                        lastPersistedStreamOffset, lsnStr(resumeAt));
+                stopWithException(new TapPdkRetryableEx("postgres", new AncestorCatchupStalledException(
+                        "Ancestor timeline WAL is not flowing during catch-up (segments unavailable); "
+                                + "resume from the current timeline start " + lsnStr(restorePrimaryAtLsn))));
+                return;
+            }
+            tapLogger.warn("Physical WAL miner ancestor catch-up stream idle for {} ms (probe {}/{}) — ancestor "
+                            + "WAL segments may be missing on the connected node. Will abandon the catch-up "
+                            + "and resume on the current timeline if this persists.",
+                    idleMs, ancestorCatchupStallCount, ANCESTOR_CATCHUP_STALL_LIMIT);
+            return;
+        }
+        if (liveTimeline <= 0) {
+            stallProbeFailures++;
+            if (stallProbeFailures >= STALL_PROBE_FAILURE_LIMIT) {
+                tapLogger.warn("Physical WAL miner WAL stream has been idle for {} ms and the source node could not "
+                                + "be reached for {} consecutive timeline probes. Handing the restart to the task "
+                                + "framework.",
+                        idleMs, stallProbeFailures);
+                stopWithException(new TapPdkRetryableEx("postgres", new StreamStalledException(
+                        "Physical WAL stream stalled and the source node is unreachable")));
+                return;
+            }
+            tapLogger.warn("Physical WAL miner WAL stream has been idle for {} ms and the timeline probe failed "
+                            + "(attempt {}/{}). Keeping the stream open and retrying the probe.",
+                    idleMs, stallProbeFailures, STALL_PROBE_FAILURE_LIMIT);
+            return;
+        }
+        stallProbeFailures = 0;
+        if (!stallIdleLogged) {
+            tapLogger.info("Physical WAL miner WAL stream idle for {} ms — no recent WAL activity on source timeline "
+                            + "{} and no failover detected. Keeping the stream open.",
+                    idleMs, liveTimeline);
+            stallIdleLogged = true;
+        }
+    }
+
+    /* How long a WAL stream may sit without any received data before the miner
+     * suspects a failover-induced stall and probes the source timeline. Tune via
+     * system property tapdata.wal.stall.timeout.ms or env TAPDATA_WAL_STALL_TIMEOUT_MS.
+     * Must exceed the cluster's election/failover latency so a healthy but idle
+     * cluster is never misclassified; 60s is a safe default for a ~30s failover
+     * window. */
+    private long getStallTimeoutMs() {
+        return parsePositiveLong("tapdata.wal.stall.timeout.ms", "TAPDATA_WAL_STALL_TIMEOUT_MS", 60_000L);
+    }
+
+    /* Minimum interval between timeline probes while a stream is stalled. */
+    private long getStallProbeIntervalMs() {
+        return parsePositiveLong("tapdata.wal.stall.probe.interval.ms", "TAPDATA_WAL_STALL_PROBE_INTERVAL_MS", 10_000L);
+    }
+
+    private static long parsePositiveLong(String sysProp, String envName, long fallback) {
+        String raw = System.getProperty(sysProp);
+        if (raw == null || raw.trim().isEmpty()) {
+            raw = System.getenv(envName);
+        }
+        if (raw == null || raw.trim().isEmpty()) {
+            return fallback;
+        }
+        try {
+            long v = Long.parseLong(raw.trim());
+            return v > 0 ? v : fallback;
+        } catch (NumberFormatException e) {
+            return fallback;
         }
     }
 
@@ -2670,6 +3162,11 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * IMPORTANT: Uses a REPEATABLE READ transaction to get a consistent catalog snapshot
      * and avoids connection leaks by NOT calling getConnection() directly. */
     private void buildDdlWatch() {
+        // buildDdlWatch is re-entered by the failover recovery loop; start from a
+        // clean slate so dropped tables do not linger as monitored OIDs and stale
+        // column snapshots cannot feed a wrong DDL diff on the new timeline.
+        monitoredOidToName.clear();
+        schemaSnapshots.clear();
         // All catalog queries use JdbcContext.query() which properly manages connection
         // pooling via try-with-resources. We execute them all in sequence; while not
         // in a single transaction, the DDL barrier mechanism prevents concurrent DDL
@@ -3236,10 +3733,6 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
     }
 
-    private PostgresConfig copyConfigForSource(TimelineSource source) {
-        return source.config;
-    }
-
     private String queryCurrentLsn() {
         String[] lsn = {"0/0"};
         // recovery-aware: a standby cannot run pg_current_wal_flush_lsn(), use the last replayed lsn there.
@@ -3248,9 +3741,171 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         // up to one WAL page, causing physical START_REPLICATION to fail with "requested starting
         // point is ahead of the WAL flush position".
         ErrorKit.ignoreAnyError(() -> postgresJdbcContext.queryWithNext(
-                "SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END",
+                CURRENT_WAL_FLUSH_LSN_SQL,
                 rs -> lsn[0] = rs.getString(1)));
         return lsn[0];
+    }
+
+    /* Open a dedicated connection to the given configured node and run a single
+     * scalar query, feeding the first result row to the consumer. SQL
+     * exceptions propagate to the caller, which decides how to handle a failed
+     * probe (wrap in ErrorKit.ignoreAnyError for best-effort probes). This is
+     * the shared plumbing for every per-node probe below. */
+    private void queryOnSource(TimelineSource source, String sql, ResultSetConsumer consumer) throws SQLException {
+        try (Connection conn = DriverManager.getConnection(
+                source.config.getDatabaseUrl(), normalProps(source.config));
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
+                consumer.accept(rs);
+            }
+        }
+    }
+
+    /* Current readable LSN on the given configured node — the highest position
+     * from which a fresh physical stream could start there. Recovery-aware: a
+     * standby reports its replayed position (pg_current_wal_flush_lsn() is
+     * unavailable on a hot standby). Returns 0 when the node is unreachable. */
+    private long queryCurrentReadableLsnOn(TimelineSource source) {
+        if (source == null) {
+            return 0L;
+        }
+        String[] lsn = {"0/0"};
+        ErrorKit.ignoreAnyError(() -> queryOnSource(source, CURRENT_WAL_FLUSH_LSN_SQL,
+                rs -> lsn[0] = rs.getString(1)));
+        return parseOffsetLsn(lsn[0]);
+    }
+
+    /* Last-resort recovery when the persisted offset cannot be read anywhere:
+     * the WAL segment holding it (and everything up to the emit position) has
+     * already been recycled — typically after a failover where the physical
+     * slot does not move to the new primary and wal_keep_size is too small to
+     * cover the offset flush window plus the retry delay. The affected changes
+     * are physically gone, so the only convergent options are failing the task
+     * or resuming from the node's current readable position. Resume (and
+     * advance the emit position / persisted offset to it) with a loud warning
+     * about the gap. Returns the new page-aligned start, or 0 when there is
+     * nothing to resume to (node unreachable or no newer readable position). */
+    private long tryResumeFromRecycledOffset(TimelineSource source) {
+        long readable = queryCurrentReadableLsnOn(source);
+        long savedEmit = emitFromLsn;
+        long resume = computeRecycledResume(readable, savedEmit);
+        if (resume <= 0) {
+            return 0L;
+        }
+        long newEmit = Math.max(readable, savedEmit);
+        emitFromLsn = newEmit;
+        lastPersistedStreamOffset = formatOffsetWithTimeline(newEmit, timelineForLsn(newEmit));
+        tapLogger.warn("Physical WAL miner persisted offset {} is no longer readable on {}:{} — the WAL "
+                        + "segment has been recycled. Resuming from the current readable position {}. Any "
+                        + "changes between the persisted offset and that position that were not already "
+                        + "delivered to the target are LOST. To avoid this, keep the WAL (wal_keep_size / "
+                        + "max_slot_wal_keep_size) large enough to cover the offset flush window and the "
+                        + "failover retry delay.",
+                lsnStr(savedEmit), source.host, source.port, lsnStr(newEmit));
+        return resume;
+    }
+
+    /* Current timeline ID, probed from the node the live WAL stream is
+     * actually connected to (activeTimelineSource) — the base JDBC context may
+     * point at a different node (e.g. the primary) than the standby the stream
+     * fell through to. Falls back to the base context when no source is
+     * recorded. Returns 0 when both probes fail. */
+    private int queryActiveTimeline() {
+        TimelineSource source = activeTimelineSource;
+        if (source != null) {
+            int tli = queryCurrentTimelineOn(source);
+            if (tli > 0) {
+                return tli;
+            }
+            tapLogger.warn("Physical WAL miner timeline probe of the active stream node {}:{} failed, "
+                            + "falling back to the base JDBC context.",
+                    source.host, source.port);
+        }
+        return queryCurrentTimeline();
+    }
+
+    /* Highest timeline currently observed across every configured node. After a
+     * failover the new primary (and any standby that has caught up) reports the
+     * post-failover timeline, while a standby stranded behind the stopped old
+     * primary still reports the pre-failover one — the maximum is therefore the
+     * authoritative "what the cluster runs on now" answer. It is also immune to
+     * which node the WAL stream happens to be connected to: activeTimelineSource
+     * can point at a stale standby after a failed ancestor catch-up, and probing
+     * only it previously drove currentTimeline backwards, which made stall
+     * detection re-fire forever (rapid stall-recovery loop -> task error).
+     * Returns 0 when every node is unreachable. */
+    /* After an ancestor catch-up completes, the stream must continue on a node
+     * that actually runs the current timeline. The node the catch-up ran on may
+     * itself be a stranded standby (old timeline, upstream primary stopped —
+     * native PG does not rejoin standbys automatically), whose WAL will never
+     * advance. Probe the configured nodes and put those reporting
+     * currentTimeline first, keeping the original order within each group;
+     * unreachable nodes (probe returns 0) stay in the second group so the
+     * open loop still falls back to them if nothing on the current timeline
+     * can open a stream. */
+    private List<TimelineSource> prioritizeCurrentTimelineSources(List<TimelineSource> sources) {
+        if (currentTimeline <= 0 || sources.size() <= 1) {
+            return sources;
+        }
+        List<TimelineSource> onCurrent = new ArrayList<>();
+        List<TimelineSource> others = new ArrayList<>();
+        for (TimelineSource source : sources) {
+            int tli = queryCurrentTimelineOn(source);
+            if (tli == currentTimeline) {
+                onCurrent.add(source);
+            } else {
+                others.add(source);
+            }
+        }
+        if (onCurrent.isEmpty()) {
+            return sources; // no reachable node reports the current timeline — keep original order
+        }
+        onCurrent.addAll(others);
+        return onCurrent;
+    }
+
+    private int queryMaxTimelineAcrossSources() {
+        if (postgresConfig == null) {
+            return 0;
+        }
+        List<TimelineSource> sources = timelineSources();
+        if (EmptyKit.isEmpty(sources)) {
+            return 0;
+        }
+        int maxTli = 0;
+        for (TimelineSource source : sources) {
+            int tli = queryCurrentTimelineOn(source);
+            if (tli > maxTli) {
+                maxTli = tli;
+            }
+        }
+        return maxTli;
+    }
+
+    /* Current timeline ID, probed from the given configured node. Same probes
+     * as queryCurrentTimeline() but over a dedicated connection to the node
+     * (used when the live WAL stream runs on a different node than the base
+     * JDBC context). Returns 0 when both probes fail. */
+    private int queryCurrentTimelineOn(TimelineSource source) {
+        if (source == null) {
+            return 0;
+        }
+        int[] tli = {0};
+        // Use the WAL file name first — after promote (e.g. EFM switchover),
+        // pg_control_checkpoint() may still reflect the OLD timeline until the
+        // first checkpoint completes. The WAL file name always carries the
+        // actual running timeline ID, making it the reliable primary source.
+        ErrorKit.ignoreAnyError(() -> queryOnSource(source, TIMELINE_FROM_WAL_FILE_SQL,
+                rs -> tli[0] = parseTimelineFromWalFileName(rs.getString(1))));
+        if (tli[0] > 0) {
+            return tli[0];
+        }
+        // Fallback: pg_control_checkpoint() — usable only after the first
+        // checkpoint on the current timeline catches up the control file.
+        ErrorKit.ignoreAnyError(() -> queryOnSource(source, TIMELINE_FROM_CONTROL_SQL,
+                rs -> tli[0] = rs.getInt(1)));
+        return tli[0];
     }
 
     /* Current timeline ID, probed from the running WAL file name first (which
@@ -3263,38 +3918,82 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         // pg_control_checkpoint() may still reflect the OLD timeline until the
         // first checkpoint completes. The WAL file name always carries the
         // actual running timeline ID, making it the reliable primary source.
-        ErrorKit.ignoreAnyError(() -> postgresJdbcContext.queryWithNext(
-                "SELECT substring(pg_walfile_name(CASE WHEN pg_is_in_recovery() "
-                        + "THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END), 1, 8)",
-                rs -> {
-                    String hex = rs.getString(1);
-                    if (EmptyKit.isNotBlank(hex)) {
-                        tli[0] = Integer.parseUnsignedInt(hex, 16);
-                    }
-                }));
+        ErrorKit.ignoreAnyError(() -> postgresJdbcContext.queryWithNext(TIMELINE_FROM_WAL_FILE_SQL,
+                rs -> tli[0] = parseTimelineFromWalFileName(rs.getString(1))));
         if (tli[0] > 0) {
             return tli[0];
         }
         // Fallback: pg_control_checkpoint() — usable only after the first
         // checkpoint on the current timeline catches up the control file.
-        ErrorKit.ignoreAnyError(() -> postgresJdbcContext.queryWithNext(
-                "SELECT timeline_id FROM pg_control_checkpoint()",
+        ErrorKit.ignoreAnyError(() -> postgresJdbcContext.queryWithNext(TIMELINE_FROM_CONTROL_SQL,
                 rs -> tli[0] = rs.getInt(1)));
         return tli[0];
     }
 
-    /* Read the PG timeline history file for the current timeline. Uses
-     * pg_read_file() which requires superuser or pg_read_server_files. */
+    /* Parse the timeline ID out of a WAL file name (the first 8 hex chars of
+     * the file name), or 0 when the value is blank. */
+    private static int parseTimelineFromWalFileName(String hex) {
+        return EmptyKit.isNotBlank(hex) ? Integer.parseUnsignedInt(hex, 16) : 0;
+    }
+
+    /* Read the PG timeline history file for the current timeline. Prefer the
+     * node that owns the active WAL stream, then the configured candidates,
+     * then the base JDBC context. In EFM/automatic failover topologies the base
+     * context can lag behind VIP movement or still point at the old primary. */
     private String queryTimelineHistoryContent(int currentTimeline) {
         String historyFile = String.format("pg_wal/%08X.history", currentTimeline);
-        String[] content = {null};
         timelineHistoryReadError = null;
+        for (TimelineSource source : timelineHistorySources()) {
+            String content = queryTimelineHistoryContentOn(source, historyFile);
+            if (content != null) {
+                return content;
+            }
+        }
+        String content = queryTimelineHistoryContentOnBase(historyFile);
+        if (content != null) {
+            return content;
+        }
+        return null;
+    }
+
+    private List<TimelineSource> timelineHistorySources() {
+        LinkedHashMap<String, TimelineSource> sources = new LinkedHashMap<>();
+        TimelineSource active = activeTimelineSource;
+        if (active != null) {
+            sources.put(active.id(), active);
+        }
+        if (postgresConfig != null) {
+            for (TimelineSource source : timelineSources()) {
+                sources.putIfAbsent(source.id(), source);
+            }
+        }
+        return new ArrayList<>(sources.values());
+    }
+
+    private String queryTimelineHistoryContentOn(TimelineSource source, String historyFile) {
+        if (source == null) {
+            return null;
+        }
+        String[] content = {null};
+        try {
+            queryOnSource(source, "SELECT pg_read_file('" + historyFile + "')",
+                    rs -> content[0] = rs.getString(1));
+        } catch (Exception t) {
+            timelineHistoryReadError = source.id() + ": " + t.getMessage();
+            tapLogger.warn("Physical WAL miner cannot read timeline history {} from {}: {}",
+                    historyFile, source.id(), t.getMessage());
+        }
+        return content[0];
+    }
+
+    private String queryTimelineHistoryContentOnBase(String historyFile) {
+        String[] content = {null};
         try {
             postgresJdbcContext.queryWithNext(
                     "SELECT pg_read_file('" + historyFile + "')",
                     rs -> content[0] = rs.getString(1));
         } catch (Exception t) {
-            timelineHistoryReadError = t.getMessage();
+            timelineHistoryReadError = "base: " + t.getMessage();
         }
         return content[0];
     }
@@ -3303,18 +4002,14 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         if (!isUnsafeTimelineResumeEnabled()) {
             return 0L;
         }
-        String historyFile = String.format("pg_wal/%08X.history", currentTimeline);
-        String[] content = {null};
-        try {
-            postgresJdbcContext.queryWithNext(
-                    "SELECT pg_read_file('" + historyFile + "')",
-                    rs -> content[0] = rs.getString(1));
-        } catch (Exception t) {
+        String content = queryTimelineHistoryContent(currentTimeline);
+        if (content == null) {
+            String historyFile = String.format("pg_wal/%08X.history", currentTimeline);
             tapLogger.warn("Physical WAL miner unsafe timeline resume is enabled, but {} cannot be read: {}",
-                    historyFile, t.getMessage());
+                    historyFile, timelineHistoryReadError);
             return 0L;
         }
-        long currentTimelineStart = parseLastTimelineSwitchPoint(content[0]);
+        long currentTimelineStart = parseLastTimelineSwitchPoint(content);
         if (currentTimelineStart <= failedStartLsn) {
             return 0L;
         }
@@ -3531,8 +4226,31 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
     }
 
+    /* Internal signal: the WAL stream stalled because the cluster failed over
+     * under it (the source node's timeline moved). Wrapped in TapPdkRetryableEx
+     * by probeStallIfDue; the startMiner recovery loop recognizes it via
+     * isStallRecoverySignal and re-opens the stream in-process instead of
+     * handing the restart to the task framework. */
+    private static final class StreamStalledException extends RuntimeException {
+        private StreamStalledException(String message) {
+            super(message);
+        }
+    }
+
     private static final class TimelineCatchupRetryException extends RuntimeException {
         private TimelineCatchupRetryException(String message) {
+            super(message);
+        }
+    }
+
+    /* Internal signal: the miner is in ancestor catch-up mode but the ancestor
+     * WAL stream is idle and cannot converge — the pre-fork segments are no
+     * longer available on any node. Wrapped in TapPdkRetryableEx by
+     * probeStallIfDue; the startMiner recovery loop recognizes it via
+     * isAncestorCatchupStallSignal and skips the catch-up, resuming on the
+     * current timeline from its start point. */
+    private static final class AncestorCatchupStalledException extends RuntimeException {
+        private AncestorCatchupStalledException(String message) {
             super(message);
         }
     }
@@ -3722,5 +4440,31 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
 
     private static long pageAlignDown(long lsn) {
         return (lsn / XLOG_BLCKSZ) * XLOG_BLCKSZ;
+    }
+
+    /* Advance the start LSN after a "requested WAL segment ... has already been
+     * removed" failure: move halfway toward emitStart (at least one segment),
+     * page-aligned, clamped at emitStart. The removed segment typically holds
+     * only look-back/warm-up WAL before the emit position, so skipping forward
+     * loses no emitted events. Returns emitStart when no progress is possible. */
+    static long advanceStartPastRemoved(long currentStart, long emitStart, long segSize) {
+        long remaining = emitStart - currentStart;
+        if (remaining <= 0) {
+            return emitStart;
+        }
+        long next = pageAlignDown(currentStart + Math.max(remaining / 2, segSize));
+        return Math.min(next, emitStart);
+    }
+
+    /* Decide the last-resort resume position when the persisted offset's WAL
+     * segment has been recycled: resume from the node's current readable LSN,
+     * page-aligned, but only when it is actually ahead of the saved emit
+     * position (otherwise there is nothing to gain and the failure must stand).
+     * Returns 0 when no resume is possible. */
+    static long computeRecycledResume(long readableLsn, long savedEmitLsn) {
+        if (readableLsn <= 0 || readableLsn <= savedEmitLsn) {
+            return 0L;
+        }
+        return pageAlignDown(readableLsn);
     }
 }
