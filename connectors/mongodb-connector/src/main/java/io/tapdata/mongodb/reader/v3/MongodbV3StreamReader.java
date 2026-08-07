@@ -179,12 +179,13 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 
 	@Override
 	public Object streamOffset(Long offsetStartTime) {
-		if (offsetStartTime == null) {
-			offsetStartTime = MongodbUtil.mongodbServerTimestamp(mongoClient.getDatabase(mongodbConfig.getDatabase()));
-		}
 		ConcurrentHashMap<Object, Object> offset = new ConcurrentHashMap<>();
-		for (String rs : nodesURI.keySet()) {
-			offset.put(rs, new MongoV3StreamOffset((int) (offsetStartTime / 1000), 0));
+		for (Map.Entry<String, String> entry : nodesURI.entrySet()) {
+			final String rs = entry.getKey();
+			final String mongodbURI = entry.getValue();
+			offset.put(rs, offsetStartTime == null
+				? readLatestOplogOffset(mongodbURI, rs)
+				: new MongoV3StreamOffset((int) (offsetStartTime / 1000), 0));
 		}
 		return offset;
 	}
@@ -223,7 +224,8 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 			final int seconds = mongoV3StreamOffset.getSeconds();
 			startTs = new BsonTimestamp(seconds, mongoV3StreamOffset.getInc());
 		} else {
-			startTs = new BsonTimestamp((int) (System.currentTimeMillis() / 1000), 0);
+			final MongoV3StreamOffset latestOplogOffset = readLatestOplogOffset(mongodbURI, replicaSetName);
+			startTs = new BsonTimestamp(latestOplogOffset.getSeconds(), latestOplogOffset.getInc());
 		}
 
 		final Bson fromMigrateFilter = Filters.exists("fromMigrate", false);
@@ -253,7 +255,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 //						List<TapEvent> tapEvents = new ArrayList<>(eventBatchSize);
 			// todo exception retry
 			while (running.get()) {
-				filter = Filters.and(Filters.gte("ts", startTs), fromMigrateFilter);
+				filter = Filters.and(Filters.gt("ts", startTs), fromMigrateFilter);
 				try (final MongoCursor<Document> mongoCursor = oplogCollection.find(filter)
 					.sort(new Document("$natural", 1))
 					.oplogReplay(true)
@@ -310,6 +312,24 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 					running.compareAndSet(true, false);
 				}
 			}
+		}
+	}
+
+	private MongoV3StreamOffset readLatestOplogOffset(String mongodbURI, String replicaSetName) {
+		try (MongoClient oplogClient = MongoClients.create(MongodbUtil.appendDefaultHaTimeoutOptions(mongodbURI, true))) {
+			final MongoCollection<Document> oplogCollection = oplogClient.getDatabase(LOCAL_DATABASE).getCollection(OPLOG_COLLECTION);
+			final Document lastEvent = oplogCollection.find()
+				.sort(new Document("$natural", -1))
+				.limit(1)
+				.first();
+			if (lastEvent == null) {
+				throw new RuntimeException(String.format("Not found any oplog, replicaSetName: '%s', URI: '%s'", replicaSetName, MongodbUtil.maskUriPassword(mongodbURI)));
+			}
+			final BsonTimestamp bsonTimestamp = lastEvent.get("ts", BsonTimestamp.class);
+			if (bsonTimestamp == null) {
+				throw new RuntimeException(String.format("Missing oplog timestamp, replicaSetName: '%s', URI: '%s', event: %s", replicaSetName, MongodbUtil.maskUriPassword(mongodbURI), lastEvent));
+			}
+			return new MongoV3StreamOffset(bsonTimestamp.getTime(), bsonTimestamp.getInc());
 		}
 	}
 
