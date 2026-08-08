@@ -20,7 +20,6 @@
         <java.version>11</java.version>
         <maven.compiler.release>11</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.build.timestamp.format>yyyy-MM-dd'T'HH:mm:ssZ</maven.build.timestamp.format>
         <tapdata.pdk.api.version>2.0.8-SNAPSHOT</tapdata.pdk.api.version>
         <postgresql.version>42.7.12</postgresql.version>
         <jackson.version>2.18.9</jackson.version>
