@@ -92,6 +92,14 @@
                   "visible": "{{$self.value==='oss' || $self.value==='s3fs'}}"
                 }
               }
+            },
+            {
+              "target": "streamReadReconnectInterval",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value!=='local'}}"
+                }
+              }
             }
           ]
         },
@@ -306,6 +314,17 @@
           "apiServerKey": "filePathString",
           "x-index": 200
         },
+        "streamReadReconnectInterval": {
+          "type": "string",
+          "title": "${streamReadReconnectInterval}",
+          "default": 120,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${streamReadReconnectIntervalTooltip}"
+          },
+          "x-index": 210
+        },
         "loadSchema": {
           "type": "boolean",
           "default": false,
@@ -482,6 +501,7 @@
       "region": "Region",
       "bucket": "Bucket",
       "filePathString": "File Path",
+      "streamReadReconnectInterval": "Incremental Reconnect Interval(minute)",
       "includeRegString": "Include Reg",
       "excludeRegString": "Exclude Reg",
       "recursive": "Recursive",
@@ -495,6 +515,7 @@
       "headerLine": "Header Line",
       "justString": "All To String",
       "filePathStringTooltip": "The root path of all files that need to be read",
+      "streamReadReconnectIntervalTooltip": "During incremental sync, the file connection is rebuilt every N minutes to refresh the directory listing (so in-place file overwrites can be detected) and to replace stale/dead connections. 0 disables it. Default 120.",
       "includeRegStringTooltip": "Includes wildcards, supports * and ?, takes precedence over excluding wildcards (non regular expressions) ",
       "excludeRegStringTooltip": "Exclude wildcards, support * and ?, exclude (non regular expressions) if wildcards are included",
       "recursiveTooltip": "When the directory recursion switch is turned on, files that meet the wildcard requirements will be traversed through the subdirectories",
@@ -532,6 +553,7 @@
       "region": "域",
       "bucket": "桶",
       "filePathString": "文件路径",
+      "streamReadReconnectInterval": "增量重连周期（分钟）",
       "includeRegString": "包含通配",
       "excludeRegString": "排除通配",
       "recursive": "目录递归",
@@ -544,6 +566,7 @@
       "headerLine": "表头行",
       "justString": "全转换字符串",
       "filePathStringTooltip": "需要读取的所有文件所在的根路径",
+      "streamReadReconnectIntervalTooltip": "增量同步期间，每隔 N 分钟重建一次文件连接，以刷新目录列表（从而能检测到原地覆盖的文件）并替换失效连接。0 表示关闭，默认 120。",
       "includeRegStringTooltip": "包含通配，支持*和?，优先于排除通配（非正则表达式）",
       "excludeRegStringTooltip": "排除通配，支持*和?，在包含通配的前提下排除（非正则表达式）",
       "recursiveTooltip": "目录递归开关打开，会向子目录遍历满足通配的文件",
@@ -581,6 +604,7 @@
       "region": "域",
       "bucket": "桶",
       "filePathString": "文件路徑",
+      "streamReadReconnectInterval": "增量重連週期（分鐘）",
       "includeRegString": "包含通配",
       "excludeRegString": "排除通配",
       "recursive": "目錄遞歸",
@@ -593,6 +617,7 @@
       "headerLine": "表頭行",
       "justString": "全轉換字符串",
       "filePathStringTooltip": "需要讀取的所有檔案所在的根路徑",
+      "streamReadReconnectIntervalTooltip": "增量同步期間，每隔 N 分鐘重建一次檔案連接，以重繪目錄清單（從而能偵測到原地覆蓋的檔案）并替換失效連接。0 表示關閉，默認 120。",
       "includeRegStringTooltip": "包含通配，支持*和？，優先於排除通配（非規則運算式）",
       "excludeRegStringTooltip": "排除通配，支持*和？，在包含通配的前提下排除（非規則運算式）",
       "recursiveTooltip": "目錄遞迴開關打開，會向子目錄遍歷滿足通配的檔案",
