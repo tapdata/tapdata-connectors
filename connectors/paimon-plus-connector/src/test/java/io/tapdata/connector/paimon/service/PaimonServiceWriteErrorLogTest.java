@@ -1,5 +1,12 @@
 package io.tapdata.connector.paimon.service;
 
+import io.tapdata.connector.paimon.write.PaimonTableCommitter;
+import io.tapdata.connector.paimon.write.PaimonTableWriteContext;
+import io.tapdata.connector.paimon.write.bucket.PaimonBucketWriterStrategy;
+
+import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract;
+import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContractTestFactory;
+
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
@@ -521,6 +528,9 @@ class PaimonServiceWriteErrorLogTest {
     }
 
     private static class NoopCommitter implements PaimonTableCommitter {
+
+        @Override
+        public void commit(long identifier, List<CommitMessage> messages) {}
 
         @Override
         public int filterAndCommit(Map<Long, List<CommitMessage>> pendingCommits) {

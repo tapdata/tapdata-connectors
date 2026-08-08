@@ -2,6 +2,7 @@ package io.tapdata.connector.paimon;
 
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.connector.paimon.config.PaimonConfig;
+import io.tapdata.connector.paimon.exception.PaimonFatalWriteException;
 import io.tapdata.connector.paimon.service.PaimonService;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
@@ -222,10 +223,85 @@ public class PaimonConnector extends ConnectorBase {
             }
             return null;
         });
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> (int) (tapDateValue.getValue().getSeconds() / 86400));
-        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> (int) (tapTimeValue.getValue().getSeconds() * 1000 + tapTimeValue.getValue().getNano() / 1000_000));
+        codecRegistry.registerFromTapValue(
+                TapDateTimeValue.class,
+                tapDateTimeValue ->
+                        tapDateTimeValue == null || tapDateTimeValue.getValue() == null
+                                ? null
+                                : tapDateTimeValue.getValue().toTimestamp());
+        codecRegistry.registerFromTapValue(TapDateValue.class, PaimonConnector::toEpochDay);
+        codecRegistry.registerFromTapValue(TapTimeValue.class, PaimonConnector::toMillisOfDay);
         codecRegistry.registerFromTapValue(TapYearValue.class, "CHAR(4)", TapValue::getOriginValue);
+    }
+
+    private static Integer toEpochDay(TapDateValue tapDateValue) {
+        if (tapDateValue == null || tapDateValue.getValue() == null) {
+            return null;
+        }
+        Long seconds = tapDateValue.getValue().getSeconds();
+        if (seconds == null) {
+            throw temporalConversionFailure(
+                    "TapDate", "DATE", tapDateValue.getValue(), "epoch seconds are missing");
+        }
+        try {
+            return Math.toIntExact(Math.floorDiv(seconds, 86_400L));
+        } catch (ArithmeticException e) {
+            throw temporalConversionFailure(
+                    "TapDate", "DATE", tapDateValue.getValue(), "value is outside the DATE range");
+        }
+    }
+
+    private static Integer toMillisOfDay(TapTimeValue tapTimeValue) {
+        if (tapTimeValue == null || tapTimeValue.getValue() == null) {
+            return null;
+        }
+        Long seconds = tapTimeValue.getValue().getSeconds();
+        Integer nanos = tapTimeValue.getValue().getNano();
+        if (seconds == null || nanos == null) {
+            throw temporalConversionFailure(
+                    "TapTime",
+                    "TIME(3)",
+                    tapTimeValue.getValue(),
+                    "seconds or nanoseconds are missing");
+        }
+        if (seconds < 0 || seconds >= 86_400L || nanos < 0 || nanos >= 1_000_000_000) {
+            throw temporalConversionFailure(
+                    "TapTime",
+                    "TIME(3)",
+                    tapTimeValue.getValue(),
+                    "value must be within one day");
+        }
+        if (nanos % 1_000_000 != 0) {
+            throw temporalConversionFailure(
+                    "TapTime",
+                    "TIME(3)",
+                    tapTimeValue.getValue(),
+                    "sub-millisecond precision is unsupported");
+        }
+        try {
+            return Math.toIntExact(
+                    Math.addExact(
+                            Math.multiplyExact(seconds, 1_000L), nanos / 1_000_000L));
+        } catch (ArithmeticException e) {
+            throw temporalConversionFailure(
+                    "TapTime",
+                    "TIME(3)",
+                    tapTimeValue.getValue(),
+                    "value is outside the TIME range");
+        }
+    }
+
+    private static PaimonFatalWriteException temporalConversionFailure(
+            String codecField, String targetType, Object source, String reason) {
+        return new PaimonFatalWriteException(
+                "PAIMON_VALUE_CONVERSION_FAILED: field=<codec:"
+                        + codecField
+                        + ">, target="
+                        + targetType
+                        + ", source="
+                        + (source == null ? "null" : source.getClass().getName())
+                        + ", reason="
+                        + reason);
     }
 
     /**

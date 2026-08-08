@@ -91,25 +91,33 @@ The connector supports multiple storage backends:
 | TapString | STRING/VARCHAR | Variable-length string |
 | TapBinary | BINARY/VARBINARY | Binary data |
 | TapDate | DATE | Date without time |
+| TapTime | TIME(0-3) | Milliseconds since midnight; sub-millisecond input is rejected |
 | TapDateTime | TIMESTAMP | Timestamp with microsecond precision |
 
 ### Complex Types
 
 | Tapdata Type | Paimon Type | Storage Format | Notes |
 |--------------|-------------|----------------|-------|
-| TapArray | ARRAY | JSON string | Arrays are serialized to JSON strings for storage |
-| TapMap | MAP | JSON string | Maps are serialized to JSON strings for storage |
-| TapRaw | STRING | JSON string | Raw objects are serialized to JSON strings |
+| TapArray | STRING | JSON string | Arrays are serialized to JSON strings for storage |
+| TapMap | STRING | JSON string | Maps are serialized to JSON strings for storage |
+| TapRow/TapRaw | STRING | JSON string | Row and raw objects are serialized to JSON strings |
 
 **Note on Complex Types**:
-- Complex types (ARRAY, MAP, ROW) are stored as JSON strings in Paimon STRING fields
+- Complex types (ARRAY, MAP, ROW, MULTISET, VARIANT) are stored as JSON strings in Paimon STRING fields
 - This approach ensures compatibility and avoids the complexity of nested type specifications
 - When reading data, you'll need to deserialize the JSON strings back to their original structures
+- Existing native Paimon complex columns are not migrated automatically and are rejected by the writer; use a STRING target column instead
+
+**Precision and compatibility notes**:
+- `INT` and `INTEGER` both create Paimon `INT` columns. Existing columns previously created as STRING remain unchanged and numeric CDC values continue to be stringified against the physical target schema.
+- Integer writes are exact: fractional and out-of-range values fail instead of being truncated.
+- Bare `DECIMAL` keeps the connector default `DECIMAL(38,10)`. Paimon applies `HALF_UP` when scaling decimal values and precision overflow fails the write.
+- Bare `TIME` creates `TIME(3)`. `TIME(0)` through `TIME(3)` are supported; higher declared or incoming precision is rejected to prevent silent loss.
 
 ## Building
 
 ```bash
-cd connectors/paimon-connector
+cd connectors/paimon-plus-connector
 mvn clean package
 ```
 
@@ -117,9 +125,9 @@ The connector JAR will be generated in `target/` and copied to `../dist/`.
 
 ## Dependencies
 
-- Apache Paimon 0.8.2
-- Hadoop Client 3.3.4
-- Tapdata PDK API 2.0.0-SNAPSHOT
+- Apache Paimon 1.3.2
+- Hadoop Client 3.3.6
+- Tapdata PDK API 2.0.8-SNAPSHOT
 
 ## Usage Example
 
@@ -229,4 +237,3 @@ This connector is part of Tapdata and follows the same license.
 For issues and questions:
 - Tapdata Support: support@tapdata.io
 - Paimon Community: https://paimon.apache.org/community/
-

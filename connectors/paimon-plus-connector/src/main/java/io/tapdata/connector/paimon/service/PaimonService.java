@@ -1,8 +1,25 @@
 package io.tapdata.connector.paimon.service;
 
+import io.tapdata.connector.paimon.commit.PaimonAsyncCommitScheduler;
+import io.tapdata.connector.paimon.commit.PaimonCommitStateStore;
+import io.tapdata.connector.paimon.commit.PaimonMicroBatchCoordinator;
+import io.tapdata.connector.paimon.commit.PaimonServiceLifecycle;
+
+import io.tapdata.connector.paimon.write.PaimonTableWriteContext;
+import io.tapdata.connector.paimon.write.bucket.PaimonBucketWriterStrategyFactory;
+import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract;
+import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContractResolver;
+import io.tapdata.connector.paimon.schema.PaimonDataTypeConverter;
+import io.tapdata.connector.paimon.schema.PaimonGeneratedFieldDependencies;
+import io.tapdata.connector.paimon.schema.PaimonDmlImageValidator;
+import io.tapdata.connector.paimon.schema.PaimonRowKindField;
+
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import io.tapdata.connector.paimon.config.PaimonConfig;
+import io.tapdata.connector.paimon.exception.PaimonDynamicBucketPollutedException;
+import io.tapdata.connector.paimon.exception.PaimonFatalWriteException;
+import io.tapdata.connector.paimon.util.PaimonSpillDirCleaner;
 import io.tapdata.entity.event.TapCallbackOffset;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -18,7 +35,6 @@ import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
-import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.commons.lang3.StringUtils;
@@ -48,7 +64,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
-import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -59,11 +75,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-
-import static org.apache.paimon.disk.IOManagerImpl.splitPaths;
 
 /**
  * Service class for Paimon operations
@@ -80,7 +92,8 @@ public class PaimonService implements AutoCloseable {
 	 * 当前 JVM 内物理表写入所有权注册表。
 	 *
 	 * <p>Key 为规范化物理表路径的摘要，Value 为 Service 实例和逻辑表组成的 owner；用于阻止同一
-	 * JVM 中多个 writer 同时写动态桶表。该变量不提供跨 JVM 的分布式锁能力。
+	 * JVM 中多个 writer 同时写同一物理表。连接器的部署契约明确禁止同一物理表跨 JVM 写入；如果
+	 * 该拓扑约束未来发生变化，必须先引入分布式 lease/fencing，不能复用当前首次提交快路径。
 	 */
 	private static final Map<String, String> ACTIVE_PHYSICAL_TABLE_OWNERS = new ConcurrentHashMap<>();
 	/** legacy 合成主键使用的摘要算法；保留 MD5 是为了兼容已有表的主键编码。 */
@@ -91,14 +104,20 @@ public class PaimonService implements AutoCloseable {
 	private static final int HASH_KEY_PRIMARY_KEY_THRESHOLD = 5;
 	/** 合成 _hash_key 列的宽度（MD5 摘要的十六进制长度，与 {@link #HASH_ALGORITHM} 匹配）。 */
 	private static final int HASH_KEY_COLUMN_LENGTH = 32;
-	/** Parenthesized single-value type pattern, reused by field length and fraction parsing. */
-	private static final Pattern PARENTHESIZED_VALUE_PATTERN = Pattern.compile("\\(([^)]+)\\)");
-	/** Parenthesized precision-and-scale type pattern. */
-	private static final Pattern PRECISION_AND_SCALE_PATTERN = Pattern.compile("\\(([^,]+),([^)]+)\\)");
 	/** commit 重试次数上限。 */
 	private static final int COMMIT_RETRY_LIMIT = 3;
-	/** 关闭异步提交调度器时的等待超时。 */
+	/** 后台关闭线程单次等待异步提交调度器的超时。 */
 	private static final long ASYNC_COMMIT_SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS = 5L;
+	/**
+	 * 调用线程等待完整关闭流程的默认总预算。超时只释放调用线程；Paimon commit、callback 和资源
+	 * 清理继续由 daemon close worker 安全完成，绝不通过中断正在进行的同步 commit 来缩短等待。
+	 */
+	private static final long DEFAULT_CLOSE_TOTAL_TIMEOUT_SECONDS = 30L;
+	/**
+	 * close worker must not inherit a short-lived PDK task ThreadGroup because cleanup may legally
+	 * continue after the task's bounded close call has returned.
+	 */
+	private static final ThreadGroup CLOSE_WORKER_THREAD_GROUP = createCloseWorkerThreadGroup();
 	/** batch read 消费线程从事件队列拉取事件的超时。 */
 	private static final int BATCH_READ_EVENT_POLL_TIMEOUT_MILLIS = 100;
 	/** stream read 无新数据时的回退等待。 */
@@ -109,12 +128,6 @@ public class PaimonService implements AutoCloseable {
 	private static final int STREAM_READ_EXECUTOR_TERMINATION_TIMEOUT_SECONDS = 30;
 	/** 查询未显式指定批大小时的默认值。 */
 	private static final int DEFAULT_QUERY_BATCH_SIZE = 1000;
-	/** 类型未带括号时 getFieldFraction 的默认值。 */
-	private static final int DEFAULT_FIELD_FRACTION = 6;
-	/** 类型未带括号时 getFieldPrecisionAndScale 的默认精度。 */
-	private static final int DEFAULT_FIELD_PRECISION = 38;
-	/** 类型未带括号时 getFieldPrecisionAndScale 的默认小数位。 */
-	private static final int DEFAULT_FIELD_SCALE = 10;
 	/** Key 为表名，Value 表示该表写入时是否需要计算 {@link #HASH_KEY} 合成主键。 */
 	private final Map<String, Boolean> computeHashKey = new ConcurrentHashMap<>();
 	/** Key 为表名，Value 为生成合成主键时参与计算的原始主键字段集合。 */
@@ -128,9 +141,12 @@ public class PaimonService implements AutoCloseable {
 	 * 表级规范写上下文，Key 为 {@code database.tableName}。
 	 *
 	 * <p>每个物理表只允许一个上下文持有 writer、committer、动态桶 router 和 commit identifier，
-	 * 避免同表不同写入对象的路由索引或提交状态相互分离。多表任务因此是“一表一写入、一表一提交器”，
-	 * 但各表 snapshot 依次提交，并不构成跨表原子事务；Paimon Flink 多表提交器也按表分组并逐表提交：
-	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/StoreMultiCommitter.java#L150-L176
+	 * 避免同表不同写入对象的路由索引或提交状态相互分离。多表任务因此是“一表一写入、一表一提交器”；
+	 * Scheduler 可以有界并发不同表，但每张表仍生成独立 snapshot，不构成跨表原子事务。
+	 * Paimon 每次 {@code AbstractFileStore#newCommit} 都创建独立 {@code FileStoreCommitImpl}：
+	 * Source: {@code paimon-core/src/main/java/org/apache/paimon/AbstractFileStore.java#newCommit},
+	 * lines 264-304. Baseline:
+	 * {@code apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e}.
 	 */
 	private final Map<String, PaimonTableWriteContext> tableWriteContexts = new ConcurrentHashMap<>();
 	/** Key 为逻辑表标识，Value 为其物理表路径摘要，用于释放 JVM 内的物理表 owner。 */
@@ -140,6 +156,14 @@ public class PaimonService implements AutoCloseable {
 
 	/**
 	 * 表级写入生命周期锁；串行化同一表的写入、prepare/commit、DDL drain 和资源关闭操作。
+	 *
+	 * <p>Paimon 1.3.2 的 {@code TableWriteImpl} 和 {@code FileStoreCommitImpl} 都保存可变的
+	 * writer/scan/commit 状态，未定义同实例并发进入契约，因此 Scheduler 只能并发不同物理表，
+	 * 不能绕过该锁并发进入同表 writer/committer。
+	 * Source: {@code paimon-core/src/main/java/org/apache/paimon/table/sink/
+	 * TableWriteImpl.java}, lines 60-90, and {@code paimon-core/src/main/java/org/apache/paimon/
+	 * operation/FileStoreCommitImpl.java}, lines 121-145.
+	 * Baseline: {@code apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e}.
 	 */
 	private final Map<String, Object> commitLocks = new ConcurrentHashMap<>();
 	/** 正在执行 DDL drain 的逻辑表集合；集合中的表禁止创建或继续使用写上下文。 */
@@ -149,7 +173,15 @@ public class PaimonService implements AutoCloseable {
 	private final PaimonServiceLifecycle lifecycle = new PaimonServiceLifecycle();
 	private final PaimonAsyncCommitScheduler asyncCommitScheduler;
 	private final LongSupplier clock;
+	/** Monotonic clock used only for the absolute close deadline. */
+	private final LongSupplier closeNanoClock;
 	private final RetryWaiter retryWaiter;
+	/** {@link #close()} 调用线程的总等待预算；后台安全清理不受该预算截断。 */
+	private final long closeTotalTimeoutNanos;
+	/** 只保护 close operation 的创建、失败聚合与最终发布，不在等待期间持有。 */
+	private final Object closeCoordinationLock = new Object();
+	/** 第一次 close 创建后永久复用，保证并发、重复关闭只执行一次清理。 */
+	private volatile CloseOperation closeOperation;
 	private final Object callbackExecutionLock = new Object();
 	private final Object bindLock = new Object();
 	private final AtomicReference<InterruptedException> cleanupInterruption =
@@ -223,14 +255,63 @@ public class PaimonService implements AutoCloseable {
 			LongSupplier clock,
 			RetryWaiter retryWaiter,
 			PaimonAsyncCommitScheduler.ExecutorFactory schedulerExecutorFactory) {
+		this(
+				config,
+				log,
+				clock,
+				retryWaiter,
+				schedulerExecutorFactory,
+				DEFAULT_CLOSE_TOTAL_TIMEOUT_SECONDS,
+				TimeUnit.SECONDS,
+				System::nanoTime);
+	}
+
+	PaimonService(
+			PaimonConfig config,
+			Log log,
+			LongSupplier clock,
+			RetryWaiter retryWaiter,
+			PaimonAsyncCommitScheduler.ExecutorFactory schedulerExecutorFactory,
+			long closeTotalTimeout,
+			TimeUnit closeTotalTimeoutUnit) {
+		this(
+				config,
+				log,
+				clock,
+				retryWaiter,
+				schedulerExecutorFactory,
+				closeTotalTimeout,
+				closeTotalTimeoutUnit,
+				System::nanoTime);
+	}
+
+	PaimonService(
+			PaimonConfig config,
+			Log log,
+			LongSupplier clock,
+			RetryWaiter retryWaiter,
+			PaimonAsyncCommitScheduler.ExecutorFactory schedulerExecutorFactory,
+			long closeTotalTimeout,
+			TimeUnit closeTotalTimeoutUnit,
+			LongSupplier closeNanoClock) {
 		this.log = log;
 		this.config = config;
 		this.clock = Objects.requireNonNull(clock, "clock");
+		this.closeNanoClock = Objects.requireNonNull(closeNanoClock, "closeNanoClock");
 		this.retryWaiter = Objects.requireNonNull(retryWaiter, "retryWaiter");
+		Objects.requireNonNull(closeTotalTimeoutUnit, "closeTotalTimeoutUnit");
+		if (closeTotalTimeout <= 0L) {
+			throw new IllegalArgumentException("closeTotalTimeout must be positive");
+		}
+		this.closeTotalTimeoutNanos = closeTotalTimeoutUnit.toNanos(closeTotalTimeout);
+		if (closeTotalTimeoutNanos <= 0L) {
+			throw new IllegalArgumentException("closeTotalTimeout is below nanosecond precision");
+		}
 		this.microBatchCoordinator = new PaimonMicroBatchCoordinator(
 				config.getBatchAccumulationSize(), config.getCommitIntervalMs());
 		this.asyncCommitScheduler = new PaimonAsyncCommitScheduler(
 				Boolean.TRUE.equals(config.getEnableAsyncCommit()) && config.getCommitIntervalMs() > 0,
+				config.getAsyncCommitConcurrency(),
 				microBatchCoordinator,
 				clock::getAsLong,
 				schedulerExecutorFactory,
@@ -288,11 +369,8 @@ public class PaimonService implements AutoCloseable {
 	 */
 	private void cleanupStaleSpillDirs() {
 		try {
-			String tmpDirs = config.getDiskTmpDir();
-			if (StringUtils.isBlank(tmpDirs)) {
-				tmpDirs = System.getProperty("java.io.tmpdir", new File(".").getAbsolutePath());
-			}
-			String[] roots = splitPaths(tmpDirs);
+			String tmpDirs = PaimonSpillDirCleaner.resolveTmpDirs(config.getDiskTmpDir());
+			String[] roots = PaimonSpillDirCleaner.splitTmpDirRoots(tmpDirs);
 			int deleted = PaimonSpillDirCleaner.cleanupStaleSpillDirs(
 					roots,
 					PaimonSpillDirCleaner.DEFAULT_STALE_GRACE_MS,
@@ -355,10 +433,11 @@ public class PaimonService implements AutoCloseable {
 				break;
 			case "oss":
 				// REVIEW: these keys match Paimon OSSLoader, but this connector module does not
-				// package paimon-oss 1.3.1, so options alone cannot register the oss:// FileIO.
+				// package paimon-oss 1.3.2, so options alone cannot register the oss:// FileIO.
 				// Add the matching loader artifact (or remove the advertised storage type).
-				// Source:
-				// https://github.com/apache/paimon/blob/release-1.3.1/paimon-filesystems/paimon-oss/src/main/java/org/apache/paimon/oss/OSSLoader.java#L52-L68
+				// Source: paimon-filesystems/paimon-oss/src/main/java/org/apache/paimon/oss/
+				// OSSLoader.java#load, lines 32-72.
+				// Baseline: apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e.
 				options.set("fs.oss.endpoint", config.getOssEndpoint());
 				options.set("fs.oss.accessKeyId", config.getOssAccessKey());
 				options.set("fs.oss.accessKeySecret", config.getOssSecretKey());
@@ -420,10 +499,7 @@ public class PaimonService implements AutoCloseable {
 			// Defaults to ${hadoop.tmp.dir}/s3a under /tmp, which can run out of space and fail with
 			// "Could not find any valid local directory for s3ablock-...". Redirect the buffer to the
 			// configured scratch dir (the same disk used for Paimon spill) and ensure it exists.
-			String s3aBufferDir = config.getDiskTmpDir();
-			if (StringUtils.isBlank(s3aBufferDir)) {
-				s3aBufferDir = System.getProperty("java.io.tmpdir", "/tmp");
-			}
+			String s3aBufferDir = PaimonSpillDirCleaner.resolveTmpDirs(config.getDiskTmpDir());
 			for (String p : s3aBufferDir.split(",")) {
 				String dir = p.trim();
 				if (!dir.isEmpty()) {
@@ -665,11 +741,11 @@ public class PaimonService implements AutoCloseable {
 		// dynamic, -2 as postpone, and positive values as fixed; PaimonConfig rejects every other
 		// first-class combination instead of silently falling back. The generic tableProperties loop
 		// below persists the same final override together with the remaining native options.
-		// Sources:
-		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
-		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
-		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
-		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#L72-L75
+		// Sources: paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#BUCKET,
+		// lines 100-112; paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java,
+		// lines 30-73; paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#bucketMode,
+		// lines 100-109; and paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#bucketMode,
+		// lines 73-75. Baseline: apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e.
 		final int configuredBucket = config.resolveBucket(tableName);
 		final List<LinkedHashMap<String, String>> tableProperties =
 				config.getTableProperties(tableName);
@@ -681,20 +757,21 @@ public class PaimonService implements AutoCloseable {
 			// The final Schema is preflighted with Paimon's FileFormat provider discovery before
 			// Catalog#createTable. Use the canonical option constant so first-class and
 			// tableProperties values share the same final key.
-			// Sources:
-			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L160-L162
-			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L229-L238
+			// Sources: paimon-core/src/main/java/org/apache/paimon/schema/
+			// SchemaValidation.java#validateTableSchema, lines 160-162, and
+			// paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#FILE_FORMAT, lines 229-238.
+			// Baseline: apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e.
 			schemaBuilder.option(
 					CoreOptions.FILE_FORMAT.key(), fileFormat);
 		}
 		final String compression = config.getCompression(tableName);
 		if (EmptyKit.isNotBlank(compression)) {
-			// Paimon 1.3.1 CoreOptions#fileCompression reads only FILE_COMPRESSION. Using the
+			// Paimon 1.3.2 CoreOptions#fileCompression reads only FILE_COMPRESSION. Using the
 			// canonical constant prevents the Connector field name "compression" from becoming an
 			// unknown Schema option that Paimon silently ignores.
-			// Sources:
-			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L259-L264
-			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L2237-L2240
+			// Source: paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#FILE_COMPRESSION,
+			// lines 259-264, and #fileCompression, lines 2237-2240.
+			// Baseline: apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e.
 			schemaBuilder.option(
 					CoreOptions.FILE_COMPRESSION.key(), compression);
 		}
@@ -767,14 +844,14 @@ public class PaimonService implements AutoCloseable {
 			});
 		}
 		Schema finalSchema = schemaBuilder.build();
-		// Paimon 1.3.1 AbstractCatalog#createTable copies Catalog table-default options into
+		// Paimon 1.3.2 AbstractCatalog#createTable copies Catalog table-default options into
 		// Schema#options with putIfAbsent immediately before creating the table. Mirror that exact
 		// mutation order so the connector validates the same effective options, while preserving
 		// explicit tableProperties overrides and rejecting before Catalog state is changed.
-		// Sources:
-		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/CatalogUtils.java#L99-L101
-		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/AbstractCatalog.java#L380-L405
-		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/AbstractCatalog.java#L649-L650
+		// Sources: paimon-core/src/main/java/org/apache/paimon/catalog/
+		// CatalogUtils.java#tableDefaultOptions, lines 99-101, and
+		// AbstractCatalog.java#createTable/#copyTableDefaultOptions, lines 380-405 and 649-650.
+		// Baseline: apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e.
 		CatalogUtils.tableDefaultOptions(catalog.options())
 				.forEach(finalSchema.options()::putIfAbsent);
 		PaimonWriteSemanticContractResolver.validateNewTable(
@@ -797,93 +874,15 @@ public class PaimonService implements AutoCloseable {
 	 * @return Paimon DataType
 	 */
 	private DataType convertToPaimonDataType(TapField tapField) {
-		String dataType = tapField.getDataType();
-		if (dataType == null) {
-			return DataTypes.STRING();
-		}
-
-		dataType = dataType.toUpperCase();
-		String pureDataType = StringKit.removeParentheses(dataType);
-		switch (pureDataType) {
-			case "BOOLEAN":
-				return DataTypes.BOOLEAN();
-			case "TINYINT":
-				return DataTypes.TINYINT();
-			case "SMALLINT":
-				return DataTypes.SMALLINT();
-			case "INTEGER":
-				return DataTypes.INT();
-			case "BIGINT":
-				return DataTypes.BIGINT();
-			case "FLOAT":
-				return DataTypes.FLOAT();
-			case "DOUBLE":
-				return DataTypes.DOUBLE();
-			case "DECIMAL":
-				return DataTypes.DECIMAL(getFieldPrecisionAndScale(dataType).getLeft(), getFieldPrecisionAndScale(dataType).getRight());
-			case "DATE":
-				return DataTypes.DATE();
-			case "TIME":
-				return DataTypes.TIME(getFieldFraction(dataType));
-			case "TIMESTAMP":
-				return DataTypes.TIMESTAMP(getFieldFraction(dataType));
-			case "TIMESTAMP WITH LOCAL TIME ZONE":
-				return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(getFieldFraction(dataType));
-			case "BINARY":
-				return DataTypes.BINARY(getFieldLength(dataType));
-			case "VARBINARY":
-				return DataTypes.VARBINARY(getFieldLength(dataType));
-			case "BYTES":
-				return DataTypes.BYTES();
-			case "CHAR":
-				return DataTypes.CHAR(getFieldLength(dataType));
-			case "VARCHAR":
-				return DataTypes.VARCHAR(getFieldLength(dataType));
-			case "ARRAY":
-				return DataTypes.ARRAY(DataTypes.STRING());
-			case "MAP":
-				return DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING());
-			case "ROW":
-				return DataTypes.ROW(DataTypes.STRING());
-			case "MULTISET":
-				return DataTypes.MULTISET(DataTypes.STRING());
-			case "VARIANT":
-				return DataTypes.VARIANT();
-			default:
-				return DataTypes.STRING();
-		}
-	}
-
-	public Integer getFieldLength(String dataType) {
-		//提取括号里的值
-		Matcher matcher = PARENTHESIZED_VALUE_PATTERN.matcher(dataType);
-		if (matcher.find()) {
-			long length = Long.parseLong(matcher.group(1));
-			if (length > Integer.MAX_VALUE) {
-				return Integer.MAX_VALUE;
-			} else {
-				return (int) length;
-			}
-		}
-		return Integer.MAX_VALUE;
+		return PaimonDataTypeConverter.toPaimonDataType(tapField);
 	}
 
 	public Integer getFieldFraction(String dataType) {
-		//提取括号里的值
-		Matcher matcher = PARENTHESIZED_VALUE_PATTERN.matcher(dataType);
-		if (matcher.find()) {
-			return Integer.parseInt(matcher.group(1));
-		}
-		return DEFAULT_FIELD_FRACTION;
+		return PaimonDataTypeConverter.getFieldFraction(dataType);
 	}
 
 	public Pair<Integer, Integer> getFieldPrecisionAndScale(String dataType) {
-		//提取括号里的值,逗号的前一个和后一个
-		Matcher matcher = PRECISION_AND_SCALE_PATTERN.matcher(dataType);
-		if (matcher.find()) {
-			return Pair.of(Integer.parseInt(matcher.group(1).trim()), Integer.parseInt(matcher.group(2).trim()));
-		}
-		return Pair.of(DEFAULT_FIELD_PRECISION, DEFAULT_FIELD_SCALE);
+		return PaimonDataTypeConverter.getFieldPrecisionAndScale(dataType);
 	}
 
 	/**
@@ -975,14 +974,15 @@ public class PaimonService implements AutoCloseable {
 	/**
 	 * Invalidate Connector-owned metadata derived from one logical table generation.
 	 *
-	 * <p>Paimon 1.3.1 {@code CachingCatalog#dropTable} invalidates Paimon's own table and
+	 * <p>Paimon 1.3.2 {@code CachingCatalog#dropTable} invalidates Paimon's own table and
 	 * partition caches after a successful drop. Connector policy additionally invalidates these
 	 * independent row-layout and legacy-hash caches after every DDL attempt, including failures,
 	 * so a later table generation cannot reuse stale field positions or source primary keys.
 	 * This helper runs inside the existing per-table lifecycle lock.
 	 *
-	 * <p>Source:
-	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/CachingCatalog.java#L184-L197
+	 * <p>Source: {@code paimon-core/src/main/java/org/apache/paimon/catalog/
+	 * CachingCatalog.java#dropTable}, lines 185-197. Baseline:
+	 * {@code apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e}.
 	 */
 	private void invalidateTableDerivedCaches(String tableKey, String tableName) {
 		paimonFieldCache.remove(tableKey);
@@ -1063,9 +1063,10 @@ public class PaimonService implements AutoCloseable {
 	 * override it. A later explicit {@code tableProperties.bucket} entry wins, matching repeated
 	 * {@link Schema.Builder#option(String, String)} calls.
 	 *
-	 * <p>Sources:
-	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
-	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/schema/Schema.java#L367-L376
+	 * <p>Sources: {@code paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#BUCKET},
+	 * lines 100-112, and {@code paimon-api/src/main/java/org/apache/paimon/schema/
+	 * Schema.java#Builder.option}, lines 367-376. Baseline:
+	 * {@code apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e}.
 	 */
 	private int resolveEffectiveBucket(String tableName) {
 		final int configuredBucket = config.resolveBucket(tableName);
@@ -1449,8 +1450,10 @@ public class PaimonService implements AutoCloseable {
 		while (!ready.isEmpty()) {
 			PaimonMicroBatchCoordinator.CallbackReservation reservation = ready.removeFirst();
 			synchronized (callbackExecutionLock) {
+				CloseOperation stopOperation = stopDrain ? closeOperation : null;
 				PaimonServiceLifecycle.ConsumerPermit permit = lifecycle.tryStartConsumer(
 						stopDrain,
+						() -> stopOperation == null || !closeDeadlineExpired(stopOperation),
 						() -> {
 							if (!microBatchCoordinator.markConsumerStarted(reservation)) {
 								throw new IllegalStateException(
@@ -1458,6 +1461,9 @@ public class PaimonService implements AutoCloseable {
 							}
 						});
 				if (permit == null) {
+					if (stopOperation != null && closeDeadlineExpired(stopOperation)) {
+						recordCloseTimeout(stopOperation);
+					}
 					return;
 				}
 				try (PaimonServiceLifecycle.ConsumerPermit ignored = permit) {
@@ -1576,21 +1582,28 @@ public class PaimonService implements AutoCloseable {
 	 * Material cleanup failures are aggregated instead of being downgraded to log-only success.
 	 */
 	private void cleanupAllResources() throws Exception {
+		cleanupAllResources(true);
+	}
+
+	private void cleanupAllResources(boolean shutdownScheduler) throws Exception {
 		Throwable failure = null;
 		boolean interrupted = false;
 
-		// Never forcibly interrupt a Paimon commit running on the scheduler worker.
-		try {
-			if (!asyncCommitScheduler.shutdownAndAwait(ASYNC_COMMIT_SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-				failure = appendFailure(
-						failure,
-						new IllegalStateException(
-								"Timed out waiting for the Paimon commit scheduler to terminate"));
+		if (shutdownScheduler) {
+			// Initialization-failure cleanup has no close worker. Keep its existing bounded wait.
+			try {
+				if (!asyncCommitScheduler.shutdownAndAwait(
+						ASYNC_COMMIT_SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+					failure = appendFailure(
+							failure,
+							new IllegalStateException(
+									"Timed out waiting for the Paimon commit scheduler to terminate"));
+				}
+			} catch (InterruptedException interruption) {
+				failure = appendFailure(failure, interruption);
+				interrupted = true;
+				Thread.interrupted();
 			}
-		} catch (InterruptedException interruption) {
-			failure = appendFailure(failure, interruption);
-			interrupted = true;
-			Thread.interrupted();
 		}
 
 		// Close all canonical table write contexts first.
@@ -1877,10 +1890,11 @@ public class PaimonService implements AutoCloseable {
 
 	private void registerPhysicalTableOwner(String tableKey, FileStoreTable table) {
 		// Paimon explicitly disallows concurrent HASH_DYNAMIC writers and KEY_DYNAMIC owns a local
-		// full-key index. This registry enforces the connector's 1/1/0 topology only inside this
-		// JVM; deployment must provide an external single-writer lease to cover other processes.
-		// Source:
-		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L40-L55
+		// full-key index. Together with the deployment invariant that a physical table is never
+		// written across JVMs, this registry enforces one writer owner for the direct-commit path.
+		// A topology change requires distributed lease/fencing before direct commit remains safe.
+		// Source: paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java,
+		// lines 40-55. Baseline: apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e.
 		String physicalHash = PaimonCommitStateStore.physicalTableHash(
 				table.location().toUri().toString());
 		String owner = serviceWriterOwner + ':' + tableKey;
@@ -1907,7 +1921,6 @@ public class PaimonService implements AutoCloseable {
 			super("Failed to create Paimon write context for table " + tableKey, cause);
 		}
 	}
-
 
 	/**
 	 * Handle insert event with stream writer
@@ -2265,7 +2278,7 @@ public class PaimonService implements AutoCloseable {
 			// Get corresponding Paimon field type from cache
 			DataType paimonType = dataField.type();
 
-			genericRow.setField(i, convertValueToPaimonType(value, paimonType));
+			genericRow.setField(i, convertValueToPaimonType(fieldName, value, paimonType));
 		}
 
 		return genericRow;
@@ -2311,7 +2324,7 @@ public class PaimonService implements AutoCloseable {
 		if (data.getClass().isArray()) return arrayToBytes(Arrays.asList((Object[]) data));
 		if (data instanceof Collection) return arrayToBytes((Collection<?>) data);
 		if (data instanceof Map) return mapToBytes((Map<?, ?>) data);
-		return data.toString().getBytes();
+		return data.toString().getBytes(StandardCharsets.UTF_8);
 	}
 
 	protected byte[] arrayToBytes(Collection<?> collection) throws IOException {
@@ -2347,68 +2360,14 @@ public class PaimonService implements AutoCloseable {
 	/**
 	 * Convert value to Paimon-compatible type
 	 *
+	 * @param fieldName  target field name
 	 * @param value      original value
 	 * @param paimonType target Paimon data type
 	 * @return converted value
 	 */
-	private Object convertValueToPaimonType(Object value, DataType paimonType) {
-		if (value == null || paimonType == null) {
-			return null;
-		}
-
-		// Get the type root for comparison (ignores nullable attribute)
-		switch (paimonType.getTypeRoot()) {
-			case CHAR:
-			case VARCHAR:
-				return BinaryString.fromString(String.valueOf(value));
-			case TINYINT:
-				return ((Number) value).byteValue();
-			case SMALLINT:
-				return ((Number) value).shortValue();
-			case BIGINT:
-				return ((Number) value).longValue();
-			case DOUBLE:
-				return ((Number) value).doubleValue();
-			case FLOAT:
-				return ((Number) value).floatValue();
-			case DECIMAL:
-				Pair<Integer, Integer> fieldPrecisionAndScale = getFieldPrecisionAndScale(paimonType.asSQLString());
-				return Decimal.fromBigDecimal((BigDecimal) value, fieldPrecisionAndScale.getLeft(), fieldPrecisionAndScale.getRight());
-			case TIMESTAMP_WITHOUT_TIME_ZONE:
-			case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-				java.sql.Timestamp sqlTimestamp = (java.sql.Timestamp) value;
-				return Timestamp.fromEpochMillis(sqlTimestamp.getTime(), (sqlTimestamp.getNanos() % 1000000));
-		}
-		return value;
-	}
-
-	/**
-	 * Flush all accumulated records for all tables
-	 * This should be called before closing the connector to ensure all data is committed
-	 */
-	public void flushAll() throws Exception {
-		for (String tableKey : new ArrayList<>(tableWriteContexts.keySet())) {
-			flushTable(tableKey);
-		}
-	}
-
-	/**
-	 * Flush accumulated records for a specific table
-	 *
-	 * @param tableKey table key (database.tableName)
-	 */
-	public void flushTable(String tableKey) throws Exception {
-		try (PaimonServiceLifecycle.Ingress ignored = lifecycle.enter("flushTable")) {
-			List<PaimonMicroBatchCoordinator.CallbackReservation> ready =
-					flushTableInternal(tableKey, "manual");
-			executeCallbacks(ready, false);
-			asyncCommitScheduler.stateChanged();
-		}
-	}
-
-	private List<PaimonMicroBatchCoordinator.CallbackReservation> flushTableInternal(
-			String tableKey, String trigger) throws Exception {
-		return flushTableInternal(tableKey, trigger, false);
+	private Object convertValueToPaimonType(
+			String fieldName, Object value, DataType paimonType) {
+		return PaimonDataTypeConverter.toInternalValue(fieldName, value, paimonType);
 	}
 
 	private List<PaimonMicroBatchCoordinator.CallbackReservation> flushTableInternal(
@@ -3376,103 +3335,244 @@ public class PaimonService implements AutoCloseable {
 	}
 
 	@Override
-	public synchronized void close() throws Exception {
-		if (lifecycle.state() == PaimonServiceLifecycle.State.CLOSED) {
-			Throwable previous = lifecycle.terminalOutcome();
-			if (previous != null) {
-				rethrow(previous);
-			}
+	public void close() throws Exception {
+		CloseOperation operation = startCloseOperation();
+		if (Thread.currentThread() == operation.worker) {
+			// A stop-drain callback may close the connector reentrantly. The current worker already
+			// owns the complete shutdown and must never wait for itself.
 			return;
 		}
 
-		Throwable failure = lifecycle.firstFailure();
 		boolean interrupted = false;
-		if (lifecycle.state() == PaimonServiceLifecycle.State.RUNNING) {
-			lifecycle.beginStopping();
-		}
-
-		while (true) {
+		while (!operation.isFinished()) {
+			long remainingNanos = operation.deadlineNanos - closeNanoClock.getAsLong();
+			if (remainingNanos <= 0L) {
+				recordCloseTimeout(operation);
+				break;
+			}
 			try {
-				if (asyncCommitScheduler.shutdownAndAwait(ASYNC_COMMIT_SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+				if (operation.completed.await(remainingNanos, TimeUnit.NANOSECONDS)) {
 					break;
 				}
+				recordCloseTimeout(operation);
+				break;
 			} catch (InterruptedException interruption) {
-				failure = appendFailure(failure, interruption);
 				interrupted = true;
+				recordCloseFailureAndFence(operation, interruption);
+				// Preserve the original contract: finish the bounded wait, then restore the flag.
 				Thread.interrupted();
 			}
 		}
 
-		while (!lifecycle.isQuiescent()) {
-			try {
-				lifecycle.awaitQuiescence();
-			} catch (InterruptedException interruption) {
-				failure = appendFailure(failure, interruption);
-				interrupted = true;
-				Thread.interrupted();
-			}
-		}
-
-		boolean allTablesDrained = failure == null;
-		for (String tableKey : new ArrayList<>(tableWriteContexts.keySet())) {
-			try {
-				flushTableInternal(tableKey, "stop", true);
-			} catch (Throwable drainFailure) {
-				failure = appendFailure(failure, drainFailure);
-				allTablesDrained = false;
-			}
-		}
-		InterruptedException retryInterruption = cleanupInterruption.getAndSet(null);
-		if (retryInterruption != null) {
-			failure = appendFailure(failure, retryInterruption);
-			interrupted = true;
-		}
-
-		Throwable stickyAfterDrain = lifecycle.firstFailure();
-		if (stickyAfterDrain != null) {
-			failure = appendFailure(failure, stickyAfterDrain);
-			allTablesDrained = false;
-		}
-		if (allTablesDrained) {
-			try {
-				List<PaimonMicroBatchCoordinator.CallbackReservation> ready =
-						new ArrayList<>(
-								microBatchCoordinator.reservedButNotStartedCallbacks());
-				ready.addAll(microBatchCoordinator.reserveReadyCallbacks());
-				executeCallbacks(ready, true);
-			} catch (Throwable callbackFailure) {
-				failure = appendFailure(failure, callbackFailure);
-			}
-		}
-
-		for (String tableKey : new ArrayList<>(tableWriteContexts.keySet())) {
-			PaimonTableWriteContext context = tableWriteContexts.remove(tableKey);
-			try {
-				if (context != null) {
-					context.close();
-				}
-			} catch (Throwable contextFailure) {
-				failure = appendFailure(failure, contextFailure);
-			} finally {
-				unregisterPhysicalTableOwner(tableKey);
-			}
-		}
-
-		try {
-			cleanupAllResources();
-		} catch (Throwable cleanupFailure) {
-			failure = appendFailure(failure, cleanupFailure);
-		}
-		dynamicSourceIngressGuards.clear();
-		activeConnectorContext = null;
-		boundTaskStateMap = null;
-		flushOffsetCallback = null;
-		lifecycle.publishClosed(failure);
+		Throwable failure = closeFailure(operation);
 		if (interrupted) {
 			Thread.currentThread().interrupt();
 		}
 		if (failure != null) {
 			rethrow(failure);
+		}
+	}
+
+	private CloseOperation startCloseOperation() throws Exception {
+		synchronized (closeCoordinationLock) {
+			if (closeOperation != null) {
+				return closeOperation;
+			}
+			if (lifecycle.state() == PaimonServiceLifecycle.State.CLOSED) {
+				Throwable terminal = lifecycle.terminalOutcome();
+				if (terminal != null) {
+					rethrow(terminal);
+				}
+				CloseOperation completed = new CloseOperation(closeNanoClock.getAsLong());
+				completed.finished = true;
+				completed.completed.countDown();
+				closeOperation = completed;
+				return completed;
+			}
+			lifecycle.beginStopping();
+
+			long deadlineNanos = closeNanoClock.getAsLong() + closeTotalTimeoutNanos;
+			CloseOperation operation = new CloseOperation(deadlineNanos);
+			Thread worker = new Thread(
+					CLOSE_WORKER_THREAD_GROUP,
+					() -> performClose(operation),
+					"paimon-service-close-" + serviceWriterOwner.substring(0, 8));
+			worker.setDaemon(true);
+			operation.worker = worker;
+			closeOperation = operation;
+			worker.start();
+			return operation;
+		}
+	}
+
+	private void performClose(CloseOperation operation) {
+		try {
+			recordCloseFailure(operation, lifecycle.firstFailure());
+			awaitSchedulerTermination(operation);
+			awaitLifecycleQuiescence(operation);
+		} catch (Throwable shutdownFailure) {
+			recordCloseFailure(operation, shutdownFailure);
+			recordStickyFailure(shutdownFailure);
+			// Without positive scheduler termination and lifecycle quiescence it is unsafe to close
+			// writer/committer resources. Leave them fenced for process-level recovery.
+			return;
+		}
+
+		// Do not take this monitor before lifecycle quiescence: admitted ingress may need a
+		// synchronized helper before releasing its permit. Once quiescent, the monitor preserves
+		// the old close-vs-init/DDL exclusion without imposing an unbounded wait on the PDK caller.
+		synchronized (this) {
+			performDrainAndCleanup(operation);
+		}
+	}
+
+	private void performDrainAndCleanup(CloseOperation operation) {
+		try {
+			for (String tableKey : new ArrayList<>(tableWriteContexts.keySet())) {
+				try {
+					flushTableInternal(tableKey, "stop", true);
+				} catch (Throwable drainFailure) {
+					recordCloseFailure(operation, drainFailure);
+				}
+			}
+			InterruptedException retryInterruption = cleanupInterruption.getAndSet(null);
+			if (retryInterruption != null) {
+				recordCloseFailure(operation, retryInterruption);
+			}
+			recordCloseFailure(operation, lifecycle.firstFailure());
+
+			if (closeFailure(operation) == null) {
+				try {
+					List<PaimonMicroBatchCoordinator.CallbackReservation> ready =
+							new ArrayList<>(
+									microBatchCoordinator.reservedButNotStartedCallbacks());
+					ready.addAll(microBatchCoordinator.reserveReadyCallbacks());
+					executeCallbacks(ready, true);
+				} catch (Throwable callbackFailure) {
+					recordCloseFailure(operation, callbackFailure);
+				}
+			}
+		} catch (Throwable drainFailure) {
+			recordCloseFailure(operation, drainFailure);
+		} finally {
+			try {
+				cleanupAllResources(false);
+			} catch (Throwable cleanupFailure) {
+				recordCloseFailure(operation, cleanupFailure);
+			}
+			dynamicSourceIngressGuards.clear();
+			activeConnectorContext = null;
+			boundTaskStateMap = null;
+			flushOffsetCallback = null;
+			synchronized (closeCoordinationLock) {
+				// Publish outcome and close the timeout race under one lock. A deadline that wins
+				// before this point becomes terminal; one observed after this point is ignored.
+				lifecycle.publishClosed(operation.failure);
+				operation.finished = true;
+			}
+			operation.completed.countDown();
+		}
+	}
+
+	private void awaitSchedulerTermination(CloseOperation operation) {
+		int attempts = 0;
+		while (true) {
+			try {
+				if (asyncCommitScheduler.shutdownAndAwait(
+						ASYNC_COMMIT_SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+					return;
+				}
+				attempts++;
+				if (log != null && (attempts == 1 || attempts % 12 == 0)) {
+					log.warn(
+							"Paimon close worker is still waiting for the async-commit scheduler "
+									+ "after {} attempt(s); the in-flight operation will not be interrupted.",
+							attempts);
+				}
+			} catch (InterruptedException interruption) {
+				recordCloseFailure(operation, interruption);
+				Thread.interrupted();
+			}
+		}
+	}
+
+	private void awaitLifecycleQuiescence(CloseOperation operation) {
+		while (!lifecycle.isQuiescent()) {
+			try {
+				lifecycle.awaitQuiescence();
+			} catch (InterruptedException interruption) {
+				recordCloseFailure(operation, interruption);
+				Thread.interrupted();
+			}
+		}
+	}
+
+	private void recordCloseTimeout(CloseOperation operation) {
+		synchronized (closeCoordinationLock) {
+			if (operation.finished) {
+				return;
+			}
+			if (operation.timeoutFailure == null) {
+				operation.timeoutFailure = new IllegalStateException(
+						"Paimon service close exceeded its total deadline; cleanup continues "
+								+ "asynchronously without interrupting the in-flight commit or callback. "
+								+ "Offsets for unfinished callbacks were not acknowledged.");
+			}
+			// The close lock and lifecycle monitor form one callback-start fence: after this
+			// critical section no new ConsumerPermit can be granted for an offset callback.
+			recordStickyFailure(operation.timeoutFailure);
+			operation.failure = appendFailure(operation.failure, operation.timeoutFailure);
+		}
+	}
+
+	private boolean closeDeadlineExpired(CloseOperation operation) {
+		return operation.deadlineNanos - closeNanoClock.getAsLong() <= 0L;
+	}
+
+	private static ThreadGroup createCloseWorkerThreadGroup() {
+		ThreadGroup root = Thread.currentThread().getThreadGroup();
+		while (root.getParent() != null) {
+			root = root.getParent();
+		}
+		return new ThreadGroup(root, "paimon-service-close-workers");
+	}
+
+	private void recordCloseFailureAndFence(CloseOperation operation, Throwable failure) {
+		synchronized (closeCoordinationLock) {
+			recordStickyFailure(failure);
+			operation.failure = appendFailure(operation.failure, failure);
+		}
+	}
+
+	private void recordCloseFailure(CloseOperation operation, Throwable failure) {
+		if (failure == null) {
+			return;
+		}
+		synchronized (closeCoordinationLock) {
+			operation.failure = appendFailure(operation.failure, failure);
+		}
+	}
+
+	private Throwable closeFailure(CloseOperation operation) {
+		synchronized (closeCoordinationLock) {
+			return operation.failure;
+		}
+	}
+
+	private static final class CloseOperation {
+		private final long deadlineNanos;
+		private final CountDownLatch completed = new CountDownLatch(1);
+		private Thread worker;
+		private Throwable failure;
+		private IllegalStateException timeoutFailure;
+		private boolean finished;
+
+		private CloseOperation(long deadlineNanos) {
+			this.deadlineNanos = deadlineNanos;
+		}
+
+		private boolean isFinished() {
+			return completed.getCount() == 0L;
 		}
 	}
 

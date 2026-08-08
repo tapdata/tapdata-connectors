@@ -1,5 +1,7 @@
 package io.tapdata.connector.paimon.service;
 
+import io.tapdata.connector.paimon.commit.PaimonServiceLifecycle;
+
 import io.tapdata.connector.paimon.PaimonConnector;
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.entity.event.TapCallbackOffset;
@@ -66,6 +68,13 @@ class PaimonConnectorMicroBatchIntegrationTest {
                             when(future.isCancelled()).thenReturn(false);
                             return future;
                         });
+        doAnswer(
+                        invocation -> {
+                            ((Runnable) invocation.getArgument(0)).run();
+                            return null;
+                        })
+                .when(executor)
+                .execute(any(Runnable.class));
         when(executor.awaitTermination(5L, TimeUnit.SECONDS)).thenReturn(true);
         PaimonService service =
                 new PaimonService(
@@ -73,7 +82,7 @@ class PaimonConnectorMicroBatchIntegrationTest {
                         mock(Log.class),
                         clock::get,
                         () -> { },
-                        () -> executor);
+                        ignored -> executor);
         List<TapCallbackOffset> callbacks = new ArrayList<>();
         AtomicBoolean callbackRunning = new AtomicBoolean();
         service.setFlushOffsetCallback(

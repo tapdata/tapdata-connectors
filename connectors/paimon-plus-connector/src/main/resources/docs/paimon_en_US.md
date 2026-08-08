@@ -69,11 +69,18 @@ The Paimon database name (default: default)
 | BINARY | TapBinary |
 | VARBINARY | TapBinary |
 | DATE | TapDate |
+| TIME(0-3) | TapTime |
 | TIMESTAMP | TapDateTime |
 | TIMESTAMP_LTZ | TapDateTime |
-| ARRAY | TapArray (stored as JSON string) |
-| MAP | TapMap (stored as JSON string) |
-| ROW | TapMap (stored as JSON string) |
+| STRING | TapArray (stored as JSON string) |
+| STRING | TapMap (stored as JSON string) |
+| STRING | TapRow/TapRaw (stored as JSON string) |
+
+`INT` and `INTEGER` both create Paimon `INT`. Bare `DECIMAL` uses `DECIMAL(38,10)`. Bare
+`TIME` uses `TIME(3)`; only precision 0-3 is supported, and sub-millisecond input is rejected.
+Existing target columns are not migrated: legacy STRING columns remain writable according to their
+physical type, while native Paimon ARRAY/MAP/ROW/MULTISET/VARIANT targets are rejected. Complex CDC
+values must be stored as JSON in STRING columns.
 
 ## Limitations
 
@@ -109,4 +116,3 @@ The Paimon database name (default: default)
 
 - [Apache Paimon Documentation](https://paimon.apache.org/)
 - [Paimon GitHub Repository](https://github.com/apache/paimon)
-

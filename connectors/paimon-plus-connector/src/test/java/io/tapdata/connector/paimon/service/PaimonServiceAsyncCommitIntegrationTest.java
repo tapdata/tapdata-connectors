@@ -1,5 +1,13 @@
 package io.tapdata.connector.paimon.service;
 
+import io.tapdata.connector.paimon.commit.PaimonMicroBatchCoordinator;
+
+import io.tapdata.connector.paimon.write.PaimonTableCommitter;
+import io.tapdata.connector.paimon.write.PaimonTableWriteContext;
+import io.tapdata.connector.paimon.write.bucket.PaimonBucketWriterStrategy;
+
+import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContractTestFactory;
+
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -35,10 +43,12 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
@@ -63,7 +73,8 @@ class PaimonServiceAsyncCommitIntegrationTest {
         fixture.scheduledTask.get().run();
 
         verify(fixture.strategy, times(1)).prepareCommit(0L);
-        verify(fixture.committer, times(1)).filterAndCommit(anyMap());
+        verify(fixture.committer, times(1)).commit(anyLong(), anyList());
+        verify(fixture.committer, never()).filterAndCommit(anyMap());
         assertEquals(0L, fixture.state().accumulatedRecordCount());
         assertEquals(1L, fixture.state().committedGeneration());
     }
@@ -81,7 +92,8 @@ class PaimonServiceAsyncCommitIntegrationTest {
         staleTask.run();
 
         verify(fixture.strategy, times(1)).prepareCommit(0L);
-        verify(fixture.committer, times(1)).filterAndCommit(anyMap());
+        verify(fixture.committer, times(1)).commit(anyLong(), anyList());
+        verify(fixture.committer, never()).filterAndCommit(anyMap());
         assertEquals(2L, fixture.state().committedGeneration());
     }
 
@@ -140,7 +152,8 @@ class PaimonServiceAsyncCommitIntegrationTest {
 
             assertNull(stickyFailure(fixture.service).get());
             verify(fixture.strategy, times(1)).prepareCommit(0L);
-            verify(fixture.committer, times(1)).filterAndCommit(anyMap());
+            verify(fixture.committer, times(1)).commit(anyLong(), anyList());
+            verify(fixture.committer, never()).filterAndCommit(anyMap());
             verify(replacementStrategy, never()).prepareCommit(anyLong());
             assertEquals(1L, fixture.state().accumulatedRecordCount());
 
@@ -153,7 +166,8 @@ class PaimonServiceAsyncCommitIntegrationTest {
             fixture.scheduledTask.get().run();
 
             verify(replacementStrategy, times(1)).prepareCommit(0L);
-            verify(replacementCommitter, times(1)).filterAndCommit(anyMap());
+            verify(replacementCommitter, times(1)).commit(anyLong(), anyList());
+            verify(replacementCommitter, never()).filterAndCommit(anyMap());
             assertEquals(0L, fixture.state().accumulatedRecordCount());
         } finally {
             executor.shutdownNow();
@@ -206,7 +220,8 @@ class PaimonServiceAsyncCommitIntegrationTest {
             schedulerFuture.get(5, TimeUnit.SECONDS);
 
             verify(fixture.strategy, times(1)).prepareCommit(0L);
-            verify(fixture.committer, times(1)).filterAndCommit(anyMap());
+            verify(fixture.committer, times(1)).commit(anyLong(), anyList());
+            verify(fixture.committer, never()).filterAndCommit(anyMap());
             assertNull(stickyFailure(fixture.service).get());
             assertEquals(0L, fixture.state().accumulatedRecordCount());
         } finally {
@@ -220,6 +235,9 @@ class PaimonServiceAsyncCommitIntegrationTest {
             throws Exception {
         Fixture fixture = fixture();
         RuntimeException first = new RuntimeException("scheduler-ambiguous");
+        doThrow(new RuntimeException("direct-ambiguous"))
+                .when(fixture.committer)
+                .commit(anyLong(), anyList());
         when(fixture.committer.filterAndCommit(anyMap()))
                 .thenThrow(
                         first,
@@ -234,6 +252,7 @@ class PaimonServiceAsyncCommitIntegrationTest {
 
         Exception visible = assertThrows(Exception.class, () -> fixture.write(2));
         assertSame(first, visible);
+        verify(fixture.committer, times(1)).commit(anyLong(), anyList());
         verify(fixture.committer, times(4)).filterAndCommit(anyMap());
         assertTrue(fixture.state().hasPendingCommit());
         assertEquals(0L, fixture.state().committedGeneration());
@@ -259,6 +278,13 @@ class PaimonServiceAsyncCommitIntegrationTest {
                             when(future.isCancelled()).thenReturn(false);
                             return future;
                         });
+        doAnswer(
+                        invocation -> {
+                            ((Runnable) invocation.getArgument(0)).run();
+                            return null;
+                        })
+                .when(executor)
+                .execute(any(Runnable.class));
 
         PaimonService service =
                 new PaimonService(
@@ -266,7 +292,7 @@ class PaimonServiceAsyncCommitIntegrationTest {
                         mock(Log.class),
                         clock::get,
                         () -> { },
-                        () -> executor);
+                        ignored -> executor);
         service.setFlushOffsetCallback(ignored -> { });
         service.startForTest();
 

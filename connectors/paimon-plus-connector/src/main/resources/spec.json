@@ -555,6 +555,29 @@
             }
           ]
         },
+        "asyncCommitConcurrency": {
+          "type": "number",
+          "title": "${asyncCommitConcurrency}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 1,
+            "max": 16,
+            "placeholder": "${asyncCommitConcurrency_placeholder}"
+          },
+          "default": 4,
+          "x-index": 100,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".enableAsyncCommit"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "enableAutoCompaction": {
           "type": "boolean",
           "title": "${enableAutoCompaction}",
@@ -699,6 +722,8 @@
       "commitIntervalMs": "Commit Interval (ms)",
       "commitIntervalMs_placeholder": "Time interval for commits in milliseconds (default: 30000)",
       "enableAsyncCommit": "Enable Async Commit",
+      "asyncCommitConcurrency": "Async Commit Concurrency",
+      "asyncCommitConcurrency_placeholder": "Concurrent physical-table commits (1-16, default: 4)",
       "enableAutoCompaction": "Enable Auto Compaction",
       "compactionIntervalMinutes": "Compaction Interval (minutes)",
       "compactionIntervalMinutes_placeholder": "Interval for auto compaction (1-1440, default: 30)",
@@ -756,6 +781,8 @@
       "commitIntervalMs": "提交间隔（毫秒）",
       "commitIntervalMs_placeholder": "提交的时间间隔（毫秒，默认：30000）",
       "enableAsyncCommit": "启用异步提交",
+      "asyncCommitConcurrency": "异步提交并发数",
+      "asyncCommitConcurrency_placeholder": "并发提交的物理表数量（1-16，默认：4）",
       "enableAutoCompaction": "启用自动压缩",
       "compactionIntervalMinutes": "压缩间隔（分钟）",
       "compactionIntervalMinutes_placeholder": "自动压缩的时间间隔（1-1440，默认：30）",
@@ -813,6 +840,8 @@
       "commitIntervalMs": "提交間隔（毫秒）",
       "commitIntervalMs_placeholder": "提交的時間間隔（毫秒，默認：30000）",
       "enableAsyncCommit": "啟用異步提交",
+      "asyncCommitConcurrency": "異步提交併發數",
+      "asyncCommitConcurrency_placeholder": "併發提交的物理表數量（1-16，默認：4）",
       "enableAutoCompaction": "啟用自動壓縮",
       "compactionIntervalMinutes": "壓縮間隔（分鐘）",
       "compactionIntervalMinutes_placeholder": "自動壓縮的時間間隔（1-1440，默認：30）",
@@ -874,8 +903,8 @@
       "to": "TapNumber",
       "precision": [1, 38],
       "scale": [0, 38],
-      "defaultPrecision": 10,
-      "defaultScale": 0,
+      "defaultPrecision": 38,
+      "defaultScale": 10,
       "fixed": true
     },
     "CHAR[($byte)]": {
@@ -913,9 +942,9 @@
       "to": "TapTime",
       "fraction": [
         0,
-        6
+        3
       ],
-      "defaultFraction": 6,
+      "defaultFraction": 3,
       "range": [
         "00:00:00",
         "23:59:59"

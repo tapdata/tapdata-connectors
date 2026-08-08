@@ -1,5 +1,7 @@
 package io.tapdata.connector.paimon.service;
 
+import io.tapdata.connector.paimon.exception.PaimonFatalWriteException;
+
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
