@@ -6,6 +6,7 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.table.BucketMode;
@@ -78,6 +79,41 @@ class PaimonServiceWriteErrorLogTest {
 
         assertFalse(error.getMessage().contains(secret));
         assertFalse(error.toString().contains(secret));
+    }
+
+    @Test
+    void rowFormatterMustPreserveCompleteOutputWithCachedSchema() throws Exception {
+        PaimonConfig config = new PaimonConfig();
+        config.setDatabase(DATABASE);
+        PaimonService service = new PaimonService(config, mock(Log.class));
+        TapTable table = mock(TapTable.class);
+        when(table.getName()).thenReturn(TABLE_NAME);
+        seedFieldCache(
+                service,
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.BIGINT()),
+                        new DataField(1, "name", DataTypes.STRING())));
+        GenericRow row = GenericRow.of(null, BinaryString.fromString("Alice"));
+
+        assertEquals(
+                "GenericRow{rowKind=INSERT, fieldCount=2, fieldMapping=[0:id, 1:name], "
+                        + "valueMetadata={0:id=null, 1:name=BinaryString(len=5)}}",
+                invokeFormatRowForLog(service, row, table));
+    }
+
+    @Test
+    void rowFormatterMustPreserveCompleteOutputWithoutCachedSchema() throws Exception {
+        PaimonConfig config = new PaimonConfig();
+        config.setDatabase(DATABASE);
+        PaimonService service = new PaimonService(config, mock(Log.class));
+        TapTable table = mock(TapTable.class);
+        when(table.getName()).thenReturn(TABLE_NAME);
+        GenericRow row = GenericRow.of(null, BinaryString.fromString("Alice"));
+
+        assertEquals(
+                "GenericRow{rowKind=INSERT, fieldCount=2, fieldMapping=[], "
+                        + "valueMetadata={0:field_0=null, 1:field_1=BinaryString(len=5)}}",
+                invokeFormatRowForLog(service, row, table));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -156,6 +192,15 @@ class PaimonServiceWriteErrorLogTest {
         @SuppressWarnings("unchecked")
         Map<String, Boolean> cache = (Map<String, Boolean>) cacheField.get(service);
         cache.put(TABLE_NAME, false);
+    }
+
+    private static String invokeFormatRowForLog(
+            PaimonService service, GenericRow row, TapTable table) throws Exception {
+        Method method =
+                PaimonService.class.getDeclaredMethod(
+                        "formatRowForLog", GenericRow.class, TapTable.class);
+        method.setAccessible(true);
+        return (String) method.invoke(service, row, table);
     }
 
     private static void invokeHandleStreamInsert(PaimonService service, TapInsertRecordEvent event,

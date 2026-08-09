@@ -37,35 +37,6 @@ final class PaimonAsyncCommitScheduler {
     PaimonAsyncCommitScheduler(
             boolean enabled,
             PaimonMicroBatchCoordinator coordinator,
-            FlushAction flushAction,
-            FailureHandler failureHandler) {
-        this(
-                enabled,
-                coordinator,
-                System::currentTimeMillis,
-                PaimonAsyncCommitScheduler::newDaemonExecutor,
-                flushAction,
-                failureHandler);
-    }
-
-    PaimonAsyncCommitScheduler(
-            boolean enabled,
-            PaimonMicroBatchCoordinator coordinator,
-            Clock clock,
-            FlushAction flushAction,
-            FailureHandler failureHandler) {
-        this(
-                enabled,
-                coordinator,
-                clock,
-                PaimonAsyncCommitScheduler::newDaemonExecutor,
-                flushAction,
-                failureHandler);
-    }
-
-    PaimonAsyncCommitScheduler(
-            boolean enabled,
-            PaimonMicroBatchCoordinator coordinator,
             Clock clock,
             ExecutorFactory executorFactory,
             FlushAction flushAction,

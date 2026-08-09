@@ -160,11 +160,12 @@ final class PaimonWriteSemanticContractResolver {
         validateNoLegacyCompressionOption(tableKey, schema);
         validateNoFlinkSinkParallelism(tableKey, schema);
         CoreOptions options = CoreOptions.fromMap(schema.options());
-        validateBucketConfiguration(tableKey, schema, options);
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        validateBucketConfiguration(tableKey, tableSchema, options);
         validateFileFormatProvider(options);
         validateKeyDynamicIgnoreDeleteConflict(
                 tableKey,
-                deriveBucketMode(schema),
+                deriveBucketMode(tableSchema, options.bucket()),
                 options.mergeEngine(),
                 options.ignoreDelete());
     }
@@ -227,8 +228,7 @@ final class PaimonWriteSemanticContractResolver {
     }
 
     private static void validateBucketConfiguration(
-            String tableKey, Schema schema, CoreOptions options) {
-        TableSchema tableSchema = TableSchema.create(0L, schema);
+            String tableKey, TableSchema tableSchema, CoreOptions options) {
         int bucket = options.bucket();
 
         // This is a scoped equivalent of Paimon 1.3.1's private

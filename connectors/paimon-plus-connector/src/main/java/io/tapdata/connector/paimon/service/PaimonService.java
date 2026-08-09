@@ -21,7 +21,6 @@ import io.tapdata.kit.ErrorKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.WriteListResult;
-import io.tapdata.pdk.core.utils.CommonUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -88,6 +87,34 @@ public class PaimonService implements AutoCloseable {
 	public static final String HASH_ALGORITHM = "MD5";
 	/** legacy 合成主键编码多个原始主键值时使用的分隔符。 */
 	public static final byte SPLIT_CHAR = ',';
+	/** 启用 hashKey 时，原始主键数量超过该阈值才改用合成 _hash_key，避免主键列过多。 */
+	private static final int HASH_KEY_PRIMARY_KEY_THRESHOLD = 5;
+	/** 合成 _hash_key 列的宽度（MD5 摘要的十六进制长度，与 {@link #HASH_ALGORITHM} 匹配）。 */
+	private static final int HASH_KEY_COLUMN_LENGTH = 32;
+	/** Parenthesized single-value type pattern, reused by field length and fraction parsing. */
+	private static final Pattern PARENTHESIZED_VALUE_PATTERN = Pattern.compile("\\(([^)]+)\\)");
+	/** Parenthesized precision-and-scale type pattern. */
+	private static final Pattern PRECISION_AND_SCALE_PATTERN = Pattern.compile("\\(([^,]+),([^)]+)\\)");
+	/** commit 重试次数上限。 */
+	private static final int COMMIT_RETRY_LIMIT = 3;
+	/** 关闭异步提交调度器时的等待超时。 */
+	private static final long ASYNC_COMMIT_SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS = 5L;
+	/** batch read 消费线程从事件队列拉取事件的超时。 */
+	private static final int BATCH_READ_EVENT_POLL_TIMEOUT_MILLIS = 100;
+	/** stream read 无新数据时的回退等待。 */
+	private static final int STREAM_READ_IDLE_WAIT_MILLIS = 1000;
+	/** stream read 完成监控循环的检查间隔。 */
+	private static final int STREAM_READ_MONITOR_INTERVAL_MILLIS = 1000;
+	/** stream read 执行器关闭时的终止等待超时。 */
+	private static final int STREAM_READ_EXECUTOR_TERMINATION_TIMEOUT_SECONDS = 30;
+	/** 查询未显式指定批大小时的默认值。 */
+	private static final int DEFAULT_QUERY_BATCH_SIZE = 1000;
+	/** 类型未带括号时 getFieldFraction 的默认值。 */
+	private static final int DEFAULT_FIELD_FRACTION = 6;
+	/** 类型未带括号时 getFieldPrecisionAndScale 的默认精度。 */
+	private static final int DEFAULT_FIELD_PRECISION = 38;
+	/** 类型未带括号时 getFieldPrecisionAndScale 的默认小数位。 */
+	private static final int DEFAULT_FIELD_SCALE = 10;
 	/** Key 为表名，Value 表示该表写入时是否需要计算 {@link #HASH_KEY} 合成主键。 */
 	private final Map<String, Boolean> computeHashKey = new ConcurrentHashMap<>();
 	/** Key 为表名，Value 为生成合成主键时参与计算的原始主键字段集合。 */
@@ -124,7 +151,7 @@ public class PaimonService implements AutoCloseable {
 	private final LongSupplier clock;
 	private final RetryWaiter retryWaiter;
 	private final Object callbackExecutionLock = new Object();
-	private final Object closeLock = new Object();
+	private final Object bindLock = new Object();
 	private final AtomicReference<InterruptedException> cleanupInterruption =
 			new AtomicReference<>();
 	/** Connector 注入的 offset 回调；只允许在 NEW 状态绑定，运行后不可替换。 */
@@ -168,18 +195,6 @@ public class PaimonService implements AutoCloseable {
 			}
 	);
 
-	// LRU cache for field index mappings: Key = "database.tableName", Value = Map<fieldName, index>
-	// Limit to 5 tables to avoid excessive memory usage
-	private final Map<String, Map<String, Integer>> fieldIndexCache = Collections.synchronizedMap(
-			new LinkedHashMap<String, Map<String, Integer>>(5, 0.75f, true) {
-				private static final long serialVersionUID = 1L;
-
-				@Override
-				protected boolean removeEldestEntry(Map.Entry<String, Map<String, Integer>> eldest) {
-					return size() > 10;
-				}
-			}
-	);
 	/**
 	 * save tapContext log
 	 */
@@ -563,46 +578,6 @@ public class PaimonService implements AutoCloseable {
 	}
 
 	/**
-	 * Convert Paimon data type to Tapdata type name
-	 *
-	 * @param dataType Paimon data type
-	 * @return Tapdata type name
-	 */
-	private String convertDataType(DataType dataType) {
-		String typeString = dataType.toString().toUpperCase();
-
-		if (dataType.equals(DataTypes.BOOLEAN())) {
-			return "BOOLEAN";
-		} else if (dataType.equals(DataTypes.TINYINT())) {
-			return "TINYINT";
-		} else if (dataType.equals(DataTypes.SMALLINT())) {
-			return "SMALLINT";
-		} else if (dataType.equals(DataTypes.INT())) {
-			return "INT";
-		} else if (dataType.equals(DataTypes.BIGINT())) {
-			return "BIGINT";
-		} else if (dataType.equals(DataTypes.FLOAT())) {
-			return "FLOAT";
-		} else if (dataType.equals(DataTypes.DOUBLE())) {
-			return "DOUBLE";
-		} else if (dataType.equals(DataTypes.STRING())) {
-			return "STRING";
-		} else if (dataType.equals(DataTypes.DATE())) {
-			return "DATE";
-		} else if (dataType.equals(DataTypes.TIMESTAMP())) {
-			return "TIMESTAMP";
-		} else if (typeString.startsWith("ARRAY")) {
-			return "ARRAY";
-		} else if (typeString.startsWith("MAP")) {
-			return "MAP";
-		} else if (typeString.startsWith("ROW")) {
-			return "ROW";
-		} else {
-			return "STRING"; // Default to STRING for unknown types
-		}
-	}
-
-	/**
 	 * Create table in Paimon
 	 *
 	 * @param tapTable table definition
@@ -660,7 +635,7 @@ public class PaimonService implements AutoCloseable {
 		// Set primary keys
 		Collection<String> primaryKeys = tapTable.primaryKeys(true);
 		if (primaryKeys != null && !primaryKeys.isEmpty()) {
-			if (config.getHashKey(tableName) && primaryKeys.size() > 5) {
+			if (config.getHashKey(tableName) && primaryKeys.size() > HASH_KEY_PRIMARY_KEY_THRESHOLD) {
 				schemaBuilder.primaryKey(Collections.singletonList(HASH_KEY));
 			} else {
 				schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
@@ -670,8 +645,8 @@ public class PaimonService implements AutoCloseable {
 		// Add fields
 		Map<String, TapField> fields = tapTable.getNameFieldMap();
 		if (fields != null) {
-			if (config.getHashKey(tableName) && EmptyKit.isNotEmpty(primaryKeys) && primaryKeys.size() > 5) {
-				schemaBuilder.column(HASH_KEY, DataTypes.VARCHAR(32));
+			if (config.getHashKey(tableName) && EmptyKit.isNotEmpty(primaryKeys) && primaryKeys.size() > HASH_KEY_PRIMARY_KEY_THRESHOLD) {
+				schemaBuilder.column(HASH_KEY, DataTypes.VARCHAR(HASH_KEY_COLUMN_LENGTH));
 			}
 			for (Map.Entry<String, TapField> entry : fields.entrySet()) {
 				String fieldName = entry.getKey();
@@ -695,9 +670,14 @@ public class PaimonService implements AutoCloseable {
 		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
 		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
 		// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#L72-L75
+		final int configuredBucket = config.resolveBucket(tableName);
+		final List<LinkedHashMap<String, String>> tableProperties =
+				config.getTableProperties(tableName);
+		final int effectiveBucket = resolveEffectiveBucket(configuredBucket, tableProperties);
 		schemaBuilder.option(
-				CoreOptions.BUCKET.key(), Integer.toString(resolveEffectiveBucket(tableName)));
-		if (EmptyKit.isNotBlank(config.getFileFormat(tableName))) {
+				CoreOptions.BUCKET.key(), Integer.toString(effectiveBucket));
+		final String fileFormat = config.getFileFormat(tableName);
+		if (EmptyKit.isNotBlank(fileFormat)) {
 			// The final Schema is preflighted with Paimon's FileFormat provider discovery before
 			// Catalog#createTable. Use the canonical option constant so first-class and
 			// tableProperties values share the same final key.
@@ -705,9 +685,10 @@ public class PaimonService implements AutoCloseable {
 			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L160-L162
 			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L229-L238
 			schemaBuilder.option(
-					CoreOptions.FILE_FORMAT.key(), config.getFileFormat(tableName));
+					CoreOptions.FILE_FORMAT.key(), fileFormat);
 		}
-		if (EmptyKit.isNotBlank(config.getCompression(tableName))) {
+		final String compression = config.getCompression(tableName);
+		if (EmptyKit.isNotBlank(compression)) {
 			// Paimon 1.3.1 CoreOptions#fileCompression reads only FILE_COMPRESSION. Using the
 			// canonical constant prevents the Connector field name "compression" from becoming an
 			// unknown Schema option that Paimon silently ignores.
@@ -715,7 +696,7 @@ public class PaimonService implements AutoCloseable {
 			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L259-L264
 			// https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L2237-L2240
 			schemaBuilder.option(
-					CoreOptions.FILE_COMPRESSION.key(), config.getCompression(tableName));
+					CoreOptions.FILE_COMPRESSION.key(), compression);
 		}
 
 		// ===== Performance Optimization Options =====
@@ -733,22 +714,20 @@ public class PaimonService implements AutoCloseable {
 
 		// 2. Target file size - Paimon will try to create files of this size
 		// Larger files = fewer files but slower compaction
-		if (config.getTargetFileSize(tableName) != null && config.getTargetFileSize(tableName) > 0) {
-			schemaBuilder.option("target-file-size", config.getTargetFileSize(tableName) + "mb");
+		final Integer targetFileSize = config.getTargetFileSize(tableName);
+		if (targetFileSize != null && targetFileSize > 0) {
+			schemaBuilder.option("target-file-size", targetFileSize + "mb");
 		}
 
 		// 3. Compaction settings
-		if (config.getEnableAutoCompaction(tableName) != null) {
-			if (config.getEnableAutoCompaction(tableName)) {
+		final Boolean enableAutoCompaction = config.getEnableAutoCompaction(tableName);
+		if (enableAutoCompaction != null) {
+			if (enableAutoCompaction) {
 				// Enable full compaction for better query performance
-				schemaBuilder.option("compaction.optimization-interval", config.getCompactionIntervalMinutes(tableName) + "min");
-
-				// REVIEW: Paimon 1.3.1 rejects any non-NONE changelog producer on a table without
-				// primary keys. With the current default enableAutoCompaction=true, creation of an
-				// append-only/BUCKET_UNAWARE table reaches this option and fails schema validation.
-				// Source:
-				// https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/schema/SchemaValidation.java#L120-L126
-				schemaBuilder.option("changelog-producer", "input");
+				final Integer compactionIntervalMinutes =
+						config.getCompactionIntervalMinutes(tableName);
+				schemaBuilder.option(
+						"compaction.optimization-interval", compactionIntervalMinutes + "min");
 
 				// Compact small files more aggressively
 				schemaBuilder.option("num-sorted-run.compaction-trigger", "30");
@@ -776,8 +755,8 @@ public class PaimonService implements AutoCloseable {
 		// 7. Changelog settings for CDC scenarios
 		schemaBuilder.option("changelog-producer.lookup-wait", "false"); // Don't wait for lookup
 
-		if (EmptyKit.isNotEmpty(config.getTableProperties(tableName))) {
-			config.getTableProperties(tableName).forEach(v -> {
+		if (EmptyKit.isNotEmpty(tableProperties)) {
+			tableProperties.forEach(v -> {
 				if (StringUtils.isEmpty(v.get("propKey"))
 					|| StringUtils.isEmpty(v.get("propValue"))
 				) {
@@ -877,8 +856,7 @@ public class PaimonService implements AutoCloseable {
 
 	public Integer getFieldLength(String dataType) {
 		//提取括号里的值
-		Pattern pattern = Pattern.compile("\\(([^)]+)\\)");
-		Matcher matcher = pattern.matcher(dataType);
+		Matcher matcher = PARENTHESIZED_VALUE_PATTERN.matcher(dataType);
 		if (matcher.find()) {
 			long length = Long.parseLong(matcher.group(1));
 			if (length > Integer.MAX_VALUE) {
@@ -892,22 +870,20 @@ public class PaimonService implements AutoCloseable {
 
 	public Integer getFieldFraction(String dataType) {
 		//提取括号里的值
-		Pattern pattern = Pattern.compile("\\(([^)]+)\\)");
-		Matcher matcher = pattern.matcher(dataType);
+		Matcher matcher = PARENTHESIZED_VALUE_PATTERN.matcher(dataType);
 		if (matcher.find()) {
 			return Integer.parseInt(matcher.group(1));
 		}
-		return 6;
+		return DEFAULT_FIELD_FRACTION;
 	}
 
 	public Pair<Integer, Integer> getFieldPrecisionAndScale(String dataType) {
 		//提取括号里的值,逗号的前一个和后一个
-		Pattern pattern = Pattern.compile("\\(([^,]+),([^)]+)\\)");
-		Matcher matcher = pattern.matcher(dataType);
+		Matcher matcher = PRECISION_AND_SCALE_PATTERN.matcher(dataType);
 		if (matcher.find()) {
 			return Pair.of(Integer.parseInt(matcher.group(1).trim()), Integer.parseInt(matcher.group(2).trim()));
 		}
-		return Pair.of(38, 10);
+		return Pair.of(DEFAULT_FIELD_PRECISION, DEFAULT_FIELD_SCALE);
 	}
 
 	/**
@@ -1010,7 +986,6 @@ public class PaimonService implements AutoCloseable {
 	 */
 	private void invalidateTableDerivedCaches(String tableKey, String tableName) {
 		paimonFieldCache.remove(tableKey);
-		fieldIndexCache.remove(tableKey);
 		computeHashKey.remove(tableName);
 		primaryKeyMap.remove(tableName);
 	}
@@ -1018,7 +993,6 @@ public class PaimonService implements AutoCloseable {
 	/** Clear the same Connector-owned derived-cache set during whole-service cleanup. */
 	private void clearAllTableDerivedCaches() {
 		paimonFieldCache.clear();
-		fieldIndexCache.clear();
 		computeHashKey.clear();
 		primaryKeyMap.clear();
 	}
@@ -1094,11 +1068,19 @@ public class PaimonService implements AutoCloseable {
 	 * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/schema/Schema.java#L367-L376
 	 */
 	private int resolveEffectiveBucket(String tableName) {
+		final int configuredBucket = config.resolveBucket(tableName);
+		final List<LinkedHashMap<String, String>> tableProperties =
+				config.getTableProperties(tableName);
+		return resolveEffectiveBucket(configuredBucket, tableProperties);
+	}
+
+	private int resolveEffectiveBucket(
+			int configuredBucket, List<LinkedHashMap<String, String>> tableProperties) {
 		Map<String, String> bucketOption = new HashMap<>();
 		bucketOption.put(
-				CoreOptions.BUCKET.key(), Integer.toString(config.resolveBucket(tableName)));
-		if (EmptyKit.isNotEmpty(config.getTableProperties(tableName))) {
-			for (Map<String, String> property : config.getTableProperties(tableName)) {
+				CoreOptions.BUCKET.key(), Integer.toString(configuredBucket));
+		if (EmptyKit.isNotEmpty(tableProperties)) {
+			for (Map<String, String> property : tableProperties) {
 				if (CoreOptions.BUCKET.key().equals(property.get("propKey"))
 						&& StringUtils.isNotEmpty(property.get("propValue"))) {
 					bucketOption.put(CoreOptions.BUCKET.key(), property.get("propValue"));
@@ -1409,7 +1391,7 @@ public class PaimonService implements AutoCloseable {
 			}
 			microBatchCoordinator.markPendingCommit(target);
 			int retry = 1;
-			while (retry <= 3) {
+			while (retry <= COMMIT_RETRY_LIMIT) {
 				try {
 					while (true) {
 						try {
@@ -1581,33 +1563,12 @@ public class PaimonService implements AutoCloseable {
 	 * only cache timing; the legacy MD5 encoding and {@code VARCHAR(32)} contract are unchanged.
 	 */
 	private void cacheSourceDerivedState(String tableName, TapTable table) {
+		Collection<String> primaryKeys = table.primaryKeys(true);
 		computeHashKey.computeIfAbsent(tableName,
 				ignored -> Boolean.TRUE.equals(config.getHashKey(tableName))
-						&& EmptyKit.isNotEmpty(table.primaryKeys(true))
-						&& table.primaryKeys(true).size() > 5);
-		primaryKeyMap.putIfAbsent(tableName, table.primaryKeys(true));
-	}
-
-	private boolean isPaimonConflict(Throwable e) {
-		Throwable t = e;
-		while (t != null) {
-			String msg = t.getMessage();
-			if (msg != null) {
-				if (msg.contains("File deletion conflicts detected")
-						|| msg.contains("Trying to delete file")
-						|| msg.contains("noConflictsOrFail")
-						|| msg.contains("assertNoDelete")) {
-					return true;
-				}
-			}
-			if (t instanceof IllegalStateException
-					&& msg != null
-					&& msg.contains("not previously added")) {
-				return true;
-			}
-			t = t.getCause();
-		}
-		return false;
+						&& EmptyKit.isNotEmpty(primaryKeys)
+						&& primaryKeys.size() > HASH_KEY_PRIMARY_KEY_THRESHOLD);
+		primaryKeyMap.putIfAbsent(tableName, primaryKeys);
 	}
 
 	/**
@@ -1620,7 +1581,7 @@ public class PaimonService implements AutoCloseable {
 
 		// Never forcibly interrupt a Paimon commit running on the scheduler worker.
 		try {
-			if (!asyncCommitScheduler.shutdownAndAwait(5L, TimeUnit.SECONDS)) {
+			if (!asyncCommitScheduler.shutdownAndAwait(ASYNC_COMMIT_SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
 				failure = appendFailure(
 						failure,
 						new IllegalStateException(
@@ -1761,27 +1722,6 @@ public class PaimonService implements AutoCloseable {
 		}
 	}
 
-	/**
-	 * Check if the exception is caused by ThreadGroup being destroyed.
-	 * This typically happens when the classloader that created Paimon's thread factory
-	 * has been unloaded, causing the captured ThreadGroup to be destroyed.
-	 *
-	 * @param e the exception to check
-	 * @return true if it's a ThreadGroup destroyed error
-	 */
-	private boolean isThreadGroupDestroyedError(Throwable e) {
-		Throwable cause = e;
-		while (cause != null) {
-			Throwable illegalThreadStateException = CommonUtils.matchThrowable(e, IllegalThreadStateException.class);
-			if (illegalThreadStateException != null) {
-				return true;
-			}
-			cause = cause.getCause();
-		}
-		return false;
-	}
-
-
 	private PaimonTableWriteContext getOrCreateTableWriteContext(
 			String tableKey,
 			String tableName,
@@ -1818,6 +1758,7 @@ public class PaimonService implements AutoCloseable {
 								"Only FileStoreTable supports connector writes for " + tableKey);
 					}
 					FileStoreTable fileStoreTable = (FileStoreTable) table;
+					List<DataField> paimonFields = fileStoreTable.rowType().getFields();
 					// Contract resolution must precede commit-state binding and the HASH_DYNAMIC
 					// RocksDB pollution preflight, not merely raw writer construction.
 					PaimonWriteSemanticContract writeSemanticContract =
@@ -1846,7 +1787,7 @@ public class PaimonService implements AutoCloseable {
 											+ "Paimon may produce duplicate primary keys after old index entries expire",
 									tableKey);
 						}
-						return PaimonTableWriteContext.create(
+						PaimonTableWriteContext writeContext = PaimonTableWriteContext.create(
 								tableKey,
 								tableName,
 								fileStoreTable,
@@ -1855,6 +1796,8 @@ public class PaimonService implements AutoCloseable {
 								binding.nextCommitIdentifier(),
 								binding.store(),
 								writeSemanticContract);
+						paimonFieldCache.putIfAbsent(tableKey, paimonFields);
+						return writeContext;
 					} catch (Exception e) {
 						unregisterPhysicalTableOwner(tableKey);
 						throw e;
@@ -1914,18 +1857,21 @@ public class PaimonService implements AutoCloseable {
 		}
 	}
 
-	private synchronized void bindTaskState(TapConnectorContext connectorContext) {
-		if (connectorContext == null || connectorContext.getStateMap() == null) {
+	private void bindTaskState(TapConnectorContext connectorContext) {
+		KVMap<Object> stateMap =
+				connectorContext == null ? null : connectorContext.getStateMap();
+		if (stateMap == null) {
 			throw new IllegalStateException("Tap task state map is required for Paimon writes");
 		}
-		KVMap<Object> stateMap = connectorContext.getStateMap();
-		if (boundTaskStateMap == null) {
-			boundTaskStateMap = stateMap;
-			return;
-		}
-		if (boundTaskStateMap != stateMap) {
-			throw new IllegalStateException(
-					"Paimon service cannot be shared by multiple Tap task state maps; restart the connector");
+		synchronized (bindLock) {
+			if (boundTaskStateMap == null) {
+				boundTaskStateMap = stateMap;
+				return;
+			}
+			if (boundTaskStateMap != stateMap) {
+				throw new IllegalStateException(
+						"Paimon service cannot be shared by multiple Tap task state maps; restart the connector");
+			}
 		}
 	}
 
@@ -2161,10 +2107,10 @@ public class PaimonService implements AutoCloseable {
 		StringBuilder builder = new StringBuilder("GenericRow{");
 		builder.append("rowKind=").append(row.getRowKind());
 		builder.append(", fieldCount=").append(row.getFieldCount());
-		builder.append(", fieldMapping=").append(formatFieldMappingForLog(table, row.getFieldCount()));
+		List<String> fieldNames = resolveRowFieldNames(table, row.getFieldCount());
+		builder.append(", fieldMapping=").append(formatFieldMappingForLog(fieldNames));
 		builder.append(", valueMetadata=");
 
-		List<String> fieldNames = resolveRowFieldNames(table, row.getFieldCount());
 		builder.append('{');
 		for (int i = 0; i < row.getFieldCount(); i++) {
 			if (i > 0) {
@@ -2181,12 +2127,10 @@ public class PaimonService implements AutoCloseable {
 	/**
 	 * Format field index to field name mapping for human-friendly error logging.
 	 *
-	 * @param table table definition
-	 * @param fieldCount row field count
+	 * @param fieldNames field names aligned with row order
 	 * @return readable field mapping string
 	 */
-	private String formatFieldMappingForLog(TapTable table, int fieldCount) {
-		List<String> fieldNames = resolveRowFieldNames(table, fieldCount);
+	private String formatFieldMappingForLog(List<String> fieldNames) {
 		if (fieldNames.isEmpty()) {
 			return "[]";
 		}
@@ -2281,51 +2225,6 @@ public class PaimonService implements AutoCloseable {
 		}
 		return event.getClass().getSimpleName()
 				+ "{referenceTime=" + event.getReferenceTime() + '}';
-	}
-
-	/**
-	 * Get or build field index mapping from cache
-	 *
-	 * @param cacheKey cache key (table ID)
-	 * @param fields   field map
-	 * @return map of field name to index
-	 */
-	private Map<String, Integer> getFieldIndexMap(String cacheKey, Map<String, TapField> fields) {
-		Map<String, Integer> indexMap = fieldIndexCache.get(cacheKey);
-
-		if (indexMap == null) {
-			// Cache miss - build field index mapping
-			indexMap = new HashMap<>(fields.size());
-			int index = 0;
-			for (String name : fields.keySet()) {
-				indexMap.put(name, index++);
-			}
-
-			// Store in cache
-			fieldIndexCache.put(cacheKey, indexMap);
-		}
-
-		return indexMap;
-	}
-
-	/**
-	 * Get field index by field name (deprecated - use getFieldIndexMap instead)
-	 *
-	 * @param fieldName field name
-	 * @param fields    field map
-	 * @return field index, or -1 if not found
-	 * @deprecated Use getFieldIndexMap for better performance with caching
-	 */
-	@Deprecated
-	private int getFieldIndex(String fieldName, Map<String, TapField> fields) {
-		int index = 0;
-		for (String name : fields.keySet()) {
-			if (name.equals(fieldName)) {
-				return index;
-			}
-			index++;
-		}
-		return -1;
 	}
 
 	/**
@@ -2458,27 +2357,25 @@ public class PaimonService implements AutoCloseable {
 		}
 
 		// Get the type root for comparison (ignores nullable attribute)
-		String rooType = paimonType.getTypeRoot().name();
-		switch (rooType) {
-			case "CHAR":
-			case "VARCHAR":
-			case "STRING":
+		switch (paimonType.getTypeRoot()) {
+			case CHAR:
+			case VARCHAR:
 				return BinaryString.fromString(String.valueOf(value));
-			case "TINYINT":
+			case TINYINT:
 				return ((Number) value).byteValue();
-			case "SMALLINT":
+			case SMALLINT:
 				return ((Number) value).shortValue();
-			case "BIGINT":
+			case BIGINT:
 				return ((Number) value).longValue();
-			case "DOUBLE":
+			case DOUBLE:
 				return ((Number) value).doubleValue();
-			case "FLOAT":
+			case FLOAT:
 				return ((Number) value).floatValue();
-			case "DECIMAL":
+			case DECIMAL:
 				Pair<Integer, Integer> fieldPrecisionAndScale = getFieldPrecisionAndScale(paimonType.asSQLString());
 				return Decimal.fromBigDecimal((BigDecimal) value, fieldPrecisionAndScale.getLeft(), fieldPrecisionAndScale.getRight());
-			case "TIMESTAMP_WITHOUT_TIME_ZONE":
-			case "TIMESTAMP_WITH_LOCAL_TIME_ZONE":
+			case TIMESTAMP_WITHOUT_TIME_ZONE:
+			case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
 				java.sql.Timestamp sqlTimestamp = (java.sql.Timestamp) value;
 				return Timestamp.fromEpochMillis(sqlTimestamp.getTime(), (sqlTimestamp.getNanos() % 1000000));
 		}
@@ -2654,27 +2551,19 @@ public class PaimonService implements AutoCloseable {
 				Identifier identifier = Identifier.create(database, tableName);
 				Table paimonTable = catalog.getTable(identifier);
 
-				// Use reflection to access snapshotManager() method
-				// AbstractFileStoreTable is not public, so we need to use reflection
-				try {
-					java.lang.reflect.Method snapshotManagerMethod = paimonTable.getClass().getMethod("snapshotManager");
-					SnapshotManager snapshotManager = (SnapshotManager) snapshotManagerMethod.invoke(paimonTable);
+				SnapshotManager snapshotManager = ((FileStoreTable) paimonTable).store().snapshotManager();
 
-					// Find snapshot at or before the given timestamp
-					Snapshot snapshot = snapshotManager.earlierOrEqualTimeMills(timestamp);
+				// Find snapshot at or before the given timestamp
+				Snapshot snapshot = snapshotManager.earlierOrEqualTimeMills(timestamp);
 
-					if (snapshot != null) {
-						long snapshotId = snapshot.id();
-						offsetMap.put(tableName, snapshotId);
-						log.info("Table {} - found snapshot {} at timestamp {}", tableName, snapshotId, snapshot.timeMillis());
-					} else {
-						// No snapshot found at or before the timestamp, use null (will start from beginning)
-						offsetMap.put(tableName, null);
-						log.warn("Table {} - no snapshot found at or before timestamp {}, will start from beginning", tableName, timestamp);
-					}
-				} catch (NoSuchMethodException e) {
-					log.warn("Table {} does not have snapshotManager() method, cannot find snapshot by timestamp", tableName);
+				if (snapshot != null) {
+					long snapshotId = snapshot.id();
+					offsetMap.put(tableName, snapshotId);
+					log.info("Table {} - found snapshot {} at timestamp {}", tableName, snapshotId, snapshot.timeMillis());
+				} else {
+					// No snapshot found at or before the timestamp, use null (will start from beginning)
 					offsetMap.put(tableName, null);
+					log.warn("Table {} - no snapshot found at or before timestamp {}, will start from beginning", tableName, timestamp);
 				}
 			} catch (Catalog.TableNotExistException e) {
 				log.warn("Table {} does not exist, skipping", tableName);
@@ -2727,31 +2616,25 @@ public class PaimonService implements AutoCloseable {
 					Identifier identifier = Identifier.create(database, tableName);
 					Table paimonTable = catalog.getTable(identifier);
 
-					// Use reflection to access snapshotManager() method
-					try {
-						java.lang.reflect.Method snapshotManagerMethod = paimonTable.getClass().getMethod("snapshotManager");
-						SnapshotManager snapshotManager = (SnapshotManager) snapshotManagerMethod.invoke(paimonTable);
+				SnapshotManager snapshotManager = ((FileStoreTable) paimonTable).store().snapshotManager();
 
-						// Get the latest snapshot
-						Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+				// Get the latest snapshot
+				Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
-						if (latestSnapshot != null) {
-							long snapshotId = latestSnapshot.id();
-							// IMPORTANT: restore(snapshotId) will INCLUDE that snapshot's data
-							// To start from AFTER the latest snapshot, we need to use snapshotId + 1
-							// This way, only NEW data after current snapshot will be read
-							long nextSnapshotId = snapshotId + 1;
-							tableSnapshots.put(tableName, nextSnapshotId);
-							log.info("Table {} - initialized to start AFTER latest snapshot {} (will start from snapshot {})",
-									tableName, snapshotId, nextSnapshotId);
-						} else {
-							// No snapshot exists yet, stream read will start from the first snapshot when it's created
-							log.info("Table {} - no snapshots exist yet, will start from first snapshot", tableName);
-							// Don't put anything in tableSnapshots, let it start naturally
-						}
-					} catch (NoSuchMethodException e) {
-						log.warn("Table {} does not have snapshotManager() method", tableName);
-					}
+				if (latestSnapshot != null) {
+					long snapshotId = latestSnapshot.id();
+					// IMPORTANT: restore(snapshotId) will INCLUDE that snapshot's data
+					// To start from AFTER the latest snapshot, we need to use snapshotId + 1
+					// This way, only NEW data after current snapshot will be read
+					long nextSnapshotId = snapshotId + 1;
+					tableSnapshots.put(tableName, nextSnapshotId);
+					log.info("Table {} - initialized to start AFTER latest snapshot {} (will start from snapshot {})",
+							tableName, snapshotId, nextSnapshotId);
+				} else {
+					// No snapshot exists yet, stream read will start from the first snapshot when it's created
+					log.info("Table {} - no snapshots exist yet, will start from first snapshot", tableName);
+					// Don't put anything in tableSnapshots, let it start naturally
+				}
 				} catch (Catalog.TableNotExistException e) {
 					log.warn("Table {} does not exist, skipping", tableName);
 				} catch (Exception e) {
@@ -2856,7 +2739,7 @@ public class PaimonService implements AutoCloseable {
 			List<io.tapdata.entity.event.TapEvent> batch = new ArrayList<>();
 			try {
 				while (running.get() || !eventQueue.isEmpty()) {
-					io.tapdata.entity.event.TapEvent event = eventQueue.poll(100, TimeUnit.MILLISECONDS);
+					io.tapdata.entity.event.TapEvent event = eventQueue.poll(BATCH_READ_EVENT_POLL_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
 					if (event != null) {
 						batch.add(event);
 
@@ -2915,7 +2798,7 @@ public class PaimonService implements AutoCloseable {
 							// No new data, update checkpoint and wait
 							Long currentSnapshot = streamScan.checkpoint();
 							currentOffsets.put(tableName, currentSnapshot);
-							Thread.sleep(1000);
+							Thread.sleep(STREAM_READ_IDLE_WAIT_MILLIS);
 							continue;
 						}
 
@@ -2992,12 +2875,12 @@ public class PaimonService implements AutoCloseable {
 				if (threadException.get() != null) {
 					throw new RuntimeException("Stream read failed", threadException.get());
 				}
-				Thread.sleep(1000);
+				Thread.sleep(STREAM_READ_MONITOR_INTERVAL_MILLIS);
 			}
 		} finally {
 			executorService.shutdown();
 			try {
-				if (!executorService.awaitTermination(30, TimeUnit.SECONDS)) {
+				if (!executorService.awaitTermination(STREAM_READ_EXECUTOR_TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
 					executorService.shutdownNow();
 				}
 			} catch (InterruptedException e) {
@@ -3393,7 +3276,7 @@ public class PaimonService implements AutoCloseable {
 
 		// Determine batch size
 		int batchSize = filter != null && filter.getBatchSize() != null && filter.getBatchSize() > 0
-			? filter.getBatchSize() : 1000;
+			? filter.getBatchSize() : DEFAULT_QUERY_BATCH_SIZE;
 
 		// Determine limit and skip
 		int limit = filter != null && filter.getLimit() != null ? filter.getLimit() : Integer.MAX_VALUE;
@@ -3494,104 +3377,102 @@ public class PaimonService implements AutoCloseable {
 
 	@Override
 	public synchronized void close() throws Exception {
-		synchronized (closeLock) {
-			if (lifecycle.state() == PaimonServiceLifecycle.State.CLOSED) {
-				Throwable previous = lifecycle.terminalOutcome();
-				if (previous != null) {
-					rethrow(previous);
-				}
-				return;
+		if (lifecycle.state() == PaimonServiceLifecycle.State.CLOSED) {
+			Throwable previous = lifecycle.terminalOutcome();
+			if (previous != null) {
+				rethrow(previous);
 			}
+			return;
+		}
 
-			Throwable failure = lifecycle.firstFailure();
-			boolean interrupted = false;
-			if (lifecycle.state() == PaimonServiceLifecycle.State.RUNNING) {
-				lifecycle.beginStopping();
-			}
+		Throwable failure = lifecycle.firstFailure();
+		boolean interrupted = false;
+		if (lifecycle.state() == PaimonServiceLifecycle.State.RUNNING) {
+			lifecycle.beginStopping();
+		}
 
-			while (true) {
-				try {
-					if (asyncCommitScheduler.shutdownAndAwait(5L, TimeUnit.SECONDS)) {
-						break;
-					}
-				} catch (InterruptedException interruption) {
-					failure = appendFailure(failure, interruption);
-					interrupted = true;
-					Thread.interrupted();
+		while (true) {
+			try {
+				if (asyncCommitScheduler.shutdownAndAwait(ASYNC_COMMIT_SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+					break;
 				}
-			}
-
-			while (!lifecycle.isQuiescent()) {
-				try {
-					lifecycle.awaitQuiescence();
-				} catch (InterruptedException interruption) {
-					failure = appendFailure(failure, interruption);
-					interrupted = true;
-					Thread.interrupted();
-				}
-			}
-
-			boolean allTablesDrained = failure == null;
-			for (String tableKey : new ArrayList<>(tableWriteContexts.keySet())) {
-				try {
-					flushTableInternal(tableKey, "stop", true);
-				} catch (Throwable drainFailure) {
-					failure = appendFailure(failure, drainFailure);
-					allTablesDrained = false;
-				}
-			}
-			InterruptedException retryInterruption = cleanupInterruption.getAndSet(null);
-			if (retryInterruption != null) {
-				failure = appendFailure(failure, retryInterruption);
+			} catch (InterruptedException interruption) {
+				failure = appendFailure(failure, interruption);
 				interrupted = true;
+				Thread.interrupted();
 			}
+		}
 
-			Throwable stickyAfterDrain = lifecycle.firstFailure();
-			if (stickyAfterDrain != null) {
-				failure = appendFailure(failure, stickyAfterDrain);
+		while (!lifecycle.isQuiescent()) {
+			try {
+				lifecycle.awaitQuiescence();
+			} catch (InterruptedException interruption) {
+				failure = appendFailure(failure, interruption);
+				interrupted = true;
+				Thread.interrupted();
+			}
+		}
+
+		boolean allTablesDrained = failure == null;
+		for (String tableKey : new ArrayList<>(tableWriteContexts.keySet())) {
+			try {
+				flushTableInternal(tableKey, "stop", true);
+			} catch (Throwable drainFailure) {
+				failure = appendFailure(failure, drainFailure);
 				allTablesDrained = false;
 			}
-			if (allTablesDrained) {
-				try {
-					List<PaimonMicroBatchCoordinator.CallbackReservation> ready =
-							new ArrayList<>(
-									microBatchCoordinator.reservedButNotStartedCallbacks());
-					ready.addAll(microBatchCoordinator.reserveReadyCallbacks());
-					executeCallbacks(ready, true);
-				} catch (Throwable callbackFailure) {
-					failure = appendFailure(failure, callbackFailure);
-				}
-			}
+		}
+		InterruptedException retryInterruption = cleanupInterruption.getAndSet(null);
+		if (retryInterruption != null) {
+			failure = appendFailure(failure, retryInterruption);
+			interrupted = true;
+		}
 
-			for (String tableKey : new ArrayList<>(tableWriteContexts.keySet())) {
-				PaimonTableWriteContext context = tableWriteContexts.remove(tableKey);
-				try {
-					if (context != null) {
-						context.close();
-					}
-				} catch (Throwable contextFailure) {
-					failure = appendFailure(failure, contextFailure);
-				} finally {
-					unregisterPhysicalTableOwner(tableKey);
-				}
-			}
-
+		Throwable stickyAfterDrain = lifecycle.firstFailure();
+		if (stickyAfterDrain != null) {
+			failure = appendFailure(failure, stickyAfterDrain);
+			allTablesDrained = false;
+		}
+		if (allTablesDrained) {
 			try {
-				cleanupAllResources();
-			} catch (Throwable cleanupFailure) {
-				failure = appendFailure(failure, cleanupFailure);
+				List<PaimonMicroBatchCoordinator.CallbackReservation> ready =
+						new ArrayList<>(
+								microBatchCoordinator.reservedButNotStartedCallbacks());
+				ready.addAll(microBatchCoordinator.reserveReadyCallbacks());
+				executeCallbacks(ready, true);
+			} catch (Throwable callbackFailure) {
+				failure = appendFailure(failure, callbackFailure);
 			}
-			dynamicSourceIngressGuards.clear();
-			activeConnectorContext = null;
-			boundTaskStateMap = null;
-			flushOffsetCallback = null;
-			lifecycle.publishClosed(failure);
-			if (interrupted) {
-				Thread.currentThread().interrupt();
+		}
+
+		for (String tableKey : new ArrayList<>(tableWriteContexts.keySet())) {
+			PaimonTableWriteContext context = tableWriteContexts.remove(tableKey);
+			try {
+				if (context != null) {
+					context.close();
+				}
+			} catch (Throwable contextFailure) {
+				failure = appendFailure(failure, contextFailure);
+			} finally {
+				unregisterPhysicalTableOwner(tableKey);
 			}
-			if (failure != null) {
-				rethrow(failure);
-			}
+		}
+
+		try {
+			cleanupAllResources();
+		} catch (Throwable cleanupFailure) {
+			failure = appendFailure(failure, cleanupFailure);
+		}
+		dynamicSourceIngressGuards.clear();
+		activeConnectorContext = null;
+		boundTaskStateMap = null;
+		flushOffsetCallback = null;
+		lifecycle.publishClosed(failure);
+		if (interrupted) {
+			Thread.currentThread().interrupt();
+		}
+		if (failure != null) {
+			rethrow(failure);
 		}
 	}
 

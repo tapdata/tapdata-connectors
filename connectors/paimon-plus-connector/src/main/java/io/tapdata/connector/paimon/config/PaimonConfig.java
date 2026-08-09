@@ -538,42 +538,43 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         }
 
         // Add protocol based on storage type
-        switch (st) {
-            case "s3":
-                // Prefer native s3:// if paimon-s3 is available, otherwise use Hadoop S3A
-                if (isPaimonS3Available()) {
-                    return "s3://" + w;
-                } else {
-                    return "s3a://" + w;
-                }
-            case "hdfs":
-                return "hdfs://" + hdfsHost + ":" + hdfsPort + w;
-            case "oss":
-                return "oss://" + w;
-            case "local":
-            default:
-                return "file://" + w;
-        }
+        return storageScheme(st) + w;
     }
 
 
     public String getConnectionString() {
         String st = storageType == null ? "" : storageType.trim().toLowerCase();
+        String scheme = storageScheme(st);
         switch (st) {
             case "s3":
-                // Prefer native s3:// if paimon-s3 is available, otherwise use Hadoop S3A
-                if (isPaimonS3Available()) {
-                    return "s3://" + removeProtocol(s3Endpoint) + "/" + removeProtocol(warehouse.trim());
-                } else {
-                    return "s3a://" + removeProtocol(s3Endpoint) + "/" + removeProtocol(warehouse.trim());
-                }
+                return scheme + removeProtocol(s3Endpoint) + "/" + removeProtocol(warehouse.trim());
             case "hdfs":
-                return "hdfs://" + hdfsHost + ":" + hdfsPort + "/" + removeProtocol(warehouse.trim());
+                return scheme + "/" + removeProtocol(warehouse.trim());
             case "oss":
-                return "oss://" + removeProtocol(ossEndpoint) + "/" + removeProtocol(warehouse.trim());
+                return scheme + removeProtocol(ossEndpoint) + "/" + removeProtocol(warehouse.trim());
             case "local":
             default:
-                return "file://" + warehouse.trim();
+                return scheme + warehouse.trim();
+        }
+    }
+
+    /**
+     * Returns the scheme prefix for the given normalized storage type, e.g. {@code "s3://"},
+     * {@code "hdfs://host:port"}, {@code "file://"}. Encapsulates the storageType → scheme mapping
+     * shared by {@link #getFullWarehousePath()} and {@link #getConnectionString()}.
+     */
+    private String storageScheme(String normalizedStorageType) {
+        switch (normalizedStorageType) {
+            case "s3":
+                // Prefer native s3:// if paimon-s3 is available, otherwise use Hadoop S3A
+                return isPaimonS3Available() ? "s3://" : "s3a://";
+            case "hdfs":
+                return "hdfs://" + hdfsHost + ":" + hdfsPort;
+            case "oss":
+                return "oss://";
+            case "local":
+            default:
+                return "file://";
         }
     }
 
