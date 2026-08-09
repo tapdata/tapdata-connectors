@@ -17,13 +17,19 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -38,6 +44,59 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PaimonServiceCloseTest {
+
+    @Test
+    void closeMustNotBlockIngressThatIsBindingTaskState() throws Exception {
+        PaimonService service = service();
+        PaimonServiceLifecycle lifecycle = lifecycle(service);
+        TapConnectorContext connectorContext = connectorContext();
+        CountDownLatch ingressEntered = new CountDownLatch(1);
+        CountDownLatch attemptBind = new CountDownLatch(1);
+        AtomicReference<Throwable> writerFailure = new AtomicReference<>();
+        AtomicReference<Throwable> closeFailure = new AtomicReference<>();
+
+        Thread writer =
+                new Thread(
+                        () -> {
+                            try (PaimonServiceLifecycle.Ingress ignored =
+                                    lifecycle.enter("bind-task-state-test")) {
+                                ingressEntered.countDown();
+                                if (!attemptBind.await(5L, TimeUnit.SECONDS)) {
+                                    throw new AssertionError("Timed out waiting to bind task state");
+                                }
+                                invokeBindTaskState(service, connectorContext);
+                            } catch (Throwable failure) {
+                                writerFailure.set(failure);
+                            }
+                        },
+                        "paimon-bind-task-state-test");
+        writer.setDaemon(true);
+        writer.start();
+        assertTrue(ingressEntered.await(5L, TimeUnit.SECONDS));
+
+        Thread closer =
+                new Thread(
+                        () -> {
+                            try {
+                                service.close();
+                            } catch (Throwable failure) {
+                                closeFailure.set(failure);
+                            }
+                        },
+                        "paimon-close-bind-task-state-test");
+        closer.setDaemon(true);
+        closer.start();
+        awaitCloseWaitingForIngress(lifecycle, closer);
+
+        attemptBind.countDown();
+        writer.join(2_000L);
+        closer.join(2_000L);
+
+        assertFalse(writer.isAlive(), "Task-state binding remained blocked by close");
+        assertFalse(closer.isAlive(), "Close remained blocked waiting for task-state binding");
+        assertNull(writerFailure.get());
+        assertNull(closeFailure.get());
+    }
 
     @Test
     void catalogCloseFailureMustBeMaterialAndRemainIdempotent() throws Exception {
@@ -299,6 +358,42 @@ class PaimonServiceCloseTest {
         Field field = PaimonService.class.getDeclaredField("catalog");
         field.setAccessible(true);
         field.set(service, catalog);
+    }
+
+    private static void invokeBindTaskState(
+            PaimonService service, TapConnectorContext connectorContext) throws Exception {
+        Method method =
+                PaimonService.class.getDeclaredMethod(
+                        "bindTaskState", TapConnectorContext.class);
+        method.setAccessible(true);
+        try {
+            method.invoke(service, connectorContext);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception) {
+                throw (Exception) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw new IllegalStateException(cause);
+        }
+    }
+
+    private static void awaitCloseWaitingForIngress(
+            PaimonServiceLifecycle lifecycle, Thread closer) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5L);
+        while (System.nanoTime() < deadline) {
+            if (lifecycle.state() == PaimonServiceLifecycle.State.STOPPING
+                    && closer.getState() == Thread.State.WAITING) {
+                return;
+            }
+            if (!closer.isAlive()) {
+                throw new AssertionError("Close completed before waiting for active ingress");
+            }
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("Timed out waiting for close to await active ingress");
     }
 
     private static final class TableFixture {
