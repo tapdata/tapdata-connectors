@@ -19,6 +19,7 @@ import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -37,6 +38,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
@@ -156,6 +158,60 @@ class PaimonServiceAsyncCommitIntegrationTest {
         } finally {
             executor.shutdownNow();
             replacementContext.close();
+        }
+    }
+
+    @Test
+    void scheduledCommitMustWaitForInFlightWriteOnSameTable() throws Exception {
+        Fixture fixture = fixture();
+        fixture.clock.set(100L);
+        fixture.write(1);
+        Runnable scheduledTask = fixture.scheduledTask.get();
+        CountDownLatch secondWriteEntered = new CountDownLatch(1);
+        CountDownLatch releaseSecondWrite = new CountDownLatch(1);
+        doAnswer(
+                        invocation -> {
+                            secondWriteEntered.countDown();
+                            assertTrue(releaseSecondWrite.await(5, TimeUnit.SECONDS));
+                            return null;
+                        })
+                .when(fixture.strategy)
+                .write(any());
+
+        fixture.clock.set(1_100L);
+        AtomicReference<Thread> schedulerThread = new AtomicReference<>();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Future<?> writeFuture = null;
+        Future<?> schedulerFuture = null;
+        try {
+            writeFuture =
+                    executor.submit(
+                            () -> {
+                                fixture.write(2);
+                                return null;
+                            });
+            assertTrue(secondWriteEntered.await(5, TimeUnit.SECONDS));
+
+            schedulerFuture =
+                    executor.submit(
+                            () -> {
+                                schedulerThread.set(Thread.currentThread());
+                                scheduledTask.run();
+                            });
+            awaitBlocked(schedulerThread);
+            verify(fixture.strategy, never()).prepareCommit(anyLong());
+
+            releaseSecondWrite.countDown();
+            writeFuture.get(5, TimeUnit.SECONDS);
+            schedulerFuture.get(5, TimeUnit.SECONDS);
+
+            verify(fixture.strategy, times(1)).prepareCommit(0L);
+            verify(fixture.committer, times(1)).filterAndCommit(anyMap());
+            assertNull(stickyFailure(fixture.service).get());
+            assertEquals(0L, fixture.state().accumulatedRecordCount());
+        } finally {
+            releaseSecondWrite.countDown();
+            executor.shutdownNow();
         }
     }
 

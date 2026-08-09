@@ -17,7 +17,7 @@ import java.util.Objects;
 final class PaimonStreamTableCommitter implements PaimonTableCommitter {
 
     private final StreamTableCommit delegate;
-    private boolean closed;
+    private volatile boolean closed;
 
     PaimonStreamTableCommitter(StreamTableCommit delegate) {
         this.delegate = Objects.requireNonNull(delegate, "delegate");

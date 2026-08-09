@@ -34,6 +34,7 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -41,6 +42,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -148,6 +151,65 @@ class PaimonServiceCreateTableValidationTest {
                     CoreOptions.fromMap(table.options()).fileCompression());
             assertEquals("snappy", table.options().get(CoreOptions.FILE_COMPRESSION.key()));
             assertFalse(table.options().containsKey("compression"));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void tableCreationMustSnapshotPerTableConfigurationWithoutChangingOptions()
+            throws Exception {
+        String tableName = "config_snapshot";
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        PaimonConfig config = spy(config(tableName));
+        config.setFileFormat("parquet");
+        config.setCompression("snappy");
+        config.setTargetFileSize(64);
+        config.setEnableAutoCompaction(true);
+        config.setCompactionIntervalMinutes(15);
+        config.setTableProperties(
+                Collections.singletonList(property("custom-option", "custom-value")));
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+
+        try {
+            assertTrue(service.createTable(crossPartitionTable(tableName)));
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+            assertEquals("parquet", table.options().get(CoreOptions.FILE_FORMAT.key()));
+            assertEquals("snappy", table.options().get(CoreOptions.FILE_COMPRESSION.key()));
+            assertEquals("64mb", table.options().get("target-file-size"));
+            assertEquals("15min", table.options().get("compaction.optimization-interval"));
+            assertEquals("custom-value", table.options().get("custom-option"));
+            assertNotEquals("input", table.options().get("changelog-producer"));
+            verify(config, times(1)).getFileFormat(tableName);
+            verify(config, times(1)).getCompression(tableName);
+            verify(config, times(1)).getTargetFileSize(tableName);
+            verify(config, times(1)).getEnableAutoCompaction(tableName);
+            verify(config, times(1)).getCompactionIntervalMinutes(tableName);
+            verify(config, times(1)).getTableProperties(tableName);
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void tablePropertyChangelogProducerMustFollowUserSpecifiedValue() throws Exception {
+        String tableName = "changelog_producer_property_override";
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        PaimonConfig config = config(tableName);
+        config.setEnableAutoCompaction(true);
+        config.setTableProperties(
+                Collections.singletonList(
+                        property("changelog-producer", "none")));
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+
+        try {
+            assertTrue(service.createTable(crossPartitionTable(tableName)));
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+            assertEquals("none", table.options().get("changelog-producer"));
         } finally {
             service.close();
         }

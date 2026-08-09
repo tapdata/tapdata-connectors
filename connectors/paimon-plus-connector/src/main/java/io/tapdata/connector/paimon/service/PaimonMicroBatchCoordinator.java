@@ -36,7 +36,7 @@ final class PaimonMicroBatchCoordinator {
     }
 
     void acceptInitial(String tableKey, int recordCount) {
-        requireTableKey(tableKey);
+        requireNonBlank(tableKey, "Table key");
         requireRecordCount(recordCount);
         synchronized (lock) {
             table(tableKey).bufferedRecordCount += recordCount;
@@ -45,7 +45,7 @@ final class PaimonMicroBatchCoordinator {
 
     BatchDecision acceptCdc(
             String tableKey, int recordCount, Set<String> sourceLanes, long nowMs) {
-        requireTableKey(tableKey);
+        requireNonBlank(tableKey, "Table key");
         requireRecordCount(recordCount);
         if (recordCount == 0) {
             return new BatchDecision(0L, 0L, false, false);
@@ -54,7 +54,7 @@ final class PaimonMicroBatchCoordinator {
             throw new IllegalArgumentException("CDC batch must contain at least one source lane");
         }
         for (String sourceLane : sourceLanes) {
-            requireSourceLane(sourceLane);
+            requireNonBlank(sourceLane, "Source lane");
         }
 
         synchronized (lock) {
@@ -86,7 +86,7 @@ final class PaimonMicroBatchCoordinator {
     }
 
     CommitTarget captureCommitTarget(String tableKey) {
-        requireTableKey(tableKey);
+        requireNonBlank(tableKey, "Table key");
         synchronized (lock) {
             MutableTableState state = table(tableKey);
             return new CommitTarget(
@@ -112,7 +112,7 @@ final class PaimonMicroBatchCoordinator {
     }
 
     CommitTarget pendingCommitTarget(String tableKey) {
-        requireTableKey(tableKey);
+        requireNonBlank(tableKey, "Table key");
         synchronized (lock) {
             MutableTableState state = tables.get(tableKey);
             return state == null ? null : state.pendingCommitTarget;
@@ -139,7 +139,7 @@ final class PaimonMicroBatchCoordinator {
     }
 
     TableSnapshot tableSnapshot(String tableKey) {
-        requireTableKey(tableKey);
+        requireNonBlank(tableKey, "Table key");
         synchronized (lock) {
             MutableTableState state = table(tableKey);
             return new TableSnapshot(state);
@@ -183,7 +183,7 @@ final class PaimonMicroBatchCoordinator {
     }
 
     boolean isDue(String tableKey, long nowMs) {
-        requireTableKey(tableKey);
+        requireNonBlank(tableKey, "Table key");
         synchronized (lock) {
             MutableTableState state = tables.get(tableKey);
             return state != null && isDueLocked(state, nowMs);
@@ -195,7 +195,7 @@ final class PaimonMicroBatchCoordinator {
     }
 
     void clearWriterDerivedStateAfterDdl(String tableKey) {
-        requireTableKey(tableKey);
+        requireNonBlank(tableKey, "Table key");
         synchronized (lock) {
             MutableTableState state = table(tableKey);
             if (state.bufferedRecordCount != 0 || state.pendingCommitTarget != null) {
@@ -209,7 +209,7 @@ final class PaimonMicroBatchCoordinator {
     }
 
     CallbackReservation registerHeartbeat(String sourceLane, TapCallbackOffset payload) {
-        requireSourceLane(sourceLane);
+        requireNonBlank(sourceLane, "Source lane");
         if (payload == null) {
             throw new IllegalArgumentException("Heartbeat payload must not be null");
         }
@@ -388,15 +388,9 @@ final class PaimonMicroBatchCoordinator {
         return left + right;
     }
 
-    private static void requireTableKey(String tableKey) {
-        if (tableKey == null || tableKey.trim().isEmpty()) {
-            throw new IllegalArgumentException("Table key must not be blank");
-        }
-    }
-
-    private static void requireSourceLane(String sourceLane) {
-        if (sourceLane == null || sourceLane.trim().isEmpty()) {
-            throw new IllegalArgumentException("Source lane must not be blank");
+    private static void requireNonBlank(String value, String label) {
+        if (value == null || value.trim().isEmpty()) {
+            throw new IllegalArgumentException(label + " must not be blank");
         }
     }
 

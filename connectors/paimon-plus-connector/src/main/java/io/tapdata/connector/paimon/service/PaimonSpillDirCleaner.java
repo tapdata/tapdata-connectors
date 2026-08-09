@@ -9,6 +9,13 @@ import java.io.RandomAccessFile;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -115,8 +122,19 @@ public final class PaimonSpillDirCleaner {
      * @return number of stale directories deleted
      */
     public static int cleanupStaleSpillDirs(String[] roots, long graceMs, BiConsumer<String, Long> onDeleted) {
+        return cleanupStaleSpillDirs(roots, graceMs, onDeleted, Files::delete);
+    }
+
+    static int cleanupStaleSpillDirs(
+            String[] roots,
+            long graceMs,
+            BiConsumer<String, Long> onDeleted,
+            DeleteAction deleteAction) {
         if (roots == null) {
             return 0;
+        }
+        if (deleteAction == null) {
+            throw new IllegalArgumentException("Delete action must not be null");
         }
         int deleted = 0;
         long now = System.currentTimeMillis();
@@ -130,14 +148,15 @@ public final class PaimonSpillDirCleaner {
                 continue;
             }
             for (File child : children) {
-                if (!child.isDirectory()) {
+                Path spillPath = child.toPath().toAbsolutePath().normalize();
+                if (!Files.isDirectory(spillPath, LinkOption.NOFOLLOW_LINKS)) {
                     continue;
                 }
                 String path = canonical(child);
                 if (LIVE_DIRS.contains(path)) {
                     continue;
                 }
-                File ownerFile = lockFile(path);
+                File ownerFile = lockFile(spillPath.toString());
                 if (!ownerFile.isFile()) {
                     // Rolling-upgrade compatibility: older connector versions did not publish an
                     // owner lock. Such a directory may still be active in an old JVM, so absence of
@@ -151,33 +170,45 @@ public final class PaimonSpillDirCleaner {
                     // evidence that a RocksDB/IOManager directory is inactive.
                     continue;
                 }
+                boolean removeOwnerFile = false;
                 try {
-                    if (now - newestModified(child) < graceMs) {
+                    long newestModified;
+                    try {
+                        newestModified = newestModified(spillPath);
+                    } catch (IOException | SecurityException inspectionFailure) {
+                        // Fail closed. Keep the owner marker so a later scan can retry.
                         continue;
                     }
-                    long size = deleteRecursively(child);
-                    if (size >= 0) {
+                    if (now - newestModified < graceMs) {
+                        continue;
+                    }
+                    DeletionResult result = deleteRecursively(spillPath, deleteAction);
+                    if (result.success) {
+                        removeOwnerFile = true;
                         deleted++;
                         if (onDeleted != null) {
-                            onDeleted.accept(path, size);
+                            onDeleted.accept(path, result.bytesDeleted);
                         }
                     }
                 } finally {
                     cleanupLock.close();
-                    deleteQuietly(cleanupLock.file);
+                    if (removeOwnerFile) {
+                        deleteQuietly(cleanupLock.file);
+                    }
                 }
             }
         }
         return deleted;
     }
 
-    /** Newest lastModified across the dir and its direct children. */
-    private static long newestModified(File dir) {
-        long newest = dir.lastModified();
-        File[] files = dir.listFiles();
-        if (files != null) {
-            for (File f : files) {
-                long m = f.lastModified();
+    /** Newest lastModified across the dir and its direct children without following links. */
+    private static long newestModified(Path dir) throws IOException {
+        long newest =
+                Files.getLastModifiedTime(dir, LinkOption.NOFOLLOW_LINKS).toMillis();
+        try (DirectoryStream<Path> children = Files.newDirectoryStream(dir)) {
+            for (Path child : children) {
+                long m =
+                        Files.getLastModifiedTime(child, LinkOption.NOFOLLOW_LINKS).toMillis();
                 if (m > newest) {
                     newest = m;
                 }
@@ -186,28 +217,16 @@ public final class PaimonSpillDirCleaner {
         return newest;
     }
 
-    /**
-     * Recursively delete a file/dir.
-     *
-     * @return total bytes deleted, or -1 if any deletion failed
-     */
-    private static long deleteRecursively(File file) {
-        long total = 0;
-        File[] children = file.listFiles();
-        if (children != null) {
-            for (File child : children) {
-                long sub = deleteRecursively(child);
-                if (sub < 0) {
-                    return -1;
-                }
-                total += sub;
-            }
+    /** Delete a tree without following symbolic links. */
+    private static DeletionResult deleteRecursively(Path root, DeleteAction deleteAction) {
+        DeletingFileVisitor visitor = new DeletingFileVisitor(deleteAction);
+        try {
+            Files.walkFileTree(root, visitor);
+        } catch (IOException | SecurityException traversalFailure) {
+            visitor.failed = true;
         }
-        long len = file.isFile() ? file.length() : 0;
-        if (!file.delete()) {
-            return -1;
-        }
-        return total + len;
+        boolean rootDeleted = Files.notExists(root, LinkOption.NOFOLLOW_LINKS);
+        return new DeletionResult(!visitor.failed && rootDeleted, visitor.bytesDeleted);
     }
 
     static String canonical(File file) {
@@ -228,6 +247,69 @@ public final class PaimonSpillDirCleaner {
         if (file != null && file.exists()) {
             // Best effort. A stale unlocked owner file is harmless and is reused by the next scan.
             file.delete();
+        }
+    }
+
+    @FunctionalInterface
+    interface DeleteAction {
+        void delete(Path path) throws IOException;
+    }
+
+    private static final class DeletingFileVisitor extends SimpleFileVisitor<Path> {
+        private final DeleteAction deleteAction;
+        private long bytesDeleted;
+        private boolean failed;
+
+        private DeletingFileVisitor(DeleteAction deleteAction) {
+            this.deleteAction = deleteAction;
+        }
+
+        @Override
+        public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+            long fileBytes = attributes.isRegularFile() ? attributes.size() : 0L;
+            delete(file, fileBytes);
+            return FileVisitResult.CONTINUE;
+        }
+
+        @Override
+        public FileVisitResult visitFileFailed(Path file, IOException failure) {
+            failed = true;
+            return FileVisitResult.CONTINUE;
+        }
+
+        @Override
+        public FileVisitResult postVisitDirectory(Path dir, IOException failure) {
+            if (failure != null) {
+                failed = true;
+            }
+            delete(dir, 0L);
+            return FileVisitResult.CONTINUE;
+        }
+
+        private void delete(Path path, long fileBytes) {
+            try {
+                deleteAction.delete(path);
+                bytesDeleted = saturatedAdd(bytesDeleted, fileBytes);
+            } catch (IOException | SecurityException deleteFailure) {
+                failed = true;
+            }
+        }
+
+        private static long saturatedAdd(long left, long right) {
+            if (right > 0L && left > Long.MAX_VALUE - right) {
+                return Long.MAX_VALUE;
+            }
+            return left + right;
+        }
+    }
+
+    private static final class DeletionResult {
+        private final boolean success;
+        private final long bytesDeleted;
+
+        private DeletionResult(boolean success, long bytesDeleted) {
+            this.success = success;
+            this.bytesDeleted = bytesDeleted;
         }
     }
 

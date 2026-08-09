@@ -40,8 +40,8 @@ final class PaimonTableWriteContext implements AutoCloseable {
     private final Map<Long, List<CommitMessage>> pendingCommits = new LinkedHashMap<>();
 
     private long nextCommitIdentifier;
-    private boolean closed;
-    private boolean failed;
+    private volatile boolean closed;
+    private volatile boolean failed;
 
     static PaimonTableWriteContext create(
             String tableKey,
@@ -247,7 +247,7 @@ final class PaimonTableWriteContext implements AutoCloseable {
         return lastIdentifier;
     }
 
-    public synchronized void write(InternalRow row) throws Exception {
+    public void write(InternalRow row) throws Exception {
         ensureWritable();
         try {
             writerStrategy.write(row);

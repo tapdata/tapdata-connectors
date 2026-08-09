@@ -10,12 +10,20 @@ import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -37,6 +45,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -146,9 +155,72 @@ class PaimonServiceTableDdlCacheInvalidationTest {
         fixture.service.close();
 
         assertTrue(map(fixture.service, "paimonFieldCache").isEmpty());
-        assertTrue(map(fixture.service, "fieldIndexCache").isEmpty());
         assertTrue(map(fixture.service, "computeHashKey").isEmpty());
         assertTrue(map(fixture.service, "primaryKeyMap").isEmpty());
+    }
+
+    @Test
+    void failedWriteContextCreationMustNotPublishFieldCache() throws Exception {
+        Fixture fixture = fixture();
+        FileStoreTable physicalTable = mock(FileStoreTable.class);
+        RowType rowType = mock(RowType.class);
+        when(rowType.getFields())
+                .thenReturn(Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
+        when(physicalTable.rowType()).thenReturn(rowType);
+        when(physicalTable.location())
+                .thenReturn(new Path("file:/tmp/paimon-b3-cache-publication-test"));
+        Method createContext =
+                PaimonService.class.getDeclaredMethod(
+                        "getOrCreateTableWriteContext",
+                        String.class,
+                        String.class,
+                        Identifier.class,
+                        TapConnectorContext.class,
+                        FileStoreTable.class,
+                        PaimonWriteSemanticContract.class);
+        createContext.setAccessible(true);
+
+        InvocationTargetException thrown =
+                assertThrows(
+                        InvocationTargetException.class,
+                        () ->
+                                createContext.invoke(
+                                        fixture.service,
+                                        TABLE_KEY,
+                                        TABLE_NAME,
+                                        Identifier.create("default", TABLE_NAME),
+                                        mock(TapConnectorContext.class),
+                                        physicalTable,
+                                        PaimonWriteSemanticContractTestFactory.forMode(
+                                                BucketMode.HASH_FIXED)));
+
+        assertTrue(thrown.getCause() instanceof IllegalStateException);
+        assertEquals(
+                "Tap task state map is required for stable Paimon commits",
+                thrown.getCause().getMessage());
+        assertFalse(map(fixture.service, "tableWriteContexts").containsKey(TABLE_KEY));
+        assertFalse(map(fixture.service, "paimonFieldCache").containsKey(TABLE_KEY));
+    }
+
+    @Test
+    void sourceDerivedStateMustReuseOnePrimaryKeySnapshot() throws Exception {
+        PaimonConfig config = new PaimonConfig();
+        config.setHashKey(true);
+        PaimonService service = new PaimonService(config, mock(Log.class));
+        TapTable table = mock(TapTable.class);
+        Collection<String> primaryKeys =
+                Arrays.asList("pk_1", "pk_2", "pk_3", "pk_4", "pk_5", "pk_6");
+        when(table.primaryKeys(true)).thenReturn(primaryKeys);
+        Method cacheSourceDerivedState =
+                PaimonService.class.getDeclaredMethod(
+                        "cacheSourceDerivedState", String.class, TapTable.class);
+        cacheSourceDerivedState.setAccessible(true);
+
+        cacheSourceDerivedState.invoke(service, TABLE_NAME, table);
+
+        verify(table, times(1)).primaryKeys(true);
+        assertEquals(Boolean.TRUE, map(service, "computeHashKey").get(TABLE_NAME));
+        assertSame(primaryKeys, map(service, "primaryKeyMap").get(TABLE_NAME));
     }
 
     @Test
@@ -244,6 +316,7 @@ class PaimonServiceTableDdlCacheInvalidationTest {
     private Fixture fixture() throws Exception {
         PaimonConfig config = new PaimonConfig();
         config.setDatabase("default");
+        config.setWarehouse("/tmp/paimon-ddl-cache-test");
         PaimonService service = new PaimonService(config, mock(Log.class));
         service.startForTest();
         Catalog catalog = mock(Catalog.class);
@@ -274,8 +347,6 @@ class PaimonServiceTableDdlCacheInvalidationTest {
     private static void seedDerivedCaches(PaimonService service) throws Exception {
         map(service, "paimonFieldCache").put(TABLE_KEY, Collections.emptyList());
         map(service, "paimonFieldCache").put(OTHER_TABLE_KEY, Collections.emptyList());
-        map(service, "fieldIndexCache").put(TABLE_KEY, Collections.emptyMap());
-        map(service, "fieldIndexCache").put(OTHER_TABLE_KEY, Collections.emptyMap());
         map(service, "computeHashKey").put(TABLE_NAME, Boolean.TRUE);
         map(service, "computeHashKey").put(OTHER_TABLE_NAME, Boolean.FALSE);
         map(service, "primaryKeyMap").put(TABLE_NAME, Collections.singleton("old_pk"));
@@ -285,7 +356,6 @@ class PaimonServiceTableDdlCacheInvalidationTest {
     private static void assertCurrentTableCachesRemoved(PaimonService service)
             throws Exception {
         assertFalse(map(service, "paimonFieldCache").containsKey(TABLE_KEY));
-        assertFalse(map(service, "fieldIndexCache").containsKey(TABLE_KEY));
         assertFalse(map(service, "computeHashKey").containsKey(TABLE_NAME));
         assertFalse(map(service, "primaryKeyMap").containsKey(TABLE_NAME));
     }
@@ -293,7 +363,6 @@ class PaimonServiceTableDdlCacheInvalidationTest {
     private static void assertOtherTableCachesPreserved(PaimonService service)
             throws Exception {
         assertTrue(map(service, "paimonFieldCache").containsKey(OTHER_TABLE_KEY));
-        assertTrue(map(service, "fieldIndexCache").containsKey(OTHER_TABLE_KEY));
         assertEquals(Boolean.FALSE, map(service, "computeHashKey").get(OTHER_TABLE_NAME));
         assertEquals(
                 Collections.singleton("other_pk"),
