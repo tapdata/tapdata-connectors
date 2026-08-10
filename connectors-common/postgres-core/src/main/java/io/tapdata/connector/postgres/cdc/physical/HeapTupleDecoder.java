@@ -101,7 +101,7 @@ public final class HeapTupleDecoder {
         int attlen = col.typLen;
         if (attlen > 0) {
             r.align(col.typAlign);
-            return PgTypeDecoder.decode(col.typeOid, r.readBytes(attlen));
+            return PgTypeDecoder.decode(col.typeOid, r.readBytes(attlen), col.enumTypeOid, col.enumLabels);
         }
         if (attlen == -1) {
             return readVarlena(r, col);
@@ -130,7 +130,7 @@ public final class HeapTupleDecoder {
             }
             int total = (first >> 1) & 0x7F;        // includes the 1-byte header
             r.skip(1);
-            return PgTypeDecoder.decode(col.typeOid, r.readBytes(total - 1));
+            return PgTypeDecoder.decode(col.typeOid, r.readBytes(total - 1), col.enumTypeOid, col.enumLabels);
         }
         // 4-byte header: align first
         r.align(col.typAlign);
@@ -148,9 +148,9 @@ public final class HeapTupleDecoder {
             int method = (int) ((tcinfo >> 30) & 0x03);
             byte[] comp = r.readBytes(total - 8);
             byte[] plain = method == 0 ? Pglz.decompress(comp, rawSize) : null;
-            return plain == null ? null : PgTypeDecoder.decode(col.typeOid, plain);
+            return plain == null ? null : PgTypeDecoder.decode(col.typeOid, plain, col.enumTypeOid, col.enumLabels);
         }
         r.skip(4);
-        return PgTypeDecoder.decode(col.typeOid, r.readBytes(total - 4));
+        return PgTypeDecoder.decode(col.typeOid, r.readBytes(total - 4), col.enumTypeOid, col.enumLabels);
     }
 }

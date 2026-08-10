@@ -7,6 +7,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -42,6 +44,33 @@ public class PgTypeDecoderTest {
         byte[] name = "id".getBytes(StandardCharsets.UTF_8);
         System.arraycopy(name, 0, buf, 0, name.length);
         assertEquals("id", PgTypeDecoder.decode(PgTypeDecoder.NAME, buf));
+    }
+
+    @Test
+    public void testDecodeEnumLabel() {
+        Map<Long, String> labels = new HashMap<>();
+        labels.put(70001L, "APPROVED");
+
+        assertEquals("APPROVED", PgTypeDecoder.decode(50001L, le32(70001L), 50001L, labels));
+    }
+
+    @Test
+    public void testDecodeEnumArrayWithUserTypeOid() {
+        Map<Long, String> labels = new HashMap<>();
+        labels.put(70001L, "STAGE");
+        labels.put(70002L, "WEB");
+
+        java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+        write32(o, 1);      // ndim
+        write32(o, 0);      // dataoffset
+        write32(o, 50001);  // elemtype: user-defined enum OID
+        write32(o, 2);      // dimension length
+        write32(o, 1);      // lower bound
+        write32(o, 70001);  // enum value OID -> STAGE
+        write32(o, 70002);  // enum value OID -> WEB
+
+        Object result = PgTypeDecoder.decode(50002L, o.toByteArray(), 50001L, labels);
+        assertEquals(Arrays.asList("STAGE", "WEB"), result);
     }
 
     @Test

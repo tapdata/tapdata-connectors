@@ -4,6 +4,7 @@ import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.entity.logger.Log;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,14 +24,19 @@ public class RelationCatalog {
     private final Log log;
     private final Map<Long, RelationInfo> cache = new ConcurrentHashMap<>();
     private final Map<Long, Boolean> negative = new ConcurrentHashMap<>();
+    private final Map<Long, EnumTypeInfo> enumTypeCache = new ConcurrentHashMap<>();
 
     private static final String REL_BY_FILENODE =
             "SELECT c.oid, n.nspname, c.relname, c.relreplident FROM pg_class c " +
                     "JOIN pg_namespace n ON c.relnamespace = n.oid " +
                     "WHERE c.relfilenode = %d AND c.relkind IN ('r','m','p') LIMIT 1";
     private static final String COLUMNS =
-            "SELECT attname, attnum, atttypid, attlen, attalign, attisdropped FROM pg_attribute " +
-                    "WHERE attrelid = %d AND attnum > 0 ORDER BY attnum";
+            "SELECT a.attname, a.attnum, a.atttypid, a.attlen, a.attalign, a.attisdropped, " +
+                    "CASE WHEN t.typtype = 'e' THEN t.oid WHEN et.typtype = 'e' THEN et.oid ELSE 0 END AS enumtypid " +
+                    "FROM pg_attribute a " +
+                    "JOIN pg_type t ON a.atttypid = t.oid " +
+                    "LEFT JOIN pg_type et ON t.typelem = et.oid " +
+                    "WHERE a.attrelid = %d AND a.attnum > 0 ORDER BY a.attnum";
     private static final String KEYS =
             "SELECT a.attname FROM pg_index i " +
                     "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) " +
@@ -64,6 +70,7 @@ public class RelationCatalog {
     public void invalidate() {
         cache.clear();
         negative.clear();
+        enumTypeCache.clear();
     }
 
     public void cache(long relNumber, RelationInfo rel) {
@@ -96,7 +103,7 @@ public class RelationCatalog {
             List<ColumnInfo> newColumns = new ArrayList<>(rel.columns);
             switch (op) {
                 case "INSERT": {
-                    ColumnInfo col = new ColumnInfo(attname, attnum, atttypid, attlen, attalign, attisdropped);
+                    ColumnInfo col = columnInfo(attname, attnum, atttypid, attlen, attalign, attisdropped);
                     int pos = 0;
                     while (pos < newColumns.size() && newColumns.get(pos).attnum < attnum) {
                         pos++;
@@ -111,7 +118,7 @@ public class RelationCatalog {
                 case "UPDATE": {
                     for (int i = 0; i < newColumns.size(); i++) {
                         if (newColumns.get(i).attnum == attnum) {
-                            newColumns.set(i, new ColumnInfo(attname, attnum, atttypid, attlen, attalign, attisdropped));
+                            newColumns.set(i, columnInfo(attname, attnum, atttypid, attlen, attalign, attisdropped));
                             break;
                         }
                     }
@@ -181,6 +188,47 @@ public class RelationCatalog {
                 new ArrayList<>(rel.keyColumns), rel.replicaIdentityFull);
     }
 
+    public RelationInfo applyPendingChangesWithTypeInfo(RelationInfo rel, java.util.List<PgAttributeChange> pending) {
+        if (pending == null || pending.isEmpty()) {
+            return rel;
+        }
+        List<ColumnInfo> columns = new ArrayList<>(rel.columns);
+        for (PgAttributeChange c : pending) {
+            if (c.attnum <= 0) {
+                continue;
+            }
+            switch (c.op) {
+                case "INSERT": {
+                    ColumnInfo col = columnInfo(c.attname, c.attnum, c.atttypid, c.attlen, c.attalign, c.attisdropped);
+                    int pos = 0;
+                    while (pos < columns.size() && columns.get(pos).attnum < c.attnum) {
+                        pos++;
+                    }
+                    if (pos < columns.size() && columns.get(pos).attnum == c.attnum) {
+                        columns.set(pos, col);
+                    } else {
+                        columns.add(pos, col);
+                    }
+                    break;
+                }
+                case "UPDATE": {
+                    for (int i = 0; i < columns.size(); i++) {
+                        if (columns.get(i).attnum == c.attnum) {
+                            columns.set(i, columnInfo(c.attname, c.attnum, c.atttypid, c.attlen, c.attalign, c.attisdropped));
+                            break;
+                        }
+                    }
+                    break;
+                }
+                case "DELETE":
+                    columns.removeIf(col -> col.attnum == c.attnum);
+                    break;
+            }
+        }
+        return new RelationInfo(rel.schema, rel.table, columns,
+                new ArrayList<>(rel.keyColumns), rel.replicaIdentityFull);
+    }
+
     /**
      * Captures a single pg_attribute row change decoded from WAL, stored until
      * the affected table's RelationInfo is loaded into the cache.
@@ -227,13 +275,15 @@ public class RelationCatalog {
             jdbcContext.query(String.format(COLUMNS, oid[0]), rs -> {
                 while (rs.next()) {
                     String align = rs.getString("attalign");
-                    columns.add(new ColumnInfo(
+                    long enumTypeOid = rs.getLong("enumtypid");
+                    columns.add(columnInfo(
                             rs.getString("attname"),
                             rs.getInt("attnum"),
                             rs.getLong("atttypid"),
                             rs.getInt("attlen"),
                             align == null || align.isEmpty() ? 'c' : align.charAt(0),
-                            rs.getBoolean("attisdropped")));
+                            rs.getBoolean("attisdropped"),
+                            enumTypeOid));
                 }
             });
             List<String> keys = new ArrayList<>();
@@ -246,6 +296,68 @@ public class RelationCatalog {
         } catch (Throwable e) {
             log.warn("Failed to resolve relation for relfilenode {}: {}", relNumber, e.getMessage());
             return null;
+        }
+    }
+
+    private ColumnInfo columnInfo(String name, int attnum, long typeOid, int typLen, char typAlign, boolean dropped) {
+        return columnInfo(name, attnum, typeOid, typLen, typAlign, dropped, resolveEnumTypeOid(typeOid));
+    }
+
+    private ColumnInfo columnInfo(String name, int attnum, long typeOid, int typLen, char typAlign, boolean dropped,
+                                  long enumTypeOid) {
+        if (enumTypeOid <= 0) {
+            return new ColumnInfo(name, attnum, typeOid, typLen, typAlign, dropped);
+        }
+        EnumTypeInfo enumInfo = enumTypeInfo(enumTypeOid);
+        if (enumInfo == null || enumInfo.labels.isEmpty()) {
+            return new ColumnInfo(name, attnum, typeOid, typLen, typAlign, dropped);
+        }
+        return new ColumnInfo(name, attnum, typeOid, typLen, typAlign, dropped, enumTypeOid, enumInfo.labels);
+    }
+
+    private long resolveEnumTypeOid(long typeOid) {
+        long[] out = {0L};
+        try {
+            jdbcContext.queryWithNext(
+                    "SELECT CASE WHEN t.typtype = 'e' THEN t.oid WHEN et.typtype = 'e' THEN et.oid ELSE 0 END AS enumtypid "
+                            + "FROM pg_type t LEFT JOIN pg_type et ON t.typelem = et.oid WHERE t.oid = " + typeOid,
+                    rs -> out[0] = rs.getLong("enumtypid"));
+        } catch (Throwable e) {
+            return 0L;
+        }
+        return out[0];
+    }
+
+    private EnumTypeInfo enumTypeInfo(long enumTypeOid) {
+        if (enumTypeOid <= 0) {
+            return null;
+        }
+        EnumTypeInfo cached = enumTypeCache.get(enumTypeOid);
+        if (cached != null) {
+            return cached;
+        }
+        Map<Long, String> labels = new HashMap<>();
+        try {
+            jdbcContext.query(
+                    "SELECT oid, enumlabel FROM pg_enum WHERE enumtypid = " + enumTypeOid + " ORDER BY enumsortorder, oid",
+                    rs -> {
+                        while (rs.next()) {
+                            labels.put(rs.getLong("oid"), rs.getString("enumlabel"));
+                        }
+                    });
+        } catch (Throwable e) {
+            return null;
+        }
+        EnumTypeInfo loaded = new EnumTypeInfo(labels);
+        enumTypeCache.put(enumTypeOid, loaded);
+        return loaded;
+    }
+
+    private static final class EnumTypeInfo {
+        final Map<Long, String> labels;
+
+        EnumTypeInfo(Map<Long, String> labels) {
+            this.labels = labels;
         }
     }
 }

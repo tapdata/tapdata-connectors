@@ -90,6 +90,61 @@ public class RelationCatalogTest {
     }
 
     @Test
+    public void testLookupLoadsEnumLabelsForEnumAndArrayColumns() throws Exception {
+        PostgresJdbcContext ctx = mock(PostgresJdbcContext.class);
+        Log log = mock(Log.class);
+
+        ResultSet rel = mock(ResultSet.class);
+        when(rel.next()).thenReturn(true);
+        when(rel.getLong("oid")).thenReturn(16384L);
+        when(rel.getString("nspname")).thenReturn("public");
+        when(rel.getString("relname")).thenReturn("cyber_draw");
+
+        ResultSet cols = mock(ResultSet.class);
+        when(cols.next()).thenReturn(true, true, false);
+        when(cols.getString("attname")).thenReturn("status", "drawMode");
+        when(cols.getInt("attnum")).thenReturn(1, 2);
+        when(cols.getLong("atttypid")).thenReturn(50001L, 50002L);
+        when(cols.getLong("enumtypid")).thenReturn(50001L, 50001L);
+        when(cols.getInt("attlen")).thenReturn(4, -1);
+        when(cols.getString("attalign")).thenReturn("i", "i");
+        when(cols.getBoolean("attisdropped")).thenReturn(false, false);
+
+        ResultSet enumLabels = mock(ResultSet.class);
+        when(enumLabels.next()).thenReturn(true, true, false);
+        when(enumLabels.getLong("oid")).thenReturn(70001L, 70002L);
+        when(enumLabels.getString("enumlabel")).thenReturn("DRAFT", "APPROVED");
+
+        ResultSet keys = mock(ResultSet.class);
+        when(keys.next()).thenReturn(false);
+
+        doAnswer(inv -> {
+            String sql = inv.getArgument(0);
+            ResultSetConsumer c = inv.getArgument(1);
+            if (sql.contains("pg_class")) {
+                c.accept(rel);
+            } else if (sql.contains("pg_attribute") && sql.contains("ORDER BY")) {
+                c.accept(cols);
+            } else if (sql.contains("pg_enum")) {
+                c.accept(enumLabels);
+            } else {
+                c.accept(keys);
+            }
+            return null;
+        }).when(ctx).query(anyString(), any(ResultSetConsumer.class));
+
+        RelationCatalog catalog = new RelationCatalog(ctx, log);
+        RelationInfo info = catalog.lookup(1L);
+
+        assertEquals(2, info.columns.size());
+        assertEquals(50001L, info.columns.get(0).enumTypeOid);
+        assertEquals("DRAFT", info.columns.get(0).enumLabels.get(70001L));
+        assertEquals(50001L, info.columns.get(1).enumTypeOid);
+        assertEquals("APPROVED", info.columns.get(1).enumLabels.get(70002L));
+        verify(ctx, times(1)).query(contains("pg_enum"), any(ResultSetConsumer.class));
+    }
+
+    @Test
     public void applyPendingChangesSkipsSystemColumnsAndReplacesExistingAttnum() {
         RelationInfo rel = new RelationInfo("public", "t",
                 Arrays.asList(
