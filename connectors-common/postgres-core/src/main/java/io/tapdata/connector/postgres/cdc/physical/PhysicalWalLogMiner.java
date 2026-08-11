@@ -1734,7 +1734,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 tapLogger.info("[WAL-DEBUG] applying {} pending pg_attribute change(s) to {}.{} before DML decode; beforeColumns={}",
                         pending.size(), rel.schema, rel.table, columnLayout(rel));
             }
-            rel = RelationCatalog.applyPendingChanges(rel, pending);
+            rel = catalog.applyPendingChangesWithTypeInfo(rel, pending);
             catalog.cache(relNumber, rel);
             if (isWalDebugEnabled()) {
                 tapLogger.info("[WAL-DEBUG] applied pending pg_attribute changes to {}.{}; afterColumns={}",

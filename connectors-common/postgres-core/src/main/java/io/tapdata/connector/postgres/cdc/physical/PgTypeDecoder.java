@@ -63,8 +63,17 @@ public final class PgTypeDecoder {
     private static final LocalDateTime PG_EPOCH_TS = LocalDateTime.of(2000, 1, 1, 0, 0);
 
     public static Object decode(long oid, byte[] v) {
+        return decode(oid, v, 0L, null);
+    }
+
+    public static Object decode(long oid, byte[] v, long enumTypeOid, Map<Long, String> enumLabels) {
         if (v == null) {
             return null;
+        }
+        if (oid == enumTypeOid && enumLabels != null && !enumLabels.isEmpty() && v.length == 4) {
+            long enumValueOid = le32(v) & 0xFFFFFFFFL;
+            String label = enumLabels.get(enumValueOid);
+            return label != null ? label : enumValueOid;
         }
         if (oid == BOOL) {
             return v.length > 0 && v[0] != 0;
@@ -141,7 +150,7 @@ public final class PgTypeDecoder {
             return new String(v, StandardCharsets.UTF_8);
         }
         // Try array type (int[], varchar[], text[], timestamp[], etc.)
-        Object arrResult = decodeArray(v);
+        Object arrResult = decodeArray(v, enumTypeOid, enumLabels);
         if (arrResult != null) {
             return arrResult;
         }
@@ -160,7 +169,7 @@ public final class PgTypeDecoder {
      *     — fixed-length (typlen &gt; 0): raw bytes, typlen per element
      *     — variable-length (typlen &lt; 0): full varlena datum per element
      */
-    private static Object decodeArray(byte[] v) {
+    private static Object decodeArray(byte[] v, long enumTypeOid, Map<Long, String> enumLabels) {
         if (v == null || v.length < 12) return null;
         int ndim = (int) le32(v, 0);
         if (ndim < 1 || ndim > 6) return null;
@@ -172,12 +181,12 @@ public final class PgTypeDecoder {
         //  but ndim=1 and dataoffset=0 happen to mask the shift for small-OID types)
         int elemOff = 8;
         long elemOid = le32(v, elemOff);
-        if (elemOid < 1 || elemOid > 10000) {
+        if (!isSupportedArrayElement(elemOid, enumTypeOid)) {
             elemOff = 9;
             if (v.length > elemOff + 3) {
                 elemOid = le32(v, elemOff);
             }
-            if (elemOid < 1 || elemOid > 10000) {
+            if (!isSupportedArrayElement(elemOid, enumTypeOid)) {
                 return null;
             }
         }
@@ -206,6 +215,9 @@ public final class PgTypeDecoder {
 
         // Determine element format
         Integer typlen = TYPE_LEN.get(elemOid);
+        if (typlen == null && elemOid == enumTypeOid && enumLabels != null && !enumLabels.isEmpty()) {
+            typlen = 4;
+        }
         boolean isFixed = typlen != null && typlen > 0;
 
         List<Object> values = new ArrayList<>(total);
@@ -229,10 +241,14 @@ public final class PgTypeDecoder {
                 elemBytes = datum.value;
             }
 
-            values.add(decode(elemOid, elemBytes));
+            values.add(decode(elemOid, elemBytes, enumTypeOid, enumLabels));
         }
 
         return ndim == 1 ? values : nestArray(values, dims, 0, 0).value;
+    }
+
+    private static boolean isSupportedArrayElement(long elemOid, long enumTypeOid) {
+        return elemOid >= 1 && (elemOid <= 10000 || TYPE_LEN.containsKey(elemOid) || elemOid == enumTypeOid);
     }
 
     private static VarlenaDatum readArrayVarlena(byte[] data, int offset) {
