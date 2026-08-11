@@ -552,7 +552,7 @@ public class StarrocksStreamLoader {
             }
 
             // 检查是否需要刷新（基于时间或大小阈值）
-            if (shouldFlushAfterBatch()) {
+            if (shouldFlushAfterBatch(table)) {
                 // 刷新时也打印一次状态
                 logCurrentStatus(processedEvents, batchDataSize, currentTime);
                 lastLogTime = currentTime;
@@ -893,7 +893,7 @@ public class StarrocksStreamLoader {
 
         // 记录刷新开始时间和状态
         long flushStartTime = System.currentTimeMillis();
-        long waitTime = flushStartTime - lastFlushTime;
+        long waitTime = flushStartTime - getTableLastFlushTime(tableName);
         long tableDataSize = getTableBatchSize(tableName);
 
         // 获取缓存文件路径用于日志
@@ -1379,13 +1379,14 @@ public class StarrocksStreamLoader {
      * 检查是否应该在批次处理后刷新
      * 只有在达到时间阈值时才刷新，大小阈值在单个记录处理时已经检查过了
      */
-    private boolean shouldFlushAfterBatch() {
-        if (pendingFlushTables.isEmpty()) {
+    private boolean shouldFlushAfterBatch(TapTable table) {
+        if (pendingFlushTables.isEmpty() || table == null || table.getId() == null) {
             return false; // 没有数据需要刷新
         }
 
         long currentTime = System.currentTimeMillis();
-        long timeSinceLastFlush = currentTime - lastFlushTime;
+        Long lastFlushTimeForTable = getTableLastFlushTime(table.getId());
+        long timeSinceLastFlush = currentTime - lastFlushTimeForTable;
         long flushTimeoutMs = StarrocksConfig.getFlushTimeoutSeconds() * 1000L;
 
         // 只检查时间阈值，因为大小阈值在 needFlush 中已经检查过了
