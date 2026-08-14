@@ -279,6 +279,9 @@ public class StarrocksStreamLoader {
      */
     private void checkAndFlushIfNeeded() throws StarrocksRetryableException {
         synchronized (writeLock) {
+            // 驱逐队首连续的、已全部落库(不在 pendingFlushTables)的陈旧 offset 锚点，避免长期无变更的冷表占据队首，导致断点被永久钉死在其旧位点上
+            evictStaleFirstOffsets();
+
             if (pendingFlushTables.isEmpty()) {
                 return; // 没有数据需要刷新
             }
@@ -313,6 +316,35 @@ public class StarrocksStreamLoader {
                         tablesToFlush.size(), formatBytes(getTotalBatchSize()), metrics.getCachedInfo());
 
                 flushSpecificTables(tablesToFlush);
+            }
+        }
+    }
+
+    /**
+     * 驱逐 firstOffsetByTable 队首连续的、已全部落库的陈旧 offset 锚点。
+     * <p>
+     * flushTable 回传断点时取的是队首表的 offset。若一张长期无变更的冷表在全量/增量早期
+     * 进入队首后再无新数据，它就不会再进入 pendingFlushTables，也就永远不会被 flush，
+     * 从而永远不会被移出队首(见 flushTable 中 tableName.equals(firstTableName) 分支)，
+     * 导致所有其它表 flush 回传的都是这张冷表的旧位点，断点被永久钉死。
+     * <p>
+     * 判据：队首表若不在 pendingFlushTables，说明它此刻没有待落库数据、之前的数据均已成功
+     * 导入，丢弃其 offset 锚点不会丢数，可直接驱逐；一旦遇到队首表在 pendingFlushTables 中，
+     * 则停止驱逐——该表会被定时/大小阈值 flush 后按正常流程移出队首并推进断点。
+     */
+    private void evictStaleFirstOffsets() {
+        synchronized (firstOffsetByTable) {
+            Iterator<Map.Entry<String, TapCallbackOffset>> iterator = firstOffsetByTable.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<String, TapCallbackOffset> firstEntry = iterator.next();
+                String firstTableName = firstEntry.getKey();
+                if (pendingFlushTables.contains(firstTableName)) {
+                    // 队首表仍有待落库数据，等它被正常 flush 后自然推进，停止驱逐
+                    break;
+                }
+                iterator.remove();
+                taplogger.info("Evicted stale offset anchor of table {} from queue head " +
+                        "(already flushed, no pending data), allowing breakpoint to advance", firstTableName);
             }
         }
     }
@@ -520,7 +552,7 @@ public class StarrocksStreamLoader {
             }
 
             // 检查是否需要刷新（基于时间或大小阈值）
-            if (shouldFlushAfterBatch()) {
+            if (shouldFlushAfterBatch(table)) {
                 // 刷新时也打印一次状态
                 logCurrentStatus(processedEvents, batchDataSize, currentTime);
                 lastLogTime = currentTime;
@@ -861,7 +893,7 @@ public class StarrocksStreamLoader {
 
         // 记录刷新开始时间和状态
         long flushStartTime = System.currentTimeMillis();
-        long waitTime = flushStartTime - lastFlushTime;
+        long waitTime = flushStartTime - getTableLastFlushTime(tableName);
         long tableDataSize = getTableBatchSize(tableName);
 
         // 获取缓存文件路径用于日志
@@ -1347,13 +1379,14 @@ public class StarrocksStreamLoader {
      * 检查是否应该在批次处理后刷新
      * 只有在达到时间阈值时才刷新，大小阈值在单个记录处理时已经检查过了
      */
-    private boolean shouldFlushAfterBatch() {
-        if (pendingFlushTables.isEmpty()) {
+    private boolean shouldFlushAfterBatch(TapTable table) {
+        if (pendingFlushTables.isEmpty() || table == null || table.getId() == null) {
             return false; // 没有数据需要刷新
         }
 
         long currentTime = System.currentTimeMillis();
-        long timeSinceLastFlush = currentTime - lastFlushTime;
+        Long lastFlushTimeForTable = getTableLastFlushTime(table.getId());
+        long timeSinceLastFlush = currentTime - lastFlushTimeForTable;
         long flushTimeoutMs = StarrocksConfig.getFlushTimeoutSeconds() * 1000L;
 
         // 只检查时间阈值，因为大小阈值在 needFlush 中已经检查过了
