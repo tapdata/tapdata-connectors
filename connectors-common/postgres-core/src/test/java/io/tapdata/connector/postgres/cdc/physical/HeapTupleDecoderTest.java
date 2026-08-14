@@ -98,6 +98,31 @@ public class HeapTupleDecoderTest {
     }
 
     @Test
+    public void testNullBitmapUsesPhysicalAttnumWhenCatalogHasGap() {
+        List<ColumnInfo> cols = Arrays.asList(
+                new ColumnInfo("a", 1, PgTypeDecoder.INT4, 4, 'i', false),
+                new ColumnInfo("d", 4, PgTypeDecoder.INT4, 4, 'i', false));
+
+        int natts = 4;
+        int bitmapLen = (natts + 7) / 8;
+        int tHoff = maxAlign(SIZE_OF_HEAP_TUPLE_HEADER + bitmapLen);
+        ByteArrayOutputStream o = new ByteArrayOutputStream();
+        u16(o, natts);
+        u16(o, HEAP_HASNULL);
+        o.write(tHoff);
+        o.write(0x09);                      // att1 present, att2/att3 null, att4 present
+        for (int i = 0; i < tHoff - SIZE_OF_HEAP_TUPLE_HEADER - bitmapLen; i++) {
+            o.write(0);
+        }
+        u32(o, 7);
+        u32(o, 99);
+
+        Map<String, Object> m = HeapTupleDecoder.decode(o.toByteArray(), cols);
+        assertEquals(7, m.get("a"));
+        assertEquals(99, m.get("d"));
+    }
+
+    @Test
     public void testPg15JsonbShortVarlenaFromWalTuple() {
         List<ColumnInfo> cols = Arrays.asList(
                 new ColumnInfo("a1", 1, PgTypeDecoder.INT4, 4, 'i', false),

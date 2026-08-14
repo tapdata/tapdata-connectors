@@ -58,13 +58,14 @@ public final class HeapTupleDecoder {
 
         for (int i = 0; i < columns.size(); i++) {
             ColumnInfo col = columns.get(i);
-            if (i >= natts) {
+            int tupleIndex = col.attnum - 1;
+            if (tupleIndex < 0 || tupleIndex >= natts) {
                 if (!col.dropped) {
                     out.put(col.name, null);
                 }
                 continue;
             }
-            boolean isNull = hasNull && !bitSet(nullBitmap, i);
+            boolean isNull = hasNull && !bitSet(nullBitmap, tupleIndex);
             if (isNull) {
                 if (!col.dropped) {
                     out.put(col.name, null);

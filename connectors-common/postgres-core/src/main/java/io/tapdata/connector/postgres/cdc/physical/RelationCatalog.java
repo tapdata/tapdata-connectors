@@ -34,7 +34,7 @@ public class RelationCatalog {
             "SELECT a.attname, a.attnum, a.atttypid, a.attlen, a.attalign, a.attisdropped, " +
                     "CASE WHEN t.typtype = 'e' THEN t.oid WHEN et.typtype = 'e' THEN et.oid ELSE 0 END AS enumtypid " +
                     "FROM pg_attribute a " +
-                    "JOIN pg_type t ON a.atttypid = t.oid " +
+                    "LEFT JOIN pg_type t ON a.atttypid = t.oid " +
                     "LEFT JOIN pg_type et ON t.typelem = et.oid " +
                     "WHERE a.attrelid = %d AND a.attnum > 0 ORDER BY a.attnum";
     private static final String KEYS =
