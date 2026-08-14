@@ -14,6 +14,7 @@
     <properties>
         <java.version>8</java.version>
         <tapdata.pdk.api.version>2.0.7-SNAPSHOT</tapdata.pdk.api.version>
+        <bouncycastle.version>1.84</bouncycastle.version>
     </properties>
     <dependencies>
         <dependency>
@@ -65,16 +66,25 @@
             <version>2.12.6.1</version>
             <scope>compile</scope>
         </dependency>
+        <!--
+          BC must NOT be fat-jarred into the connector.
+          jar-with-dependencies unpacks classes and drops JCE jar signatures, which causes:
+            "JCE cannot authenticate the provider BC" when SSLUtil registers BC as a JCE provider.
+          Scope provided: compile/test still resolve BC; runtime comes from the engine/TM parent
+          classloader, where spring-boot requiresUnpack keeps the signed bcprov/bcpkix jars.
+          Version must stay aligned with iengine org.bouncycastle.version.
+        -->
         <dependency>
             <groupId>org.bouncycastle</groupId>
-            <artifactId>bcprov-jdk15on</artifactId>
-            <version>1.60</version>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.bouncycastle</groupId>
-            <artifactId>bcpkix-jdk15on</artifactId>
-            <version>1.60</version>
-            <scope>compile</scope>
+            <artifactId>bcpkix-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version>
+            <scope>provided</scope>
         </dependency>
 
         <dependency>
