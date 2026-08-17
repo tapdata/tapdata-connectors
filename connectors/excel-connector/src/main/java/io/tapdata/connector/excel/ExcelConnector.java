@@ -24,6 +24,8 @@ import org.apache.poi.ss.util.CellRangeAddressBase;
 import org.apache.poi.xssf.usermodel.XSSFWorkbookFactory;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -72,6 +74,7 @@ public class ExcelConnector extends FileConnector {
                     Workbook wb = WorkbookFactory.create(is, excelConfig.getExcelPassword())
             ) {
                 FormulaEvaluator formulaEvaluator = wb.getCreationHelper().createFormulaEvaluator();
+                DataFormatter dataFormatter = new DataFormatter();
                 List<Integer> sheetNumbers = EmptyKit.isEmpty(excelConfig.getSheetNum()) ? ExcelUtil.getAllSheetNumber(wb.getNumberOfSheets()) : excelConfig.getSheetNum();
                 List<Integer> sheets = sheetNumbers.stream().filter(n -> n >= fileOffset.getSheetNum()).collect(Collectors.toList());
                 for (int i = 0; isAlive() && i < sheets.size(); i++) {
@@ -91,14 +94,18 @@ public class ExcelConnector extends FileConnector {
                         if (j > lastMergedRow) {
                             for (int k = excelConfig.getFirstColumn() - 1; k < excelConfig.getLastColumn(); k++) {
                                 checkCellType(k, row.getCell(k), cellTypeMap);
-                                Object val = ExcelUtil.getCellValue(row.getCell(k), formulaEvaluator);
-                                after.put((String) headers[k - excelConfig.getFirstColumn() + 1], excelConfig.getJustString() ? (EmptyKit.isNull(val) ? "null" : String.valueOf(val)) : val);
+                                Object val = excelConfig.getJustString()
+                                        ? ExcelUtil.getCellDisplayValue(row.getCell(k), formulaEvaluator, dataFormatter)
+                                        : ExcelUtil.getCellValue(row.getCell(k), formulaEvaluator);
+                                after.put((String) headers[k - excelConfig.getFirstColumn() + 1], excelConfig.getJustString() ? parseValue(val) : val);
                             }
                         } else {
                             for (int k = excelConfig.getFirstColumn() - 1; k < excelConfig.getLastColumn(); k++) {
                                 checkCellType(k, row.getCell(k), cellTypeMap);
-                                Object val = ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, row.getCell(k), formulaEvaluator);
-                                after.put((String) headers[k - excelConfig.getFirstColumn() + 1], excelConfig.getJustString() ? (EmptyKit.isNull(val) ? "null" : String.valueOf(val)) : val);
+                                Object val = excelConfig.getJustString()
+                                        ? ExcelUtil.getMergedCellDisplayValue(mergedList, mergedDataMap, row.getCell(k), formulaEvaluator, dataFormatter)
+                                        : ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, row.getCell(k), formulaEvaluator);
+                                after.put((String) headers[k - excelConfig.getFirstColumn() + 1], excelConfig.getJustString() ? parseValue(val) : val);
                             }
                         }
                         TapRecordEvent recordEvent = insertRecordEvent(after, tapTable.getId()).referenceTime(lastModified);
@@ -204,7 +211,7 @@ public class ExcelConnector extends FileConnector {
             field.name(objectEntry.getKey().replaceAll("\n", ""));
             Object val = objectEntry.getValue();
             if (isJustString) {
-                val = EmptyKit.isNull(val) ? "null" : String.valueOf(val);
+                val = parseValue(val);
             }
             if (EmptyKit.isNull(val) || val instanceof String) {
                 if (EmptyKit.isNotEmpty((String) val) && ((String) val).length() > 200) {
@@ -219,4 +226,12 @@ public class ExcelConnector extends FileConnector {
         }
     }
 
+    Object parseValue(Object val) {
+        if (val instanceof Double || val instanceof Float || val instanceof Long) {
+            val = BigDecimal.valueOf(((Number) val).doubleValue()).stripTrailingZeros().toPlainString();
+        } else {
+            val = EmptyKit.isNull(val) ? "null" : String.valueOf(val);
+        }
+        return val;
+    }
 }
