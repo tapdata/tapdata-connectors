@@ -54,10 +54,13 @@ public class PostgresTest extends CommonDbTest {
         return this;
     }
 
-    public void testHostPortForMasterSlave(boolean master) {
+    public boolean testHostPortForMasterSlave(boolean master) {
         AtomicBoolean isMaster = new AtomicBoolean();
         String availableHost = null;
         int availablePort = 0;
+        if (EmptyKit.isEmpty(((PostgresConfig) commonDbConfig).getMasterSlaveAddress())) {
+            return false;
+        }
         for (LinkedHashMap<String, Integer> hostPort : ((PostgresConfig) commonDbConfig).getMasterSlaveAddress()) {
             commonDbConfig.setHost(String.valueOf(hostPort.get("host")));
             commonDbConfig.setPort(hostPort.get("port"));
@@ -68,7 +71,7 @@ public class PostgresTest extends CommonDbTest {
                 if (master) {
                     if (isMaster.get()) {
                         masterConnected = true;
-                        return;
+                        return true;
                     } else {
                         availableHost = commonDbConfig.getHost();
                         availablePort = commonDbConfig.getPort();
@@ -77,7 +80,7 @@ public class PostgresTest extends CommonDbTest {
                 } else {
                     if (!isMaster.get()) {
                         masterConnected = false;
-                        return;
+                        return true;
                     } else {
                         availableHost = commonDbConfig.getHost();
                         availablePort = commonDbConfig.getPort();
@@ -91,6 +94,7 @@ public class PostgresTest extends CommonDbTest {
             commonDbConfig.setHost(availableHost);
             commonDbConfig.setPort(availablePort);
         }
+        return false;
     }
 
     public PostgresTest withPostgresVersion(String version) {

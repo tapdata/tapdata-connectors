@@ -71,11 +71,13 @@
 		<module>vastbase-connector</module>
 		<module>highgo-connector</module>
 		<module>file-stream-connector</module>
-		<module>paimon-connector</module>
+		<module>paimon-plus-connector</module>
 		<module>snowflake-connector</module>
+		<module>risingwave-connector</module>
 	</modules>
 	<properties>
-		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>
+		<maven.build.timestamp.format>yyyyMMddHHmm</maven.build.timestamp.format>
+		<connector.file.name>${project.artifactId}-v${project.version}-${maven.build.timestamp}</connector.file.name>
 		<java.version>8</java.version>
 		<tapdata.pdk.runner.version>2.5-SNAPSHOT</tapdata.pdk.runner.version>
 		<tapdata.pdk.api.version>2.0.5-SNAPSHOT</tapdata.pdk.api.version>
@@ -302,4 +304,3 @@
 		</repository>
 	</repositories>
 </project>
-

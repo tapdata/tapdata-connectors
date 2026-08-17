@@ -54,6 +54,10 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private String walSpillDir;
     // Number of WAL segments to look back for cold-cache warm-up (default 10)
     private Integer walLookbackSegments;
+    // Explicit operator override: after timeline changes, allow starting at the
+    // first readable point on the current timeline when earlier ancestor WAL is
+    // unavailable. This can skip unconfirmed WAL and is disabled by default.
+    private Boolean walUnsafeTimelineResume = false;
     // EDB Postgres Advanced Server TDE WAL decryption. Enabled when the TDE key
     // file is uploaded in connection config.
     private String walTdeKey;
@@ -330,6 +334,14 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setWalLookbackSegments(Integer walLookbackSegments) {
         this.walLookbackSegments = walLookbackSegments;
+    }
+
+    public Boolean getWalUnsafeTimelineResume() {
+        return walUnsafeTimelineResume;
+    }
+
+    public void setWalUnsafeTimelineResume(Boolean walUnsafeTimelineResume) {
+        this.walUnsafeTimelineResume = walUnsafeTimelineResume;
     }
 
     public String getWalTdeKey() {
