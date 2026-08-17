@@ -1,5 +1,17 @@
 package io.tapdata.connector.paimon.service;
 
+import io.tapdata.connector.paimon.commit.PaimonMicroBatchCoordinator;
+
+import io.tapdata.connector.paimon.write.PaimonTableCommitter;
+import io.tapdata.connector.paimon.write.PaimonTableWriteContext;
+import io.tapdata.connector.paimon.write.bucket.PaimonBucketWriterStrategy;
+
+import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContractTestFactory;
+
+import io.tapdata.connector.paimon.exception.PaimonDynamicBucketPollutedException;
+
+import io.tapdata.connector.paimon.exception.PaimonFatalWriteException;
+
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.entity.event.TapCallbackOffset;
 import io.tapdata.entity.event.control.HeartbeatEvent;
@@ -42,10 +54,12 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -89,7 +103,8 @@ class PaimonServiceInitialSyncPendingTest {
         service.afterInitialSync(connectorContext, tapTable);
 
         verify(strategy, times(1)).prepareCommit(0L);
-        verify(committer, times(1)).filterAndCommit(anyMap());
+        verify(committer, times(1)).commit(anyLong(), anyList());
+        verify(committer, never()).filterAndCommit(anyMap());
         assertEquals(
                 Long.valueOf(123L),
                 tableState(service, "default.t").commitIntervalBaseTimeMs());
@@ -154,7 +169,8 @@ class PaimonServiceInitialSyncPendingTest {
         order.verify(strategy).validateRoutingRow(rowCaptor.capture(), eq("INSERT"));
         order.verify(strategy).write(same(rowCaptor.getValue()));
         order.verify(strategy).prepareCommit(0L);
-        order.verify(committer).filterAndCommit(anyMap());
+        order.verify(committer).commit(eq(0L), anyList());
+        verify(committer, never()).filterAndCommit(anyMap());
         assertEquals(expectedHash, rowCaptor.getValue().getString(0).toString());
         assertEquals(originalSourceData, sourceData);
         assertFalse(sourceData.containsKey("_hash_key"));
@@ -178,6 +194,13 @@ class PaimonServiceInitialSyncPendingTest {
                     when(future.isCancelled()).thenReturn(false);
                     return future;
                 });
+        doAnswer(
+                        invocation -> {
+                            ((Runnable) invocation.getArgument(0)).run();
+                            return null;
+                        })
+                .when(schedulerExecutor)
+                .execute(any(Runnable.class));
         when(schedulerExecutor.awaitTermination(anyLong(), any(TimeUnit.class)))
                 .thenReturn(true);
         PaimonService service =
@@ -186,7 +209,7 @@ class PaimonServiceInitialSyncPendingTest {
                         mock(Log.class),
                         clock::get,
                         () -> { },
-                        () -> schedulerExecutor);
+                        ignored -> schedulerExecutor);
         AtomicInteger callbackCount = new AtomicInteger();
         service.setFlushOffsetCallback(ignored -> callbackCount.incrementAndGet());
         service.startForTest();
@@ -384,6 +407,9 @@ class PaimonServiceInitialSyncPendingTest {
                         Collections.emptyList(),
                         0L);
         when(strategy.prepareCommit(0L)).thenReturn(Collections.emptyList());
+        doThrow(new RuntimeException("direct commit outcome unknown"))
+                .when(committer)
+                .commit(anyLong(), anyList());
         when(committer.filterAndCommit(anyMap()))
                 .thenThrow(new RuntimeException("ambiguous"))
                 .thenReturn(0);
@@ -439,6 +465,11 @@ class PaimonServiceInitialSyncPendingTest {
                         0L);
         when(strategy.prepareCommit(0L)).thenReturn(Collections.emptyList());
         when(strategy.prepareCommit(1L)).thenReturn(Collections.emptyList());
+        doThrow(
+                        new RuntimeException("historical direct outcome unknown"),
+                        new RuntimeException("current direct outcome unknown"))
+                .when(committer)
+                .commit(anyLong(), anyList());
         when(committer.filterAndCommit(anyMap()))
                 .thenThrow(new RuntimeException("historical commit ambiguous"))
                 .thenReturn(0)

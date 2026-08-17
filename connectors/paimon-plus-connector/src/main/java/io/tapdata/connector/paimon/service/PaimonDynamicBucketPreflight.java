@@ -1,5 +1,9 @@
 package io.tapdata.connector.paimon.service;
 
+import io.tapdata.connector.paimon.commit.PaimonCommitStateStore;
+
+import io.tapdata.connector.paimon.exception.PaimonDynamicBucketPollutedException;
+import io.tapdata.connector.paimon.util.PaimonSpillDirCleaner;
 import io.tapdata.entity.utils.cache.KVMap;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.crosspartition.GlobalIndexAssigner;
@@ -9,22 +13,19 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 
-import java.io.File;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-import static org.apache.paimon.disk.IOManagerImpl.splitPaths;
-
 /** One-time exact-primary-key pollution preflight for legacy HASH_DYNAMIC tables. */
-final class PaimonDynamicBucketPreflight {
+public final class PaimonDynamicBucketPreflight {
 
     private static final String MARKER_PREFIX = "paimon.hash-dynamic-preflight-v1.";
 
     private PaimonDynamicBucketPreflight() {
     }
 
-    static void ensureHashDynamicValidated(
+    public static void ensureHashDynamicValidated(
             KVMap<Object> stateMap,
             String warehouse,
             String tableKey,
@@ -66,19 +67,16 @@ final class PaimonDynamicBucketPreflight {
 
     private static void validateExactPrimaryKeyUniqueness(
             String tableKey, FileStoreTable table, String configuredTmpDirs) throws Exception {
-        String tmpDirs = configuredTmpDirs;
-        if (tmpDirs == null || tmpDirs.trim().isEmpty()) {
-            tmpDirs = System.getProperty("java.io.tmpdir", new File(".").getAbsolutePath());
-        }
-
         IOManager ioManager = null;
         GlobalIndexAssigner checker = null;
         List<String> spillDirs = Collections.emptyList();
         Long snapshotBefore = table.snapshotManager().latestSnapshotIdFromFileSystem();
         Exception failure = null;
         try {
-            ioManager = IOManager.create(splitPaths(tmpDirs));
-            spillDirs = PaimonSpillDirCleaner.registerLiveDirs(ioManager);
+            PaimonSpillDirCleaner.IOManagerBuildResult built =
+                    PaimonSpillDirCleaner.resolveAndCreateIOManager(configuredTmpDirs);
+            ioManager = built.ioManager();
+            spillDirs = built.spillDirs();
             FileStoreTable validationTable = withoutIndexTtl(table);
             checker = new GlobalIndexAssigner(validationTable);
             checker.open(0L, ioManager, 1, 0, (row, bucket) -> { });
@@ -104,9 +102,7 @@ final class PaimonDynamicBucketPreflight {
                                 + "only one write job per physical table is supported");
             }
         } catch (Exception e) {
-            failure = containsMessage(e, "data contains duplicates")
-                    ? new PaimonDynamicBucketPollutedException(tableKey, e)
-                    : e;
+            failure = PaimonDynamicBucketPollutedException.wrapIfPolluted(tableKey, e);
         } finally {
             failure = close(checker, failure);
             failure = close(ioManager, failure);
@@ -123,7 +119,7 @@ final class PaimonDynamicBucketPreflight {
      * Use a read-only dynamic table copy with the TTL removed so every latest-snapshot split is
      * examined; the persisted table options are not changed.
      */
-    static FileStoreTable withoutIndexTtl(FileStoreTable table) {
+    public static FileStoreTable withoutIndexTtl(FileStoreTable table) {
         if (!table.options().containsKey(CoreOptions.CROSS_PARTITION_UPSERT_INDEX_TTL.key())) {
             return table;
         }
@@ -144,16 +140,5 @@ final class PaimonDynamicBucketPreflight {
             failure.addSuppressed(closeError);
         }
         return failure;
-    }
-
-    private static boolean containsMessage(Throwable error, String text) {
-        Throwable current = error;
-        while (current != null) {
-            if (current.getMessage() != null && current.getMessage().contains(text)) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
     }
 }

@@ -69,11 +69,17 @@ Paimon 数据库名称（默认：default）
 | BINARY | TapBinary |
 | VARBINARY | TapBinary |
 | DATE | TapDate |
+| TIME(0-3) | TapTime |
 | TIMESTAMP | TapDateTime |
 | TIMESTAMP_LTZ | TapDateTime |
-| ARRAY | TapArray (以 JSON 字符串存储) |
-| MAP | TapMap (以 JSON 字符串存储) |
-| ROW | TapMap (以 JSON 字符串存储) |
+| STRING | TapArray (以 JSON 字符串存储) |
+| STRING | TapMap (以 JSON 字符串存储) |
+| STRING | TapRow/TapRaw (以 JSON 字符串存储) |
+
+`INT` 和 `INTEGER` 都创建 Paimon `INT`。不带参数的 `DECIMAL` 使用 `DECIMAL(38,10)`；
+不带参数的 `TIME` 使用 `TIME(3)`，仅支持 0-3 位精度，包含亚毫秒精度的输入会被拒绝。
+连接器不会自动迁移已有目标列：历史 STRING 列仍按实际物理类型写入，原生 Paimon
+ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 JSON 写入 STRING 列。
 
 ## 限制
 
@@ -109,4 +115,3 @@ Paimon 数据库名称（默认：default）
 
 - [Apache Paimon 文档](https://paimon.apache.org/)
 - [Paimon GitHub 仓库](https://github.com/apache/paimon)
-

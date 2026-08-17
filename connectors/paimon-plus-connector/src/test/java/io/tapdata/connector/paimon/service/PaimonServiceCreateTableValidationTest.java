@@ -1,4 +1,7 @@
 package io.tapdata.connector.paimon.service;
+import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContractResolver;
+
+import io.tapdata.connector.paimon.exception.PaimonFatalWriteException;
 
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -19,6 +22,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DataTypeRoot;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -319,6 +323,70 @@ class PaimonServiceCreateTableValidationTest {
             FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
 
             assertFalse(table.options().containsKey("sink.parallelism"));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void cdcSchemaTypesMustMaterializeUsingConnectorStorageContract() throws Exception {
+        String tableName = "cdc_schema_types";
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        PaimonService service = service(tableName, catalog);
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+        TapTable tapTable =
+                new TapTable(tableName)
+                        .add(new TapField("id", " int ").primaryKeyPos(1))
+                        .add(new TapField("pt", "INTEGER"))
+                        .add(new TapField("event_time", "TIME"))
+                        .add(new TapField("array_value", "ARRAY"))
+                        .add(new TapField("map_value", "MAP"))
+                        .add(new TapField("row_value", "ROW"))
+                        .add(new TapField("multiset_value", "MULTISET"))
+                        .add(new TapField("variant_value", "VARIANT"));
+
+        try {
+            assertTrue(service.createTable(tapTable));
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+            assertEquals(
+                    DataTypeRoot.INTEGER,
+                    table.rowType().getField("id").type().getTypeRoot());
+            assertEquals(
+                    DataTypeRoot.INTEGER,
+                    table.rowType().getField("pt").type().getTypeRoot());
+            assertEquals(DataTypes.TIME(3), table.rowType().getField("event_time").type());
+            assertEquals(DataTypes.STRING(), table.rowType().getField("array_value").type());
+            assertEquals(DataTypes.STRING(), table.rowType().getField("map_value").type());
+            assertEquals(DataTypes.STRING(), table.rowType().getField("row_value").type());
+            assertEquals(DataTypes.STRING(), table.rowType().getField("multiset_value").type());
+            assertEquals(DataTypes.STRING(), table.rowType().getField("variant_value").type());
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void timePrecisionAboveMillisecondsMustFailBeforeTableCreation() throws Exception {
+        String tableName = "reject_time_precision";
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        PaimonConfig config = config(tableName);
+        config.setPartitionKey(Collections.emptyList());
+        PaimonService service = service(config, catalog);
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+        TapTable tapTable =
+                new TapTable(tableName)
+                        .add(new TapField("id", "INT"))
+                        .add(new TapField("event_time", "TIME(4)"));
+
+        try {
+            PaimonFatalWriteException thrown =
+                    assertThrows(
+                            PaimonFatalWriteException.class,
+                            () -> service.createTable(tapTable));
+
+            assertTrue(thrown.getMessage().contains("PAIMON_TIME_PRECISION_UNSUPPORTED"));
+            assertThrows(Catalog.TableNotExistException.class, () -> catalog.getTable(identifier));
         } finally {
             service.close();
         }

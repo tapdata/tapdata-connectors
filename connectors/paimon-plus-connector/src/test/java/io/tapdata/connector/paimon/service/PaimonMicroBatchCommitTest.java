@@ -1,5 +1,15 @@
 package io.tapdata.connector.paimon.service;
 
+import io.tapdata.connector.paimon.commit.PaimonMicroBatchCoordinator;
+
+import io.tapdata.connector.paimon.write.PaimonTableCommitter;
+import io.tapdata.connector.paimon.write.PaimonTableWriteContext;
+import io.tapdata.connector.paimon.write.bucket.PaimonBucketWriterStrategy;
+
+import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContractTestFactory;
+
+import io.tapdata.connector.paimon.exception.PaimonFatalWriteException;
+
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -23,8 +33,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -46,7 +58,8 @@ class PaimonMicroBatchCommitTest {
 
         verify(fixture.strategy, times(3)).write(any());
         verify(fixture.strategy, times(1)).prepareCommit(0L);
-        verify(fixture.committer, times(1)).filterAndCommit(anyMap());
+        verify(fixture.committer, times(1)).commit(anyLong(), anyList());
+        verify(fixture.committer, never()).filterAndCommit(anyMap());
         PaimonMicroBatchCoordinator.TableSnapshot state = fixture.state();
         assertEquals(3L, state.acceptedGeneration());
         assertEquals(3L, state.committedGeneration());
@@ -65,7 +78,8 @@ class PaimonMicroBatchCommitTest {
         fixture.write(cdcEvent(2));
 
         verify(fixture.strategy, times(1)).prepareCommit(0L);
-        verify(fixture.committer, times(1)).filterAndCommit(anyMap());
+        verify(fixture.committer, times(1)).commit(anyLong(), anyList());
+        verify(fixture.committer, never()).filterAndCommit(anyMap());
         assertEquals(Long.valueOf(1_100L), fixture.state().commitIntervalBaseTimeMs());
     }
 
@@ -125,9 +139,11 @@ class PaimonMicroBatchCommitTest {
             throws Exception {
         Fixture fixture = fixture(1, 30_000);
         RuntimeException first = new RuntimeException("first-ambiguous");
+        RuntimeException direct = new RuntimeException("direct-ambiguous");
         RuntimeException retry1 = new RuntimeException("retry-1");
         RuntimeException retry2 = new RuntimeException("retry-2");
         RuntimeException retry3 = new RuntimeException("retry-3");
+        doThrow(direct).when(fixture.committer).commit(anyLong(), anyList());
         when(fixture.committer.filterAndCommit(anyMap()))
                 .thenThrow(first, retry1, retry2, retry3);
 
@@ -135,12 +151,14 @@ class PaimonMicroBatchCommitTest {
                 assertThrows(RuntimeException.class, () -> fixture.write(cdcEvent(1)));
 
         assertSame(first, thrown);
-        assertEquals(3, thrown.getSuppressed().length);
-        assertSame(retry1, thrown.getSuppressed()[0]);
-        assertSame(retry2, thrown.getSuppressed()[1]);
-        assertSame(retry3, thrown.getSuppressed()[2]);
+        assertEquals(4, thrown.getSuppressed().length);
+        assertSame(direct, thrown.getSuppressed()[0]);
+        assertSame(retry1, thrown.getSuppressed()[1]);
+        assertSame(retry2, thrown.getSuppressed()[2]);
+        assertSame(retry3, thrown.getSuppressed()[3]);
         verify(fixture.strategy, times(1)).write(any());
         verify(fixture.strategy, times(1)).prepareCommit(0L);
+        verify(fixture.committer, times(1)).commit(anyLong(), anyList());
         verify(fixture.committer, times(4)).filterAndCommit(anyMap());
         assertEquals(1L, fixture.state().acceptedGeneration());
         assertEquals(0L, fixture.state().committedGeneration());

@@ -19,6 +19,9 @@ import java.util.Map;
 public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     private static final long serialVersionUID = 1L;
+    public static final int DEFAULT_ASYNC_COMMIT_CONCURRENCY = 4;
+    public static final int MIN_ASYNC_COMMIT_CONCURRENCY = 1;
+    public static final int MAX_ASYNC_COMMIT_CONCURRENCY = 16;
 
     // Warehouse path
     private String warehouse;
@@ -54,11 +57,12 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
      * "dynamic" writes bucket=-1, "postpone" writes bucket=-2, and "fixed" requires a positive
      * bucket count. Paimon materializes the final BucketMode from the schema and table shape.
      *
-     * Sources:
-     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
-     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
-     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L99-L109
-     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/AppendOnlyFileStore.java#L72-L75
+     * Sources: {@code paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#BUCKET},
+     * lines 100-112; {@code paimon-common/src/main/java/org/apache/paimon/table/
+     * BucketMode.java}, lines 30-73; {@code paimon-core/src/main/java/org/apache/paimon/
+     * KeyValueFileStore.java#bucketMode}, lines 100-109; and {@code paimon-core/src/main/java/
+     * org/apache/paimon/AppendOnlyFileStore.java#bucketMode}, lines 73-75.
+     * Baseline: {@code apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e}.
      */
     private String bucketMode = "dynamic";
 
@@ -94,12 +98,19 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // Enable background deadline commits for low-traffic CDC tables (default: true)
     private Boolean enableAsyncCommit = true;
 
+    // Connector-level physical-table commit concurrency. This is deliberately not mapped to
+    // Paimon's file-operation.thread-num, which controls internal file operations instead.
+    private Integer asyncCommitConcurrency = DEFAULT_ASYNC_COMMIT_CONCURRENCY;
+
     // Enable auto compaction (default: true)
     // Compaction merges small files for better query performance
     private Boolean enableAutoCompaction = true;
 
-    // Full Compaction interval in minutes (default: 60 minutes)
-    private Integer compactionIntervalMinutes = 60;
+    // Full Compaction interval in minutes (default: 30 minutes)
+    // Must match the value advertised in spec.json (default: 30) and the
+    // localized placeholders (en/zh_CN/zh_TW); otherwise users see "default: 30"
+    // in the UI but the runtime silently uses a different fallback.
+    private Integer compactionIntervalMinutes = 30;
 
     // Target file size in MB (default: 128MB)
     // Paimon will try to create files of this size
@@ -276,12 +287,13 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
      * Resolve the first-class bucket configuration for one logical table to Paimon's native
      * {@code bucket} value.
      *
-     * <p>Paimon 1.3.1 defines -1 as dynamic, -2 as postpone, and positive values as fixed bucket
+     * <p>Paimon 1.3.2 defines -1 as dynamic, -2 as postpone, and positive values as fixed bucket
      * mode. A non-positive fixed count is never reinterpreted as another mode.
      *
-     * <p>Sources:
-     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L100-L112
-     * https://github.com/apache/paimon/blob/release-1.3.1/paimon-common/src/main/java/org/apache/paimon/table/BucketMode.java#L63-L73
+     * <p>Sources: {@code paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#BUCKET},
+     * lines 100-112, and {@code paimon-common/src/main/java/org/apache/paimon/table/
+     * BucketMode.java}, lines 30-73. Baseline:
+     * {@code apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e}.
      *
      * @param tableName logical table name used for per-table configuration lookup
      * @return Paimon's native bucket value
@@ -310,15 +322,6 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
                 throw new IllegalArgumentException(
                         "Bucket mode must be one of 'dynamic', 'postpone', or 'fixed'");
         }
-    }
-
-    /**
-     * Check if using dynamic bucket mode
-     *
-     * @return true if using dynamic bucket mode
-     */
-    public boolean isDynamicBucketMode() {
-        return "dynamic".equalsIgnoreCase(bucketMode);
     }
 
     public String getFileFormat() {
@@ -417,6 +420,16 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         this.enableAsyncCommit = enableAsyncCommit;
     }
 
+    public Integer getAsyncCommitConcurrency() {
+        return asyncCommitConcurrency == null
+                ? DEFAULT_ASYNC_COMMIT_CONCURRENCY
+                : asyncCommitConcurrency;
+    }
+
+    public void setAsyncCommitConcurrency(Integer asyncCommitConcurrency) {
+        this.asyncCommitConcurrency = asyncCommitConcurrency;
+    }
+
     public Boolean getEnableAutoCompaction() {
         return enableAutoCompaction;
     }
@@ -483,12 +496,13 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
      */
     private static boolean isPaimonS3Available() {
         /*
-         * REVIEW: paimon-s3 1.3.1 packages S3FileIO below the nested paimon-plugin-s3 directory and
+         * REVIEW: paimon-s3 1.3.2 packages S3FileIO below the nested paimon-plugin-s3 directory and
          * exposes the root-classpath S3Loader as the FileIOLoader. Class.forName(S3FileIO) therefore
          * returns false with the connector's current artifact, selecting s3a:// even though the
          * native loader is packaged. Capability detection should use FileIO loader discovery.
-         * Source:
-         * https://github.com/apache/paimon/blob/release-1.3.1/paimon-filesystems/paimon-s3/src/main/java/org/apache/paimon/s3/S3Loader.java#L35-L83
+         * Source: {@code paimon-filesystems/paimon-s3/src/main/java/org/apache/paimon/s3/
+         * S3Loader.java#load}, lines 32-83. Baseline:
+         * {@code apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e}.
          */
         try {
             Class.forName("org.apache.paimon.s3.S3FileIO");
@@ -599,6 +613,16 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         }
 
         resolveBucket(bucketMode, bucketCount);
+
+        int commitConcurrency = getAsyncCommitConcurrency();
+        if (commitConcurrency < MIN_ASYNC_COMMIT_CONCURRENCY
+                || commitConcurrency > MAX_ASYNC_COMMIT_CONCURRENCY) {
+            throw new IllegalArgumentException(
+                    "Async commit concurrency must be between "
+                            + MIN_ASYNC_COMMIT_CONCURRENCY
+                            + " and "
+                            + MAX_ASYNC_COMMIT_CONCURRENCY);
+        }
         
         switch (storageType.toLowerCase()) {
             case "s3":
