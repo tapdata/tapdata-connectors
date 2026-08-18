@@ -8,13 +8,11 @@ import org.dom4j.Node;
 import org.dom4j.tree.DefaultElement;
 import org.dom4j.tree.DefaultText;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-public class BigSaxSchemaHandler implements ElementHandler {
+public class BigSaxSchemaHandler implements ElementHandler, HandlerBase {
 
     private String path;
     private Map<String, Object> sampleResult;
@@ -67,21 +65,20 @@ public class BigSaxSchemaHandler implements ElementHandler {
         }
     }
 
-    private Object analyzeElement(Element element) {
+    @Override
+    public Object analyzeElement(Element element) {
         List<Node> nodes = element.content();
         if (nodes.size() == 1 && nodes.get(0) instanceof DefaultText) {
             return nodes.get(0).getText();
-        } else {
-            List<Node> newNodes = nodes.stream().filter(v -> v instanceof DefaultElement).collect(Collectors.toList());
-            if (newNodes.stream().map(Node::getPath).distinct().count() > 1) {
-                Map<String, Object> subMap = new LinkedHashMap<>();
-                newNodes.forEach(v -> subMap.put(v.getName(), analyzeElement((DefaultElement) v)));
-                return subMap;
-            } else {
-                List<Object> subList = new ArrayList<>();
-                newNodes.forEach(v -> subList.add(analyzeElement((DefaultElement) v)));
-                return subList;
-            }
         }
+        List<Node> newNodes = nodes.stream().filter(v -> v instanceof DefaultElement).collect(Collectors.toList());
+        if (newNodes.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (Node node : nodes) {
+                sb.append(node.getText());
+            }
+            return sb.toString();
+        }
+        return afterAnalyzeElement(newNodes);
     }
 }
