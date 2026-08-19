@@ -758,23 +758,26 @@
     },
     "float": {
       "to": "TapNumber",
-      "precision": [
-        1,
-        6
-      ],
+      "precision": 7,
+      "defaultPrecision": 7,
+      "defaultScale": 0,
+      "value": ["-3.40E+38", "3.40E+38"],
       "scale": [
         0,
-        6
+        17
       ],
       "fixed": false
     },
     "double": {
       "to": "TapNumber",
       "precision": [
-        1,
-        17
+        15,
+        16
       ],
-      "preferPrecision": 11,
+      "value": ["2.23E-308", "1.80E+308"],
+      "defaultScale": 0,
+      "defaultPrecision": 15,
+      "preferPrecision": 15,
       "preferScale": 4,
       "scale": [
         0,
