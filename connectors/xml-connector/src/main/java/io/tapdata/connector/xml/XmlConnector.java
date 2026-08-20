@@ -98,7 +98,9 @@ public class XmlConnector extends FileConnector {
             makeTapTable(tapTable, sample, fileConfig.getJustString());
             consumer.accept(Collections.singletonList(tapTable));
         } finally {
-            storage.destroy();
+            if (null != storage) {
+                storage.destroy();
+            }
         }
     }
 }

@@ -119,9 +119,20 @@ public class BigSaxDataHandler implements ElementHandler, HandlerBase {
         }
         List<Node> newNodes = nodes.stream().filter(v -> v instanceof DefaultElement).collect(Collectors.toList());
         if (newNodes.isEmpty()) {
+            // No child elements, but the content may be split into multiple nodes (whitespace text,
+            // CDATA sections, leading/trailing newlines) by the SAX parser. We must only append
+            // TEXT_NODE and CDATA_SECTION_NODE to keep semantics consistent with the single-DefaultText
+            // path above. Explicitly skip XML comments (DefaultComment), processing instructions
+            // (DefaultProcessingInstruction) and entity references -- those are XML-level metadata
+            // and must never pollute the downstream business value, which would otherwise turn
+            // "hello<!-- NOTE -->world" into "hello NOTE world" and silently break type inference,
+            // regex validations and hash-based idempotency checks on the sink side.
             StringBuilder sb = new StringBuilder();
             for (Node node : nodes) {
-                sb.append(node.getText());
+                short nodeType = node.getNodeType();
+                if (Node.TEXT_NODE == nodeType || Node.CDATA_SECTION_NODE == nodeType) {
+                    sb.append(node.getText());
+                }
             }
             String text = sb.toString();
             try {
