@@ -31,10 +31,13 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.sql.SQLException;
 import java.sql.ResultSet;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -279,5 +282,98 @@ public class PostgresConnectorTest {
                 "asyncCheckSlaveExecutor");
         Assertions.assertNotNull(executor);
         executor.shutdownNow();
+    }
+
+    @Test
+    void testPhysicalSlavePreferredSkipsStaleTimelineSlave() throws Exception {
+        TimelineProbePostgresConnector postgresConnector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("primary", 5432,
+                address("primary", 5432), address("stale-standby", 5433));
+        postgresConnector.addProbe("primary", 5432, false, "00000006", 6);
+        postgresConnector.addProbe("stale-standby", 5433, true, "00000005", 5);
+        PostgresJdbcContext jdbcContext = mock(PostgresJdbcContext.class);
+
+        ReflectionTestUtils.setField(postgresConnector, "postgresConfig", config);
+        ReflectionTestUtils.setField(postgresConnector, "postgresJdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(postgresConnector, "tapLogger", mock(Log.class));
+
+        Boolean switched = ReflectionTestUtils.invokeMethod(postgresConnector, "switchCdcConnectionToSlave");
+
+        Assertions.assertFalse(Boolean.TRUE.equals(switched));
+        Assertions.assertEquals("primary", config.getHost());
+        Assertions.assertEquals(5432, config.getPort());
+        verify(jdbcContext, never()).refresh();
+    }
+
+    @Test
+    void testPhysicalSlavePreferredSwitchesOnlyToCurrentTimelineSlave() throws Exception {
+        TimelineProbePostgresConnector postgresConnector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("primary", 5432,
+                address("primary", 5432), address("stale-standby", 5433), address("healthy-standby", 5434));
+        postgresConnector.addProbe("primary", 5432, false, "00000006", 6);
+        postgresConnector.addProbe("stale-standby", 5433, true, "00000005", 5);
+        postgresConnector.addProbe("healthy-standby", 5434, true, "00000006", 6);
+        PostgresJdbcContext jdbcContext = mock(PostgresJdbcContext.class);
+
+        ReflectionTestUtils.setField(postgresConnector, "postgresConfig", config);
+        ReflectionTestUtils.setField(postgresConnector, "postgresJdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(postgresConnector, "tapLogger", mock(Log.class));
+
+        Boolean switched = ReflectionTestUtils.invokeMethod(postgresConnector, "switchCdcConnectionToSlave");
+
+        Assertions.assertTrue(Boolean.TRUE.equals(switched));
+        Assertions.assertEquals("healthy-standby", config.getHost());
+        Assertions.assertEquals(5434, config.getPort());
+        verify(jdbcContext, times(1)).refresh();
+    }
+
+    private static PostgresConfig physicalMasterSlaveConfig(String host, int port,
+                                                           LinkedHashMap<String, Integer>... addresses) {
+        PostgresConfig config = new PostgresConfig();
+        config.setDeploymentMode("master-slave");
+        config.setLogPluginName("physical");
+        config.setHost(host);
+        config.setPort(port);
+        ArrayList<LinkedHashMap<String, Integer>> list = new ArrayList<>();
+        Collections.addAll(list, addresses);
+        config.setMasterSlaveAddress(list);
+        return config;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static LinkedHashMap<String, Integer> address(String host, int port) {
+        LinkedHashMap address = new LinkedHashMap();
+        address.put("host", host);
+        address.put("port", port);
+        return address;
+    }
+
+    private static class TimelineProbePostgresConnector extends PostgresConnector {
+        private final Map<String, PostgresJdbcContext> probes = new HashMap<>();
+
+        private void addProbe(String host, int port, boolean inRecovery, String timelineWalFileHex, int controlTimeline)
+                throws SQLException {
+            PostgresJdbcContext context = mock(PostgresJdbcContext.class);
+            doAnswer(invocation -> {
+                String sql = invocation.getArgument(0);
+                ResultSetConsumer consumer = invocation.getArgument(1);
+                ResultSet resultSet = mock(ResultSet.class);
+                if (sql.contains("pg_is_in_recovery()")) {
+                    when(resultSet.getBoolean(1)).thenReturn(inRecovery);
+                } else if (sql.contains("pg_walfile_name")) {
+                    when(resultSet.getString(1)).thenReturn(timelineWalFileHex);
+                } else if (sql.contains("pg_control_checkpoint()")) {
+                    when(resultSet.getInt(1)).thenReturn(controlTimeline);
+                }
+                consumer.accept(resultSet);
+                return null;
+            }).when(context).queryWithNext(anyString(), any(ResultSetConsumer.class));
+            probes.put(host + ":" + port, context);
+        }
+
+        @Override
+        protected PostgresJdbcContext newPostgresJdbcContext(PostgresConfig config) {
+            return probes.get(config.getHost() + ":" + config.getPort());
+        }
     }
 }
