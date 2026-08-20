@@ -83,19 +83,24 @@ public class XmlConnector extends FileConnector {
 
     @Override
     public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
-        initConnection(connectionContext);
-        if (EmptyKit.isBlank(fileConfig.getModelName())) {
-            return;
+        try {
+            initConnection(connectionContext);
+            if (EmptyKit.isBlank(fileConfig.getModelName())) {
+                return;
+            }
+            TapTable tapTable = table(fileConfig.getModelName());
+            ConcurrentMap<String, TapFile> xmlFileMap = getFilteredFiles();
+            XmlSchema xmlSchema = new XmlSchema((XmlConfig) fileConfig, storage);
+            Map<String, Object> sample = xmlSchema.sampleEveryFileData(xmlFileMap);
+            if (EmptyKit.isEmpty(sample)) {
+                throw new RuntimeException("Load schema from xml files error: no headers and contents!");
+            }
+            makeTapTable(tapTable, sample, fileConfig.getJustString());
+            consumer.accept(Collections.singletonList(tapTable));
+        } finally {
+            if (null != storage) {
+                storage.destroy();
+            }
         }
-        TapTable tapTable = table(fileConfig.getModelName());
-        ConcurrentMap<String, TapFile> xmlFileMap = getFilteredFiles();
-        XmlSchema xmlSchema = new XmlSchema((XmlConfig) fileConfig, storage);
-        Map<String, Object> sample = xmlSchema.sampleEveryFileData(xmlFileMap);
-        if (EmptyKit.isEmpty(sample)) {
-            throw new RuntimeException("Load schema from xml files error: no headers and contents!");
-        }
-        makeTapTable(tapTable, sample, fileConfig.getJustString());
-        consumer.accept(Collections.singletonList(tapTable));
-        storage.destroy();
     }
 }
