@@ -94,6 +94,10 @@ public class PostgresConnector extends CommonDbConnector {
     protected String postgresVersion;
     protected PostgresPartitionContext postgresPartitionContext;
     private ScheduledExecutorService asyncCheckSlaveExecutor;
+    private static final String TIMELINE_FROM_WAL_FILE_SQL =
+            "SELECT substring(pg_walfile_name(CASE WHEN pg_is_in_recovery() "
+                    + "THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END), 1, 8)";
+    private static final String TIMELINE_FROM_CONTROL_SQL = "SELECT timeline_id FROM pg_control_checkpoint()";
 
     @Override
     public void onStart(TapConnectionContext connectorContext) {
@@ -1078,6 +1082,9 @@ public class PostgresConnector extends CommonDbConnector {
         if (!"master-slave".equals(postgresConfig.getDeploymentMode())) {
             return false;
         }
+        if ("physical".equals(postgresConfig.getLogPluginName())) {
+            return switchCdcConnectionToTimelineHealthySlave();
+        }
         boolean selected = postgresTest.testHostPortForMasterSlave(false);
         postgresJdbcContext.refresh();
         if (!selected) {
@@ -1098,6 +1105,132 @@ public class PostgresConnector extends CommonDbConnector {
         tapLogger.warn("Postgres CDC selected node {}:{} is not a slave node",
                 postgresConfig.getHost(), postgresConfig.getPort());
         return false;
+    }
+
+    private boolean switchCdcConnectionToTimelineHealthySlave() {
+        SlaveNodeState selected = selectTimelineHealthySlaveNode();
+        if (selected == null) {
+            tapLogger.warn("Postgres CDC slave-preferred mode could not find an available timeline-healthy slave node");
+            return false;
+        }
+        postgresConfig.setHost(selected.host);
+        postgresConfig.setPort(selected.port);
+        postgresJdbcContext.refresh();
+        tapLogger.info("Postgres CDC switched to slave node: {}:{} timeline={}",
+                selected.host, selected.port, selected.timeline);
+        return true;
+    }
+
+    private SlaveNodeState selectTimelineHealthySlaveNode() {
+        ArrayList<LinkedHashMap<String, Integer>> addresses = postgresConfig.getMasterSlaveAddress();
+        if (EmptyKit.isEmpty(addresses)) {
+            return null;
+        }
+        List<SlaveNodeState> states = new ArrayList<>();
+        int maxTimeline = 0;
+        for (LinkedHashMap<String, Integer> address : addresses) {
+            SlaveNodeState state = querySlaveNodeState(address);
+            if (state == null) {
+                continue;
+            }
+            states.add(state);
+            if (state.timeline > maxTimeline) {
+                maxTimeline = state.timeline;
+            }
+        }
+        for (SlaveNodeState state : states) {
+            if (!state.inRecovery) {
+                continue;
+            }
+            if (state.timeline <= 0) {
+                tapLogger.warn("Postgres CDC skips slave node {}:{} because its timeline cannot be determined",
+                        state.host, state.port);
+                continue;
+            }
+            if (maxTimeline > 0 && state.timeline < maxTimeline) {
+                tapLogger.warn("Postgres CDC skips stale slave node {}:{} because its timeline {} is behind "
+                                + "the cluster current timeline {}",
+                        state.host, state.port, state.timeline, maxTimeline);
+                continue;
+            }
+            return state;
+        }
+        return null;
+    }
+
+    private SlaveNodeState querySlaveNodeState(LinkedHashMap<String, Integer> address) {
+        String host = String.valueOf(address.get("host"));
+        int port = address.get("port");
+        try {
+            PostgresConfig probeConfig = copyConfigForSlaveProbe();
+            probeConfig.setHost(host);
+            probeConfig.setPort(port);
+            try (PostgresJdbcContext context = newPostgresJdbcContext(probeConfig)) {
+                SlaveNodeState state = new SlaveNodeState(host, port);
+                context.queryWithNext("SELECT pg_is_in_recovery()", resultSet ->
+                        state.inRecovery = resultSet.getBoolean(1));
+                state.timeline = queryCurrentTimeline(context);
+                return state;
+            }
+        } catch (Exception e) {
+            tapLogger.warn("Postgres CDC failed to probe node {}:{} for slave timeline health: {}",
+                    host, port, e.getMessage());
+            return null;
+        }
+    }
+
+    private PostgresConfig copyConfigForSlaveProbe() {
+        PostgresConfig probeConfig = new PostgresConfig();
+        probeConfig.setDatabase(postgresConfig.getDatabase());
+        probeConfig.setSchema(postgresConfig.getSchema());
+        probeConfig.setUser(postgresConfig.getUser());
+        probeConfig.setPassword(postgresConfig.getPassword());
+        probeConfig.setExtParams(postgresConfig.getExtParams());
+        probeConfig.setUseSSL(postgresConfig.getUseSSL());
+        probeConfig.setSslCa(postgresConfig.getSslCa());
+        probeConfig.setSslCert(postgresConfig.getSslCert());
+        probeConfig.setSslKey(postgresConfig.getSslKey());
+        probeConfig.setSslKeyPassword(postgresConfig.getSslKeyPassword());
+        probeConfig.setJdbcDriver(postgresConfig.getJdbcDriver());
+        probeConfig.setLogPluginName(postgresConfig.getLogPluginName());
+        if (postgresConfig.getProperties() != null) {
+            Properties properties = new Properties();
+            properties.putAll(postgresConfig.getProperties());
+            probeConfig.setProperties(properties);
+        }
+        return probeConfig;
+    }
+
+    protected PostgresJdbcContext newPostgresJdbcContext(PostgresConfig config) {
+        return new PostgresJdbcContext(config);
+    }
+
+    private int queryCurrentTimeline(PostgresJdbcContext context) {
+        AtomicInteger timeline = new AtomicInteger(0);
+        ErrorKit.ignoreAnyError(() -> context.queryWithNext(TIMELINE_FROM_WAL_FILE_SQL, resultSet ->
+                timeline.set(parseTimelineFromWalFileName(resultSet.getString(1)))));
+        if (timeline.get() > 0) {
+            return timeline.get();
+        }
+        ErrorKit.ignoreAnyError(() -> context.queryWithNext(TIMELINE_FROM_CONTROL_SQL, resultSet ->
+                timeline.set(resultSet.getInt(1))));
+        return timeline.get();
+    }
+
+    private static int parseTimelineFromWalFileName(String hex) {
+        return EmptyKit.isNotBlank(hex) ? Integer.parseUnsignedInt(hex, 16) : 0;
+    }
+
+    private static class SlaveNodeState {
+        private final String host;
+        private final int port;
+        private boolean inRecovery;
+        private int timeline;
+
+        private SlaveNodeState(String host, int port) {
+            this.host = host;
+            this.port = port;
+        }
     }
 
     private void requestSlaveReconnect(PhysicalWalLogMiner miner) {
