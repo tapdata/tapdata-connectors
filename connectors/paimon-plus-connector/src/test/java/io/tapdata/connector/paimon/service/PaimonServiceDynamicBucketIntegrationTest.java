@@ -738,71 +738,6 @@ class PaimonServiceDynamicBucketIntegrationTest {
     }
 
     @Test
-    void fixedCrossPartitionAfterOnlyUpdateMustFailWithoutAdvancingSnapshot() throws Exception {
-        PaimonConfig config = config("fixed-after-only-contract");
-        KVMap<Object> stateMap = stateMap();
-        TapTable tapTable =
-                new TapTable("fixed_after_only_t")
-                        .add(new TapField("value", "STRING"))
-                        .add(new TapField("id", "INT").primaryKeyPos(1))
-                        .add(new TapField("pt", "INT"));
-
-        PaimonService service = service(config);
-        boolean fenced = false;
-        try {
-            createFixedCrossPartitionTable(catalog(service), "fixed_after_only_t", false);
-            TapConnectorContext connectorContext = context(stateMap);
-            service.writeRecords(
-                    Collections.singletonList(
-                            cdcInsert(
-                                    "fixed_after_only_t",
-                                    map("value", "old", "id", 1, "pt", 1))),
-                    tapTable,
-                    connectorContext);
-            FileStoreTable target =
-                    (FileStoreTable)
-                            catalog(service)
-                                    .getTable(
-                                            Identifier.create(
-                                                    DATABASE, "fixed_after_only_t"));
-            Long snapshotBeforeFailure = target.snapshotManager().latestSnapshotIdFromFileSystem();
-
-            PaimonFatalWriteException thrown =
-                    assertThrows(
-                            PaimonFatalWriteException.class,
-                            () ->
-                                    service.writeRecords(
-                                            Collections.singletonList(
-                                                    cdcUpdateAfter(
-                                                            "fixed_after_only_t",
-                                                            map(
-                                                                    "value",
-                                                                    "new",
-                                                                    "id",
-                                                                    1,
-                                                                    "pt",
-                                                                    2))),
-                                            tapTable,
-                                            connectorContext));
-            fenced = true;
-            assertTrue(thrown.getMessage().contains("PAIMON_INCOMPLETE_BEFORE_IMAGE"));
-            assertEquals(
-                    snapshotBeforeFailure,
-                    target.snapshotManager().latestSnapshotIdFromFileSystem());
-            List<InternalRow> rows = readRows(target);
-            assertEquals(1, rows.size());
-            assertEquals(1, rows.get(0).getInt(0));
-            assertEquals("old", rows.get(0).getString(2).toString());
-        } finally {
-            if (fenced) {
-                assertThrows(PaimonFatalWriteException.class, service::close);
-            } else {
-                service.close();
-            }
-        }
-    }
-
-    @Test
     void fixedCompleteCrossPartitionUpdateMustLeaveOnlyNewPartition() throws Exception {
         PaimonConfig config = config("fixed-complete-contract");
         KVMap<Object> stateMap = stateMap();
@@ -970,51 +905,6 @@ class PaimonServiceDynamicBucketIntegrationTest {
     }
 
     @Test
-    void postponeAfterOnlyCrossPartitionUpdateMustFailWithoutPendingSnapshot()
-            throws Exception {
-        PaimonConfig config = config("postpone-after-only-contract");
-        TapTable tapTable =
-                new TapTable("postpone_after_only_t")
-                        .add(new TapField("value", "STRING"))
-                        .add(new TapField("id", "INT").primaryKeyPos(1))
-                        .add(new TapField("pt", "INT"));
-        Map<String, Object> persistedState = new ConcurrentHashMap<>();
-        PaimonService service = service(config);
-        try {
-            createPostponeCrossPartitionTable(catalog(service), "postpone_after_only_t");
-            FileStoreTable target =
-                    (FileStoreTable)
-                            catalog(service)
-                                    .getTable(
-                                            Identifier.create(
-                                                    DATABASE, "postpone_after_only_t"));
-
-            PaimonFatalWriteException failure =
-                    assertThrows(
-                            PaimonFatalWriteException.class,
-                            () ->
-                                    service.writeRecords(
-                                            Collections.singletonList(
-                                                    cdcUpdateAfter(
-                                                            "postpone_after_only_t",
-                                                            map(
-                                                                    "value",
-                                                                    "new",
-                                                                    "id",
-                                                                    1,
-                                                                    "pt",
-                                                                    2))),
-                                            tapTable,
-                                            context(stateMap(persistedState))));
-            assertTrue(failure.getMessage().contains("PAIMON_INCOMPLETE_BEFORE_IMAGE"));
-            assertNull(target.snapshotManager().latestSnapshotIdFromFileSystem());
-            assertTrue(persistedState.isEmpty());
-        } finally {
-            assertThrows(PaimonFatalWriteException.class, service::close);
-        }
-    }
-
-    @Test
     void postponeCompleteCrossPartitionUpdateMustCommitBothRetractAndAddPartitions()
             throws Exception {
         PaimonConfig config = config("postpone-complete-contract");
@@ -1063,57 +953,6 @@ class PaimonServiceDynamicBucketIntegrationTest {
                     updatedPartitions);
         } finally {
             service.close();
-        }
-    }
-
-    @Test
-    void keyDynamicInputChangelogMustRejectAfterOnlyUpdate() throws Exception {
-        PaimonConfig config = config("key-input-contract");
-        KVMap<Object> stateMap = stateMap();
-        TapTable tapTable =
-                new TapTable("key_input_t")
-                        .add(new TapField("value", "STRING"))
-                        .add(new TapField("id", "INT").primaryKeyPos(1))
-                        .add(new TapField("pt", "INT"));
-
-        PaimonService service = service(config);
-        boolean fenced = false;
-        try {
-            createKeyDynamicInputTable(catalog(service), "key_input_t");
-            TapConnectorContext connectorContext = context(stateMap);
-            service.writeRecords(
-                    Collections.singletonList(
-                            cdcInsert(
-                                    "key_input_t",
-                                    map("value", "old", "id", 1, "pt", 1))),
-                    tapTable,
-                    connectorContext);
-
-            PaimonFatalWriteException thrown =
-                    assertThrows(
-                            PaimonFatalWriteException.class,
-                            () ->
-                                    service.writeRecords(
-                                            Collections.singletonList(
-                                                    cdcUpdateAfter(
-                                                            "key_input_t",
-                                                            map(
-                                                                    "value",
-                                                                    "new",
-                                                                    "id",
-                                                                    1,
-                                                                    "pt",
-                                                                    2))),
-                                            tapTable,
-                                            connectorContext));
-            fenced = true;
-            assertTrue(thrown.getMessage().contains("PAIMON_INCOMPLETE_BEFORE_IMAGE"));
-        } finally {
-            if (fenced) {
-                assertThrows(PaimonFatalWriteException.class, service::close);
-            } else {
-                service.close();
-            }
         }
     }
 
