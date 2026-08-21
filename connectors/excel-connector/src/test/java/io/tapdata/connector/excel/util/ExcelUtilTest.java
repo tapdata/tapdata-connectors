@@ -10,6 +10,10 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -50,6 +54,43 @@ class ExcelUtilTest {
         }
     }
 
+    @Test
+    void getCellValueReadsDateOnlyCellAsLocalDate() throws Exception {
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Cell cell = createTemporalCell(workbook, LocalDateTime.of(2024, 5, 17, 0, 0), "yyyy-mm-dd");
+
+            Object value = ExcelUtil.getCellValue(cell, null);
+
+            assertEquals(LocalDate.class, value.getClass());
+            assertEquals(LocalDate.of(2024, 5, 17), value);
+        }
+    }
+
+    @Test
+    void getCellValueReadsTimeOnlyCellAsLocalTime() throws Exception {
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Cell cell = createNumericCell(workbook, "hh:mm:ss");
+            cell.setCellValue(0.5D);
+
+            Object value = ExcelUtil.getCellValue(cell, null);
+
+            assertEquals(LocalTime.class, value.getClass());
+            assertEquals(LocalTime.of(12, 0), value);
+        }
+    }
+
+    @Test
+    void getCellValueKeepsDateTimeWhenValueContainsDateAndTime() throws Exception {
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Cell cell = createTemporalCell(workbook, LocalDateTime.of(2024, 5, 17, 13, 45, 30), "yyyy-mm-dd");
+
+            Object value = ExcelUtil.getCellValue(cell, null);
+
+            assertEquals(LocalDateTime.class, value.getClass());
+            assertEquals(LocalDateTime.of(2024, 5, 17, 13, 45, 30), value);
+        }
+    }
+
     private Cell createNumericCell(Workbook workbook, String format) {
         Sheet sheet = workbook.createSheet();
         Row row = sheet.createRow(0);
@@ -61,6 +102,12 @@ class ExcelUtilTest {
             cellStyle.setDataFormat(dataFormat.getFormat(format));
             cell.setCellStyle(cellStyle);
         }
+        return cell;
+    }
+
+    private Cell createTemporalCell(Workbook workbook, LocalDateTime value, String format) {
+        Cell cell = createNumericCell(workbook, format);
+        cell.setCellValue(value);
         return cell;
     }
 }
