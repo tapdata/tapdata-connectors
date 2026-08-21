@@ -135,10 +135,11 @@ public class ExcelConnector extends FileConnector {
             cellTypeMap.put(col, cell.getCellType());
             return;
         }
-        CellType cellType = cellTypeMap.get(col);
-        if (checkLevel(cellType) != checkLevel(cell.getCellType())) {
-            tapLogger.info(String.format("The data type of line %s, column %s is inconsistent, please check the data in the excel file", cell.getRowIndex() + 1, col + 1));
-        }
+        //TAP-12574 Printing too many logs can result in log loss, causing the page to not display the logs. Currently, this log output is temporarily removed
+        //CellType cellType = cellTypeMap.get(col);
+        //if (checkLevel(cellType) != checkLevel(cell.getCellType())) {
+            //tapLogger.info(String.format("The data type of line %s, column %s is inconsistent, please check the data in the excel file", cell.getRowIndex() + 1, col + 1));
+        //}
     }
 
     private int checkLevel(CellType type) {
