@@ -654,10 +654,37 @@
     },
     "DATE": {
       "range": [
-        "1000-01-01 00:00:00",
-        "9999-12-31 23:59:59"
+        "1000-01-01",
+        "9999-12-31"
       ],
-      "pattern": "yyyy-MM-dd HH:mm:ss",
+      "pattern": "yyyy-MM-dd",
+      "priority": 2,
+      "to": "TapDate"
+    },
+    "TIME": {
+      "range": [
+        "00:00:00.000000000",
+        "23:59:59.999999999"
+      ],
+      "pattern": "HH:mm:ss.SSSSSSSSS",
+      "fraction": [
+        0,
+        9
+      ],
+      "defaultFraction": 0,
+      "priority": 2,
+      "to": "TapTime"
+    },
+    "DATETIME": {
+      "range": [
+        "1000-01-01 00:00:00.000000000",
+        "9999-12-31 23:59:59.999999999"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSSSSS",
+      "fraction": [
+        0,
+        9
+      ],
       "defaultFraction": 3,
       "withTimeZone": false,
       "priority": 2,
