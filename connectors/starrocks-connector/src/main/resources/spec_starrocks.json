@@ -758,28 +758,29 @@
     },
     "float": {
       "to": "TapNumber",
-      "precision": [
-        1,
-        6
-      ],
+      "precision": 7,
+      "bit": 4,
+      "defaultPrecision": 7,
+      "defaultScale": 7,
       "scale": [
         0,
-        6
+        7
       ],
       "fixed": false
     },
     "double": {
+      "bit": 8,
       "to": "TapNumber",
       "precision": [
-        1,
-        17
+        15,
+        16
       ],
-      "preferPrecision": 11,
-      "preferScale": 4,
       "scale": [
         0,
-        17
+        16
       ],
+      "defaultScale": 16,
+      "defaultPrecision": 15,
       "fixed": false
     },
     "decimal[($precision,$scale)]": {

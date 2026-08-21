@@ -1403,22 +1403,28 @@
     "real": {
       "to": "TapNumber",
       "bit": 4,
-      "defaultPrecision": 24,
-      "defaultScale": 8,
+      "precision": 7,
+      "defaultPrecision": 7,
+      "defaultScale": 7,
+      "scale": [
+        0,
+        7
+      ],
       "fixed": false
     },
     "double precision": {
+      "bit": 8,
       "priority": 2,
       "precision": [
-        1,
-        17
+        15,
+        16
       ],
-      "preferPrecision": 11,
-      "preferScale": 4,
       "scale": [
         0,
-        17
+        16
       ],
+      "defaultPrecision": 15,
+      "defaultScale": 16,
       "fixed": false,
       "to": "TapNumber"
     },
