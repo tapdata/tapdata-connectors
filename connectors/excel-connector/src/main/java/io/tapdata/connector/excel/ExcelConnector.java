@@ -79,6 +79,7 @@ public class ExcelConnector extends FileConnector {
                 List<Integer> sheets = sheetNumbers.stream().filter(n -> n >= fileOffset.getSheetNum()).collect(Collectors.toList());
                 for (int i = 0; isAlive() && i < sheets.size(); i++) {
                     Sheet sheet = wb.getSheetAt(sheets.get(i) - 1);
+                    String sheetName = sheet.getSheetName();
                     List<CellRangeAddress> mergedList = sheet.getMergedRegions();
                     int lastMergedRow = mergedList.stream().map(CellRangeAddressBase::getLastRow).max(Comparator.naturalOrder()).orElse(-1);
                     Map<CellRangeAddress, Cell> mergedDataMap = ExcelUtil.getMergedDataMap(sheet);
@@ -112,6 +113,7 @@ public class ExcelConnector extends FileConnector {
                         recordEvent.addInfo("lastModified", lastModified);
                         recordEvent.addInfo("filePath", fileOffset.getPath());
                         recordEvent.addInfo("fileName", fileOffset.getPath().substring(fileOffset.getPath().lastIndexOf("/") + 1));
+                        recordEvent.addInfo("sheetName", sheetName);
                         tapEvents.get().add(recordEvent);
                         if (tapEvents.get().size() == eventBatchSize) {
                             fileOffset.setDataLine(fileOffset.getDataLine() + eventBatchSize);
