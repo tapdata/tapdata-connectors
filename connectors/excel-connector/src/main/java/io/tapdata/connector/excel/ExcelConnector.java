@@ -3,6 +3,7 @@ package io.tapdata.connector.excel;
 import io.tapdata.common.FileConnector;
 import io.tapdata.common.FileOffset;
 import io.tapdata.connector.excel.config.ExcelConfig;
+import io.tapdata.connector.excel.util.CellValueConvert;
 import io.tapdata.connector.excel.util.ExcelUtil;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
@@ -24,8 +25,11 @@ import org.apache.poi.ss.util.CellRangeAddressBase;
 import org.apache.poi.xssf.usermodel.XSSFWorkbookFactory;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -37,7 +41,6 @@ import java.util.stream.Collectors;
 public class ExcelConnector extends FileConnector {
 
     private static final String TAG = ExcelConnector.class.getSimpleName();
-
     static {
         try {
             XSSFWorkbookFactory factory = new XSSFWorkbookFactory();
@@ -93,19 +96,33 @@ public class ExcelConnector extends FileConnector {
                         Map<String, Object> after = new HashMap<>();
                         if (j > lastMergedRow) {
                             for (int k = excelConfig.getFirstColumn() - 1; k < excelConfig.getLastColumn(); k++) {
-                                checkCellType(k, row.getCell(k), cellTypeMap);
-                                Object val = excelConfig.getJustString()
-                                        ? ExcelUtil.getCellDisplayValue(row.getCell(k), formulaEvaluator, dataFormatter)
-                                        : ExcelUtil.getCellValue(row.getCell(k), formulaEvaluator);
-                                after.put((String) headers[k - excelConfig.getFirstColumn() + 1], excelConfig.getJustString() ? parseValue(val) : val);
+                                Cell cell = row.getCell(k);
+                                checkCellType(k, cell, cellTypeMap);
+                                String fieldName = (String) headers[k - excelConfig.getFirstColumn() + 1];
+                                Object val;
+                                if (excelConfig.getJustString()) {
+                                    Object cellValue = ExcelUtil.getCellValue(cell, formulaEvaluator);
+                                    Object displayValue = ExcelUtil.getCellDisplayValue(cell, formulaEvaluator, dataFormatter);
+                                    val = CellValueConvert.parseValue(cellValue, displayValue, CellValueConvert.getFieldDataType(tapTable, fieldName));
+                                } else {
+                                    val = ExcelUtil.getCellValue(cell, formulaEvaluator);
+                                }
+                                after.put(fieldName, val);
                             }
                         } else {
                             for (int k = excelConfig.getFirstColumn() - 1; k < excelConfig.getLastColumn(); k++) {
-                                checkCellType(k, row.getCell(k), cellTypeMap);
-                                Object val = excelConfig.getJustString()
-                                        ? ExcelUtil.getMergedCellDisplayValue(mergedList, mergedDataMap, row.getCell(k), formulaEvaluator, dataFormatter)
-                                        : ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, row.getCell(k), formulaEvaluator);
-                                after.put((String) headers[k - excelConfig.getFirstColumn() + 1], excelConfig.getJustString() ? parseValue(val) : val);
+                                Cell cell = row.getCell(k);
+                                checkCellType(k, cell, cellTypeMap);
+                                String fieldName = (String) headers[k - excelConfig.getFirstColumn() + 1];
+                                Object val;
+                                if (excelConfig.getJustString()) {
+                                    Object cellValue = ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, cell, formulaEvaluator);
+                                    Object displayValue = ExcelUtil.getMergedCellDisplayValue(mergedList, mergedDataMap, cell, formulaEvaluator, dataFormatter);
+                                    val = CellValueConvert.parseValue(cellValue, displayValue, CellValueConvert.getFieldDataType(tapTable, fieldName));
+                                } else {
+                                    val = ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, cell, formulaEvaluator);
+                                }
+                                after.put(fieldName, val);
                             }
                         }
                         TapRecordEvent recordEvent = insertRecordEvent(after, tapTable.getId()).referenceTime(lastModified);
@@ -156,6 +173,10 @@ public class ExcelConnector extends FileConnector {
 
     @Override
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
+        codecRegistry.registerToTapValue(LocalDate.class, (value, tapType) ->
+                new TapDateValue(new DateTime(((LocalDate) value).atStartOfDay())));
+        codecRegistry.registerToTapValue(LocalTime.class, (value, tapType) ->
+                new TapTimeValue(DateTime.withTimeStr(value.toString())));
         codecRegistry.registerFromTapValue(TapRawValue.class, "STRING", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null) return toJson(tapRawValue.getValue());
             return "null";
@@ -211,7 +232,7 @@ public class ExcelConnector extends FileConnector {
             field.name(objectEntry.getKey().replaceAll("\n", ""));
             Object val = objectEntry.getValue();
             if (isJustString) {
-                val = parseValue(val);
+                val = CellValueConvert.parseValue(val, CellValueConvert.STRING_DATA_TYPE);
             }
             if (EmptyKit.isNull(val) || val instanceof String) {
                 if (EmptyKit.isNotEmpty((String) val) && ((String) val).length() > 200) {
@@ -220,18 +241,9 @@ public class ExcelConnector extends FileConnector {
                     field.dataType("STRING");
                 }
             } else {
-                field.dataType(val.getClass().getSimpleName().toUpperCase());
+                field.dataType(CellValueConvert.toExcelDataType(val));
             }
             tapTable.add(field);
         }
-    }
-
-    Object parseValue(Object val) {
-        if (val instanceof Double || val instanceof Float || val instanceof Long) {
-            val = BigDecimal.valueOf(((Number) val).doubleValue()).stripTrailingZeros().toPlainString();
-        } else {
-            val = EmptyKit.isNull(val) ? "null" : String.valueOf(val);
-        }
-        return val;
     }
 }
