@@ -255,7 +255,8 @@ public abstract class FileConnector extends ConnectorBase {
             for (Map.Entry<String, Object> objectEntry : sample.entrySet()) {
                 TapField field = new TapField();
                 field.name(objectEntry.getKey());
-                if (EmptyKit.isNotEmpty((String) objectEntry.getValue()) && ((String) objectEntry.getValue()).length() > 200) {
+                String value = objectEntry.getValue() == null ? "" : String.valueOf(objectEntry.getValue());
+                if (EmptyKit.isNotEmpty(value) && value.length() > 200) {
                     field.dataType("TEXT");
                 } else {
                     field.dataType("STRING");
@@ -266,7 +267,18 @@ public abstract class FileConnector extends ConnectorBase {
             for (Map.Entry<String, Object> objectEntry : sample.entrySet()) {
                 TapField field = new TapField();
                 field.name(objectEntry.getKey());
-                String value = (String) objectEntry.getValue();
+                Object rawValue = objectEntry.getValue();
+                if (rawValue instanceof Map) {
+                    field.dataType("OBJECT");
+                    tapTable.add(field);
+                    continue;
+                }
+                if (rawValue instanceof Collection || (rawValue != null && rawValue.getClass().isArray())) {
+                    field.dataType("ARRAY");
+                    tapTable.add(field);
+                    continue;
+                }
+                String value = rawValue == null ? "" : String.valueOf(rawValue);
                 if (EmptyKit.isEmpty(value)) {
                     field.dataType("STRING");
                 } else if (MatchUtil.matchBoolean(value)) {
