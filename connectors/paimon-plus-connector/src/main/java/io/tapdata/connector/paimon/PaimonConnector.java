@@ -225,12 +225,24 @@ public class PaimonConnector extends ConnectorBase {
         });
         codecRegistry.registerFromTapValue(
                 TapDateTimeValue.class,
-                tapDateTimeValue ->
-                        tapDateTimeValue == null || tapDateTimeValue.getValue() == null
-                                ? null
-                                : tapDateTimeValue.getValue().toTimestamp());
-        codecRegistry.registerFromTapValue(TapDateValue.class, PaimonConnector::toEpochDay);
-        codecRegistry.registerFromTapValue(TapTimeValue.class, PaimonConnector::toMillisOfDay);
+                t -> {
+                    if (t == null || null == t.getValue() ||  t.getValue().isContainsIllegal()) {
+                        return null;
+                    }
+                    return t.getValue().toTimestamp();
+                });
+        codecRegistry.registerFromTapValue(TapDateValue.class, t -> {
+            if (t == null || null == t.getValue() ||  t.getValue().isContainsIllegal()) {
+                return null;
+            }
+            return PaimonConnector.toEpochDay(t);
+        });
+        codecRegistry.registerFromTapValue(TapTimeValue.class, t -> {
+            if (t == null || null == t.getValue() ||  t.getValue().isContainsIllegal()) {
+                return null;
+            }
+            return PaimonConnector.toMillisOfDay(t);
+        });
         codecRegistry.registerFromTapValue(TapYearValue.class, "CHAR(4)", TapValue::getOriginValue);
     }
 
