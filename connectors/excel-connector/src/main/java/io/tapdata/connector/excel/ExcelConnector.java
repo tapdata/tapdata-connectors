@@ -139,7 +139,7 @@ public class ExcelConnector extends FileConnector {
         }
         CellType cellType = cellTypeMap.get(col);
         if (checkLevel(cellType) != checkLevel(cell.getCellType())) {
-            tapLogger.info(String.format("The data type of line %s, column %s is inconsistent, please check the data in the excel file", cell.getRowIndex() + 1, col + 1));
+//            tapLogger.info(String.format("The data type of line %s, column %s is inconsistent, please check the data in the excel file", cell.getRowIndex() + 1, col + 1));
         }
     }
 
