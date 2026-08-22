@@ -248,8 +248,8 @@ public class OceanbaseConnector extends MysqlConnector {
             return offsetStartTime / 1000L;
         }
         AtomicLong offset = new AtomicLong(0);
-        mysqlJdbcContext.queryWithNext("select current_timestamp()", resultSet -> {
-            offset.set(resultSet.getTimestamp(1).getTime() / 1000L);
+        mysqlJdbcContext.queryWithNext("select unix_timestamp(current_timestamp())", resultSet -> {
+            offset.set(resultSet.getLong(1));
         });
         return offset.get();
     }
