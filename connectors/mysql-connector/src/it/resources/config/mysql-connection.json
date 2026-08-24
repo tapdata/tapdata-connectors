@@ -1,8 +1,8 @@
 {
-  "host": "127.0.0.1",
-  "port": 13306,
-  "database": "test",
+  "host": "192.168.1.184",
+  "port": 23306,
+  "database": "test_it",
   "user": "root",
-  "password": "root",
+  "password": "Gotapd8!",
   "highPerformance": true
 }
