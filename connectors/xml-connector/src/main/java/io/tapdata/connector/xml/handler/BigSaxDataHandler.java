@@ -14,8 +14,6 @@ import org.dom4j.Node;
 import org.dom4j.tree.DefaultElement;
 import org.dom4j.tree.DefaultText;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -26,7 +24,7 @@ import java.util.stream.Collectors;
 import static io.tapdata.entity.simplify.TapSimplify.insertRecordEvent;
 import static io.tapdata.entity.simplify.TapSimplify.list;
 
-public class BigSaxDataHandler implements ElementHandler {
+public class BigSaxDataHandler implements ElementHandler, HandlerBase {
 
     private String path;
     private FileOffset fileOffset;
@@ -109,7 +107,8 @@ public class BigSaxDataHandler implements ElementHandler {
         }
     }
 
-    private Object analyzeElement(Element element) {
+    @Override
+    public Object analyzeElement(Element element) {
         List<Node> nodes = element.content();
         if (nodes.size() == 1 && nodes.get(0) instanceof DefaultText) {
             try {
@@ -117,17 +116,31 @@ public class BigSaxDataHandler implements ElementHandler {
             } catch (Exception e) {
                 throw new RuntimeException(String.format("%s field has invalid value", element.getName()), e);
             }
-        } else {
-            List<Node> newNodes = nodes.stream().filter(v -> v instanceof DefaultElement).collect(Collectors.toList());
-            if (newNodes.stream().map(Node::getPath).distinct().count() > 1) {
-                Map<String, Object> subMap = new LinkedHashMap<>();
-                newNodes.forEach(v -> subMap.put(v.getName(), analyzeElement((DefaultElement) v)));
-                return subMap;
-            } else {
-                List<Object> subList = new ArrayList<>();
-                newNodes.forEach(v -> subList.add(analyzeElement((DefaultElement) v)));
-                return subList;
+        }
+        List<Node> newNodes = nodes.stream().filter(v -> v instanceof DefaultElement).collect(Collectors.toList());
+        if (newNodes.isEmpty()) {
+            // No child elements, but the content may be split into multiple nodes (whitespace text,
+            // CDATA sections, leading/trailing newlines) by the SAX parser. We must only append
+            // TEXT_NODE and CDATA_SECTION_NODE to keep semantics consistent with the single-DefaultText
+            // path above. Explicitly skip XML comments (DefaultComment), processing instructions
+            // (DefaultProcessingInstruction) and entity references -- those are XML-level metadata
+            // and must never pollute the downstream business value, which would otherwise turn
+            // "hello<!-- NOTE -->world" into "hello NOTE world" and silently break type inference,
+            // regex validations and hash-based idempotency checks on the sink side.
+            StringBuilder sb = new StringBuilder();
+            for (Node node : nodes) {
+                short nodeType = node.getNodeType();
+                if (Node.TEXT_NODE == nodeType || Node.CDATA_SECTION_NODE == nodeType) {
+                    sb.append(node.getText());
+                }
+            }
+            String text = sb.toString();
+            try {
+                return MatchUtil.parse(text, dataTypeMap.get(element.getName()));
+            } catch (Exception e) {
+                throw new RuntimeException(String.format("%s field has invalid value", element.getName()), e);
             }
         }
+        return afterAnalyzeElement(newNodes);
     }
 }
