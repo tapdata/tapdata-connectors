@@ -25,11 +25,8 @@ import org.apache.poi.ss.util.CellRangeAddressBase;
 import org.apache.poi.xssf.usermodel.XSSFWorkbookFactory;
 
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -99,13 +96,15 @@ public class ExcelConnector extends FileConnector {
                                 Cell cell = row.getCell(k);
                                 checkCellType(k, cell, cellTypeMap);
                                 String fieldName = (String) headers[k - excelConfig.getFirstColumn() + 1];
+                                String fieldType = CellValueConvert.getFieldDataType(tapTable, fieldName);
                                 Object val;
                                 if (excelConfig.getJustString()) {
                                     Object cellValue = ExcelUtil.getCellValue(cell, formulaEvaluator);
                                     Object displayValue = ExcelUtil.getCellDisplayValue(cell, formulaEvaluator, dataFormatter);
-                                    val = CellValueConvert.parseValue(cellValue, displayValue, CellValueConvert.getFieldDataType(tapTable, fieldName));
+                                    val = CellValueConvert.parseValue(cellValue, displayValue, fieldType);
                                 } else {
-                                    val = ExcelUtil.getCellValue(cell, formulaEvaluator);
+                                    Object cellValue = ExcelUtil.getCellValue(cell, formulaEvaluator);
+                                    val = CellValueConvert.parseOriginValue(cellValue, fieldType);
                                 }
                                 after.put(fieldName, val);
                             }
@@ -114,13 +113,15 @@ public class ExcelConnector extends FileConnector {
                                 Cell cell = row.getCell(k);
                                 checkCellType(k, cell, cellTypeMap);
                                 String fieldName = (String) headers[k - excelConfig.getFirstColumn() + 1];
+                                String fieldType = CellValueConvert.getFieldDataType(tapTable, fieldName);
                                 Object val;
                                 if (excelConfig.getJustString()) {
                                     Object cellValue = ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, cell, formulaEvaluator);
                                     Object displayValue = ExcelUtil.getMergedCellDisplayValue(mergedList, mergedDataMap, cell, formulaEvaluator, dataFormatter);
                                     val = CellValueConvert.parseValue(cellValue, displayValue, CellValueConvert.getFieldDataType(tapTable, fieldName));
                                 } else {
-                                    val = ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, cell, formulaEvaluator);
+                                    Object cellValue = ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, cell, formulaEvaluator);
+                                    val = CellValueConvert.parseOriginValue(cellValue, fieldType);
                                 }
                                 after.put(fieldName, val);
                             }
