@@ -10,6 +10,7 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
 import java.util.Set;
@@ -80,8 +81,9 @@ public class MySQLConnectorIT extends ConnectorIT {
     }
 
     @DisplayName("Test github action")
+    @Test
     public void testGithubAction() {
-        int result = 10*2;
-        Assertions.assertEquals(20, result);
+        int result = 10*3;
+        Assertions.assertEquals(30, result);
     }
 }
