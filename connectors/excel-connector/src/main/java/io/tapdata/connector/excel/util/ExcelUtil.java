@@ -5,12 +5,12 @@ import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
 
 import java.math.BigDecimal;
-import java.time.Instant;
-import java.time.ZoneId;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
 public class ExcelUtil {
+    private static final double EXCEL_TIME_EPSILON = 1.0E-9;
 
     //3,5~9,12
     public static List<Integer> getSheetNumber(String reg) {
@@ -165,7 +165,7 @@ public class ExcelUtil {
 
             case NUMERIC:
                 if (DateUtil.isCellDateFormatted(cell) || cell.getCellStyle().getDataFormat() == 58) {
-                    return Instant.ofEpochMilli((cell.getDateCellValue()).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime();
+                    return parseDateTimeValue(cell);
                 } else {
                     return parseNumberValue(cell);
                 }
@@ -190,8 +190,8 @@ public class ExcelUtil {
                             return cell.getRichStringCellValue().getString();
 
                         case NUMERIC:
-                            if (DateUtil.isCellDateFormatted(cell)) {
-                                return Instant.ofEpochMilli((cell.getDateCellValue()).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime();
+                            if (DateUtil.isCellDateFormatted(cell) || cell.getCellStyle().getDataFormat() == 58) {
+                                return parseDateTimeValue(cell);
                             } else {
                                 return parseNumberValue(cell);
                             }
@@ -210,6 +210,107 @@ public class ExcelUtil {
             case _NONE:
             default:
                 return "";
+        }
+    }
+
+    private static Object parseDateTimeValue(Cell cell) {
+        LocalDateTime localDateTime = cell.getLocalDateTimeCellValue();
+        double numericValue = cell.getNumericCellValue();
+        boolean hasDatePart = hasDatePart(numericValue);
+        boolean hasTimePart = hasTimePart(numericValue);
+        TemporalFormat temporalFormat = parseTemporalFormat(cell.getCellStyle());
+        if (!hasDatePart && (hasTimePart || temporalFormat.hasTime)) {
+            return localDateTime.toLocalTime();
+        }
+        if (hasDatePart && hasTimePart) {
+            return localDateTime;
+        }
+        if (temporalFormat.hasDate && temporalFormat.hasTime) {
+            return localDateTime;
+        }
+        if (temporalFormat.hasTime && !temporalFormat.hasDate) {
+            return localDateTime.toLocalTime();
+        }
+        return localDateTime.toLocalDate();
+    }
+
+    private static boolean hasDatePart(double numericValue) {
+        return Math.floor(numericValue) >= 1D;
+    }
+
+    private static boolean hasTimePart(double numericValue) {
+        double fraction = Math.abs(numericValue - Math.floor(numericValue));
+        return fraction > EXCEL_TIME_EPSILON && Math.abs(1D - fraction) > EXCEL_TIME_EPSILON;
+    }
+
+    private static TemporalFormat parseTemporalFormat(CellStyle cellStyle) {
+        if (cellStyle == null) {
+            return new TemporalFormat(false, false);
+        }
+        String format = normalizeDateFormat(cellStyle.getDataFormatString());
+        boolean hasTime = format.contains("{time}")
+                || format.contains(":")
+                || format.contains("am/pm")
+                || format.contains("a/p")
+                || format.indexOf('h') >= 0
+                || format.indexOf('s') >= 0;
+        boolean hasDate = cellStyle.getDataFormat() == 58
+                || format.indexOf('y') >= 0
+                || format.indexOf('d') >= 0
+                || (!hasTime && format.indexOf('m') >= 0);
+        return new TemporalFormat(hasDate, hasTime);
+    }
+
+    private static String normalizeDateFormat(String format) {
+        if (EmptyKit.isBlank(format)) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        boolean inQuote = false;
+        for (int i = 0; i < format.length(); i++) {
+            char c = format.charAt(i);
+            if (inQuote) {
+                if (c == '"') {
+                    inQuote = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inQuote = true;
+                continue;
+            }
+            if (c == '\\' || c == '_' || c == '*') {
+                i++;
+                continue;
+            }
+            if (c == ';') {
+                break;
+            }
+            if (c == '[') {
+                int end = format.indexOf(']', i);
+                if (end > i) {
+                    String token = format.substring(i + 1, end).toLowerCase(Locale.ROOT);
+                    if ("h".equals(token) || "hh".equals(token)
+                            || "m".equals(token) || "mm".equals(token)
+                            || "s".equals(token) || "ss".equals(token)) {
+                        builder.append("{time}");
+                    }
+                    i = end;
+                    continue;
+                }
+            }
+            builder.append(Character.toLowerCase(c));
+        }
+        return builder.toString();
+    }
+
+    private static class TemporalFormat {
+        private final boolean hasDate;
+        private final boolean hasTime;
+
+        private TemporalFormat(boolean hasDate, boolean hasTime) {
+            this.hasDate = hasDate;
+            this.hasTime = hasTime;
         }
     }
 
