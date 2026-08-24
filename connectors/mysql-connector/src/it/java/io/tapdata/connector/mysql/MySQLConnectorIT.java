@@ -8,6 +8,8 @@ import io.tapdata.it.ConnectorTestContext;
 import io.tapdata.it.support.TestStateMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.TestInstance;
 
 import java.util.Set;
@@ -75,5 +77,11 @@ public class MySQLConnectorIT extends ConnectorIT {
         ctx.getLog().info("[IT] MySQL connection: host={}, port={}, database={}, user={}",
                 config.getString("host"), config.getInteger("port"), config.getString("database"), config.getString("user"));
         return ctx;
+    }
+
+    @DisplayName("Test github action")
+    public void testGithubAction() {
+        int result = 10*2;
+        Assertions.assertEquals(20, result);
     }
 }
