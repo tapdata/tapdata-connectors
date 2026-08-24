@@ -3,6 +3,7 @@ package io.tapdata.connector.excel.util;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
+import org.apache.commons.lang3.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -40,6 +41,24 @@ public final class CellValueConvert {
         return val.getClass().getSimpleName().toUpperCase();
     }
 
+    static Object stringValue(Object val) {
+        String temporalValue = formatTemporalValue(val);
+        if (temporalValue != null) {
+            return temporalValue;
+        }
+        return parseValue(val);
+    }
+
+    public static Object parseOriginValue(Object val, String fieldType) {
+        if (isStringField(fieldType)) {
+            return stringValue(val);
+        }
+        if (val instanceof String && StringUtils.isBlank((String) val)) {
+            return null;
+        }
+        return val;
+    }
+
     public static Object parseValue(Object val) {
         if (val instanceof Double || val instanceof Float || val instanceof Long) {
             val = BigDecimal.valueOf(((Number) val).doubleValue()).stripTrailingZeros().toPlainString();
@@ -55,11 +74,10 @@ public final class CellValueConvert {
 
     public static Object parseValue(Object val, Object displayValue, String fieldDataType) {
         if (isStringField(fieldDataType)) {
-            String temporalValue = formatTemporalValue(val);
-            if (temporalValue != null) {
-                return temporalValue;
-            }
-            return parseValue(displayValue);
+            return stringValue(val);
+        }
+        if (displayValue instanceof String && StringUtils.isBlank((String) displayValue)) {
+            return null;
         }
         return parseValue(val);
     }
