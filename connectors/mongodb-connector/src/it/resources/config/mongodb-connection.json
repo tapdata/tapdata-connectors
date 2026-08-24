@@ -1,4 +1,4 @@
 {
-  "uri": "mongodb://127.0.0.1:27017/test",
+  "uri": "mongodb://root:Gotapd8@192.168.1.184:14017/test?authSource=admin",
   "database": "test"
 }
