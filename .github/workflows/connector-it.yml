@@ -2,7 +2,7 @@
 #
 # 触发时机：push 任意分支（含 PR 合并后的推送）+ PR 提交/更新 + 手工触发。
 # paths 过滤保证仅连接器相关路径变更时启动，文档/README 等改动不触发。
-# 实际测试逻辑在 tapdata-application 的 connector-it-reusable.yml 中统一维护。
+# 实际测试逻辑在 tapdata-it 的 connector-it-reusable.yml 中统一维护。
 name: Connector Integration Tests
 
 on:
@@ -35,8 +35,7 @@ concurrency:
 
 jobs:
   connector-it:
-    # TODO: 合入主分支后将 @feature-it 改回 @main
-    uses: tapdata/tapdata-application/.github/workflows/connector-it-reusable.yml@feature-it
+    uses: tapdata/tapdata-it/.github/workflows/connector-it-reusable.yml@main
     with:
       java_version: '17'
       connectors_override: ${{ inputs.connectors || '' }}
