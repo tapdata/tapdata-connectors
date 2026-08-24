@@ -126,4 +126,11 @@ public class MongoDBConnectorIT extends ConnectorIT {
         samples.put("obj_regex", new BsonRegularExpression("^tap.*", "i"));
         return samples;
     }
+
+    @DisplayName("Test github action")
+    @Test
+    public void testGithubAction() {
+        int result = 10*4;
+        Assertions.assertEquals(40, result);
+    }
 }

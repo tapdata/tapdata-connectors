@@ -83,7 +83,7 @@ public class MySQLConnectorIT extends ConnectorIT {
     @DisplayName("Test github action")
     @Test
     public void testGithubAction() {
-        int result = 10*3;
-        Assertions.assertEquals(30, result);
+        int result = 10*4;
+        Assertions.assertEquals(40, result);
     }
 }
