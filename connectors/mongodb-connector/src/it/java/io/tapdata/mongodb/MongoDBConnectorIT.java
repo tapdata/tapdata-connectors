@@ -130,7 +130,7 @@ public class MongoDBConnectorIT extends ConnectorIT {
     @DisplayName("Test github action")
     @Test
     public void testGithubAction() {
-        int result = 10*4;
-        Assertions.assertEquals(40, result);
+        int result = 10*5;
+        Assertions.assertEquals(50, result);
     }
 }
