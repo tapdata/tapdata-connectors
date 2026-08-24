@@ -35,7 +35,8 @@ concurrency:
 
 jobs:
   connector-it:
-    uses: tapdata/tapdata-application/.github/workflows/connector-it-reusable.yml@main
+    # TODO: 合入主分支后将 @feature-it 改回 @main
+    uses: tapdata/tapdata-application/.github/workflows/connector-it-reusable.yml@feature-it
     with:
       java_version: '17'
       connectors_override: ${{ inputs.connectors || '' }}
