@@ -15,6 +15,7 @@
         <java.version>8</java.version>
         <tapdata.pdk.api.version>2.0.7-SNAPSHOT</tapdata.pdk.api.version>
         <bouncycastle.version>1.84</bouncycastle.version>
+        <skipITs>true</skipITs>
     </properties>
     <dependencies>
         <dependency>
@@ -116,6 +117,13 @@
         </dependency>
 
 
+        <!-- 通用 Connector 集成测试框架（test scope，提供 ConnectorIT 基类与全部通用用例） -->
+        <dependency>
+            <groupId>io.tapdata</groupId>
+            <artifactId>tapdata-connector-it</artifactId>
+            <version>1.0-SNAPSHOT</version>
+            <scope>test</scope>
+        </dependency>
         <!-- Mockito -->
         <dependency>
             <groupId>org.mockito</groupId>
@@ -285,6 +293,65 @@
                         <phase>test</phase>
                         <goals>
                             <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.2.0</version>
+                <executions>
+                    <execution>
+                        <id>add-integration-test-source</id>
+                        <phase>generate-test-sources</phase>
+                        <goals>
+                            <goal>add-test-source</goal>
+                            <goal>add-test-resource</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>src/it/java</source>
+                            </sources>
+                            <resources>
+                                <resource>
+                                    <directory>src/it/resources</directory>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- 集成测试（src/it/java，*IT 命名，与单测 surefire 分离） -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.5.6</version>
+                <configuration>
+                    <skipITs>${skipITs}</skipITs>
+                    <!-- MongodbWriter 依赖 AppType（引擎启动参数 app_type），fork JVM 需显式设置，
+                        否则构造 writer 时抛 "app_type is blank" -->
+                    <argLine>
+                        -Xmx4g
+                        -Dapp_type=DAAS
+                        --add-opens=java.base/java.lang=ALL-UNNAMED
+                        --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+                        --add-opens=java.base/java.util=ALL-UNNAMED
+                        --add-opens=java.base/java.security=ALL-UNNAMED
+                        --add-opens=java.base/java.io=ALL-UNNAMED
+                        --add-opens=java.base/java.time=ALL-UNNAMED
+                        --add-opens=java.base/jdk.internal.loader=ALL-UNNAMED
+                    </argLine>
+                    <reportsDirectory>
+                        ${project.build.directory}/failsafe-reports
+                    </reportsDirectory>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>integration-test</id>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
                         </goals>
                     </execution>
                 </executions>
