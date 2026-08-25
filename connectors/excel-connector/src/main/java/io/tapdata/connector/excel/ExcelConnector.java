@@ -242,8 +242,6 @@ public class ExcelConnector extends FileConnector {
                 } else {
                     field.dataType("STRING");
                 }
-            } else if (val instanceof LocalDateTime) {
-                field.dataType("DATE");
             } else {
                 field.dataType(CellValueConvert.toExcelDataType(val));
             }
