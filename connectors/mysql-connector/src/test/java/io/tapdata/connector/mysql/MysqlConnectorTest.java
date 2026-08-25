@@ -241,9 +241,9 @@ public class MysqlConnectorTest {
         void setUp() {
             tapTable = mock(TapTable.class);
             mysqlConfig = mock(MysqlConfig.class);
-            connector = mock(MysqlConnector.class);
-            doCallRealMethod().when(connector).getBatchReadSelectSql(tapTable);
+            connector = new MysqlConnector();
             UnitTestUtils.injectField(MysqlConnector.class, connector, "mysqlConfig", mysqlConfig);
+            UnitTestUtils.injectField(CommonDbConnector.class, connector, "commonDbConfig", mysqlConfig);
         }
 
         private LinkedHashMap<String, TapField> generateFieldMap(TapField... fields) {
@@ -265,7 +265,10 @@ public class MysqlConnectorTest {
                 fields[i] = new TapField("f" + i, "INT");
             }
             when(tapTable.getNameFieldMap()).thenReturn(generateFieldMap(fields));
-            assertTrue(connector.getBatchReadSelectSql(tapTable).toLowerCase().startsWith("select *"));
+            when(tapTable.getId()).thenReturn("AA_0607");
+            when(mysqlConfig.getEscapeChar()).thenReturn('`');
+            when(mysqlConfig.getSchema()).thenReturn("COOLGJ");
+            assertEquals("SELECT * FROM `COOLGJ`.`AA_0607`", connector.getBatchReadSelectSql(tapTable));
         }
     }
 
