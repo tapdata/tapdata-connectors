@@ -15,6 +15,9 @@ import org.bson.types.Code;
 import org.bson.types.Decimal128;
 import org.bson.types.ObjectId;
 import org.bson.types.Symbol;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
 import java.util.HashSet;
