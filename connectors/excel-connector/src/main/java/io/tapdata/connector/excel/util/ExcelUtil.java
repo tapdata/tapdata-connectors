@@ -164,7 +164,7 @@ public class ExcelUtil {
                 return cell.getRichStringCellValue().getString();
 
             case NUMERIC:
-                if (DateUtil.isCellDateFormatted(cell) || cell.getCellStyle().getDataFormat() == 58) {
+                if (isCellDateOrTimeFormatted(cell)) {
                     return parseDateTimeValue(cell);
                 } else {
                     return parseNumberValue(cell);
@@ -190,7 +190,7 @@ public class ExcelUtil {
                             return cell.getRichStringCellValue().getString();
 
                         case NUMERIC:
-                            if (DateUtil.isCellDateFormatted(cell) || cell.getCellStyle().getDataFormat() == 58) {
+                            if (isCellDateOrTimeFormatted(cell)) {
                                 return parseDateTimeValue(cell);
                             } else {
                                 return parseNumberValue(cell);
@@ -213,6 +213,15 @@ public class ExcelUtil {
             default:
                 return null;
         }
+    }
+
+    private static boolean isCellDateOrTimeFormatted(Cell cell) {
+        CellStyle cellStyle = cell.getCellStyle();
+        if (DateUtil.isCellDateFormatted(cell) || cellStyle.getDataFormat() == 58) {
+            return true;
+        }
+        TemporalFormat temporalFormat = parseTemporalFormat(cellStyle);
+        return temporalFormat.hasDate || temporalFormat.hasTime;
     }
 
     private static Object parseDateTimeValue(Cell cell) {
