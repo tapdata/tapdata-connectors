@@ -74,7 +74,11 @@ public final class CellValueConvert {
 
     public static Object parseValue(Object val, Object displayValue, String fieldDataType) {
         if (isStringField(fieldDataType)) {
-            return stringValue(val);
+            String temporalValue = formatTemporalValue(val);
+            if (temporalValue != null) {
+                return temporalValue;
+            }
+            return parseValue(displayValue);
         }
         if (displayValue instanceof String && StringUtils.isBlank((String) displayValue)) {
             return null;
