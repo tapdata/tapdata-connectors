@@ -38,6 +38,5 @@ jobs:
   connector-it:
     uses: tapdata/tapdata-it/.github/workflows/connector-it-reusable.yml@main
     with:
-      java_version: '17'
       connectors_override: ${{ inputs.connectors || '' }}
     secrets: inherit
