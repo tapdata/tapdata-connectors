@@ -198,18 +198,20 @@ public class ExcelUtil {
                         case FORMULA:
                             return cell.getCellFormula();
                         case BLANK:
+                            return "";
                         case ERROR:
                         case _NONE:
                         default:
-                            return "";
+                            return null;
                     }
                 }
                 return cell.getCellFormula();
             case BLANK:
+                return "";
             case ERROR:
             case _NONE:
             default:
-                return "";
+                return null;
         }
     }
 
