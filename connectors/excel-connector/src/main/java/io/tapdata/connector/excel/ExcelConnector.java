@@ -178,7 +178,7 @@ public class ExcelConnector extends FileConnector {
         codecRegistry.registerToTapValue(LocalDate.class, (value, tapType) ->
                 new TapDateValue(new DateTime(((LocalDate) value).atStartOfDay())));
         codecRegistry.registerToTapValue(LocalTime.class, (value, tapType) ->
-                new TapTimeValue(DateTime.withTimeStr(value.toString())));
+                new TapTimeValue(DateTime.withTimeStr(CellValueConvert.formatTemporalValue(value))));
         codecRegistry.registerFromTapValue(TapRawValue.class, "STRING", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null) return toJson(tapRawValue.getValue());
             return "null";
