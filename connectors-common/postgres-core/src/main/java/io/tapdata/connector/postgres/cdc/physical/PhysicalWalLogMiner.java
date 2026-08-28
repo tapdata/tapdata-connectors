@@ -29,6 +29,7 @@ import org.postgresql.replication.LogSequenceNumber;
 import org.postgresql.replication.PGReplicationStream;
 
 import java.nio.ByteBuffer;
+import java.io.ByteArrayOutputStream;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.util.ArrayList;
@@ -170,7 +171,8 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         walLevelLogical = queryWalLevelLogical();
         pageCache = walLevelLogical ? null : new PageStateCache(PAGE_CACHE_CAPACITY);
         decodeCtx = new HeapRmgrDecoder.Ctx(pageCache, walLevelLogical,
-                WAL_DEBUG_ENABLED ? (fmt, args) -> tapLogger.info(fmt, args) : null);
+                WAL_DEBUG_ENABLED ? (fmt, args) -> tapLogger.info(fmt, args) : null,
+                this::fetchToastValue);
         buildDdlWatch();
         // Seed strategy (standby-friendly). PageStateCache is seeded by each
         // page's first post-checkpoint FPI, which is what unlocks UPDATE/DELETE
@@ -1036,7 +1038,8 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         // from an earlier FPI on the same page, mirroring the user-table cache.
         catalogPageCache = walLevelLogical ? null : new PageStateCache(PAGE_CACHE_CAPACITY);
         catalogDecodeCtx = new HeapRmgrDecoder.Ctx(catalogPageCache, walLevelLogical,
-                WAL_DEBUG_ENABLED ? (fmt, args) -> tapLogger.info(fmt, args) : null);
+                WAL_DEBUG_ENABLED ? (fmt, args) -> tapLogger.info(fmt, args) : null,
+                this::fetchToastValue);
         // Baseline column layout for every monitored table; later pg_attribute
         // changes are diffed against this to derive the concrete field DDL.
         try {
@@ -1413,6 +1416,29 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 "SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_lsn() END",
                 rs -> lsn[0] = rs.getString(1)));
         return lsn[0];
+    }
+
+    private byte[] fetchToastValue(long toastRelId, long valueId) {
+        if (toastRelId <= 0 || valueId <= 0) {
+            return null;
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            postgresJdbcContext.query(
+                    "SELECT chunk_data FROM pg_toast.pg_toast_" + toastRelId
+                            + " WHERE chunk_id = " + valueId + " ORDER BY chunk_seq",
+                    rs -> {
+                        while (rs.next()) {
+                            byte[] chunk = rs.getBytes(1);
+                            if (chunk != null && chunk.length > 0) {
+                                out.write(chunk, 0, chunk.length);
+                            }
+                        }
+                    });
+        } catch (Throwable e) {
+            return null;
+        }
+        return out.size() == 0 ? null : out.toByteArray();
     }
 
     /* Best-effort LSN string -> long; 0 on blank/parse failure so callers can

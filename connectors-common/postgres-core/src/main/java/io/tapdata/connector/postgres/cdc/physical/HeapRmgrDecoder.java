@@ -37,11 +37,18 @@ public final class HeapRmgrDecoder {
         public final PageStateCache cache;          // null disables tracking
         public final boolean walLevelLogical;       // global bypass when true
         public final BiConsumer<String, Object[]> debug;   // (fmt, args) → log line; may be null
+        public final HeapTupleDecoder.ToastedValueFetcher toastFetcher;
 
         public Ctx(PageStateCache cache, boolean walLevelLogical, BiConsumer<String, Object[]> debug) {
+            this(cache, walLevelLogical, debug, null);
+        }
+
+        public Ctx(PageStateCache cache, boolean walLevelLogical, BiConsumer<String, Object[]> debug,
+                   HeapTupleDecoder.ToastedValueFetcher toastFetcher) {
             this.cache = cache;
             this.walLevelLogical = walLevelLogical;
             this.debug = debug;
+            this.toastFetcher = toastFetcher;
         }
 
         boolean trackingEnabled(RelationInfo rel) {
@@ -116,7 +123,7 @@ public final class HeapRmgrDecoder {
             cp.put(offnum, tuple);
         }
         NormalRedo r = base(rec, rel, OperationEnum.INSERT);
-        r.setRedoRecord(HeapTupleDecoder.decode(tuple, rel.columns));
+        r.setRedoRecord(HeapTupleDecoder.decode(tuple, rel.columns, ctx == null ? null : ctx.toastFetcher));
         return r;
     }
 
@@ -151,7 +158,7 @@ public final class HeapRmgrDecoder {
         }
         NormalRedo r = base(rec, rel, OperationEnum.DELETE);
         if (oldTuple != null) {
-            r.setUndoRecord(HeapTupleDecoder.decode(oldTuple, rel.columns));
+            r.setUndoRecord(HeapTupleDecoder.decode(oldTuple, rel.columns, ctx == null ? null : ctx.toastFetcher));
         }
         return r;
     }
@@ -216,10 +223,10 @@ public final class HeapRmgrDecoder {
         }
         NormalRedo r = base(rec, rel, OperationEnum.UPDATE);
         if (oldTuple != null) {
-            r.setUndoRecord(HeapTupleDecoder.decode(oldTuple, rel.columns));
+            r.setUndoRecord(HeapTupleDecoder.decode(oldTuple, rel.columns, ctx == null ? null : ctx.toastFetcher));
         }
         if (newTuple != null) {
-            r.setRedoRecord(HeapTupleDecoder.decode(newTuple, rel.columns));
+            r.setRedoRecord(HeapTupleDecoder.decode(newTuple, rel.columns, ctx == null ? null : ctx.toastFetcher));
         }
         return r;
     }
@@ -262,7 +269,7 @@ public final class HeapRmgrDecoder {
                 continue;
             }
             NormalRedo nr = base(rec, rel, OperationEnum.INSERT);
-            nr.setRedoRecord(HeapTupleDecoder.decode(tuples[i], rel.columns));
+            nr.setRedoRecord(HeapTupleDecoder.decode(tuples[i], rel.columns, ctx == null ? null : ctx.toastFetcher));
             out.add(nr);
         }
         ctx.log("[WAL-DEBUG] MULTI_INSERT rel={} blk={} ntuples={} offnums={} dataLen={}",
