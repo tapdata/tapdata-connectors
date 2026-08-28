@@ -203,4 +203,35 @@ public interface MongodbErrorCode {
             dynamicDescriptionCN = "断点：{}"
     )
     String RESUME_TOKEN_MISSING = "370010";
+
+    @TapExCode(
+            describe = "The user does not have the collMod privilege, so changeStreamPreAndPostImages cannot be enabled for the collection. Capturing pre/post images in CDC requires executing the collMod command to enable changeStreamPreAndPostImages on the collection; MongoDB returns error 13 (Unauthorized) when the privilege is missing.",
+            describeCN = "用户缺少 collMod 权限，无法为集合开启 changeStreamPreAndPostImages。CDC 采集前后镜像需要对集合执行 collMod 命令开启 changeStreamPreAndPostImages，权限不足时 MongoDB 返回 error 13 (Unauthorized)。",
+            solution = "Grant the collMod privilege to the user, for example:\n" +
+                    "<pre><code>use admin\n" +
+                    "db.createRole({\n" +
+                    "  role: \"collectionModifier\",\n" +
+                    "  privileges: [{resource: {db: \"YourDb\", collection: \"\"}, actions: [\"collMod\"]}],\n" +
+                    "  roles: []\n" +
+                    "})\n" +
+                    "db.grantRolesToUser(\"YourUser\", [\"collectionModifier\"])</code></pre>\n" +
+                    "Alternatively, manually enable changeStreamPreAndPostImages for the collection with a privileged account:\n" +
+                    "<pre><code>db.runCommand({collMod: \"YourCollection\", changeStreamPreAndPostImages: {enabled: true}})</code></pre>",
+            solutionCN = "为用户添加 collMod 权限，样例：\n" +
+                    "<pre><code>use admin\n" +
+                    "db.createRole({\n" +
+                    "  role: \"collectionModifier\",\n" +
+                    "  privileges: [{resource: {db: \"YourDb\", collection: \"\"}, actions: [\"collMod\"]}],\n" +
+                    "  roles: []\n" +
+                    "})\n" +
+                    "db.grantRolesToUser(\"YourUser\", [\"collectionModifier\"])</code></pre>\n" +
+                    "或使用有权限的账号手工为集合开启 changeStreamPreAndPostImages：\n" +
+                    "<pre><code>db.runCommand({collMod: \"YourCollection\", changeStreamPreAndPostImages: {enabled: true}})</code></pre>",
+            level = TapExLevel.NORMAL,
+            type = TapExType.RUNTIME,
+            dynamicDescription = "Collection: {}",
+            dynamicDescriptionCN = "集合：{}",
+            seeAlso = {"https://www.mongodb.com/docs/manual/reference/command/collMod/", "https://www.mongodb.com/docs/manual/reference/privilege-actions/"}
+    )
+    String PRE_POST_IMAGES_PRIVILEGE_MISSING = "370011";
 }

@@ -24,12 +24,14 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.ParagraphFormatter;
+import io.tapdata.exception.TapCodeException;
 import io.tapdata.exception.TapPdkTerminateByServerEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.batch.MongoBatchReader;
 import io.tapdata.mongodb.entity.MongoCdcOffset;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.entity.ReadParam;
+import io.tapdata.mongodb.error.MongodbErrorCode;
 import io.tapdata.mongodb.reader.MongodbOpLogStreamV3Reader;
 import io.tapdata.mongodb.reader.MongodbStreamReader;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
@@ -726,6 +728,10 @@ public class MongodbConnector extends ConnectorBase {
 				// Collection doesn't exist (NamespaceNotFound), create it and try again
 				mongoDatabase.createCollection(tableName);
 				mongoDatabase.runCommand(bsonDocument);
+			} else if (e.getCode() == 13) {
+				throw new TapCodeException(MongodbErrorCode.PRE_POST_IMAGES_PRIVILEGE_MISSING,
+						"Not authorized to execute collMod to enable changeStreamPreAndPostImages on collection " + tableName, e)
+						.dynamicDescriptionParameters(tableName);
 			} else {
 				throw e;
 			}
