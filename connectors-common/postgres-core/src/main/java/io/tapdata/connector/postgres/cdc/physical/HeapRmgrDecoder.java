@@ -37,11 +37,18 @@ public final class HeapRmgrDecoder {
         public final PageStateCache cache;          // null disables tracking
         public final boolean walLevelLogical;       // global bypass when true
         public final BiConsumer<String, Object[]> debug;   // (fmt, args) → log line; may be null
+        public final HeapTupleDecoder.ToastedValueFetcher toastFetcher;
 
         public Ctx(PageStateCache cache, boolean walLevelLogical, BiConsumer<String, Object[]> debug) {
+            this(cache, walLevelLogical, debug, null);
+        }
+
+        public Ctx(PageStateCache cache, boolean walLevelLogical, BiConsumer<String, Object[]> debug,
+                   HeapTupleDecoder.ToastedValueFetcher toastFetcher) {
             this.cache = cache;
             this.walLevelLogical = walLevelLogical;
             this.debug = debug;
+            this.toastFetcher = toastFetcher;
         }
 
         boolean trackingEnabled(RelationInfo rel) {
@@ -116,7 +123,7 @@ public final class HeapRmgrDecoder {
             cp.put(offnum, tuple);
         }
         NormalRedo r = base(rec, rel, OperationEnum.INSERT);
-        r.setRedoRecord(decodeTuple(tuple, rel, ctx, "insert"));
+        r.setRedoRecord(HeapTupleDecoder.decode(tuple, rel.columns, ctx == null ? null : ctx.toastFetcher));
         return r;
     }
 
@@ -150,7 +157,7 @@ public final class HeapRmgrDecoder {
         // overwrites the offset before any later record should read it.
         NormalRedo r = base(rec, rel, OperationEnum.DELETE);
         if (oldTuple != null) {
-            r.setUndoRecord(decodeTuple(oldTuple, rel, ctx, "delete-old"));
+            r.setUndoRecord(HeapTupleDecoder.decode(oldTuple, rel.columns, ctx == null ? null : ctx.toastFetcher));
         }
         return r;
     }
@@ -215,10 +222,10 @@ public final class HeapRmgrDecoder {
         }
         NormalRedo r = base(rec, rel, OperationEnum.UPDATE);
         if (oldTuple != null) {
-            r.setUndoRecord(decodeTuple(oldTuple, rel, ctx, "update-old"));
+            r.setUndoRecord(HeapTupleDecoder.decode(oldTuple, rel.columns, ctx == null ? null : ctx.toastFetcher));
         }
         if (newTuple != null) {
-            r.setRedoRecord(decodeTuple(newTuple, rel, ctx, "update-new"));
+            r.setRedoRecord(HeapTupleDecoder.decode(newTuple, rel.columns, ctx == null ? null : ctx.toastFetcher));
         }
         return r;
     }
@@ -261,7 +268,7 @@ public final class HeapRmgrDecoder {
                 continue;
             }
             NormalRedo nr = base(rec, rel, OperationEnum.INSERT);
-            nr.setRedoRecord(decodeTuple(tuples[i], rel, ctx, "multi-insert"));
+            nr.setRedoRecord(HeapTupleDecoder.decode(tuples[i], rel.columns, ctx == null ? null : ctx.toastFetcher));
             out.add(nr);
         }
         ctx.log("[WAL-DEBUG] MULTI_INSERT rel={} blk={} ntuples={} offnums={} dataLen={}",
@@ -275,19 +282,6 @@ public final class HeapRmgrDecoder {
             }
         }
         return out;
-    }
-
-    private static Map<String, Object> decodeTuple(byte[] tuple, RelationInfo rel, Ctx ctx, String image) {
-        if (tuple != null && tuple.length >= SIZE_OF_HEAP_HEADER) {
-            int infomask2 = u16(tuple, 0);
-            int infomask = u16(tuple, 2);
-            int tHoff = tuple[4] & 0xFF;
-            int natts = infomask2 & HEAP_NATTS_MASK;
-            ctx.log("[WAL-DEBUG] TUPLE-DECODE image={} rel={} tupleLen={} natts={} infomask=0x{} tHoff={} relColumns={}",
-                    new Object[]{image, relTag(rel), tuple.length, natts, Integer.toHexString(infomask),
-                            tHoff, columnLayout(rel)});
-        }
-        return HeapTupleDecoder.decode(tuple, rel.columns);
     }
 
     private static int u16(byte[] bytes, int offset) {

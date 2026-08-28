@@ -24,11 +24,21 @@ public final class HeapTupleDecoder {
     private HeapTupleDecoder() {
     }
 
+    @FunctionalInterface
+    public interface ToastedValueFetcher {
+        byte[] fetch(long toastRelId, long valueId);
+    }
+
     /* on-disk TOAST pointer: VARHDRSZ_EXTERNAL(2) + sizeof(varatt_external)(16). */
     private static final int VARTAG_ONDISK = 18;
     private static final int EXTERNAL_ONDISK_SIZE = 2 + 16;
+    private static final int VARHDRSZ = 4;
 
     public static Map<String, Object> decode(byte[] tuple, List<ColumnInfo> columns) {
+        return decode(tuple, columns, null);
+    }
+
+    public static Map<String, Object> decode(byte[] tuple, List<ColumnInfo> columns, ToastedValueFetcher toastFetcher) {
         Map<String, Object> out = new LinkedHashMap<>();
         if (tuple == null || tuple.length < SIZE_OF_HEAP_HEADER) {
             return out;
@@ -74,7 +84,7 @@ public final class HeapTupleDecoder {
             }
             Object value;
             try {
-                value = readAttr(r, col);
+                value = readAttr(r, col, toastFetcher);
             } catch (RuntimeException ex) {
                 // Malformed/garbage tuple bytes (typically a stale cache page or
                 // an unrecoverable delta-only update): abort the rest of the row
@@ -98,14 +108,14 @@ public final class HeapTupleDecoder {
         return (bitmap[i >> 3] & (1 << (i & 7))) != 0;
     }
 
-    private static Object readAttr(WalByteReader r, ColumnInfo col) {
+    private static Object readAttr(WalByteReader r, ColumnInfo col, ToastedValueFetcher toastFetcher) {
         int attlen = col.typLen;
         if (attlen > 0) {
             r.align(col.typAlign);
             return PgTypeDecoder.decode(col.typeOid, r.readBytes(attlen), col.enumTypeOid, col.enumLabels);
         }
         if (attlen == -1) {
-            return readVarlena(r, col);
+            return readVarlena(r, col, toastFetcher);
         }
         if (attlen == -2) {
             // cstring: null-terminated, no alignment beyond byte
@@ -119,15 +129,41 @@ public final class HeapTupleDecoder {
         throw new IllegalStateException("unsupported attlen " + attlen + " for column " + col.name);
     }
 
-    private static Object readVarlena(WalByteReader r, ColumnInfo col) {
+    private static Object readVarlena(WalByteReader r, ColumnInfo col, ToastedValueFetcher toastFetcher) {
         int first = r.peekUInt8();
         if ((first & 0x01) == 0x01) {
             if (first == 0x01) {
                 // 1B external TOAST pointer; value lives in the TOAST relation
                 int tag = r.peekUInt8(1);
-                int size = tag == VARTAG_ONDISK ? EXTERNAL_ONDISK_SIZE : 2;
-                r.skip(size);
-                return null;            // external value not present in this record
+                if (tag != VARTAG_ONDISK) {
+                    r.skip(2);
+                    return null;
+                }
+                r.skip(2);
+                int rawSize = r.readInt32();
+                long extInfo = r.readUInt32();
+                long valueId = r.readUInt32();
+                long toastRelId = r.readUInt32();
+                byte[] toasted;
+                try {
+                    toasted = toastFetcher == null ? null : toastFetcher.fetch(toastRelId, valueId);
+                } catch (RuntimeException ex) {
+                    toasted = null;
+                }
+                if (toasted == null) {
+                    return null;
+                }
+                int extSize = (int) (extInfo & 0x3FFFFFFFL);
+                boolean compressed = extSize < rawSize - VARHDRSZ;
+                if (compressed) {
+                    int method = (int) ((extInfo >> 30) & 0x03);
+                    if (!isPglzCompressionMethod(method)) {
+                        return null;
+                    }
+                    byte[] plain = Pglz.decompress(toasted, rawSize - VARHDRSZ);
+                    return plain == null ? null : PgTypeDecoder.decode(col.typeOid, plain);
+                }
+                return PgTypeDecoder.decode(col.typeOid, toasted);
             }
             int total = (first >> 1) & 0x7F;        // includes the 1-byte header
             r.skip(1);
@@ -148,10 +184,14 @@ public final class HeapTupleDecoder {
             int rawSize = (int) (tcinfo & 0x3FFFFFFF);
             int method = (int) ((tcinfo >> 30) & 0x03);
             byte[] comp = r.readBytes(total - 8);
-            byte[] plain = method == 0 ? Pglz.decompress(comp, rawSize) : null;
+            byte[] plain = isPglzCompressionMethod(method) ? Pglz.decompress(comp, rawSize) : null;
             return plain == null ? null : PgTypeDecoder.decode(col.typeOid, plain, col.enumTypeOid, col.enumLabels);
         }
         r.skip(4);
         return PgTypeDecoder.decode(col.typeOid, r.readBytes(total - 4), col.enumTypeOid, col.enumLabels);
+    }
+
+    private static boolean isPglzCompressionMethod(int method) {
+        return method == 0 || method == 1;
     }
 }

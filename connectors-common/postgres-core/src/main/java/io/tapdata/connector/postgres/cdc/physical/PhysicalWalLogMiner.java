@@ -385,7 +385,8 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             throw new UncheckedIOException("Cannot create spill directory " + spillDir, e);
         }
         decodeCtx = new HeapRmgrDecoder.Ctx(pageCache, walLevelLogical,
-                isWalDebugEnabled() ? tapLogger::info : null);
+                isWalDebugEnabled() ? tapLogger::info : null,
+                this::fetchToastValue);
         buildDdlWatch();
         // Seed strategy (standby-friendly). PageStateCache is seeded by each
         // page's first post-checkpoint FPI, which is what unlocks UPDATE/DELETE
@@ -3220,15 +3221,10 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         // Give the catalog its own page overlay so FPI-less pg_attribute UPDATEs
         // (DROP/RENAME/ALTER COLUMN) reconstruct their before/after tuple images
         // from an earlier FPI on the same page, mirroring the user-table cache.
-        //
-        // This must stay enabled even when the user-table WAL level is logical:
-        // pg_attribute UPDATE records may still omit the old tuple bytes. DDL
-        // recognition relies on the catalog overlay to recover the before-image
-        // and mark the xid as DDL before later DML in the same transaction is
-        // decoded/emitted.
         catalogPageCache = new PageStateCache(getPageCacheCapacity());
         catalogDecodeCtx = new HeapRmgrDecoder.Ctx(catalogPageCache, false,
-                isWalDebugEnabled() ? tapLogger::info : null);
+                isWalDebugEnabled() ? tapLogger::info : null,
+                this::fetchToastValue);
         // Baseline column layout for every monitored table; later pg_attribute
         // changes are diffed against this to derive the concrete field DDL.
         try {
@@ -4253,6 +4249,29 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         private AncestorCatchupStalledException(String message) {
             super(message);
         }
+    }
+
+    private byte[] fetchToastValue(long toastRelId, long valueId) {
+        if (toastRelId <= 0 || valueId <= 0) {
+            return null;
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            postgresJdbcContext.query(
+                    "SELECT chunk_data FROM pg_toast.pg_toast_" + toastRelId
+                            + " WHERE chunk_id = " + valueId + " ORDER BY chunk_seq",
+                    rs -> {
+                        while (rs.next()) {
+                            byte[] chunk = rs.getBytes(1);
+                            if (chunk != null && chunk.length > 0) {
+                                out.write(chunk, 0, chunk.length);
+                            }
+                        }
+                    });
+        } catch (Throwable e) {
+            return null;
+        }
+        return out.size() == 0 ? null : out.toByteArray();
     }
 
     /* Best-effort LSN string -> long; 0 on blank/parse failure so callers can

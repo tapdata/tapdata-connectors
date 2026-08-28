@@ -45,19 +45,17 @@ public class HeapTupleDecoderTest {
                 new ColumnInfo("b", 2, PgTypeDecoder.INT8, 8, 'd', false),
                 new ColumnInfo("c", 3, PgTypeDecoder.TEXT, -1, 'i', false));
 
-        int tHoff = maxAlign(SIZE_OF_HEAP_TUPLE_HEADER);     // 24, no null bitmap
+        int tHoff = maxAlign(SIZE_OF_HEAP_TUPLE_HEADER);
         ByteArrayOutputStream o = new ByteArrayOutputStream();
-        u16(o, 3);                          // t_infomask2 = natts
-        u16(o, 0);                          // t_infomask = no nulls
-        o.write(tHoff);                     // t_hoff
-        // padding between offset 23 and t_hoff (24) -> 1 byte
+        u16(o, 3);
+        u16(o, 0);
+        o.write(tHoff);
         for (int i = 0; i < tHoff - SIZE_OF_HEAP_TUPLE_HEADER; i++) {
             o.write(0);
         }
-        u32(o, 42);                         // a int4
-        u32(o, 0);                          // align padding to 8 for int8
-        u64(o, 123456789L);                 // b int8
-        // c text "hi" short varlena: header=(payload+1)<<1|1
+        u32(o, 42);
+        u32(o, 0);
+        u64(o, 123456789L);
         o.write(((2 + 1) << 1) | 1);
         o.write('h');
         o.write('i');
@@ -76,19 +74,18 @@ public class HeapTupleDecoderTest {
                 new ColumnInfo("c", 3, PgTypeDecoder.INT4, 4, 'i', false));
 
         int natts = 3;
-        int bitmapLen = (natts + 7) / 8;    // 1
-        int tHoff = maxAlign(SIZE_OF_HEAP_TUPLE_HEADER + bitmapLen);   // 24
-        // a present, dead null, c present -> bits 1,0,1 -> 0b101 = 0x05
+        int bitmapLen = (natts + 7) / 8;
+        int tHoff = maxAlign(SIZE_OF_HEAP_TUPLE_HEADER + bitmapLen);
         ByteArrayOutputStream o = new ByteArrayOutputStream();
         u16(o, natts);
         u16(o, HEAP_HASNULL);
         o.write(tHoff);
-        o.write(0x05);                      // null bitmap
+        o.write(0x05);
         for (int i = 0; i < tHoff - SIZE_OF_HEAP_TUPLE_HEADER - bitmapLen; i++) {
-            o.write(0);                     // padding to t_hoff
+            o.write(0);
         }
-        u32(o, 7);                          // a
-        u32(o, 9);                          // c (dead is null, no bytes)
+        u32(o, 7);
+        u32(o, 9);
 
         Map<String, Object> m = HeapTupleDecoder.decode(o.toByteArray(), cols);
         assertEquals(7, m.get("a"));
@@ -110,7 +107,7 @@ public class HeapTupleDecoderTest {
         u16(o, natts);
         u16(o, HEAP_HASNULL);
         o.write(tHoff);
-        o.write(0x09);                      // att1 present, att2/att3 null, att4 present
+        o.write(0x09);
         for (int i = 0; i < tHoff - SIZE_OF_HEAP_TUPLE_HEADER - bitmapLen; i++) {
             o.write(0);
         }
@@ -147,5 +144,126 @@ public class HeapTupleDecoderTest {
                 hex("0200020818000c000000a902000020030000800500000002000000350000506466646b646b646b73660000040000400a0000900a00001008000010030000002800000001800c00330c00002000000000807b002000000000807b00313233"), cols);
         assertEquals(12, nestedArrayRow.get("a1"));
         assertEquals("{\"dfd\":\"sf\",\"kdkdk\":[123123,123,123,\"123\"]}", nestedArrayRow.get("a2"));
+    }
+
+    @Test
+    public void testExternalToastPointerFetch() {
+        List<ColumnInfo> cols = Arrays.asList(
+                new ColumnInfo("payload", 1, PgTypeDecoder.TEXT, -1, 'i', false));
+
+        int tHoff = maxAlign(SIZE_OF_HEAP_TUPLE_HEADER);
+        ByteArrayOutputStream o = new ByteArrayOutputStream();
+        u16(o, 1);
+        u16(o, 0);
+        o.write(tHoff);
+        for (int i = 0; i < tHoff - SIZE_OF_HEAP_TUPLE_HEADER; i++) {
+            o.write(0);
+        }
+        o.write(0x01);
+        o.write(18);
+        u32(o, 11);
+        u32(o, 7);
+        u32(o, 77);
+        u32(o, 991);
+
+        Map<String, Object> m = HeapTupleDecoder.decode(o.toByteArray(), cols, (toastRelId, valueId) -> {
+            assertEquals(991L, toastRelId);
+            assertEquals(77L, valueId);
+            return "payload".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        });
+
+        assertEquals("payload", m.get("payload"));
+    }
+
+    @Test
+    public void testExternalToastPointerFetchCompressed() {
+        assertExternalToastPointerFetchCompressed(0);
+    }
+
+    @Test
+    public void testExternalToastPointerFetchCompressedPg14Pglz() {
+        assertExternalToastPointerFetchCompressed(1);
+    }
+
+    private static void assertExternalToastPointerFetchCompressed(int method) {
+        List<ColumnInfo> cols = Arrays.asList(
+                new ColumnInfo("payload", 1, PgTypeDecoder.TEXT, -1, 'i', false));
+
+        int tHoff = maxAlign(SIZE_OF_HEAP_TUPLE_HEADER);
+        ByteArrayOutputStream o = new ByteArrayOutputStream();
+        u16(o, 1);
+        u16(o, 0);
+        o.write(tHoff);
+        for (int i = 0; i < tHoff - SIZE_OF_HEAP_TUPLE_HEADER; i++) {
+            o.write(0);
+        }
+        o.write(0x01);
+        o.write(18);
+        u32(o, 10);
+        u32(o, 5 | ((long) method << 30));
+        u32(o, 77);
+        u32(o, 991);
+
+        byte[] toasted = new byte[] {
+                0x04,
+                'a', 'b',
+                0x01, 0x02
+        };
+        Map<String, Object> m = HeapTupleDecoder.decode(o.toByteArray(), cols, (toastRelId, valueId) -> toasted);
+
+        assertEquals("ababab", m.get("payload"));
+    }
+
+    @Test
+    public void testExternalToastPointerFetchUnsupportedCompressionReturnsNull() {
+        List<ColumnInfo> cols = Arrays.asList(
+                new ColumnInfo("payload", 1, PgTypeDecoder.TEXT, -1, 'i', false));
+
+        int tHoff = maxAlign(SIZE_OF_HEAP_TUPLE_HEADER);
+        ByteArrayOutputStream o = new ByteArrayOutputStream();
+        u16(o, 1);
+        u16(o, 0);
+        o.write(tHoff);
+        for (int i = 0; i < tHoff - SIZE_OF_HEAP_TUPLE_HEADER; i++) {
+            o.write(0);
+        }
+        o.write(0x01);
+        o.write(18);
+        u32(o, 10);
+        u32(o, 5 | (2L << 30));
+        u32(o, 77);
+        u32(o, 991);
+
+        Map<String, Object> m = HeapTupleDecoder.decode(o.toByteArray(), cols, (toastRelId, valueId) -> new byte[] {
+                0x04, 'a', 'b', 0x01, 0x02
+        });
+
+        assertNull(m.get("payload"));
+    }
+
+    @Test
+    public void testInlineCompressedVarlenaPg14Pglz() {
+        List<ColumnInfo> cols = Arrays.asList(
+                new ColumnInfo("payload", 1, PgTypeDecoder.TEXT, -1, 'i', false));
+
+        byte[] compressed = new byte[] {
+                0x04, 'a', 'b', 0x01, 0x02
+        };
+        int tHoff = maxAlign(SIZE_OF_HEAP_TUPLE_HEADER);
+        int total = 8 + compressed.length;
+        ByteArrayOutputStream o = new ByteArrayOutputStream();
+        u16(o, 1);
+        u16(o, 0);
+        o.write(tHoff);
+        for (int i = 0; i < tHoff - SIZE_OF_HEAP_TUPLE_HEADER; i++) {
+            o.write(0);
+        }
+        u32(o, ((long) total << 2) | 0x02);
+        u32(o, 6 | (1L << 30));
+        o.write(compressed, 0, compressed.length);
+
+        Map<String, Object> m = HeapTupleDecoder.decode(o.toByteArray(), cols);
+
+        assertEquals("ababab", m.get("payload"));
     }
 }
