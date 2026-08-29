@@ -1,5 +1,6 @@
 package io.tapdata.mongodb;
 
+import com.mongodb.MongoException;
 import com.mongodb.client.*;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
@@ -13,7 +14,10 @@ import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapIndexEx;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.utils.DataMap;
+import io.tapdata.exception.TapCodeException;
 import io.tapdata.mongodb.batch.ErrorHandler;
+import io.tapdata.mongodb.error.MongodbErrorCode;
 import io.tapdata.mongodb.batch.MongoBatchReader;
 import io.tapdata.mongodb.entity.MongoCdcOffset;
 import io.tapdata.mongodb.entity.MongodbConfig;
@@ -901,6 +905,44 @@ class MongodbConnectorTest {
                 assertTrue(indexes.get(0).getUnique());
                 assertFalse(indexes.get(1).getUnique());
             });
+        }
+    }
+
+    @Nested
+    class OpenPreImageTest {
+        MongodbConnector mongodbConnector;
+        MongoDatabase mongoDatabase;
+        TapTable tapTable;
+        DataMap nodeConfig;
+
+        @BeforeEach
+        void setUp() {
+            mongodbConnector = new MongodbConnector();
+            mongoDatabase = mock(MongoDatabase.class);
+            ReflectionTestUtils.setField(mongodbConnector, "mongoDatabase", mongoDatabase);
+            ReflectionTestUtils.setField(mongodbConnector, "mongoVersion", 6);
+            tapTable = new TapTable("test");
+            nodeConfig = new DataMap();
+            nodeConfig.put("preImage4Sink", true);
+        }
+
+        @Test
+        @DisplayName("test collMod without privilege throws coded exception")
+        void testNoCollModPrivilege() {
+            MongoException mongoException = new MongoException(13, "not authorized on test to execute command collMod");
+            when(mongoDatabase.runCommand(any())).thenThrow(mongoException);
+            TapCodeException tapCodeException = assertThrows(TapCodeException.class,
+                    () -> ReflectionTestUtils.invokeMethod(mongodbConnector, "openPreImage", tapTable, nodeConfig));
+            assertEquals(MongodbErrorCode.PRE_POST_IMAGES_PRIVILEGE_MISSING, tapCodeException.getCode());
+        }
+
+        @Test
+        @DisplayName("test other MongoException is rethrown as-is")
+        void testOtherErrorRethrown() {
+            MongoException mongoException = new MongoException(27, "error");
+            when(mongoDatabase.runCommand(any())).thenThrow(mongoException);
+            assertThrows(MongoException.class,
+                    () -> ReflectionTestUtils.invokeMethod(mongodbConnector, "openPreImage", tapTable, nodeConfig));
         }
     }
 }
