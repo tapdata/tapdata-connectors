@@ -19,10 +19,12 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
+import io.tapdata.exception.TapCodeException;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.MongodbExceptionCollector;
 import io.tapdata.mongodb.MongodbUtil;
+import io.tapdata.mongodb.error.MongodbErrorCode;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.util.MongodbLookupUtil;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -489,11 +491,10 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                         if (isPreImageAlreadyEnabled(tableName)) {
                             TapLogger.info(TAG, "Collection {} already has changeStreamPreAndPostImages enabled, skipping", tableName);
                             continue;
-                        } else {
-                            TapLogger.warn(TAG, "Collection {} does not have changeStreamPreAndPostImages enabled and no permission to enable it. " +
-                                    "Please manually enable preImage for this collection or grant collMod permission to the user.", tableName);
-                            continue;
                         }
+                        throw new TapCodeException(MongodbErrorCode.PRE_POST_IMAGES_PRIVILEGE_MISSING,
+                                "Not authorized to execute collMod to enable changeStreamPreAndPostImages on collection " + tableName, e)
+                                .dynamicDescriptionParameters(tableName);
                     }
                     throw new MongoException(tableName + " failed to enable changeStreamPreAndPostImages", e);
                 }

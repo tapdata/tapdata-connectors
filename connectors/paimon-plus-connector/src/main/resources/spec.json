@@ -300,7 +300,7 @@
             "min": 1,
             "placeholder": "${bucketCount_placeholder}"
           },
-          "default": 4,
+          "default": 1,
           "x-index": 30,
           "x-perTable": true
         },
@@ -565,7 +565,7 @@
             "max": 16,
             "placeholder": "${asyncCommitConcurrency_placeholder}"
           },
-          "default": 4,
+          "default": 1,
           "x-index": 100,
           "x-reactions": [
             {

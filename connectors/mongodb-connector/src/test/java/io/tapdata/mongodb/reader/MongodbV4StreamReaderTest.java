@@ -3,6 +3,8 @@ package io.tapdata.mongodb.reader;
 import com.mongodb.MongoException;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoDatabase;
+import io.tapdata.exception.TapCodeException;
+import io.tapdata.mongodb.error.MongodbErrorCode;
 import org.bson.Document;
 import org.junit.jupiter.api.*;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -75,6 +77,27 @@ class MongodbV4StreamReaderTest {
 			MongoException mongoException = new MongoException(27,"error");
 			when(mongoDatabase.runCommand(any())).thenThrow(mongoException);
 			Assertions.assertThrows(MongoException.class,()->mongodbV4StreamReader.openChangeStreamPreAndPostImages(Arrays.asList("test")));
+		}
+
+		@Test
+		void testNoCollModPrivilegeButAlreadyEnabled(){
+			MongoException mongoException = new MongoException(13,"not authorized on test to execute command collMod");
+			Document listCollectionsResult = new Document("cursor",
+					new Document("firstBatch", Arrays.asList(new Document("options",
+							new Document("changeStreamPreAndPostImages", new Document("enabled", true))))));
+			when(mongoDatabase.runCommand(any())).thenThrow(mongoException).thenReturn(listCollectionsResult);
+			mongodbV4StreamReader.openChangeStreamPreAndPostImages(Arrays.asList("test"));
+			verify(mongoDatabase,times(0)).createCollection("test");
+			verify(mongoDatabase,times(2)).runCommand(any());
+		}
+
+		@Test
+		void testNoCollModPrivilegeAndNotEnabled(){
+			MongoException mongoException = new MongoException(13,"not authorized on test to execute command collMod");
+			when(mongoDatabase.runCommand(any())).thenThrow(mongoException).thenReturn(new Document());
+			TapCodeException tapCodeException = Assertions.assertThrows(TapCodeException.class,
+					()->mongodbV4StreamReader.openChangeStreamPreAndPostImages(Arrays.asList("test")));
+			Assertions.assertEquals(MongodbErrorCode.PRE_POST_IMAGES_PRIVILEGE_MISSING, tapCodeException.getCode());
 		}
 
 	}
