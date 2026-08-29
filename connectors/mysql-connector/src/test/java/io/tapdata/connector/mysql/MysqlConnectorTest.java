@@ -93,6 +93,27 @@ public class MysqlConnectorTest {
         Assertions.assertNotNull(connectorFunctions.getCountByPartitionFilterFunction());
     }
 
+    @Test
+    void testFieldSizeLargeThen50() {
+        TapTable tapTable = new TapTable();
+        LinkedHashMap<String, TapField> fieldMap = new LinkedHashMap<>();
+        for (int i = 0; i < 51; i++) {
+            TapField field = new TapField("f" + i, "INT");
+            fieldMap.put(field.getName(), field);
+        }
+        tapTable.setId("AA_0607");
+        tapTable.setNameFieldMap(fieldMap);
+
+        CommonDbConfig commonDbConfig = mock(CommonDbConfig.class);
+        when(commonDbConfig.getSchema()).thenReturn("COOLGJ");
+        when(commonDbConfig.getEscapeChar()).thenReturn('`');
+
+        MysqlConnector connector = spy(new MysqlConnector());
+        UnitTestUtils.injectField(CommonDbConnector.class, connector, "commonDbConfig", commonDbConfig);
+
+        assertEquals("SELECT * FROM `COOLGJ`.`AA_0607`", connector.getBatchReadSelectSql(tapTable));
+    }
+
     @Nested
     class FilterTimeForMysqlTest {
         MysqlConnector mysqlConnector = new MysqlConnector();
@@ -228,44 +249,6 @@ public class MysqlConnectorTest {
             Map<String, Object> actual = mysqlConnector.filterTimeForMysql(resultSet, metaData, recordEvent, illegalDateConsumer);
             assertInstanceOf(TapIllegalDate.class, actual.get("_timestamp"));
             assertEquals("_timestamp", ((TapInsertRecordEvent) recordEvent).getAfterIllegalDateFieldName().get(0));
-        }
-    }
-
-    @Nested
-    class BatchReadSqlTest {
-        TapTable tapTable;
-        MysqlConfig mysqlConfig;
-        MysqlConnector connector;
-
-        @BeforeEach
-        void setUp() {
-            tapTable = mock(TapTable.class);
-            mysqlConfig = mock(MysqlConfig.class);
-            connector = mock(MysqlConnector.class);
-            doCallRealMethod().when(connector).getBatchReadSelectSql(tapTable);
-            UnitTestUtils.injectField(MysqlConnector.class, connector, "mysqlConfig", mysqlConfig);
-        }
-
-        private LinkedHashMap<String, TapField> generateFieldMap(TapField... fields) {
-            if (null == fields) {
-                return null;
-            }
-            LinkedHashMap<String, TapField> fieldMap = new LinkedHashMap<>();
-            for (TapField field : fields) {
-                fieldMap.put(field.getName(), field);
-            }
-            return fieldMap;
-        }
-
-        @Test
-        void testFieldSizeLargeThen50() {
-            int fieldSize = 51;
-            TapField[] fields = new TapField[fieldSize];
-            for (int i = 0; i < fieldSize; i++) {
-                fields[i] = new TapField("f" + i, "INT");
-            }
-            when(tapTable.getNameFieldMap()).thenReturn(generateFieldMap(fields));
-            assertTrue(connector.getBatchReadSelectSql(tapTable).toLowerCase().startsWith("select *"));
         }
     }
 
