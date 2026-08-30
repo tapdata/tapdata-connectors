@@ -214,10 +214,13 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     /*
      * Side-effect-free context used only by pool threads for wal_level=logical.
      * cache=null and walLevelLogical=true guarantee HeapRmgrDecoder will not
-     * read or mutate PageStateCache while pre-decoding DML.
+     * read or mutate PageStateCache while pre-decoding DML. Not static because
+     * it carries the instance toastFetcher: logical-level WAL stores large
+     * values (jsonb etc.) as TOAST pointers, and fast pre-decode must resolve
+     * them through pg_toast just like the consumer-side decodeCtx does.
+     * Initialized in resetCachesForRecovery alongside decodeCtx.
      */
-    private static final HeapRmgrDecoder.Ctx LOGICAL_FAST_DECODE_CTX =
-            new HeapRmgrDecoder.Ctx(null, true, null);
+    private HeapRmgrDecoder.Ctx logicalFastDecodeCtx;
     /* Running diagnostics for before-image coverage under wal_level=replica:
      * how many emitted UPDATE/DELETE carried a null before-image (cache miss),
      * throttled to one warning per interval. Consumer-thread only. */
@@ -385,6 +388,9 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             throw new UncheckedIOException("Cannot create spill directory " + spillDir, e);
         }
         decodeCtx = new HeapRmgrDecoder.Ctx(pageCache, walLevelLogical,
+                isWalDebugEnabled() ? tapLogger::info : null,
+                this::fetchToastValue);
+        logicalFastDecodeCtx = new HeapRmgrDecoder.Ctx(null, true,
                 isWalDebugEnabled() ? tapLogger::info : null,
                 this::fetchToastValue);
         buildDdlWatch();
@@ -1632,7 +1638,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      *
      * Fast path: when wal_level=logical, DML WAL carries enough tuple bytes to
      * decode without PageStateCache. The worker may pre-decode those records
-     * with LOGICAL_FAST_DECODE_CTX, which has no cache and no debug callback.
+     * with logicalFastDecodeCtx, which has no cache and no page-state tracking.
      *
      * Slow path: replica-level WAL and any DDL-sensitive record are decoded on
      * the consumer thread in WAL order. Workers must not mutate page cache,
@@ -1751,7 +1757,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private List<NormalRedo> decodeHeapLogicalFast(XLogRecord rec, RelationInfo rel) {
         List<NormalRedo> redos;
         try {
-            redos = HeapRmgrDecoder.decode(rec, rel, LOGICAL_FAST_DECODE_CTX);
+            redos = HeapRmgrDecoder.decode(rec, rel, logicalFastDecodeCtx);
         } catch (RuntimeException ex) {
             tapLogger.warn("skip logical fast heap record at lsn={} rel={}.{} due to decode error: {}",
                     lsnStr(rec.lsn), rel.schema, rel.table, ex.getMessage());
@@ -4255,10 +4261,29 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         if (toastRelId <= 0 || valueId <= 0) {
             return null;
         }
+        // The TOAST pointer stores the TOAST table's own OID (pg_class.oid of
+        // pg_toast_<n>), NOT the owning table's OID. The toast relation's name
+        // is pg_toast_<owningOid> and can differ from pg_toast_<toastRelId> once
+        // OIDs and relfilenodes diverge (e.g. after a table rebuild), so resolve
+        // the real relation name through pg_class instead of string-concatenating
+        // the pointer value into a table name.
+        String[] toastTable = {null};
+        ErrorKit.ignoreAnyError(() -> postgresJdbcContext.query(
+                "SELECT relname FROM pg_class WHERE oid = " + toastRelId,
+                rs -> {
+                    if (rs.next()) {
+                        toastTable[0] = rs.getString(1);
+                    }
+                }));
+        if (toastTable[0] == null) {
+            tapLogger.warn("TAP-12765 fetchToastValue: no pg_class row for oid {} (valueId={}); returning null",
+                    toastRelId, valueId);
+            return null;
+        }
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try {
             postgresJdbcContext.query(
-                    "SELECT chunk_data FROM pg_toast.pg_toast_" + toastRelId
+                    "SELECT chunk_data FROM pg_toast." + toastTable[0]
                             + " WHERE chunk_id = " + valueId + " ORDER BY chunk_seq",
                     rs -> {
                         while (rs.next()) {
@@ -4269,9 +4294,18 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                         }
                     });
         } catch (Throwable e) {
+            tapLogger.warn("TAP-12765 fetchToastValue: query pg_toast.{} chunk_id={} failed: {}",
+                    toastTable[0], valueId, e.getMessage());
             return null;
         }
-        return out.size() == 0 ? null : out.toByteArray();
+        if (out.size() == 0) {
+            tapLogger.warn("TAP-12765 fetchToastValue: pg_toast.{} chunk_id={} returned 0 bytes",
+                    toastTable[0], valueId);
+            return null;
+        }
+        tapLogger.info("TAP-12765 fetchToastValue: pg_toast.{} chunk_id={} fetched {} bytes",
+                toastTable[0], valueId, out.size());
+        return out.toByteArray();
     }
 
     /* Best-effort LSN string -> long; 0 on blank/parse failure so callers can

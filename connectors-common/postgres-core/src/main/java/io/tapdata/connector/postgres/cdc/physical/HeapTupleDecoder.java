@@ -1,5 +1,6 @@
 package io.tapdata.connector.postgres.cdc.physical;
 
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -160,7 +161,15 @@ public final class HeapTupleDecoder {
                     if (!isPglzCompressionMethod(method)) {
                         return null;
                     }
-                    byte[] plain = Pglz.decompress(toasted, rawSize - VARHDRSZ);
+                    // A TOASTed compressed value stores VARDATA in the toast
+                    // relation, which begins with the 4-byte va_tcinfo word
+                    // (raw size) followed by the pglz stream. Skip the tcinfo
+                    // before inflating, mirroring the inline 4B-header branch.
+                    if (toasted.length <= 4) {
+                        return null;
+                    }
+                    byte[] pglzData = Arrays.copyOfRange(toasted, 4, toasted.length);
+                    byte[] plain = Pglz.decompress(pglzData, rawSize - VARHDRSZ);
                     return plain == null ? null : PgTypeDecoder.decode(col.typeOid, plain);
                 }
                 return PgTypeDecoder.decode(col.typeOid, toasted);

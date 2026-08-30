@@ -205,6 +205,7 @@ public class HeapTupleDecoderTest {
         u32(o, 991);
 
         byte[] toasted = new byte[] {
+                0x06, 0x00, 0x00, 0x00,        // va_tcinfo: raw size 6 ("ababab")
                 0x04,
                 'a', 'b',
                 0x01, 0x02
