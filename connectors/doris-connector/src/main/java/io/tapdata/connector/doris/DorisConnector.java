@@ -41,6 +41,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -220,6 +221,23 @@ public class DorisConnector extends CommonDbConnector {
             createTableOptions.setTableExists(true);
             return createTableOptions;
         }
+        createTableOptions.setTableExists(false);
+        String createTableSql = buildCreateTableSql(tapTable);
+        try {
+            tapLogger.info("Create table sql: [{}]", createTableSql);
+            dorisJdbcContext.execute(createTableSql);
+            return createTableOptions;
+        } catch (Exception e) {
+            exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
+            throw new RuntimeException("Create Table " + tapTable.getId() + " Failed | Error: " + e.getMessage() + " | Sql: " + createTableSql, e);
+        }
+    }
+
+    /**
+     * Build the CREATE TABLE sql for Doris, extracted for unit testability.
+     * Only depends on {@link DorisConfig} and {@link DorisSqlMaker}, no JDBC involved.
+     */
+    String buildCreateTableSql(TapTable tapTable) {
         Collection<String> primaryKeys = tapTable.primaryKeys(true);
         DorisTableType uniqueType = DorisTableType.valueOf(dorisConfig.getUniqueKeyType(tapTable.getId()));
         StringBuilder stringBuilder = new StringBuilder();
@@ -265,19 +283,15 @@ public class DorisConnector extends CommonDbConnector {
             stringBuilder.append(String.join("`,`", dorisConfig.getDistributedKey(tapTable.getId())));
         }
         //generate bucket
-        stringBuilder.append("`) BUCKETS ").append(dorisConfig.getBucket(tapTable.getId())).append(" PROPERTIES(");
-        //generate properties
-        stringBuilder.append(dorisConfig.getTableProperties(tapTable.getId()).stream().map(v -> "\"" + v.get("propKey") + "\"=\"" + v.get("propValue") + "\"").collect(Collectors.joining(", ")));
-        stringBuilder.append(")");
-        createTableOptions.setTableExists(false);
-        try {
-            tapLogger.info("Create table sql: [{}]", stringBuilder.toString());
-            dorisJdbcContext.execute(stringBuilder.toString());
-            return createTableOptions;
-        } catch (Exception e) {
-            exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
-            throw new RuntimeException("Create Table " + tapTable.getId() + " Failed | Error: " + e.getMessage() + " | Sql: " + stringBuilder, e);
+        stringBuilder.append("`) BUCKETS ").append(dorisConfig.getBucket(tapTable.getId()));
+        //generate properties: omit the whole PROPERTIES() clause when table properties are empty, otherwise Doris parses "PROPERTIES()" as a syntax error
+        List<LinkedHashMap<String, String>> tableProperties = dorisConfig.getTableProperties(tapTable.getId());
+        if (EmptyKit.isNotEmpty(tableProperties)) {
+            stringBuilder.append(" PROPERTIES(");
+            stringBuilder.append(tableProperties.stream().map(v -> "\"" + v.get("propKey") + "\"=\"" + v.get("propValue") + "\"").collect(Collectors.joining(", ")));
+            stringBuilder.append(")");
         }
+        return stringBuilder.toString();
     }
 
 //    @Override
