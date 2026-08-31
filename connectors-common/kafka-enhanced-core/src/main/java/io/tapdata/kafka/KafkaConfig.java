@@ -260,6 +260,10 @@ public class KafkaConfig extends BasicConfig implements
     public void addRegistryConfig(Properties props) {
         if (this.getConnectionSchemaRegister()) {
             props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+            if ("HORTONWORKS".equalsIgnoreCase(getConnectionSchemaRegistryType())) {
+                props.put("value.serializer", org.apache.kafka.common.serialization.StringSerializer.class);
+                return;
+            }
             switch (getConnectionRegistrySchemaType()) {
                 case "JSON":
                     props.put("value.serializer", io.confluent.kafka.serializers.KafkaJsonSerializer.class);

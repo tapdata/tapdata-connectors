@@ -1,7 +1,9 @@
 package io.tapdata.kafka.schema_mode;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.confluent.kafka.schemaregistry.json.JsonSchema;
 import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.entity.ValueChange;
@@ -45,6 +47,7 @@ public class RegistryJsonMode extends AbsSchemaMode {
 
     // 每个 topic 最近一次推断出的 schema（fieldName -> tapType）；命中时跳过 schema diff 计算
     private final Map<String, Map<String, String>> lastSchemaPerTopic = new ConcurrentHashMap<>();
+    private final Set<String> registeredHortonworksSubjects = ConcurrentHashMap.newKeySet();
 
     public RegistryJsonMode(IKafkaService kafkaService) {
         super(KafkaSchemaMode.REGISTRY_JSON, kafkaService);
@@ -207,17 +210,20 @@ public class RegistryJsonMode extends AbsSchemaMode {
             // 创建 Kafka 主键
             String keyValue = createKafkaKeyValueMap(data, tapTable);
 
-            // 将 Map 转换为 JsonNode，KafkaJsonSchemaSerializer 支持 JsonNode
-            // 它会自动从 JsonNode 生成 JSON Schema 并注册到 Schema Registry
-            JsonNode valueNode = OBJECT_MAPPER.valueToTree(data);
+            String topic = topic(tapTable, tapEvent);
+            Object value = OBJECT_MAPPER.valueToTree(data);
+            if ("HORTONWORKS".equalsIgnoreCase(kafkaService.getConfig().getConnectionSchemaRegistryType())) {
+                registerHortonworksJsonSchema(topic, data);
+                value = OBJECT_MAPPER.writeValueAsString(data);
+            }
 
             // 创建 ProducerRecord
             ProducerRecord<Object, Object> producerRecord = new ProducerRecord<>(
-                    topic(tapTable, tapEvent),
+                    topic,
                     computePartition(createKafkaKey(data, tapTable), kafkaService.getConfig().getNodePartitionSize()),
                     tapEvent.getTime(),
                     keyValue,
-                    valueNode,  // 使用 JsonNode 而不是硬编码的对象
+                    value,
                     new RecordHeaders().add("op", op.name().getBytes())
             );
 
@@ -226,6 +232,47 @@ public class RegistryJsonMode extends AbsSchemaMode {
         } catch (Exception e) {
             throw new RuntimeException("Failed to convert TapEvent to JSON message for table: " + tapTable.getId(), e);
         }
+    }
+
+    private void registerHortonworksJsonSchema(String topic, Map<String, Object> data) {
+        String subject = topic + "-value";
+        if (registeredHortonworksSubjects.contains(subject)) {
+            return;
+        }
+        try {
+            ObjectNode schema = OBJECT_MAPPER.createObjectNode();
+            schema.put("$schema", "http://json-schema.org/draft-07/schema#");
+            schema.put("type", "object");
+            schema.put("additionalProperties", true);
+            ObjectNode properties = schema.putObject("properties");
+            for (Map.Entry<String, Object> entry : data.entrySet()) {
+                ObjectNode field = properties.putObject(entry.getKey());
+                field.put("type", jsonSchemaType(entry.getValue()));
+            }
+            kafkaService.getSchemaRegistryClient().register(subject, new JsonSchema(schema));
+            registeredHortonworksSubjects.add(subject);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to register Hortonworks JSON schema for subject: " + subject, e);
+        }
+    }
+
+    private String jsonSchemaType(Object value) {
+        if (value == null) {
+            return "null";
+        }
+        if (value instanceof Boolean) {
+            return "boolean";
+        }
+        if (value instanceof Number) {
+            return (value instanceof Float || value instanceof Double || value instanceof BigDecimal) ? "number" : "integer";
+        }
+        if (value instanceof Map) {
+            return "object";
+        }
+        if (value instanceof Collection || value.getClass().isArray()) {
+            return "array";
+        }
+        return "string";
     }
 
     @Override

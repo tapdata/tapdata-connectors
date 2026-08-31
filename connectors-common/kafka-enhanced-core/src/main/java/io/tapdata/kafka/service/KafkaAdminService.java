@@ -9,6 +9,7 @@ import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.config.TopicConfig;
 import org.apache.kafka.common.errors.TopicExistsException;
 
 import java.util.*;
@@ -55,7 +56,13 @@ public class KafkaAdminService implements IKafkaAdminService {
     @Override
     public void createTopic(Collection<String> topics, int numPartitions, short replicationFactor, CreateTopicsOptions createTopicsOptions) throws ExecutionException, InterruptedException {
         Collection<NewTopic> newTopics = new ArrayList<>();
-        topics.forEach(topic -> newTopics.add(new NewTopic(topic, numPartitions, replicationFactor)));
+        topics.forEach(topic -> {
+            NewTopic newTopic = new NewTopic(topic, numPartitions, replicationFactor);
+            if (replicationFactor == 1) {
+                newTopic.configs(Collections.singletonMap(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, "1"));
+            }
+            newTopics.add(newTopic);
+        });
 
         int interval = 5;
         boolean firstError = true;

@@ -703,15 +703,20 @@ public class KafkaService implements IKafkaService {
             boolean handled = false;
             for (String registryUrl : registryUrls) {
                 try {
-                    int code = deleteSchemaRegistrySubject(registryUrl, subject, false);
+                    boolean hortonworksRegistry = isHortonworksSchemaRegistry(registryUrl);
+                    int code = hortonworksRegistry
+                            ? deleteHortonworksSchemaRegistrySubject(registryUrl, subject)
+                            : deleteSchemaRegistrySubject(registryUrl, subject, false);
                     if (code == HttpURLConnection.HTTP_NOT_FOUND) {
                         handled = true;
                         break;
                     }
                     if (code >= 200 && code < 300) {
-                        int permanentCode = deleteSchemaRegistrySubject(registryUrl, subject, true);
-                        if (permanentCode != HttpURLConnection.HTTP_NOT_FOUND && (permanentCode < 200 || permanentCode >= 300)) {
-                            logger.warn("Delete schema registry subject '{}' permanently failed, url: {}, code: {}", subject, registryUrl, permanentCode);
+                        if (!hortonworksRegistry) {
+                            int permanentCode = deleteSchemaRegistrySubject(registryUrl, subject, true);
+                            if (permanentCode != HttpURLConnection.HTTP_NOT_FOUND && (permanentCode < 200 || permanentCode >= 300)) {
+                                logger.warn("Delete schema registry subject '{}' permanently failed, url: {}, code: {}", subject, registryUrl, permanentCode);
+                            }
                         }
                         handled = true;
                         logger.info("Deleted schema registry subject '{}' for topic '{}'", subject, topic);
@@ -728,9 +733,46 @@ public class KafkaService implements IKafkaService {
         }
     }
 
+    private boolean isHortonworksSchemaRegistry() {
+        return "HORTONWORKS".equalsIgnoreCase(config.getConnectionSchemaRegistryType());
+    }
+
+    private boolean isHortonworksSchemaRegistry(String registryUrl) {
+        if (isHortonworksSchemaRegistry()) {
+            return true;
+        }
+        // Some existing task snapshots may still carry schemaRegistryType=CONFLUENT
+        // while pointing at the Hortonworks registry service.
+        return StringUtils.containsIgnoreCase(registryUrl, "schema-registry.kafka-registry")
+                || StringUtils.contains(registryUrl, ":9090");
+    }
+
+    private int deleteHortonworksSchemaRegistrySubject(String registryUrl, String subject) throws Exception {
+        String baseUrl = registryUrl.endsWith("/") ? registryUrl.substring(0, registryUrl.length() - 1) : registryUrl;
+        String url = baseUrl + "/api/v1/schemaregistry/schemas/" + encodePathSegment(subject);
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setRequestMethod("DELETE");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(10000);
+            connection.setDoInput(true);
+            if (config.getConnectionBasicAuth()) {
+                String auth = config.getConnectionAuthUserName() + ":" + config.getConnectionAuthPassword();
+                String encoded = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+                connection.setRequestProperty("Authorization", "Basic " + encoded);
+            }
+            return connection.getResponseCode();
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
     private int deleteSchemaRegistrySubject(String registryUrl, String subject, boolean permanent) throws Exception {
         String baseUrl = registryUrl.endsWith("/") ? registryUrl.substring(0, registryUrl.length() - 1) : registryUrl;
-        String url = baseUrl + "/subjects/" + URLEncoder.encode(subject, StandardCharsets.UTF_8.name());
+        String url = baseUrl + "/subjects/" + encodePathSegment(subject);
         if (permanent) {
             url += "?permanent=true";
         }
@@ -752,6 +794,10 @@ public class KafkaService implements IKafkaService {
                 connection.disconnect();
             }
         }
+    }
+
+    private String encodePathSegment(String value) throws Exception {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20");
     }
 
     public SchemaRegistryClient getSchemaRegistryClient() {

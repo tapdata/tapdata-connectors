@@ -35,8 +35,8 @@ import static io.tapdata.pdk.apis.entity.ConnectionOptions.*;
 public class KafkaEnhancedCoreConnector extends ConnectorBase {
     public static final String PDK_ID = "kafka_enhanced";
 
-    protected IKafkaService kafkaService;
-    protected KafkaConfig kafkaConfig;
+    protected volatile IKafkaService kafkaService;
+    protected volatile KafkaConfig kafkaConfig;
     protected final AtomicBoolean stopping = new AtomicBoolean(false);
     protected Map<String, KafkaProducer<Object, Object>> producerMap = new ConcurrentHashMap<>();
 
@@ -168,12 +168,16 @@ public class KafkaEnhancedCoreConnector extends ConnectorBase {
     }
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) {
+        IKafkaService service = kafkaService;
+        if (service == null) {
+            throw new IllegalStateException("Kafka service is not initialized");
+        }
         // 当前线程若已开启事务，使用对应的 transactional producer；否则走普通 producer
-         KafkaProducer<Object, Object> producer = producerMap.get(Thread.currentThread().getName());
+        KafkaProducer<Object, Object> producer = producerMap.get(Thread.currentThread().getName());
         if (null != producer) {
-            kafkaService.writeRecord(producer, tapRecordEvents, tapTable, writeListResultConsumer);
+            service.writeRecord(producer, tapRecordEvents, tapTable, writeListResultConsumer);
         } else {
-            kafkaService.writeRecord(tapRecordEvents, tapTable, writeListResultConsumer);
+            service.writeRecord(tapRecordEvents, tapTable, writeListResultConsumer);
         }
     }
 

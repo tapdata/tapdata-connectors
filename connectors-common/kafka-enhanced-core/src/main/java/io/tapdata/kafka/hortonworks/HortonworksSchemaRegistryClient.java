@@ -1,5 +1,7 @@
 package io.tapdata.kafka.hortonworks;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.confluent.kafka.schemaregistry.ParsedSchema;
 import io.confluent.kafka.schemaregistry.client.SchemaMetadata;
 import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
@@ -17,6 +19,7 @@ import io.confluent.kafka.schemaregistry.client.rest.entities.SchemaReference;
  * 仅实现 TapData 实际用到的方法，其他方法抛 UnsupportedOperationException
  */
 public class HortonworksSchemaRegistryClient implements SchemaRegistryClient {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     
     private final List<String> baseUrls;
     private final OkHttpClient httpClient;
@@ -42,51 +45,65 @@ public class HortonworksSchemaRegistryClient implements SchemaRegistryClient {
 
     @Override
     public int register(String subject, ParsedSchema schema) throws IOException, RestClientException {
-        // Hortonworks API: POST /subjects/{subject}/versions
-        // body: {"schema": "<escaped JSON string>"}  <-- 不带 schemaType
-        String url = baseUrls.get(0) + "/subjects/" + subject + "/versions";
         String schemaStr = schema.canonicalString();
-        // 需要转义双引号并包装成 JSON 字符串
-        String escapedSchema = schemaStr.replace("\\", "\\\\").replace("\"", "\\\"");
-        String requestBody = "{\"schema\":\"" + escapedSchema + "\"}";
-        
-        Request.Builder builder = new Request.Builder()
+        ensureSchemaMetadata(subject, schema.schemaType());
+
+        String url = baseUrls.get(0) + "/api/v1/schemaregistry/schemas/" + encodePath(subject) + "/versions?branch=MASTER&disableCanonicalCheck=true";
+        String requestBody = OBJECT_MAPPER.createObjectNode()
+                .put("description", "TapData generated schema")
+                .put("schemaText", schemaStr)
+                .toString();
+
+        JsonNode body = executeJson(new Request.Builder()
                 .url(url)
-                .post(RequestBody.create(requestBody, MediaType.parse("application/json")));
-        
+                .post(RequestBody.create(requestBody, MediaType.parse("application/json"))), true);
+        return body.path("id").asInt();
+    }
+
+    private void ensureSchemaMetadata(String subject, String schemaType) throws IOException, RestClientException {
+        String url = baseUrls.get(0) + "/api/v1/schemaregistry/schemas";
+        String requestBody = OBJECT_MAPPER.createObjectNode()
+                .put("type", StringUtils.defaultIfBlank(schemaType, "json").toLowerCase(Locale.ROOT))
+                .put("schemaGroup", "Kafka")
+                .put("name", subject)
+                .put("description", "TapData generated schema")
+                .put("compatibility", "NONE")
+                .put("validationLevel", "ALL")
+                .toString();
+
+        executeJson(new Request.Builder()
+                .url(url)
+                .post(RequestBody.create(requestBody, MediaType.parse("application/json"))), false);
+    }
+
+    private JsonNode executeJson(Request.Builder builder, boolean failOnConflict) throws IOException, RestClientException {
         if (basicAuthHeader != null) {
             builder.header("Authorization", basicAuthHeader);
         }
-        
+
         try (Response response = httpClient.newCall(builder.build()).execute()) {
             String body = response.body() != null ? response.body().string() : "";
             if (!response.isSuccessful()) {
-                throw new RestClientException("Register schema failed: " + response.code() + " " + body, 
+                if (!failOnConflict && (response.code() == 400 || response.code() == 409)) {
+                    return OBJECT_MAPPER.createObjectNode();
+                }
+                throw new RestClientException("Hortonworks schema registry request failed: " + response.code() + " " + body,
                         response.code(), 50001);
             }
-            // 解析返回的 {"id": 123}
-            return parseId(body);
+            if (StringUtils.isBlank(body)) {
+                return OBJECT_MAPPER.createObjectNode();
+            }
+            return OBJECT_MAPPER.readTree(body);
         }
     }
 
-    private int parseId(String json) {
-        // 简单解析 {"id":123}
-        int idIndex = json.indexOf("\"id\"");
-        if (idIndex < 0) {
-            throw new RuntimeException("Invalid response: " + json);
-        }
-        int colonIndex = json.indexOf(":", idIndex);
-        int commaIndex = json.indexOf(",", colonIndex);
-        int braceIndex = json.indexOf("}", colonIndex);
-        int endIndex = commaIndex > 0 ? Math.min(commaIndex, braceIndex) : braceIndex;
-        String idStr = json.substring(colonIndex + 1, endIndex).trim();
-        return Integer.parseInt(idStr);
+    private String encodePath(String value) {
+        return okhttp3.HttpUrl.parse("http://localhost/").newBuilder().addPathSegment(value).build().encodedPath().substring(1);
     }
 
     @Override
     public SchemaMetadata getLatestSchemaMetadata(String subject) throws IOException, RestClientException {
-        // Hortonworks API: GET /subjects/{subject}/versions/latest
-        String url = baseUrls.get(0) + "/subjects/" + subject + "/versions/latest";
+        String url = baseUrls.get(0) + "/api/v1/schemaregistry/schemas/" + encodePath(subject) + "/versions/latest";
         Request.Builder builder = new Request.Builder().url(url).get();
         if (basicAuthHeader != null) {
             builder.header("Authorization", basicAuthHeader);
@@ -101,32 +118,9 @@ public class HortonworksSchemaRegistryClient implements SchemaRegistryClient {
                 throw new RestClientException("Get schema failed: " + response.code() + " " + body,
                         response.code(), 50001);
             }
-            // 简化解析: 假设返回 {"id":1, "version":1, "schema":"..."}
-            int id = parseFieldInt(body, "id");
-            int version = parseFieldInt(body, "version");
-            String schema = parseFieldString(body, "schema");
-            return new SchemaMetadata(id, version, schema);
+            JsonNode json = OBJECT_MAPPER.readTree(body);
+            return new SchemaMetadata(json.path("id").asInt(), json.path("version").asInt(), json.path("schemaText").asText());
         }
-    }
-
-    private int parseFieldInt(String json, String field) {
-        int fieldIndex = json.indexOf("\"" + field + "\"");
-        if (fieldIndex < 0) return -1;
-        int colonIndex = json.indexOf(":", fieldIndex);
-        int commaIndex = json.indexOf(",", colonIndex);
-        int braceIndex = json.indexOf("}", colonIndex);
-        int endIndex = commaIndex > 0 ? Math.min(commaIndex, braceIndex) : braceIndex;
-        String valueStr = json.substring(colonIndex + 1, endIndex).trim();
-        return Integer.parseInt(valueStr);
-    }
-
-    private String parseFieldString(String json, String field) {
-        int fieldIndex = json.indexOf("\"" + field + "\"");
-        if (fieldIndex < 0) return null;
-        int colonIndex = json.indexOf(":", fieldIndex);
-        int quoteStart = json.indexOf("\"", colonIndex);
-        int quoteEnd = json.indexOf("\"", quoteStart + 1);
-        return json.substring(quoteStart + 1, quoteEnd);
     }
 
     // ========== 以下是接口要求但 TapData 未使用的方法，全部抛异常 ==========
@@ -143,8 +137,10 @@ public class HortonworksSchemaRegistryClient implements SchemaRegistryClient {
 
     @Override
     public String updateCompatibility(String subject, String compatibility) throws IOException, RestClientException {
-        // 如果 TapData 用到了这个方法，需要实现
-        throw new UnsupportedOperationException("Not implemented for Hortonworks");
+        // Hortonworks Schema Registry does not expose the same compatibility
+        // endpoint as Confluent. Treat this as best-effort so topic creation is
+        // not blocked; schema registration still happens through register().
+        return compatibility;
     }
 
     @Override
