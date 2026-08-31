@@ -153,6 +153,9 @@ public class KafkaConfig extends BasicConfig implements
         return connectionConfigGet("schemaRegisterUrl", "");
     }
 
+    public String getConnectionSchemaRegistryType() {
+        return connectionConfigGet("schemaRegistryType", "CONFLUENT");
+    }
     public String getConnectionRegistrySchemaType() {
         return connectionConfigGet("registrySchemaType", "JSON");
     }

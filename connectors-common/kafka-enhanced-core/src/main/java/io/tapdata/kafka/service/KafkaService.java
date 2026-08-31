@@ -780,6 +780,12 @@ public class KafkaService implements IKafkaService {
                 configs.put("basic.auth.user.info",
                         config.getConnectionAuthUserName() + ":" + config.getConnectionAuthPassword());
             }
+            String registryType = config.getConnectionSchemaRegistryType();
+            if ("HORTONWORKS".equalsIgnoreCase(registryType)) {
+                schemaRegistryClient = new io.tapdata.kafka.hortonworks.HortonworksSchemaRegistryClient(urls, configs);
+                logger.info("Using Hortonworks Schema Registry adapter for URLs: " + urls);
+                return schemaRegistryClient;
+            }
             schemaRegistryClient = new CachedSchemaRegistryClient(urls, 1000, configs);
             return schemaRegistryClient;
         }
