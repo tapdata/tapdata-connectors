@@ -10,6 +10,7 @@ import org.apache.commons.lang3.StringUtils;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import io.confluent.kafka.schemaregistry.client.rest.entities.SchemaReference;
 
 /**
  * Hortonworks Schema Registry 适配器（最小实现）
@@ -171,5 +172,74 @@ public class HortonworksSchemaRegistryClient implements SchemaRegistryClient {
         throw new UnsupportedOperationException("Not implemented for Hortonworks");
     }
 
-    // 还有更多接口方法，这里省略...
+
+    @Override
+    public void reset() {
+        // No-op for Hortonworks adapter (stateless HTTP client)
+    }
+
+    @Override
+    public Optional<ParsedSchema> parseSchema(String schemaType, String schemaString, List<SchemaReference> references) {
+        throw new UnsupportedOperationException("parseSchema not implemented for Hortonworks");
+    }
+
+    @Override
+    public int register(String subject, ParsedSchema schema, int version, int id) throws IOException, RestClientException {
+        throw new UnsupportedOperationException("register with version/id not implemented for Hortonworks");
+    }
+
+    @Override
+    public Collection<String> getAllSubjectsById(int id) throws IOException, RestClientException {
+        throw new UnsupportedOperationException("getAllSubjectsById not implemented for Hortonworks");
+    }
+
+    @Override
+    public SchemaMetadata getSchemaMetadata(String subject, int version) throws IOException, RestClientException {
+        throw new UnsupportedOperationException("getSchemaMetadata not implemented for Hortonworks");
+    }
+
+    @Override
+    public boolean testCompatibility(String subject, ParsedSchema schema) throws IOException, RestClientException {
+        throw new UnsupportedOperationException("testCompatibility not implemented for Hortonworks");
+    }
+
+    @Override
+    public String setMode(String mode) throws IOException, RestClientException {
+        throw new UnsupportedOperationException("setMode not implemented for Hortonworks");
+    }
+
+    @Override
+    public String setMode(String mode, String subject) throws IOException, RestClientException {
+        throw new UnsupportedOperationException("setMode with subject not implemented for Hortonworks");
+    }
+
+    @Override
+    public String getMode() throws IOException, RestClientException {
+        throw new UnsupportedOperationException("getMode not implemented for Hortonworks");
+    }
+
+    @Override
+    public String getMode(String subject) throws IOException, RestClientException {
+        throw new UnsupportedOperationException("getMode with subject not implemented for Hortonworks");
+    }
+
+    @Override
+    public List<Integer> deleteSubject(String subject) throws IOException, RestClientException {
+        throw new UnsupportedOperationException("deleteSubject not implemented for Hortonworks");
+    }
+
+    @Override
+    public List<Integer> deleteSubject(Map<String, String> requestProperties, String subject) throws IOException, RestClientException {
+        throw new UnsupportedOperationException("deleteSubject with properties not implemented for Hortonworks");
+    }
+
+    @Override
+    public Integer deleteSchemaVersion(String subject, String version) throws IOException, RestClientException {
+        throw new UnsupportedOperationException("deleteSchemaVersion not implemented for Hortonworks");
+    }
+
+    @Override
+    public Integer deleteSchemaVersion(Map<String, String> requestProperties, String subject, String version) throws IOException, RestClientException {
+        throw new UnsupportedOperationException("deleteSchemaVersion with properties not implemented for Hortonworks");
+    }
 }
