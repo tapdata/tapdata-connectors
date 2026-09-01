@@ -92,7 +92,7 @@ public class TidbConnector extends CommonDbConnector {
         });
         tapLogger = tapConnectionContext.getLog();
         if (tidbConfig.getFileLog()) {
-            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
+            tapLogger.info("Starting JDBC Logging, connectorId: {}", firstConnectorId);
             tidbConfig.startJdbcLog(firstConnectorId);
         }
         tidbJdbcContext = new TidbJdbcContext(tidbConfig);
