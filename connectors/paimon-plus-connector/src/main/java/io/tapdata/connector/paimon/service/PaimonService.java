@@ -61,9 +61,11 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.ByteArrayOutputStream;
+import java.io.FileNotFoundException;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.file.NoSuchFileException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDate;
@@ -1149,11 +1151,12 @@ public class PaimonService implements AutoCloseable {
 		WriteListResult<TapRecordEvent> result = new WriteListResult<>();
 		Identifier identifier = Identifier.create(database, tableName);
 		List<PaimonMicroBatchCoordinator.CallbackReservation> readyCallbacks = new ArrayList<>();
+		PaimonTableWriteContext writeContext = null;
 		boolean writerIngressStarted = false;
 		try {
 			Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
 			synchronized (lock) {
-				PaimonTableWriteContext writeContext = tableWriteContexts.get(tableKey);
+				writeContext = tableWriteContexts.get(tableKey);
 				if (writeContext != null && writeContext.hasPendingCommit()) {
 					readyCallbacks.addAll(confirmPendingCommitLocked(
 							writeContext, tableKey, "pending-retry"));
@@ -1202,6 +1205,10 @@ public class PaimonService implements AutoCloseable {
 				}
 			}
 		} catch (Exception failure) {
+			if (writerIngressStarted && isRecoverableSpillFileFailure(failure)) {
+				resetBrokenTableWriteContext(tableKey, writeContext, currentLog, failure);
+				throw failure;
+			}
 			if (failure instanceof PaimonDynamicBucketPollutedException
 					|| failure instanceof PaimonFatalWriteException
 					|| writerIngressStarted) {
@@ -1520,6 +1527,41 @@ public class PaimonService implements AutoCloseable {
 		}
 		stickyWriteFailure.compareAndSet(null, failure);
 		lifecycle.fail(stickyWriteFailure.get());
+	}
+
+	private boolean isRecoverableSpillFileFailure(Throwable failure) {
+		Throwable current = failure;
+		while (current != null) {
+			if (current instanceof FileNotFoundException || current instanceof NoSuchFileException) {
+				String message = current.getMessage();
+				if (message != null && message.contains("paimon-io-") && message.contains(".channel")) {
+					return true;
+				}
+			}
+			current = current.getCause();
+		}
+		return false;
+	}
+
+	private void resetBrokenTableWriteContext(
+			String tableKey,
+			PaimonTableWriteContext writeContext,
+			Log currentLog,
+			Throwable failure) {
+		boolean removed = tableWriteContexts.remove(tableKey, writeContext);
+		if (!removed) {
+			return;
+		}
+		try {
+			writeContext.close();
+		} catch (Throwable closeFailure) {
+			if (currentLog != null) {
+				currentLog.warn(
+						"Failed to close recoverable Paimon write context after spill error for table {}",
+						tableKey,
+						closeFailure);
+			}
+		}
 	}
 
 	private static void rethrow(Throwable failure) throws Exception {
