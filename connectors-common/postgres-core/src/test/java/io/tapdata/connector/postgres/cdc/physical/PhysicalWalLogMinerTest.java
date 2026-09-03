@@ -1498,18 +1498,38 @@ public class PhysicalWalLogMinerTest {
         ReflectionTestUtils.setField(miner, "postgresConfig", config);
         ReflectionTestUtils.setField(miner, "currentTimeline", 41);
 
-        AtomicInteger call = new AtomicInteger();
         try (MockedStatic<DriverManager> dm = mockStatic(DriverManager.class)) {
             dm.when(() -> DriverManager.getConnection(anyString(), any(Properties.class))).thenAnswer(inv -> {
+                String url = inv.getArgument(0);
+                String host;
+                int port;
+                if (url.contains("postgres-slave2")) {
+                    host = "postgres-slave2";
+                    port = 6433;
+                } else {
+                    host = "postgres-master";
+                    port = 6434;
+                }
                 Connection conn = mock(Connection.class);
-                PreparedStatement ps = mock(PreparedStatement.class);
-                ResultSet rs = mock(ResultSet.class);
-                when(rs.next()).thenReturn(true);
-                // base node (6434) is stranded on the old timeline 40, the standby
-                // (6433) is the new primary on 41
-                when(rs.getString(1)).thenReturn(call.incrementAndGet() == 1 ? "00000028" : "00000029");
-                when(ps.executeQuery()).thenReturn(rs);
-                when(conn.prepareStatement(anyString())).thenReturn(ps);
+                when(conn.prepareStatement(anyString())).thenAnswer(psInv -> {
+                    String sql = psInv.getArgument(0);
+                    PreparedStatement ps = mock(PreparedStatement.class);
+                    when(ps.executeQuery()).thenAnswer(qInv -> {
+                        ResultSet rs = mock(ResultSet.class);
+                        when(rs.next()).thenReturn(true);
+                        if (sql.contains("pg_walfile_name")) {
+                            when(rs.getString(1)).thenReturn("postgres-slave2".equals(host) ? "00000029" : "00000028");
+                        } else if (sql.contains("pg_control_checkpoint()")) {
+                            when(rs.getInt(1)).thenReturn("postgres-slave2".equals(host) ? 41 : 40);
+                        } else if (sql.contains("pg_last_wal_replay_lsn()") || sql.contains("pg_current_wal_flush_lsn()")) {
+                            when(rs.getString(1)).thenReturn("postgres-slave2".equals(host) ? "0/00002000" : "0/00001000");
+                        } else if (sql.contains("pg_is_in_recovery()")) {
+                            when(rs.getBoolean(1)).thenReturn("postgres-slave2".equals(host));
+                        }
+                        return rs;
+                    });
+                    return ps;
+                });
                 return conn;
             });
 
@@ -1520,6 +1540,74 @@ public class PhysicalWalLogMinerTest {
             Object first = prioritized.get(0);
             assertEquals("postgres-slave2", ReflectionTestUtils.getField(first, "host"));
             assertEquals(6433, ReflectionTestUtils.getField(first, "port"));
+        }
+    }
+
+    @Test
+    public void testPrioritizeCurrentTimelineSourcesPrefersHigherReadableLsnAmongCurrentTimelineStandbys() {
+        // Two standbys are on the same current timeline, but one is further
+        // ahead on replay LSN. The retry loop should prefer that more reliable
+        // standby first, even if it is later in the configured address order.
+        PostgresConfig config = new PostgresConfig();
+        config.setHost("postgres-master");
+        config.setPort(6434);
+        config.setDatabase("postgres");
+        config.setUser("postgres");
+        config.setPassword("postgres");
+        config.setDeploymentMode("master-slave");
+        ArrayList<LinkedHashMap<String, Object>> nodes = new ArrayList<>();
+        nodes.add(node("postgres-slave2", 6433));
+        nodes.add(node("postgres-slave3", 6435));
+        config.setMasterSlaveAddress((ArrayList) nodes);
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        ReflectionTestUtils.setField(miner, "postgresConfig", config);
+        ReflectionTestUtils.setField(miner, "currentTimeline", 41);
+
+        try (MockedStatic<DriverManager> dm = mockStatic(DriverManager.class)) {
+            dm.when(() -> DriverManager.getConnection(anyString(), any(Properties.class))).thenAnswer(inv -> {
+                String url = inv.getArgument(0);
+                String host;
+                int port;
+                if (url.contains("postgres-slave3")) {
+                    host = "postgres-slave3";
+                    port = 6435;
+                } else if (url.contains("postgres-slave2")) {
+                    host = "postgres-slave2";
+                    port = 6433;
+                } else {
+                    host = "postgres-master";
+                    port = 6434;
+                }
+                Connection conn = mock(Connection.class);
+                when(conn.prepareStatement(anyString())).thenAnswer(psInv -> {
+                    String sql = psInv.getArgument(0);
+                    PreparedStatement ps = mock(PreparedStatement.class);
+                    when(ps.executeQuery()).thenAnswer(qInv -> {
+                        ResultSet rs = mock(ResultSet.class);
+                        when(rs.next()).thenReturn(true);
+                        if (sql.contains("pg_walfile_name")) {
+                            when(rs.getString(1)).thenReturn("postgres-slave3".equals(host) ? "00000029" : "00000028");
+                        } else if (sql.contains("pg_control_checkpoint()")) {
+                            when(rs.getInt(1)).thenReturn("postgres-slave3".equals(host) ? 41 : 40);
+                        } else if (sql.contains("pg_last_wal_replay_lsn()") || sql.contains("pg_current_wal_flush_lsn()")) {
+                            when(rs.getString(1)).thenReturn("postgres-slave3".equals(host) ? "0/00002000" : "0/00001000");
+                        } else if (sql.contains("pg_is_in_recovery()")) {
+                            when(rs.getBoolean(1)).thenReturn(!"postgres-master".equals(host));
+                        }
+                        return rs;
+                    });
+                    return ps;
+                });
+                return conn;
+            });
+
+            List<?> sources = (List<?>) ReflectionTestUtils.invokeMethod(miner, "timelineSources");
+            assertNotNull(sources);
+            List<?> prioritized = (List<?>) ReflectionTestUtils.invokeMethod(miner, "prioritizeCurrentTimelineSources", sources);
+            assertNotNull(prioritized);
+            Object first = prioritized.get(0);
+            assertEquals("postgres-slave3", ReflectionTestUtils.getField(first, "host"));
+            assertEquals(6435, ReflectionTestUtils.getField(first, "port"));
         }
     }
 }

@@ -1138,6 +1138,7 @@ public class PostgresConnector extends CommonDbConnector {
                 maxTimeline = state.timeline;
             }
         }
+        SlaveNodeState selected = null;
         for (SlaveNodeState state : states) {
             if (!state.inRecovery) {
                 continue;
@@ -1153,9 +1154,13 @@ public class PostgresConnector extends CommonDbConnector {
                         state.host, state.port, state.timeline, maxTimeline);
                 continue;
             }
-            return state;
+            if (selected == null
+                    || state.readableLsn > selected.readableLsn
+                    || (state.readableLsn == selected.readableLsn && state.timeline > selected.timeline)) {
+                selected = state;
+            }
         }
-        return null;
+        return selected;
     }
 
     private SlaveNodeState querySlaveNodeState(LinkedHashMap<String, Integer> address) {
@@ -1166,16 +1171,38 @@ public class PostgresConnector extends CommonDbConnector {
             probeConfig.setHost(host);
             probeConfig.setPort(port);
             try (PostgresJdbcContext context = newPostgresJdbcContext(probeConfig)) {
-                SlaveNodeState state = new SlaveNodeState(host, port);
-                context.queryWithNext("SELECT pg_is_in_recovery()", resultSet ->
-                        state.inRecovery = resultSet.getBoolean(1));
-                state.timeline = queryCurrentTimeline(context);
-                return state;
+                return querySlaveNodeState(context, probeConfig);
             }
         } catch (Exception e) {
             tapLogger.warn("Postgres CDC failed to probe node {}:{} for slave timeline health: {}",
                     host, port, e.getMessage());
             return null;
+        }
+    }
+
+    private SlaveNodeState querySlaveNodeState(PostgresJdbcContext context, PostgresConfig probeConfig) throws SQLException {
+        SlaveNodeState state = new SlaveNodeState(String.valueOf(probeConfig.getHost()), probeConfig.getPort());
+        context.queryWithNext("SELECT pg_is_in_recovery()", resultSet ->
+                state.inRecovery = resultSet.getBoolean(1));
+        state.timeline = queryCurrentTimeline(context);
+        if (state.inRecovery) {
+            context.queryWithNext("SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END",
+                    resultSet -> state.readableLsn = parseOffsetLsn(resultSet.getString(1)));
+        }
+        return state;
+    }
+
+    private long parseOffsetLsn(String lsn) {
+        if (StringUtils.isBlank(lsn) || !lsn.contains("/")) {
+            return 0L;
+        }
+        try {
+            String[] parts = lsn.trim().split("/", 2);
+            long high = Long.parseUnsignedLong(parts[0], 16);
+            long low = Long.parseUnsignedLong(parts[1], 16);
+            return (high << 32) | low;
+        } catch (Exception e) {
+            return 0L;
         }
     }
 
@@ -1226,6 +1253,7 @@ public class PostgresConnector extends CommonDbConnector {
         private final int port;
         private boolean inRecovery;
         private int timeline;
+        private long readableLsn;
 
         private SlaveNodeState(String host, int port) {
             this.host = host;

@@ -3669,6 +3669,25 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
     }
 
+    private static final class TimelineSourceState {
+        final TimelineSource source;
+        final String host;
+        final int port;
+        boolean inRecovery;
+        int timeline;
+        long readableLsn;
+
+        private TimelineSourceState(TimelineSource source) {
+            this.source = source;
+            this.host = source.host;
+            this.port = source.port;
+        }
+
+        String id() {
+            return source.id();
+        }
+    }
+
     private static final class TimelineHistoryEntry {
         final int timeline;
         final long switchPoint;
@@ -3841,21 +3860,20 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * that actually runs the current timeline. The node the catch-up ran on may
      * itself be a stranded standby (old timeline, upstream primary stopped —
      * native PG does not rejoin standbys automatically), whose WAL will never
-     * advance. Probe the configured nodes and put those reporting
-     * currentTimeline first, keeping the original order within each group;
-     * unreachable nodes (probe returns 0) stay in the second group so the
-     * open loop still falls back to them if nothing on the current timeline
-     * can open a stream. */
+     * advance. Probe the configured nodes, put the current-timeline ones first
+     * and prefer the node whose readable LSN is furthest ahead; unreachable or
+     * off-timeline nodes stay in the second group so the open loop still falls
+     * back to them if nothing on the current timeline can open a stream. */
     private List<TimelineSource> prioritizeCurrentTimelineSources(List<TimelineSource> sources) {
         if (currentTimeline <= 0 || sources.size() <= 1) {
             return sources;
         }
-        List<TimelineSource> onCurrent = new ArrayList<>();
+        List<TimelineSourceState> onCurrent = new ArrayList<>();
         List<TimelineSource> others = new ArrayList<>();
         for (TimelineSource source : sources) {
-            int tli = queryCurrentTimelineOn(source);
-            if (tli == currentTimeline) {
-                onCurrent.add(source);
+            TimelineSourceState state = probeTimelineSource(source);
+            if (state != null && state.timeline == currentTimeline) {
+                onCurrent.add(state);
             } else {
                 others.add(source);
             }
@@ -3863,8 +3881,13 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         if (onCurrent.isEmpty()) {
             return sources; // no reachable node reports the current timeline — keep original order
         }
-        onCurrent.addAll(others);
-        return onCurrent;
+        onCurrent.sort(Comparator.comparingLong((TimelineSourceState state) -> state.readableLsn).reversed());
+        List<TimelineSource> prioritized = new ArrayList<>(sources.size());
+        for (TimelineSourceState state : onCurrent) {
+            prioritized.add(state.source);
+        }
+        prioritized.addAll(others);
+        return prioritized;
     }
 
     private int queryMaxTimelineAcrossSources() {
@@ -3908,6 +3931,23 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         ErrorKit.ignoreAnyError(() -> queryOnSource(source, TIMELINE_FROM_CONTROL_SQL,
                 rs -> tli[0] = rs.getInt(1)));
         return tli[0];
+    }
+
+    private TimelineSourceState probeTimelineSource(TimelineSource source) {
+        if (source == null) {
+            return null;
+        }
+        try {
+            TimelineSourceState state = new TimelineSourceState(source);
+            queryOnSource(source, "SELECT pg_is_in_recovery()", rs -> state.inRecovery = rs.getBoolean(1));
+            state.timeline = queryCurrentTimelineOn(source);
+            state.readableLsn = queryCurrentReadableLsnOn(source);
+            return state;
+        } catch (Exception e) {
+            tapLogger.warn("Physical WAL miner failed to probe timeline health for {}:{}: {}",
+                    source.host, source.port, e.getMessage());
+            return null;
+        }
     }
 
     /* Current timeline ID, probed from the running WAL file name first (which
