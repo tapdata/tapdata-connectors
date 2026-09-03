@@ -757,6 +757,7 @@ public class PhysicalWalLogMinerTest {
             probes.incrementAndGet();
             ResultSetConsumer consumer = inv.getArgument(1);
             ResultSet rs = mock(ResultSet.class);
+            when(rs.getInt(1)).thenReturn(2);
             when(rs.getString(1)).thenReturn("00000002");
             consumer.accept(rs);
             return null;
@@ -1414,17 +1415,27 @@ public class PhysicalWalLogMinerTest {
         AtomicInteger call = new AtomicInteger();
         try (MockedStatic<DriverManager> dm = mockStatic(DriverManager.class)) {
             dm.when(() -> DriverManager.getConnection(anyString(), any(Properties.class))).thenAnswer(inv -> {
+                String url = inv.getArgument(0);
+                boolean advancedNode = url.contains("postgres-slave2");
                 Connection conn = mock(Connection.class);
-                PreparedStatement ps = mock(PreparedStatement.class);
-                ResultSet rs = mock(ResultSet.class);
-                when(rs.next()).thenReturn(true);
-                // call 1: active stream node 6434 -> 40 (node-local probe, unchanged)
-                // call 2: 6434 re-probed by cluster probe -> 40
-                // call 3: new primary 6433 -> 41
-                int c = call.incrementAndGet();
-                when(rs.getString(1)).thenReturn(c == 3 ? "00000029" : "00000028");
-                when(ps.executeQuery()).thenReturn(rs);
-                when(conn.prepareStatement(anyString())).thenReturn(ps);
+                when(conn.prepareStatement(anyString())).thenAnswer(psInv -> {
+                    String sql = psInv.getArgument(0);
+                    PreparedStatement ps = mock(PreparedStatement.class);
+                    when(ps.executeQuery()).thenAnswer(qInv -> {
+                        call.incrementAndGet();
+                        ResultSet rs = mock(ResultSet.class);
+                        when(rs.next()).thenReturn(true);
+                        if (sql.contains("pg_stat_wal_receiver")) {
+                            when(rs.getInt(1)).thenReturn(advancedNode ? 41 : 40);
+                        } else if (sql.contains("pg_walfile_name")) {
+                            when(rs.getString(1)).thenReturn(advancedNode ? "00000029" : "00000028");
+                        } else if (sql.contains("pg_control_checkpoint()")) {
+                            when(rs.getInt(1)).thenReturn(advancedNode ? 41 : 40);
+                        }
+                        return rs;
+                    });
+                    return ps;
+                });
                 return conn;
             });
 
@@ -1517,7 +1528,9 @@ public class PhysicalWalLogMinerTest {
                     when(ps.executeQuery()).thenAnswer(qInv -> {
                         ResultSet rs = mock(ResultSet.class);
                         when(rs.next()).thenReturn(true);
-                        if (sql.contains("pg_walfile_name")) {
+                        if (sql.contains("pg_stat_wal_receiver")) {
+                            when(rs.getInt(1)).thenReturn("postgres-slave2".equals(host) ? 41 : 40);
+                        } else if (sql.contains("pg_walfile_name")) {
                             when(rs.getString(1)).thenReturn("postgres-slave2".equals(host) ? "00000029" : "00000028");
                         } else if (sql.contains("pg_control_checkpoint()")) {
                             when(rs.getInt(1)).thenReturn("postgres-slave2".equals(host) ? 41 : 40);
@@ -1585,7 +1598,9 @@ public class PhysicalWalLogMinerTest {
                     when(ps.executeQuery()).thenAnswer(qInv -> {
                         ResultSet rs = mock(ResultSet.class);
                         when(rs.next()).thenReturn(true);
-                        if (sql.contains("pg_walfile_name")) {
+                        if (sql.contains("pg_stat_wal_receiver")) {
+                            when(rs.getInt(1)).thenReturn("postgres-slave3".equals(host) ? 41 : 40);
+                        } else if (sql.contains("pg_walfile_name")) {
                             when(rs.getString(1)).thenReturn("postgres-slave3".equals(host) ? "00000029" : "00000028");
                         } else if (sql.contains("pg_control_checkpoint()")) {
                             when(rs.getInt(1)).thenReturn("postgres-slave3".equals(host) ? 41 : 40);

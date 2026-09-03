@@ -111,6 +111,8 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private static final String TIMELINE_FROM_WAL_FILE_SQL =
             "SELECT substring(pg_walfile_name(CASE WHEN pg_is_in_recovery() "
                     + "THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END), 1, 8)";
+    private static final String TIMELINE_FROM_WAL_RECEIVER_SQL =
+            "SELECT COALESCE((SELECT received_tli FROM pg_stat_wal_receiver LIMIT 1), 0)";
     private static final String TIMELINE_FROM_CONTROL_SQL = "SELECT timeline_id FROM pg_control_checkpoint()";
 
     private String slotName;
@@ -3917,6 +3919,14 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             return 0;
         }
         int[] tli = {0};
+        // On standbys, pg_walfile_name() and pg_control_checkpoint() can be
+        // blocked during recovery. The receiver view carries the timeline
+        // currently streamed from the upstream primary.
+        ErrorKit.ignoreAnyError(() -> queryOnSource(source, TIMELINE_FROM_WAL_RECEIVER_SQL,
+                rs -> tli[0] = rs.getInt(1)));
+        if (tli[0] > 0) {
+            return tli[0];
+        }
         // Use the WAL file name first — after promote (e.g. EFM switchover),
         // pg_control_checkpoint() may still reflect the OLD timeline until the
         // first checkpoint completes. The WAL file name always carries the
@@ -3956,6 +3966,14 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * probes fail. */
     private int queryCurrentTimeline() {
         int[] tli = {0};
+        // On standbys, pg_walfile_name() and pg_control_checkpoint() can be
+        // blocked during recovery. The receiver view carries the timeline
+        // currently streamed from the upstream primary.
+        ErrorKit.ignoreAnyError(() -> postgresJdbcContext.queryWithNext(TIMELINE_FROM_WAL_RECEIVER_SQL,
+                rs -> tli[0] = rs.getInt(1)));
+        if (tli[0] > 0) {
+            return tli[0];
+        }
         // Use the WAL file name first — after promote (e.g. EFM switchover),
         // pg_control_checkpoint() may still reflect the OLD timeline until the
         // first checkpoint completes. The WAL file name always carries the

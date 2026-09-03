@@ -349,6 +349,29 @@ public class PostgresConnectorTest {
         verify(jdbcContext, times(1)).refresh();
     }
 
+    @Test
+    void testPhysicalSlavePreferredSwitchesAwayFromCurrentStaleStandbyOnStartup() throws Exception {
+        TimelineProbePostgresConnector postgresConnector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("stale-standby", 5433,
+                address("primary", 5432), address("stale-standby", 5433), address("healthy-standby", 5434));
+        postgresConnector.addProbe("primary", 5432, false, "00000006", 6);
+        postgresConnector.addProbe("stale-standby", 5433, true, "00000005", 5, "0/00003000");
+        postgresConnector.addProbe("healthy-standby", 5434, true, "00000006", 6, "0/00002000");
+        PostgresJdbcContext jdbcContext = mock(PostgresJdbcContext.class);
+
+        ReflectionTestUtils.setField(postgresConnector, "postgresConfig", config);
+        ReflectionTestUtils.setField(postgresConnector, "postgresJdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(postgresConnector, "tapLogger", mock(Log.class));
+
+        Boolean switched = ReflectionTestUtils.invokeMethod(postgresConnector,
+                "ensureCdcConnectedToSlave", (PhysicalWalLogMiner) null);
+
+        Assertions.assertTrue(Boolean.TRUE.equals(switched));
+        Assertions.assertEquals("healthy-standby", config.getHost());
+        Assertions.assertEquals(5434, config.getPort());
+        verify(jdbcContext, times(1)).refresh();
+    }
+
     private static PostgresConfig physicalMasterSlaveConfig(String host, int port,
                                                            LinkedHashMap<String, Integer>... addresses) {
         PostgresConfig config = new PostgresConfig();
@@ -385,7 +408,9 @@ public class PostgresConnectorTest {
                 String sql = invocation.getArgument(0);
                 ResultSetConsumer consumer = invocation.getArgument(1);
                 ResultSet resultSet = mock(ResultSet.class);
-                if (sql.contains("pg_walfile_name")) {
+                if (sql.contains("pg_stat_wal_receiver")) {
+                    when(resultSet.getInt(1)).thenReturn(inRecovery ? controlTimeline : 0);
+                } else if (sql.contains("pg_walfile_name")) {
                     when(resultSet.getString(1)).thenReturn(timelineWalFileHex);
                 } else if (sql.contains("pg_control_checkpoint()")) {
                     when(resultSet.getInt(1)).thenReturn(controlTimeline);

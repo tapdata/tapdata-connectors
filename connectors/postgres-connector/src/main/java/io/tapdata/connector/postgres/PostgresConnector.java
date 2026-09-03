@@ -97,6 +97,8 @@ public class PostgresConnector extends CommonDbConnector {
     private static final String TIMELINE_FROM_WAL_FILE_SQL =
             "SELECT substring(pg_walfile_name(CASE WHEN pg_is_in_recovery() "
                     + "THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END), 1, 8)";
+    private static final String TIMELINE_FROM_WAL_RECEIVER_SQL =
+            "SELECT COALESCE((SELECT received_tli FROM pg_stat_wal_receiver LIMIT 1), 0)";
     private static final String TIMELINE_FROM_CONTROL_SQL = "SELECT timeline_id FROM pg_control_checkpoint()";
 
     @Override
@@ -1047,6 +1049,13 @@ public class PostgresConnector extends CommonDbConnector {
             });
             asyncCheckSlaveExecutor.scheduleAtFixedRate(() -> {
                 try {
+                    if ("master-slave".equals(postgresConfig.getDeploymentMode())
+                            && "physical".equals(postgresConfig.getLogPluginName())) {
+                        if (ensureCdcConnectedToSlave(miner)) {
+                            requestSlaveReconnect(miner);
+                        }
+                        return;
+                    }
                     postgresJdbcContext.queryWithNext("SELECT pg_is_in_recovery()", resultSet -> {
                         boolean isInRecovery = resultSet.getBoolean(1);
                         if (!isInRecovery) {
@@ -1065,7 +1074,21 @@ public class PostgresConnector extends CommonDbConnector {
         }
     }
 
-    private void ensureCdcConnectedToSlave(PhysicalWalLogMiner miner) throws SQLException {
+    private boolean ensureCdcConnectedToSlave(PhysicalWalLogMiner miner) throws SQLException {
+        if ("master-slave".equals(postgresConfig.getDeploymentMode())
+                && "physical".equals(postgresConfig.getLogPluginName())) {
+            SlaveNodeState selected = selectTimelineHealthySlaveNode();
+            if (selected == null) {
+                tapLogger.warn("Postgres CDC slave-preferred mode could not find an available timeline-healthy slave node");
+                tapLogger.warn("No standby PostgreSQL node is available, keep CDC connected to the master node");
+                return false;
+            }
+            if (selected.host.equals(String.valueOf(postgresConfig.getHost()))
+                    && selected.port == postgresConfig.getPort()) {
+                return false;
+            }
+            return switchCdcConnectionToTimelineHealthySlave(selected);
+        }
         postgresJdbcContext.queryWithNext("SELECT pg_is_in_recovery()", resultSet -> {
             boolean isInRecovery = resultSet.getBoolean(1);
             if (!isInRecovery) {
@@ -1076,6 +1099,7 @@ public class PostgresConnector extends CommonDbConnector {
                 tapLogger.warn("No standby PostgreSQL node is available, keep CDC connected to the master node");
             }
         });
+        return false;
     }
 
     private boolean switchCdcConnectionToSlave() {
@@ -1113,6 +1137,10 @@ public class PostgresConnector extends CommonDbConnector {
             tapLogger.warn("Postgres CDC slave-preferred mode could not find an available timeline-healthy slave node");
             return false;
         }
+        return switchCdcConnectionToTimelineHealthySlave(selected);
+    }
+
+    private boolean switchCdcConnectionToTimelineHealthySlave(SlaveNodeState selected) {
         postgresConfig.setHost(selected.host);
         postgresConfig.setPort(selected.port);
         postgresJdbcContext.refresh();
@@ -1234,6 +1262,11 @@ public class PostgresConnector extends CommonDbConnector {
 
     private int queryCurrentTimeline(PostgresJdbcContext context) {
         AtomicInteger timeline = new AtomicInteger(0);
+        ErrorKit.ignoreAnyError(() -> context.queryWithNext(TIMELINE_FROM_WAL_RECEIVER_SQL, resultSet ->
+                timeline.set(resultSet.getInt(1))));
+        if (timeline.get() > 0) {
+            return timeline.get();
+        }
         ErrorKit.ignoreAnyError(() -> context.queryWithNext(TIMELINE_FROM_WAL_FILE_SQL, resultSet ->
                 timeline.set(parseTimelineFromWalFileName(resultSet.getString(1)))));
         if (timeline.get() > 0) {
