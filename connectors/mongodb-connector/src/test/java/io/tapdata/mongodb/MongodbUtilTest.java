@@ -6,6 +6,7 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.internal.MongoClientImpl;
+import io.tapdata.entity.schema.value.DateTime;
 import org.bson.BsonDocument;
 import org.bson.BsonInt32;
 import org.bson.Document;
@@ -13,9 +14,12 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -23,6 +27,23 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 public class MongodbUtilTest {
+    @Test
+    void convertValueShouldConvertNestedDateTimeToDate() {
+        long epochMilli = 1_715_187_045_123L;
+        DateTime dateTime = new DateTime(Instant.ofEpochMilli(epochMilli));
+        Map<String, Object> nested = new LinkedHashMap<>();
+        nested.put("salesDateTime", dateTime);
+        List<Object> items = new ArrayList<>();
+        items.add(nested);
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("items", items);
+
+        Object converted = MongodbUtil.convertValue(value);
+
+        Assertions.assertSame(value, converted);
+        Assertions.assertEquals(new Date(epochMilli), nested.get("salesDateTime"));
+    }
+
     @Test
     void test_getServerTime(){
         MongoClientImpl mongoClient = mock(MongoClientImpl.class);
