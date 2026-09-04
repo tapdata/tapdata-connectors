@@ -1288,6 +1288,10 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
     }
 
+    public int knownTimelineFloor() {
+        return Math.max(savedTimeline, currentTimeline);
+    }
+
     private void resetStallDetection() {
         lastStallProbeMs = 0L;
         stallProbeFailures = 0;

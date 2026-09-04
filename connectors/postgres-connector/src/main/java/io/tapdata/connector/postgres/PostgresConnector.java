@@ -94,6 +94,7 @@ public class PostgresConnector extends CommonDbConnector {
     protected String postgresVersion;
     protected PostgresPartitionContext postgresPartitionContext;
     private ScheduledExecutorService asyncCheckSlaveExecutor;
+    private final AtomicInteger observedTimelineFloor = new AtomicInteger(0);
     private static final String TIMELINE_FROM_WAL_FILE_SQL =
             "SELECT substring(pg_walfile_name(CASE WHEN pg_is_in_recovery() "
                     + "THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END), 1, 8)";
@@ -1042,6 +1043,9 @@ public class PostgresConnector extends CommonDbConnector {
     private void checkCdcSlaveConnected(PhysicalWalLogMiner miner) throws SQLException {
         if (Boolean.TRUE.equals(postgresConfig.getCheckCdcSlave())) {
             ensureCdcConnectedToSlave(miner);
+            if (asyncCheckSlaveExecutor != null) {
+                asyncCheckSlaveExecutor.shutdownNow();
+            }
             asyncCheckSlaveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "slave-async-check");
                 t.setDaemon(true);
@@ -1075,9 +1079,13 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private boolean ensureCdcConnectedToSlave(PhysicalWalLogMiner miner) throws SQLException {
+        return ensureCdcConnectedToSlave(knownTimelineFloor(miner));
+    }
+
+    private boolean ensureCdcConnectedToSlave(int knownTimelineFloor) throws SQLException {
         if ("master-slave".equals(postgresConfig.getDeploymentMode())
                 && "physical".equals(postgresConfig.getLogPluginName())) {
-            SlaveNodeState selected = selectTimelineHealthySlaveNode();
+            SlaveNodeState selected = selectTimelineHealthySlaveNode(knownTimelineFloor);
             if (selected == null) {
                 tapLogger.warn("Postgres CDC slave-preferred mode could not find an available timeline-healthy slave node");
                 tapLogger.warn("No standby PostgreSQL node is available, keep CDC connected to the master node");
@@ -1132,7 +1140,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private boolean switchCdcConnectionToTimelineHealthySlave() {
-        SlaveNodeState selected = selectTimelineHealthySlaveNode();
+        SlaveNodeState selected = selectTimelineHealthySlaveNode(0);
         if (selected == null) {
             tapLogger.warn("Postgres CDC slave-preferred mode could not find an available timeline-healthy slave node");
             return false;
@@ -1149,11 +1157,17 @@ public class PostgresConnector extends CommonDbConnector {
         return true;
     }
 
-    private SlaveNodeState selectTimelineHealthySlaveNode() {
+    private int knownTimelineFloor(PhysicalWalLogMiner miner) {
+        rememberTimeline(miner == null ? 0 : miner.knownTimelineFloor());
+        return observedTimelineFloor.get();
+    }
+
+    private SlaveNodeState selectTimelineHealthySlaveNode(int knownTimelineFloor) {
         ArrayList<LinkedHashMap<String, Integer>> addresses = postgresConfig.getMasterSlaveAddress();
         if (EmptyKit.isEmpty(addresses)) {
             return null;
         }
+        rememberTimeline(knownTimelineFloor);
         List<SlaveNodeState> states = new ArrayList<>();
         int maxTimeline = 0;
         for (LinkedHashMap<String, Integer> address : addresses) {
@@ -1166,6 +1180,9 @@ public class PostgresConnector extends CommonDbConnector {
                 maxTimeline = state.timeline;
             }
         }
+        rememberTimeline(maxTimeline);
+        int requiredTimeline = Math.max(maxTimeline, knownTimelineFloor);
+        requiredTimeline = Math.max(requiredTimeline, observedTimelineFloor.get());
         SlaveNodeState selected = null;
         for (SlaveNodeState state : states) {
             if (!state.inRecovery) {
@@ -1176,10 +1193,10 @@ public class PostgresConnector extends CommonDbConnector {
                         state.host, state.port);
                 continue;
             }
-            if (maxTimeline > 0 && state.timeline < maxTimeline) {
+            if (requiredTimeline > 0 && state.timeline < requiredTimeline) {
                 tapLogger.warn("Postgres CDC skips stale slave node {}:{} because its timeline {} is behind "
                                 + "the cluster current timeline {}",
-                        state.host, state.port, state.timeline, maxTimeline);
+                        state.host, state.port, state.timeline, requiredTimeline);
                 continue;
             }
             if (selected == null
@@ -1189,6 +1206,13 @@ public class PostgresConnector extends CommonDbConnector {
             }
         }
         return selected;
+    }
+
+    private void rememberTimeline(int timeline) {
+        if (timeline <= 0) {
+            return;
+        }
+        observedTimelineFloor.accumulateAndGet(timeline, Math::max);
     }
 
     private SlaveNodeState querySlaveNodeState(LinkedHashMap<String, Integer> address) {

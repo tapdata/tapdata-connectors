@@ -372,6 +372,107 @@ public class PostgresConnectorTest {
         verify(jdbcContext, times(1)).refresh();
     }
 
+    @Test
+    void testPhysicalSlavePreferredWouldSelectOnlyVisibleOldTimelineWithoutKnownFloor() throws Exception {
+        TimelineProbePostgresConnector postgresConnector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("qvewldbs11", 5432,
+                address("qvewldbs12", 5432));
+        postgresConnector.addProbe("qvewldbs12", 5432, true, "000000BB", 187, "163/D556D518");
+        PostgresJdbcContext jdbcContext = mock(PostgresJdbcContext.class);
+
+        ReflectionTestUtils.setField(postgresConnector, "postgresConfig", config);
+        ReflectionTestUtils.setField(postgresConnector, "postgresJdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(postgresConnector, "tapLogger", mock(Log.class));
+
+        Boolean switched = ReflectionTestUtils.invokeMethod(postgresConnector,
+                "ensureCdcConnectedToSlave", 0);
+
+        Assertions.assertTrue(Boolean.TRUE.equals(switched));
+        Assertions.assertEquals("qvewldbs12", config.getHost());
+        Assertions.assertEquals(5432, config.getPort());
+        verify(jdbcContext, times(1)).refresh();
+    }
+
+    @Test
+    void testPhysicalSlavePreferredDoesNotRegressBelowMinerKnownTimeline() throws Exception {
+        TimelineProbePostgresConnector postgresConnector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("qvewldbs11", 5432,
+                address("qvewldbs12", 5432));
+        postgresConnector.addProbe("qvewldbs12", 5432, true, "000000BB", 187, "163/D556D518");
+        PostgresJdbcContext jdbcContext = mock(PostgresJdbcContext.class);
+
+        ReflectionTestUtils.setField(postgresConnector, "postgresConfig", config);
+        ReflectionTestUtils.setField(postgresConnector, "postgresJdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(postgresConnector, "tapLogger", mock(Log.class));
+
+        Boolean switched = ReflectionTestUtils.invokeMethod(postgresConnector,
+                "ensureCdcConnectedToSlave", 188);
+
+        Assertions.assertFalse(Boolean.TRUE.equals(switched));
+        Assertions.assertEquals("qvewldbs11", config.getHost());
+        Assertions.assertEquals(5432, config.getPort());
+        verify(jdbcContext, never()).refresh();
+    }
+
+    @Test
+    void testPhysicalSlavePreferredKeepsObservedTimelineFloorAcrossMinerRetry() throws Exception {
+        TimelineProbePostgresConnector postgresConnector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("qvewldbs13", 5432,
+                address("qvewldbs11", 5432), address("qvewldbs12", 5432));
+        postgresConnector.addProbe("qvewldbs11", 5432, true, "000000BC", 188, "163/D556D518");
+        postgresConnector.addProbe("qvewldbs12", 5432, true, "000000BB", 187, "163/D556D518");
+        PostgresJdbcContext jdbcContext = mock(PostgresJdbcContext.class);
+
+        ReflectionTestUtils.setField(postgresConnector, "postgresConfig", config);
+        ReflectionTestUtils.setField(postgresConnector, "postgresJdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(postgresConnector, "tapLogger", mock(Log.class));
+
+        Boolean firstSwitch = ReflectionTestUtils.invokeMethod(postgresConnector,
+                "ensureCdcConnectedToSlave", 0);
+
+        Assertions.assertTrue(Boolean.TRUE.equals(firstSwitch));
+        Assertions.assertEquals("qvewldbs11", config.getHost());
+        Assertions.assertEquals(5432, config.getPort());
+
+        config.setHost("qvewldbs11");
+        postgresConnector.removeProbe("qvewldbs11", 5432);
+
+        Boolean retrySwitch = ReflectionTestUtils.invokeMethod(postgresConnector,
+                "ensureCdcConnectedToSlave", 0);
+
+        Assertions.assertFalse(Boolean.TRUE.equals(retrySwitch));
+        Assertions.assertEquals("qvewldbs11", config.getHost());
+        Assertions.assertEquals(5432, config.getPort());
+        verify(jdbcContext, times(1)).refresh();
+    }
+
+    @Test
+    void testPhysicalSlavePreferredReplacesAsyncCheckExecutorOnRetry() throws Exception {
+        TimelineProbePostgresConnector postgresConnector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("qvewldbs11", 5432,
+                address("qvewldbs11", 5432));
+        config.setCheckCdcSlave(true);
+        postgresConnector.addProbe("qvewldbs11", 5432, true, "000000BC", 188, "163/D556D518");
+
+        ReflectionTestUtils.setField(postgresConnector, "postgresConfig", config);
+        ReflectionTestUtils.setField(postgresConnector, "postgresJdbcContext", mock(PostgresJdbcContext.class));
+        ReflectionTestUtils.setField(postgresConnector, "tapLogger", mock(Log.class));
+
+        ReflectionTestUtils.invokeMethod(postgresConnector, "checkCdcSlaveConnected", (PhysicalWalLogMiner) null);
+        ScheduledExecutorService first = (ScheduledExecutorService) ReflectionTestUtils.getField(postgresConnector,
+                "asyncCheckSlaveExecutor");
+        Assertions.assertNotNull(first);
+
+        ReflectionTestUtils.invokeMethod(postgresConnector, "checkCdcSlaveConnected", (PhysicalWalLogMiner) null);
+        ScheduledExecutorService second = (ScheduledExecutorService) ReflectionTestUtils.getField(postgresConnector,
+                "asyncCheckSlaveExecutor");
+
+        Assertions.assertNotNull(second);
+        Assertions.assertNotSame(first, second);
+        Assertions.assertTrue(first.isShutdown());
+        second.shutdownNow();
+    }
+
     private static PostgresConfig physicalMasterSlaveConfig(String host, int port,
                                                            LinkedHashMap<String, Integer>... addresses) {
         PostgresConfig config = new PostgresConfig();
@@ -423,6 +524,10 @@ public class PostgresConnectorTest {
                 return null;
             }).when(context).queryWithNext(anyString(), any(ResultSetConsumer.class));
             probes.put(host + ":" + port, context);
+        }
+
+        private void removeProbe(String host, int port) {
+            probes.remove(host + ":" + port);
         }
 
         @Override
