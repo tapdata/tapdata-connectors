@@ -116,7 +116,7 @@ public class MysqlConnector extends CommonDbConnector {
         });
         tapLogger = tapConnectionContext.getLog();
         if (mysqlConfig.getFileLog()) {
-            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
+            tapLogger.info("Starting JDBC Logging, connectorId: {}", firstConnectorId);
             mysqlConfig.startJdbcLog(firstConnectorId);
         }
         contextMapForMasterSlave = MysqlUtil.buildContextMapForMasterSlave(mysqlConfig);
