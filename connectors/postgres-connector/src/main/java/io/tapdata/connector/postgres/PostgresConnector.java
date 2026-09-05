@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.util.concurrent.AtomicDouble;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.dml.NormalRecordWriter;
+import io.tapdata.common.entity.HashReadOffset;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
 import io.tapdata.connector.postgres.cdc.WalLogMinerV2;
@@ -1648,12 +1649,17 @@ public class PostgresConnector extends CommonDbConnector {
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
         ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
+        HashReadOffset offset = resolveHashReadOffset(offsetState);
         try {
             for (int i = 0; i < commonDbConfig.getBatchReadThreadSize(); i++) {
                 final int threadIndex = i;
                 executorService.submit(() -> {
                     try {
                         for (int ii = threadIndex; ii < commonDbConfig.getMaxSplit(); ii += commonDbConfig.getBatchReadThreadSize()) {
+                            if (isHashSplitFinished(offset, ii)) {
+                                tapLogger.info("batchRead, splitSql[{}]: {} has been finished, skip it", ii + 1, sql);
+                                continue;
+                            }
                             String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
                             tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
                             int retry = 20;
@@ -1670,15 +1676,16 @@ public class PostgresConnector extends CommonDbConnector {
                                         while (isAlive() && resultSet.next()) {
                                             tapEvents.add(insertRecordEvent(filterTimeForPG(resultSet, typeAndName, columnNames), tapTable.getId()));
                                             if (tapEvents.size() == eventBatchSize) {
-                                                syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                                syncEventSubmit(tapEvents, eventsOffsetConsumer, offset);
                                                 tapEvents = list();
                                             }
                                         }
                                         //last events those less than eventBatchSize
                                         if (EmptyKit.isNotEmpty(tapEvents)) {
-                                            syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                            syncEventSubmit(tapEvents, eventsOffsetConsumer, offset);
                                         }
                                     });
+                                    offset.addFinishedSplit(ii);
                                     break;
                                 } catch (Exception e) {
                                     if (retry == 0 || !(e instanceof SQLRecoverableException || e instanceof IOException)) {

@@ -3,6 +3,7 @@ package io.tapdata.common;
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.ddl.DDLSqlGenerator;
 import io.tapdata.common.dml.NormalWriteRecorder;
+import io.tapdata.common.entity.HashReadOffset;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.entity.TapConstraintException;
@@ -800,17 +801,59 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return "SELECT " + columns + " FROM " + getSchemaAndTable(tapTable.getId());
     }
 
+    /**
+     * fingerprint of the current hash split space. Subclasses which split by other unstable rules
+     * (e.g. time range of tdengine) can provide it to avoid skipping finished splits that are no longer
+     * trustworthy after the source data changes. null means the split space is stable and no check needed.
+     */
+    protected String getHashSplitFingerprint() {
+        return null;
+    }
+
+    /**
+     * Resolve the offset of hash split reading: reuse the recovered {@link HashReadOffset} when it is still
+     * valid (same maxSplit and same fingerprint), otherwise create a new one. A new offset means no split
+     * will be skipped, all splits will be read again, which keeps at-least-once semantics.
+     */
+    public HashReadOffset resolveHashReadOffset(Object offsetState) {
+        return resolveHashReadOffset(offsetState, getHashSplitFingerprint());
+    }
+
+    public HashReadOffset resolveHashReadOffset(Object offsetState, String fingerprint) {
+        if (offsetState instanceof HashReadOffset) {
+            HashReadOffset offset = (HashReadOffset) offsetState;
+            if (!Objects.equals(offset.getMaxSplits(), commonDbConfig.getMaxSplit())) {
+                throw new RuntimeException("The maxSplit of offset is not equal to the maxSplit of config, if you have forgotten the config please reset the task");
+            }
+            if (!Objects.equals(offset.getFingerprint(), fingerprint)) {
+                tapLogger.info("batchRead, the fingerprint of hash split offset has changed, all splits will be read again");
+                return new HashReadOffset(commonDbConfig.getMaxSplit(), fingerprint);
+            }
+            return offset;
+        }
+        return new HashReadOffset(commonDbConfig.getMaxSplit(), fingerprint);
+    }
+
+    public boolean isHashSplitFinished(HashReadOffset offset, int split) {
+        return offset.getMaxSplits() != null && offset.getFinishedSplits() != null && offset.getFinishedSplits().contains(split);
+    }
+
     protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
         ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
+        HashReadOffset offset = resolveHashReadOffset(offsetState);
         try {
             for (int i = 0; i < commonDbConfig.getBatchReadThreadSize(); i++) {
                 final int threadIndex = i;
                 executorService.submit(() -> {
                     try {
                         for (int ii = threadIndex; ii < commonDbConfig.getMaxSplit(); ii += commonDbConfig.getBatchReadThreadSize()) {
+                            if (isHashSplitFinished(offset, ii)) {
+                                tapLogger.info("batchRead, splitSql[{}]: {} has been finished, skip it", ii + 1, sql);
+                                continue;
+                            }
                             String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
                             tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
                             int retry = 20;
@@ -825,15 +868,16 @@ public abstract class CommonDbConnector extends ConnectorBase {
                                             processDataMap(dataMap, tapTable);
                                             tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
                                             if (tapEvents.size() == eventBatchSize) {
-                                                syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                                syncEventSubmit(tapEvents, eventsOffsetConsumer, offset);
                                                 tapEvents = list();
                                             }
                                         }
                                         //last events those less than eventBatchSize
                                         if (EmptyKit.isNotEmpty(tapEvents)) {
-                                            syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                            syncEventSubmit(tapEvents, eventsOffsetConsumer, offset);
                                         }
                                     });
+                                    offset.addFinishedSplit(ii);
                                     break;
                                 } catch (Exception e) {
                                     if (retry == 0 || !(e instanceof SQLRecoverableException || e instanceof IOException)) {
@@ -868,6 +912,10 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected synchronized void syncEventSubmit(List<TapEvent> eventList, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         eventsOffsetConsumer.accept(eventList, TapSimplify.list());
+    }
+
+    protected synchronized void syncEventSubmit(List<TapEvent> eventList, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer, Object offsetState) {
+        eventsOffsetConsumer.accept(eventList, offsetState);
     }
 
     //for mysql type (with offset & limit)

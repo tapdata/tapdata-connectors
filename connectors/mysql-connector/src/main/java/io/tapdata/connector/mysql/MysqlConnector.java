@@ -7,6 +7,7 @@ import io.tapdata.common.JdbcProcedureParam;
 import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.common.ddl.type.DDLParserType;
 import io.tapdata.common.dml.NormalRecordWriter;
+import io.tapdata.common.entity.HashReadOffset;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
@@ -740,6 +741,10 @@ public class MysqlConnector extends CommonDbConnector {
     }
 
     protected ResultSetConsumer resultSetConsumer(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+        return resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer, new HashMap<>());
+    }
+
+    protected ResultSetConsumer resultSetConsumer(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer, Object offsetState) {
         return resultSet -> {
             List<TapEvent> tapEvents = list();
             ResultSetMetaData metaData = resultSet.getMetaData();
@@ -759,13 +764,13 @@ public class MysqlConnector extends CommonDbConnector {
                 tapInsertRecordEvent.after(data).table(tapTable.getId());
                 tapEvents.add(tapInsertRecordEvent);
                 if (tapEvents.size() == eventBatchSize) {
-                    eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
+                    eventsOffsetConsumer.accept(tapEvents, offsetState);
                     tapEvents = list();
                 }
             }
             //last events those less than eventBatchSize
             if (EmptyKit.isNotEmpty(tapEvents)) {
-                eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
+                eventsOffsetConsumer.accept(tapEvents, offsetState);
             }
         };
     }
@@ -785,15 +790,21 @@ public class MysqlConnector extends CommonDbConnector {
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
         ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
+        HashReadOffset offset = resolveHashReadOffset(offsetState);
         try {
             for (int i = 0; i < commonDbConfig.getBatchReadThreadSize(); i++) {
                 final int threadIndex = i;
                 executorService.submit(() -> {
                     try {
                         for (int ii = threadIndex; ii < commonDbConfig.getMaxSplit(); ii += commonDbConfig.getBatchReadThreadSize()) {
+                            if (isHashSplitFinished(offset, ii)) {
+                                tapLogger.info("batchRead, splitSql[{}]: {} has been finished, skip it", ii + 1, sql);
+                                continue;
+                            }
                             String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
                             tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
-                            mysqlJdbcContext.queryWithStream(splitSql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
+                            mysqlJdbcContext.queryWithStream(splitSql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer, offset));
+                            offset.addFinishedSplit(ii);
                         }
                     } catch (Throwable e) {
                         throwable.set(e);

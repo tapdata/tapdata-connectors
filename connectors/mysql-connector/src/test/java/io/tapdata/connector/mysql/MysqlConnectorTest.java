@@ -313,6 +313,7 @@ public class MysqlConnectorTest {
             UnitTestUtils.injectField(CommonDbConnector.class, connector, "commonDbConfig", commonDbConfig);
             UnitTestUtils.injectField(CommonDbConnector.class, connector, "tapLogger", tapLogger);
             doCallRealMethod().when(connector).batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
+            doCallRealMethod().when(connector).resolveHashReadOffset(any());
         }
 
         @Test
@@ -322,7 +323,7 @@ public class MysqlConnectorTest {
             when(commonDbConfig.getMaxSplit()).thenReturn(expectedMaxSplit);
             when(commonDbConfig.getBatchReadThreadSize()).thenReturn(3);
             assertDoesNotThrow(() -> connector.batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer));
-            verify(connector, times(expectedMaxSplit)).resultSetConsumer(any(), anyInt(), any());
+            verify(connector, times(expectedMaxSplit)).resultSetConsumer(any(), anyInt(), any(), any());
         }
     }
 

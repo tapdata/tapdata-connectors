@@ -1,6 +1,7 @@
 package io.tapdata.oceanbase.connector;
 
 import io.tapdata.common.CommonSqlMaker;
+import io.tapdata.common.entity.HashReadOffset;
 import io.tapdata.connector.mysql.MysqlConnector;
 import io.tapdata.connector.mysql.MysqlExceptionCollector;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
@@ -286,7 +287,7 @@ public class OceanbaseConnector extends MysqlConnector {
         mysqlJdbcContext.streamQueryWithTimeout(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer), prepareSqlBeforeQuery, Integer.MIN_VALUE);
     }
 
-    private void batchReadWorker(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Exception {
+    private void batchReadWorker(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer, Object offsetState) throws Exception {
         int retry = 20;
         while (retry-- > 0 && isAlive()) {
             try {
@@ -300,13 +301,13 @@ public class OceanbaseConnector extends MysqlConnector {
                         processDataMap(dataMap, tapTable);
                         tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
                         if (tapEvents.size() == eventBatchSize) {
-                            syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                            syncEventSubmit(tapEvents, eventsOffsetConsumer, offsetState);
                             tapEvents = list();
                         }
                     }
                     //last events those less than eventBatchSize
                     if (EmptyKit.isNotEmpty(tapEvents)) {
-                        syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                        syncEventSubmit(tapEvents, eventsOffsetConsumer, offsetState);
                     }
                 }, prepareSqlBeforeQuery, Integer.MIN_VALUE);
                 break;
@@ -355,7 +356,7 @@ public class OceanbaseConnector extends MysqlConnector {
                         for (String partition : threadPartitions) {
                             String splitSql = sql + " partition(" + partition + ")";
                             try {
-                                batchReadWorker(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer);
+                            batchReadWorker(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer, new HashMap<>());
                             } catch (Exception e) {
                                 throwable.set(e);
                             }
@@ -404,6 +405,7 @@ public class OceanbaseConnector extends MysqlConnector {
         CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
         ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
         Integer threadSize = commonDbConfig.getBatchReadThreadSize();
+        HashReadOffset offset = resolveHashReadOffset(offsetState);
 
         try {
             for (int i = 0; i < threadSize; i++) {
@@ -411,9 +413,14 @@ public class OceanbaseConnector extends MysqlConnector {
                 executorService.submit(() -> {
                     try {
                         for (int ii = threadIndex; ii < commonDbConfig.getMaxSplit(); ii += commonDbConfig.getBatchReadThreadSize()) {
+                            if (isHashSplitFinished(offset, ii)) {
+                                tapLogger.info("batchRead, splitSql[{}]: {} has been finished, skip it", ii + 1, sql);
+                                continue;
+                            }
                             String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
                             tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
-                            batchReadWorker(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer);
+                            batchReadWorker(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer, offset);
+                            offset.addFinishedSplit(ii);
                         }
                     } catch (Exception e) {
                         throwable.set(e);
