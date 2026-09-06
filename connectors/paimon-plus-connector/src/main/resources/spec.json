@@ -565,7 +565,7 @@
             "max": 16,
             "placeholder": "${asyncCommitConcurrency_placeholder}"
           },
-          "default": 1,
+          "default": 4,
           "x-index": 100,
           "x-reactions": [
             {

@@ -25,6 +25,82 @@ class PaimonSpillDirCleanerTest {
     java.nio.file.Path tempDir;
 
     @Test
+    void withConfinedTempDirsMustRedirectTempDirsButDelegateChannels() throws Exception {
+        org.apache.paimon.disk.IOManager delegate =
+                org.mockito.Mockito.mock(org.apache.paimon.disk.IOManager.class);
+        org.mockito.Mockito.when(delegate.tempDirs()).thenReturn(new String[] {"/raw-root"});
+        org.apache.paimon.disk.FileIOChannel.ID channelId =
+                org.mockito.Mockito.mock(org.apache.paimon.disk.FileIOChannel.ID.class);
+        org.mockito.Mockito.when(delegate.createChannel()).thenReturn(channelId);
+
+        org.apache.paimon.disk.IOManager confined =
+                PaimonSpillDirCleaner.withConfinedTempDirs(
+                        delegate, java.util.Collections.singletonList("/spill/paimon-io-1"));
+
+        // tempDirs() is the only redirected view: the GlobalIndexAssigner's rocksdb directory
+        // lands inside the registered spill directory, not under the raw root.
+        org.junit.jupiter.api.Assertions.assertArrayEquals(
+                new String[] {"/spill/paimon-io-1"}, confined.tempDirs());
+        // Spill channels still flow through the delegate's real FileChannelManager.
+        org.junit.jupiter.api.Assertions.assertSame(channelId, confined.createChannel());
+        confined.close();
+        org.mockito.Mockito.verify(delegate).close();
+        org.mockito.Mockito.verify(delegate, org.mockito.Mockito.never()).tempDirs();
+    }
+
+    @Test
+    void partialRegistrationMustDeleteOnlyOwnedRootsAndNeverCloseForeignDirectory() throws Exception {
+        IOManager foreign = IOManager.create(tempDir.toString());
+        List<String> foreignDirs = PaimonSpillDirCleaner.registerLiveDirs(foreign);
+        File ownFirst = Files.createDirectory(tempDir.resolve("paimon-io-owned-first")).toFile();
+        File ownLast = Files.createDirectory(tempDir.resolve("paimon-io-owned-last")).toFile();
+        AtomicInteger unsafeClose = new AtomicInteger();
+        org.apache.paimon.disk.IOManagerImpl partiallyOwned = new org.apache.paimon.disk.IOManagerImpl(tempDir.toString()) {
+            @Override
+            public File[] getSpillingDirectories() {
+                return new File[] {ownFirst, new File(foreignDirs.get(0)), ownLast};
+            }
+            @Override
+            public void close() { unsafeClose.incrementAndGet(); }
+        };
+        try {
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                    () -> PaimonSpillDirCleaner.registerCreatedIOManager(partiallyOwned));
+            assertEquals(0, unsafeClose.get(), "整体 close 会越权删除冲突目录");
+            assertFalse(ownFirst.exists());
+            assertFalse(ownLast.exists(), "第一个锁冲突后的自有 root 也必须回滚");
+            assertFalse(ownerFile(ownFirst).exists());
+            assertFalse(ownerFile(ownLast).exists());
+            assertTrue(new File(foreignDirs.get(0)).exists());
+            assertTrue(ownerFile(new File(foreignDirs.get(0))).exists());
+        } finally {
+            foreign.close();
+            PaimonSpillDirCleaner.releaseAfterClose(foreignDirs, true);
+        }
+    }
+
+    @Test
+    void failedIoDeletionAfterAccessorsExitMustKeepMarkerAndPermitStaleCleanup() throws Exception {
+        PaimonSpillDirCleaner.IOManagerBuildResult built =
+                PaimonSpillDirCleaner.resolveAndCreateIOManager(tempDir.toString());
+        List<String> paths = built.spillDirs();
+        File directory = new File(paths.get(0));
+        try {
+            assertTrue(ownerFile(directory).exists());
+            // 模拟 IOManager 删除抛错但 writer/executor 已退出：仅释放保护，不移除 marker。
+            PaimonSpillDirCleaner.releaseAfterClose(paths, false);
+            assertTrue(ownerFile(directory).exists());
+            assertEquals(1, PaimonSpillDirCleaner.cleanupStaleSpillDirs(
+                    new String[] {tempDir.toString()}, 0, null));
+            assertFalse(directory.exists());
+            assertFalse(ownerFile(directory).exists());
+        } finally {
+            built.ioManager().close();
+            PaimonSpillDirCleaner.releaseAfterClose(paths, true);
+        }
+    }
+
+    @Test
     void freshUnlockedDirectoryMustRetainOwnerMarkerForLaterCleanup() throws Exception {
         File spillDir = Files.createDirectory(tempDir.resolve("paimon-io-fresh")).toFile();
         File data = Files.write(spillDir.toPath().resolve("fresh.sst"), new byte[] {1})
@@ -204,7 +280,7 @@ class PaimonSpillDirCleanerTest {
             }
         } finally {
             ioManager.close();
-            PaimonSpillDirCleaner.unregisterLiveDirs(spillDirs);
+            PaimonSpillDirCleaner.releaseAfterClose(spillDirs, true);
         }
 
         for (String path : spillDirs) {

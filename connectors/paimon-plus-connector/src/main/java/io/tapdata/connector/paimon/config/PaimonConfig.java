@@ -486,7 +486,18 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
      */
     @Override
     public PaimonConfig load(Map<String, Object> map) {
-        return (PaimonConfig) super.load(map);
+        PaimonConfig loaded = (PaimonConfig) super.load(map);
+        loaded.validateExpireMode();
+        return loaded;
+    }
+
+    private void validateExpireMode() {
+        PaimonSyncExpireMode.requireSyncProperties("<connection>", tableProperties);
+        if (getTableConfig() != null) {
+            for (String tableKey : getTableConfig().keySet()) {
+                PaimonSyncExpireMode.requireSyncProperties(tableKey, getTableProperties(tableKey));
+            }
+        }
     }
 
     /**
@@ -604,6 +615,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
      * @throws IllegalArgumentException if configuration is invalid
      */
     public void validate() {
+        validateExpireMode();
         if (warehouse == null || warehouse.trim().isEmpty()) {
             throw new IllegalArgumentException("Warehouse path is required");
         }

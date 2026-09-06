@@ -30,6 +30,9 @@ public interface PaimonBucketWriterStrategy extends AutoCloseable {
     /** Runs mode-specific prepare work and raw writer prepare with the same identifier. */
     List<CommitMessage> prepareCommit(long commitIdentifier) throws Exception;
 
+    /** 停止专用准备：保留模式钩子，并等待原生 Compaction 结果。 */
+    List<CommitMessage> prepareFinalCommit(long commitIdentifier) throws Exception;
+
     @Override
     void close() throws Exception;
 }

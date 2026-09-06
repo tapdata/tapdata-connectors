@@ -108,9 +108,22 @@ public abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucket
 
     @Override
     public final List<CommitMessage> prepareCommit(long commitIdentifier) throws Exception {
+        return prepareCommit(false, commitIdentifier);
+    }
+
+    @Override
+    public final List<CommitMessage> prepareFinalCommit(long commitIdentifier) throws Exception {
+        return prepareCommit(true, commitIdentifier);
+    }
+
+    private List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier) throws Exception {
         ensureOpen();
         beforePrepareCommit(commitIdentifier);
-        return delegate.prepareCommit(false, commitIdentifier);
+        // Paimon 1.3.2 prepareCommit(true) 会 flush、等待并消费结果，flush 自身还可能调度
+        // Compaction，调用前不能 shutdown executor。普通提交保留 false；不能绕过模式钩子。
+        // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/mergetree/MergeTreeWriter.java#L252
+        // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/append/AppendOnlyWriter.java#L221
+        return delegate.prepareCommit(waitCompaction, commitIdentifier);
     }
 
     protected void beforePrepareCommit(long commitIdentifier) throws Exception {
@@ -124,23 +137,24 @@ public abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucket
         }
         closed = true;
 
-        Exception failure = null;
+        Throwable failure = null;
         try {
             closeModeResources();
-        } catch (Exception e) {
+        } catch (Exception | Error e) {
             failure = e;
         }
         try {
             delegate.close();
-        } catch (Exception e) {
+        } catch (Exception | Error e) {
             if (failure == null) {
                 failure = e;
-            } else {
+            } else if (failure != e) {
                 failure.addSuppressed(e);
             }
         }
         if (failure != null) {
-            throw failure;
+            if (failure instanceof Error) { throw (Error) failure; }
+            throw (Exception) failure;
         }
     }
 

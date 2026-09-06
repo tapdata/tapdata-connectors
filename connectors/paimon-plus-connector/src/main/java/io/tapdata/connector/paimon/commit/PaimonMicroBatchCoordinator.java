@@ -297,16 +297,6 @@ public final class PaimonMicroBatchCoordinator {
         }
     }
 
-    public boolean consumerStarted(CallbackReservation reservation) {
-        if (reservation == null) {
-            return false;
-        }
-        synchronized (lock) {
-            LaneOffsetState lane = lanes.get(reservation.sourceLane);
-            return matches(lane, reservation) && lane.inFlight.consumerStarted;
-        }
-    }
-
     public boolean hasInFlight(String sourceLane) {
         synchronized (lock) {
             LaneOffsetState lane = lanes.get(sourceLane);
@@ -637,10 +627,6 @@ public final class PaimonMicroBatchCoordinator {
 
         public String sourceLane() {
             return sourceLane;
-        }
-
-        public long version() {
-            return version;
         }
 
         public long token() {

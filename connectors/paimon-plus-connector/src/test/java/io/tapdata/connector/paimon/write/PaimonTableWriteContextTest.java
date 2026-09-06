@@ -259,26 +259,24 @@ class PaimonTableWriteContextTest {
     }
 
     @Test
-    void closeMustRunStrategyThenCommitterThenIoAndSuppressLaterFailures() throws Exception {
+    void resourceCloseFailureMustSuppressLaterErrorsAndRetainSpill() throws Exception {
         IOManager ioManager = mock(IOManager.class);
         Fixture fixture = new Fixture(0L, PaimonTableWriteContext.CommitStateStore.NOOP, ioManager);
         Exception strategyError = new Exception("strategy close");
         Exception committerError = new Exception("committer close");
-        Exception ioError = new Exception("io close");
         doThrow(strategyError).when(fixture.strategy).close();
         doThrow(committerError).when(fixture.committer).close();
-        doThrow(ioError).when(ioManager).close();
 
         Exception thrown = assertThrows(Exception.class, fixture.context::close);
 
         assertSame(strategyError, thrown);
-        assertEquals(2, thrown.getSuppressed().length);
+        assertEquals(1, thrown.getSuppressed().length);
         assertSame(committerError, thrown.getSuppressed()[0]);
-        assertSame(ioError, thrown.getSuppressed()[1]);
+        assertFalse(fixture.context.cleanupComplete());
         InOrder order = inOrder(fixture.strategy, fixture.committer, ioManager);
         order.verify(fixture.strategy).close();
         order.verify(fixture.committer).close();
-        order.verify(ioManager).close();
+        verify(ioManager, never()).close();
     }
 
     @Test
@@ -289,6 +287,10 @@ class PaimonTableWriteContextTest {
         fixture.context.close();
         fixture.context.close();
 
+        InOrder order = inOrder(fixture.strategy, fixture.committer, ioManager);
+        order.verify(fixture.strategy).close();
+        order.verify(fixture.committer).close();
+        order.verify(ioManager).close();
         verify(fixture.strategy).close();
         verify(fixture.committer).close();
         verify(ioManager).close();

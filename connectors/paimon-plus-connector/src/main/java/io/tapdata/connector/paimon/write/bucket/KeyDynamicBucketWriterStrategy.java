@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.write.bucket;
 import io.tapdata.connector.paimon.schema.PaimonRowKindField;
+import io.tapdata.connector.paimon.write.PaimonTableWriteContextFactory.IncompleteCleanupException;
 
 import org.apache.paimon.crosspartition.GlobalIndexAssigner;
 import org.apache.paimon.data.InternalRow;
@@ -13,10 +14,10 @@ import java.util.Objects;
 /**
  * Global key-index routing strategy for cross-partition primary-key updates.
  *
- * <p>Open, bootstrap, emitted DELETE/INSERT ordering and snapshot fencing follow Paimon 1.3.1:
- * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L114-L273
+ * <p>Open, bootstrap, emitted DELETE/INSERT ordering and snapshot fencing follow Paimon 1.3.2:
+ * https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L114-L273
  * and
- * https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/crosspartition/IndexBootstrap.java#L72-L125
+ * https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/crosspartition/IndexBootstrap.java#L72-L125
  */
 public final class KeyDynamicBucketWriterStrategy extends AbstractPaimonBucketWriterStrategy {
 
@@ -44,11 +45,17 @@ public final class KeyDynamicBucketWriterStrategy extends AbstractPaimonBucketWr
                     0,
                     (row, bucket) -> emittedRows.add(new BucketedRow(row, bucket)));
             bootstrap(runtime);
-        } catch (Exception e) {
+        } catch (Exception | Error e) {
             try {
+                // GlobalIndexAssigner.open 会建立 RocksDB 和 bootstrap Spill 缓冲；构造失败
+                // 时 Factory 尚未得到 strategy，必须在这里关闭已取得的 assigner。
+                // 原生 close 失败不构成清理证明，向 Factory 传递同一不完整信号并保留 IO。
+                // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L114
+                // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L276
                 assigner.close();
-            } catch (Exception closeError) {
-                e.addSuppressed(closeError);
+            } catch (Exception | Error closeError) {
+                if (closeError != e) { e.addSuppressed(closeError); }
+                throw new IncompleteCleanupException(tableKey, e);
             }
             throw e;
         }

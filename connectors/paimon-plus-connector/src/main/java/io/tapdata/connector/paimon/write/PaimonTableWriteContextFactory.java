@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.write;
 
+import io.tapdata.connector.paimon.config.PaimonSyncExpireMode;
 import io.tapdata.connector.paimon.write.bucket.DefaultPaimonBucketWriterRuntimeFactory;
 import io.tapdata.connector.paimon.write.bucket.PaimonBucketWriterRuntimeFactory;
 import io.tapdata.connector.paimon.write.bucket.PaimonBucketWriterStrategy;
@@ -20,6 +21,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableWriteImpl;
 
 import java.util.Collections;
 import java.util.List;
@@ -52,6 +54,7 @@ public final class PaimonTableWriteContextFactory {
         }
 
         FileStoreTable fileStoreTable = (FileStoreTable) paimonTable;
+        PaimonSyncExpireMode.requireSync(tableKey, fileStoreTable);
         Optional<Snapshot> latestUserSnapshot =
                 fileStoreTable.snapshotManager().latestSnapshotOfUserFromFilesystem(commitUser);
         long nextCommitIdentifier =
@@ -96,6 +99,7 @@ public final class PaimonTableWriteContextFactory {
             PaimonTableWriteContext.CommitStateStore commitStateStore,
             PaimonBucketWriterRuntimeFactory runtimeFactory)
             throws Exception {
+        PaimonSyncExpireMode.requireSync(tableKey, fileStoreTable);
         PaimonWriteSemanticContract writeSemanticContract =
                 PaimonWriteSemanticContractResolver.resolve(tableKey, fileStoreTable);
         return create(
@@ -122,6 +126,7 @@ public final class PaimonTableWriteContextFactory {
             PaimonWriteSemanticContract writeSemanticContract)
             throws Exception {
         Objects.requireNonNull(fileStoreTable, "fileStoreTable");
+        PaimonSyncExpireMode.requireSync(tableKey, fileStoreTable);
         Objects.requireNonNull(writeSemanticContract, "writeSemanticContract");
         if (nextCommitIdentifier < 0L) {
             throw new IllegalArgumentException("Negative Paimon commit identifier for " + tableKey);
@@ -150,21 +155,41 @@ public final class PaimonTableWriteContextFactory {
         IOManager ioManager = null;
         List<String> spillDirs = Collections.emptyList();
         StreamTableWrite rawWriter = null;
+        StreamTableCommit rawCommitter = null;
+        PaimonNativeWriteAccess nativeWriteAccess = null;
         PaimonTableCommitter tableCommitter = null;
         PaimonBucketWriterStrategy writerStrategy = null;
+        PaimonCompactionLifecycle compactionLifecycle = PaimonCompactionLifecycle.forTable(tableKey);
         try {
+            // Connector-owned compaction executor, injected before the writer's first use. Paimon
+            // then never shuts this executor down itself, so only the connector can produce the
+            // termination proof that gates IOManager close.
+            // Source: paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java#
+            // withCompactExecutor, lines 134-137; AbstractFileStoreWrite.java#withCompactExecutor,
+            // lines 146-150 (closeCompactExecutorWhenLeaving=false). Baseline:
+            // apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e (= 1.3.2@c05f7d1f).
+            rawWriter = builder.newWrite();
+            TableWriteImpl<?> tableWrite = requireTableWriteImpl(rawWriter, tableKey);
+            nativeWriteAccess = PaimonNativeWriteAccess.of(rawWriter);
+            tableWrite = tableWrite.withCompactExecutor(compactionLifecycle.compactionExecutor());
             if (createIoManager) {
                 PaimonSpillDirCleaner.IOManagerBuildResult built =
                         PaimonSpillDirCleaner.resolveAndCreateIOManager(configuredTmpDirs);
                 ioManager = built.ioManager();
                 spillDirs = built.spillDirs();
-                rawWriter = (StreamTableWrite) builder.newWrite().withIOManager(ioManager);
-            } else {
-                rawWriter = builder.newWrite();
+                tableWrite = tableWrite.withIOManager(ioManager);
             }
+            rawWriter = tableWrite;
 
-            StreamTableCommit rawCommitter = builder.newCommit();
+            rawCommitter = builder.newCommit();
+            if (!(rawCommitter instanceof org.apache.paimon.table.sink.TableCommitImpl)) {
+                throw new IllegalArgumentException("Paimon committer type drift: expected TableCommitImpl");
+            }
             tableCommitter = new PaimonStreamTableCommitter(rawCommitter);
+            // GlobalIndexAssigner.open 使用 tempDirs() 创建 rocksdb-*，必须约束在已登记目录内。
+            // Paimon 1.3.2: https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L136
+            IOManager strategyIoManager = ioManager == null ? null
+                    : PaimonSpillDirCleaner.withConfinedTempDirs(ioManager, spillDirs);
             writerStrategy =
                     PaimonBucketWriterStrategyFactory.create(
                             new PaimonBucketWriterStrategyContext(
@@ -172,7 +197,7 @@ public final class PaimonTableWriteContextFactory {
                                     fileStoreTable,
                                     rawWriter,
                                     commitUser,
-                                    ioManager,
+                                    strategyIoManager,
                                     writeSemanticContract),
                             runtimeFactory);
 
@@ -185,40 +210,71 @@ public final class PaimonTableWriteContextFactory {
                     ioManager,
                     spillDirs,
                     nextCommitIdentifier,
-                    commitStateStore);
-        } catch (Exception e) {
-            Exception failure =
-                    fileStoreTable.bucketMode() == BucketMode.KEY_DYNAMIC
-                            ? PaimonDynamicBucketPollutedException.wrapIfPolluted(tableKey, e)
-                            : e;
-            if (writerStrategy != null) {
-                closeSuppressed(writerStrategy, failure);
-            }
-            closeSuppressed(tableCommitter, failure);
-            if (writerStrategy == null) {
-                closeSuppressed(rawWriter, failure);
-            }
-            if (ioManager != null) {
+                    commitStateStore,
+                    compactionLifecycle,
+                    nativeWriteAccess);
+        } catch (Exception | Error original) {
+            boolean safe = !(original instanceof IncompleteCleanupException);
+            Throwable failure = !safe ? original.getCause()
+                    : original instanceof Exception && fileStoreTable.bucketMode() == BucketMode.KEY_DYNAMIC
+                    ? PaimonDynamicBucketPollutedException.wrapIfPolluted(tableKey, (Exception) original) : original;
+            // 构造失败同样先停止实际任务，再消费所有 bucket Future；不能先 rawWriter.close
+            // (原生会 cancel) 或 IOManager.close (递归删除)。所有原始引用在类型检查前保存。
+            // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/mergetree/MergeTreeWriter.java#L343
+            InterruptedException interruption = compactionLifecycle.shutdownAndAwaitCompletion();
+            if (interruption != null) { failure.addSuppressed(interruption); }
+            if (nativeWriteAccess != null) {
                 try {
-                    ioManager.close();
-                } catch (Exception closeError) {
-                    failure.addSuppressed(closeError);
-                } finally {
-                    PaimonSpillDirCleaner.unregisterLiveDirs(spillDirs);
+                    for (Throwable syncFailure : nativeWriteAccess.syncAll()) {
+                        if (syncFailure != failure) { failure.addSuppressed(syncFailure); }
+                    }
+                } catch (Exception | Error syncFailure) {
+                    if (syncFailure != failure) { failure.addSuppressed(syncFailure); }
                 }
             }
-            throw failure;
+            // strategy 已拥有 rawWriter 时只关闭一次；committer 同理。
+            safe &= closeSuppressed(writerStrategy != null ? writerStrategy : rawWriter, failure);
+            safe &= closeSuppressed(tableCommitter != null ? tableCommitter : rawCommitter, failure);
+            if (ioManager != null && safe) {
+                boolean deleted = closeSuppressed(ioManager, failure);
+                PaimonSpillDirCleaner.releaseAfterClose(spillDirs, deleted);
+                safe = deleted;
+            }
+            if (interruption != null) { Thread.currentThread().interrupt(); }
+            if (!safe) { throw new IncompleteCleanupException(tableKey, failure); }
+            if (failure instanceof Error) { throw (Error) failure; }
+            throw (Exception) failure;
         }
     }
 
-    private static void closeSuppressed(AutoCloseable closeable, Exception original) {
-        if (closeable == null) {
-            return;
+    /** Service 不能在半构造资源未完整关闭时无条件释放物理 owner。 */
+    public static final class IncompleteCleanupException extends Exception {
+        public IncompleteCleanupException(String tableKey, Throwable cause) {
+            super("Paimon construction cleanup is incomplete for " + tableKey, cause);
         }
+    }
+
+    private static TableWriteImpl<?> requireTableWriteImpl(
+            StreamTableWrite rawWriter, String tableKey) {
+        if (!(rawWriter instanceof TableWriteImpl)) {
+            throw new IllegalArgumentException(
+                    "Paimon writer type drift for "
+                            + tableKey
+                            + ": expected TableWriteImpl to inject the connector compaction"
+                            + " executor, but got "
+                            + rawWriter.getClass().getName());
+        }
+        return (TableWriteImpl<?>) rawWriter;
+    }
+
+    private static boolean closeSuppressed(AutoCloseable closeable, Throwable original) {
+        if (closeable == null) { return true; }
         try {
             closeable.close();
-        } catch (Exception closeError) {
-            original.addSuppressed(closeError);
+            return true;
+        } catch (Exception | Error closeError) {
+            if (closeError != original) { original.addSuppressed(closeError); }
+            return false;
         }
     }
 }

@@ -4,6 +4,7 @@ import io.tapdata.connector.paimon.commit.PaimonCommitStateStore;
 
 import io.tapdata.connector.paimon.exception.PaimonDynamicBucketPollutedException;
 import io.tapdata.connector.paimon.util.PaimonSpillDirCleaner;
+import io.tapdata.connector.paimon.write.PaimonTableWriteContextFactory.IncompleteCleanupException;
 import io.tapdata.entity.utils.cache.KVMap;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.crosspartition.GlobalIndexAssigner;
@@ -71,7 +72,8 @@ public final class PaimonDynamicBucketPreflight {
         GlobalIndexAssigner checker = null;
         List<String> spillDirs = Collections.emptyList();
         Long snapshotBefore = table.snapshotManager().latestSnapshotIdFromFileSystem();
-        Exception failure = null;
+        Throwable failure = null;
+        boolean cleanupComplete = false;
         try {
             PaimonSpillDirCleaner.IOManagerBuildResult built =
                     PaimonSpillDirCleaner.resolveAndCreateIOManager(configuredTmpDirs);
@@ -79,7 +81,10 @@ public final class PaimonDynamicBucketPreflight {
             spillDirs = built.spillDirs();
             FileStoreTable validationTable = withoutIndexTtl(table);
             checker = new GlobalIndexAssigner(validationTable);
-            checker.open(0L, ioManager, 1, 0, (row, bucket) -> { });
+            // 与写入策略共享约束视图；原始 IOManager 仍由本方法在 checker 关闭后释放。
+            // Paimon 1.3.2 GlobalIndexAssigner.open: https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L136
+            checker.open(0L, PaimonSpillDirCleaner.withConfinedTempDirs(ioManager, spillDirs),
+                    1, 0, (row, bucket) -> { });
             try (RecordReader<InternalRow> reader =
                          new IndexBootstrap(validationTable).bootstrap(1, 0)) {
                 RecordReader.RecordIterator<InternalRow> batch;
@@ -101,16 +106,26 @@ public final class PaimonDynamicBucketPreflight {
                         "Paimon table changed during HASH_DYNAMIC pollution preflight; "
                                 + "only one write job per physical table is supported");
             }
-        } catch (Exception e) {
-            failure = PaimonDynamicBucketPollutedException.wrapIfPolluted(tableKey, e);
+        } catch (Exception | Error e) {
+            failure = e instanceof Exception
+                    ? PaimonDynamicBucketPollutedException.wrapIfPolluted(tableKey, e) : e;
         } finally {
-            failure = close(checker, failure);
-            failure = close(ioManager, failure);
-            PaimonSpillDirCleaner.unregisterLiveDirs(spillDirs);
+            // 原生 GlobalIndexAssigner.open 持有 RocksDB / bootstrap Spill；close 失败不能
+            // 当作“业务预检失败但资源已安全释放”。只有 checker 正常关闭才允许删除其 IO 目录。
+            // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L114
+            // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L276
+            Throwable checkerFailure = close(checker);
+            failure = appendFailure(failure, checkerFailure);
+            if (checkerFailure == null) {
+                Throwable ioFailure = close(ioManager);
+                failure = appendFailure(failure, ioFailure);
+                cleanupComplete = ioFailure == null;
+                PaimonSpillDirCleaner.releaseAfterClose(spillDirs, cleanupComplete);
+            }
         }
-        if (failure != null) {
-            throw failure;
-        }
+        if (!cleanupComplete) { throw new IncompleteCleanupException(tableKey, failure); }
+        if (failure instanceof Error) { throw (Error) failure; }
+        if (failure != null) { throw (Exception) failure; }
     }
 
     /**
@@ -127,18 +142,15 @@ public final class PaimonDynamicBucketPreflight {
                 CoreOptions.CROSS_PARTITION_UPSERT_INDEX_TTL.key(), null));
     }
 
-    private static Exception close(AutoCloseable closeable, Exception failure) {
-        if (closeable == null) {
-            return failure;
-        }
-        try {
-            closeable.close();
-        } catch (Exception closeError) {
-            if (failure == null) {
-                return closeError;
-            }
-            failure.addSuppressed(closeError);
-        }
-        return failure;
+    private static Throwable close(AutoCloseable closeable) {
+        if (closeable == null) { return null; }
+        try { closeable.close(); return null; }
+        catch (Exception | Error failure) { return failure; }
+    }
+
+    private static Throwable appendFailure(Throwable first, Throwable next) {
+        if (first == null) { return next; }
+        if (next != null && next != first) { first.addSuppressed(next); }
+        return first;
     }
 }
