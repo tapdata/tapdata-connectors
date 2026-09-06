@@ -17,6 +17,7 @@ public class HashReadOffset implements Serializable {
     private String fingerprint;
 
     public HashReadOffset() {
+        this.finishedSplits = new ConcurrentSkipListSet<>();
     }
 
     public HashReadOffset(final Integer maxSplit) {
@@ -26,6 +27,7 @@ public class HashReadOffset implements Serializable {
     public HashReadOffset(final Integer maxSplit, final String fingerprint) {
         this.maxSplit = maxSplit;
         this.fingerprint = fingerprint;
+        this.finishedSplits = new ConcurrentSkipListSet<>();
     }
 
     public Integer getMaxSplits() {
@@ -49,9 +51,6 @@ public class HashReadOffset implements Serializable {
     }
 
     public void addFinishedSplit(final Integer split) {
-        if (finishedSplits == null) {
-            finishedSplits = new ConcurrentSkipListSet<>();
-        }
         finishedSplits.add(split);
     }
 

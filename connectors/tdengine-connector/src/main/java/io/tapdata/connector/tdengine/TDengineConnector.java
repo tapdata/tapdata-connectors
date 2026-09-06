@@ -410,9 +410,12 @@ public class TDengineConnector extends CommonDbConnector {
         }
     }
 
-    protected void batchReadRestful(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer, Object offsetState, Timestamp min, Timestamp max) throws Throwable {
+    protected boolean batchReadRestful(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer, Object offsetState, Timestamp min, Timestamp max) throws Throwable {
         long offset = 0;
-        while (isAlive()) {
+        while (true) {
+            if (!isAlive()) {
+                return false;
+            }
             String querySql;
             if (eventBatchSize > 0) {
                 querySql = sql + " limit " + eventBatchSize + " offset " + offset;
@@ -421,28 +424,36 @@ public class TDengineConnector extends CommonDbConnector {
             }
             List<TapEvent> tapEvents = list();
             List<String> columnNames = list();
+            AtomicBoolean pageFinished = new AtomicBoolean(false);
             if (EmptyKit.isNull(min) && EmptyKit.isNull(max)) {
-                jdbcContext.query(querySql, resultSet -> allOverResultSet(resultSet, columnNames, tapTable, tapEvents));
+                jdbcContext.query(querySql, resultSet -> pageFinished.set(allOverResultSet(resultSet, columnNames, tapTable, tapEvents)));
             } else {
-                jdbcContext.prepareQuery(querySql, Arrays.asList(min, max), resultSet -> allOverResultSet(resultSet, columnNames, tapTable, tapEvents));
+                jdbcContext.prepareQuery(querySql, Arrays.asList(min, max), resultSet -> pageFinished.set(allOverResultSet(resultSet, columnNames, tapTable, tapEvents)));
+            }
+            if (!pageFinished.get()) {
+                return false;
             }
             syncEventSubmit(tapEvents, eventsOffsetConsumer, offsetState);
             if (eventBatchSize == 0 || eventBatchSize > 0 && tapEvents.size() < eventBatchSize) {
-                break;
+                return true;
             }
             offset += eventBatchSize;
         }
     }
 
-    private void allOverResultSet(ResultSet resultSet, List<String> columnNames, TapTable tapTable, List<TapEvent> tapEvents) throws SQLException {
+    private boolean allOverResultSet(ResultSet resultSet, List<String> columnNames, TapTable tapTable, List<TapEvent> tapEvents) throws SQLException {
         if (EmptyKit.isEmpty(columnNames)) {
             columnNames.addAll(DbKit.getColumnsFromResultSet(resultSet));
         }
-        while (isAlive() && resultSet.next()) {
+        while (resultSet.next()) {
+            if (!isAlive()) {
+                return false;
+            }
             DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
             processDataMap(dataMap, tapTable);
             tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
         }
+        return true;
     }
 
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
@@ -502,7 +513,9 @@ public class TDengineConnector extends CommonDbConnector {
                                 splitSql = sql + String.format(" WHERE `%s` >= ? AND `%s` < ?", timestampColumn, timestampColumn);
                             }
                             tapLogger.info("batchRead, splitSql[{}], from {} to {}", splitSql, splitTimestamps[index], splitTimestamps[index + 1]);
-                            batchReadRestful(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer, offset, splitTimestamps[index], splitTimestamps[index + 1]);
+                            if (!batchReadRestful(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer, offset, splitTimestamps[index], splitTimestamps[index + 1])) {
+                                return;
+                            }
                             offset.addFinishedSplit(index);
                         }
                     } catch (Throwable e) {

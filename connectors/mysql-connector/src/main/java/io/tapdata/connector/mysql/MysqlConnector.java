@@ -748,7 +748,10 @@ public class MysqlConnector extends CommonDbConnector {
         return resultSet -> {
             List<TapEvent> tapEvents = list();
             ResultSetMetaData metaData = resultSet.getMetaData();
-            while (isAlive() && resultSet.next()) {
+            while (resultSet.next()) {
+                if (!isAlive()) {
+                    return;
+                }
                 TapInsertRecordEvent tapInsertRecordEvent = new TapInsertRecordEvent().init();
                 Map<String, Object> data = filterTimeForMysql(resultSet, metaData, tapInsertRecordEvent, new IllegalDateConsumer() {
                     @Override
@@ -803,7 +806,14 @@ public class MysqlConnector extends CommonDbConnector {
                             }
                             String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
                             tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
-                            mysqlJdbcContext.queryWithStream(splitSql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer, offset));
+                            AtomicBoolean splitFinished = new AtomicBoolean(false);
+                            mysqlJdbcContext.queryWithStream(splitSql, resultSet -> {
+                                resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer, offset).accept(resultSet);
+                                splitFinished.set(isAlive());
+                            });
+                            if (!splitFinished.get()) {
+                                return;
+                            }
                             offset.addFinishedSplit(ii);
                         }
                     } catch (Throwable e) {

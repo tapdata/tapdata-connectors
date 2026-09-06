@@ -42,6 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -859,11 +860,15 @@ public abstract class CommonDbConnector extends ConnectorBase {
                             int retry = 20;
                             while (retry-- > 0 && isAlive()) {
                                 try {
+                                    AtomicBoolean splitFinished = new AtomicBoolean(false);
                                     jdbcContext.query(splitSql, resultSet -> {
                                         List<TapEvent> tapEvents = list();
                                         //get all column names
                                         List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
-                                        while (isAlive() && resultSet.next()) {
+                                        while (resultSet.next()) {
+                                            if (!isAlive()) {
+                                                return;
+                                            }
                                             DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
                                             processDataMap(dataMap, tapTable);
                                             tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
@@ -876,7 +881,11 @@ public abstract class CommonDbConnector extends ConnectorBase {
                                         if (EmptyKit.isNotEmpty(tapEvents)) {
                                             syncEventSubmit(tapEvents, eventsOffsetConsumer, offset);
                                         }
+                                        splitFinished.set(true);
                                     });
+                                    if (!splitFinished.get()) {
+                                        return;
+                                    }
                                     offset.addFinishedSplit(ii);
                                     break;
                                 } catch (Exception e) {

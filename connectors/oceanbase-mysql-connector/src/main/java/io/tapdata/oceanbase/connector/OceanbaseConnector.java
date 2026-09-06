@@ -43,6 +43,7 @@ import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -287,16 +288,20 @@ public class OceanbaseConnector extends MysqlConnector {
         mysqlJdbcContext.streamQueryWithTimeout(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer), prepareSqlBeforeQuery, Integer.MIN_VALUE);
     }
 
-    private void batchReadWorker(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer, Object offsetState) throws Exception {
+    private boolean batchReadWorker(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer, Object offsetState) throws Exception {
         int retry = 20;
         while (retry-- > 0 && isAlive()) {
             try {
                 tapLogger.info("batchRead, sql: {}", sql);
+                AtomicBoolean splitFinished = new AtomicBoolean(false);
                 mysqlJdbcContext.streamQueryWithTimeout(sql, resultSet -> {
                     List<TapEvent> tapEvents = list();
                     //get all column names
                     List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
-                    while (isAlive() && resultSet.next()) {
+                    while (resultSet.next()) {
+                        if (!isAlive()) {
+                            return;
+                        }
                         DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
                         processDataMap(dataMap, tapTable);
                         tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
@@ -309,8 +314,9 @@ public class OceanbaseConnector extends MysqlConnector {
                     if (EmptyKit.isNotEmpty(tapEvents)) {
                         syncEventSubmit(tapEvents, eventsOffsetConsumer, offsetState);
                     }
+                    splitFinished.set(true);
                 }, prepareSqlBeforeQuery, Integer.MIN_VALUE);
-                break;
+                return splitFinished.get();
             } catch (Exception e) {
                 if (retry == 0 || !(e instanceof SQLRecoverableException || e instanceof IOException)) {
                     throw e;
@@ -319,6 +325,7 @@ public class OceanbaseConnector extends MysqlConnector {
                 throw new RuntimeException(e);
             }
         }
+        return false;
     }
 
     protected void batchReadWithPartition(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
@@ -419,7 +426,9 @@ public class OceanbaseConnector extends MysqlConnector {
                             }
                             String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
                             tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
-                            batchReadWorker(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer, offset);
+                            if (!batchReadWorker(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer, offset)) {
+                                return;
+                            }
                             offset.addFinishedSplit(ii);
                         }
                     } catch (Exception e) {
