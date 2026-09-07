@@ -18,6 +18,8 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import io.tapdata.file.operation.FileStorageCapability;
+
 public class FtpFileStorage implements TapFileStorage {
 
     private FtpConfig ftpConfig;
@@ -120,8 +122,8 @@ public class FtpFileStorage implements TapFileStorage {
     }
 
     @Override
-    public boolean move(String sourcePath, String destPath) {
-        throw new UnsupportedOperationException();
+    public synchronized boolean move(String sourcePath, String destPath) throws IOException {
+        return ftpClient.rename(encodeISO(sourcePath), encodeISO(destPath));
     }
 
     @Override
@@ -132,8 +134,14 @@ public class FtpFileStorage implements TapFileStorage {
     @Override
     public synchronized TapFile saveFile(String path, InputStream is, boolean canReplace) throws IOException {
         if (!isFileExist(path) || canReplace) {
-            ftpClient.changeWorkingDirectory(encodeISO(path.substring(0, path.lastIndexOf("/"))));
-            ftpClient.storeFile(encodeISO(path.substring(path.lastIndexOf("/") + 1)), is);
+            String parent = path.substring(0, path.lastIndexOf("/"));
+            if (!ftpClient.changeWorkingDirectory(encodeISO(parent))) {
+                throw new IOException("changeWorkingDirectory failed: " + parent);
+            }
+            boolean stored = ftpClient.storeFile(encodeISO(path.substring(path.lastIndexOf("/") + 1)), is);
+            if (!stored) {
+                throw new IOException("storeFile failed: " + path);
+            }
         }
         return getFile(path);
     }
@@ -156,7 +164,9 @@ public class FtpFileStorage implements TapFileStorage {
             @Override
             public void close() throws IOException {
                 os.close();
-                ftpClient.completePendingCommand();
+                if (!ftpClient.completePendingCommand()) {
+                    throw new IOException("completePendingCommand failed: " + path);
+                }
             }
 
         };
@@ -203,6 +213,20 @@ public class FtpFileStorage implements TapFileStorage {
     @Override
     public synchronized boolean isDirectoryExist(String path) throws IOException {
         return ftpClient.changeWorkingDirectory(encodeISO(path));
+    }
+
+    @Override
+    public synchronized boolean makeDirectory(String path) throws IOException {
+        if (isDirectoryExist(path)) {
+            return true;
+        }
+        return ftpClient.makeDirectory(encodeISO(path));
+    }
+
+    @Override
+    public EnumSet<FileStorageCapability> capabilities() {
+        return EnumSet.of(FileStorageCapability.ATOMIC_RENAME,
+                FileStorageCapability.MAKE_DIRECTORY);
     }
 
     @Override
