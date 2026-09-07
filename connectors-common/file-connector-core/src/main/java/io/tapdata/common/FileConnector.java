@@ -12,7 +12,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.file.TapFile;
 import io.tapdata.file.TapFileStorage;
-import io.tapdata.file.TapFileStorageBuilder;
+import io.tapdata.common.file.FileStorageFactory;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -63,12 +63,7 @@ public abstract class FileConnector extends ConnectorBase {
      * Build a fresh storage instance (opens a new underlying connection/session) from the saved connection params.
      */
     protected void buildStorage() throws Exception {
-        String clazz = FileProtocolEnum.fromValue(fileConfig.getProtocol()).getStorage();
-        storage = new TapFileStorageBuilder()
-                .withClassLoader(Class.forName(clazz).getClassLoader())
-                .withParams(connectionParams)
-                .withStorageClassName(clazz)
-                .build();
+        storage = FileStorageFactory.build(fileConfig.getProtocol(), connectionParams);
     }
 
     /**

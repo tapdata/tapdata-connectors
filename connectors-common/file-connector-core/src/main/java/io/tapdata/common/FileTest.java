@@ -2,7 +2,7 @@ package io.tapdata.common;
 
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.file.TapFileStorage;
-import io.tapdata.file.TapFileStorageBuilder;
+import io.tapdata.common.file.FileStorageFactory;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.storage.kit.EmptyKit;
 
@@ -18,12 +18,7 @@ public class FileTest implements AutoCloseable {
 
     public FileTest(DataMap params) throws Exception {
         fileConfig = new FileConfig().load(params);
-        String clazz = FileProtocolEnum.fromValue(fileConfig.getProtocol()).getStorage();
-        storage = new TapFileStorageBuilder()
-                .withClassLoader(Class.forName(clazz).getClassLoader())
-                .withParams(params)
-                .withStorageClassName(clazz)
-                .build();
+        storage = FileStorageFactory.build(fileConfig.getProtocol(), params);
     }
 
     public TestItem testConnect() {
