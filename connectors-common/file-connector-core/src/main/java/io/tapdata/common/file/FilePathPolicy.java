@@ -9,7 +9,7 @@ public final class FilePathPolicy {
             throw new IllegalArgumentException("path is required");
         }
         String value = path.trim().replace('\\', '/');
-        if (value.contains("://") || value.startsWith("/") || value.indexOf('\u0000') >= 0) {
+        if (value.contains("://") || value.startsWith("/") || containsControlCharacter(value)) {
             throw new IllegalArgumentException("path must be relative");
         }
         StringBuilder normalized = new StringBuilder();
@@ -37,9 +37,16 @@ public final class FilePathPolicy {
         String root = rootPath.trim().replace('\\', '/');
         if (!root.startsWith("/")) root = "/" + root;
         while (root.endsWith("/") && root.length() > 1) root = root.substring(0, root.length() - 1);
-        if (root.contains("..") || root.contains("://") || root.indexOf('\u0000') >= 0) {
+        if (root.contains("..") || root.contains("://") || containsControlCharacter(root)) {
             throw new IllegalArgumentException("root path is invalid");
         }
         return root + "/" + normalized;
+    }
+
+    private static boolean containsControlCharacter(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            if (Character.isISOControl(value.charAt(i))) return true;
+        }
+        return false;
     }
 }
