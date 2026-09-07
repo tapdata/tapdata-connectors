@@ -108,6 +108,20 @@ class PaimonSpillDirCleanerProcessIntegrationTest {
         }
     }
 
+    @Test
+    void retainedOwnerAfterGcMustExcludeOtherJvmCleanerUntilActualProcessDeath(@TempDir Path tempDir) throws Exception {
+        try (ChildOwner child = ChildOwner.start(tempDir, true)) {
+            child.awaitReady();
+            assertCrossProcessLockHeld(child.marker);
+            assertEquals(0, PaimonSpillDirCleaner.cleanupStaleSpillDirs(new String[] {tempDir.toString()}, 0, null));
+            assertTrue(Files.exists(child.spill));
+            child.process.destroyForcibly();
+            assertTrue(child.process.waitFor(10, TimeUnit.SECONDS)); assertFalse(child.process.isAlive());
+            assertEquals(1, PaimonSpillDirCleaner.cleanupStaleSpillDirs(new String[] {tempDir.toString()}, 0, null));
+            assertFalse(Files.exists(child.spill)); assertFalse(Files.exists(child.marker));
+        }
+    }
+
     private static Path createLegacyDirectoryWithoutMarker(Path root) throws IOException {
         Path directory = Files.createDirectory(root.resolve("paimon-io-legacy-without-marker"));
         Path data = Files.write(directory.resolve("legacy.channel"), new byte[] {5, 6});
@@ -143,7 +157,8 @@ class PaimonSpillDirCleanerProcessIntegrationTest {
             this.output = output;
         }
 
-        private static ChildOwner start(Path root) throws IOException {
+        private static ChildOwner start(Path root) throws IOException { return start(root, false); }
+        private static ChildOwner start(Path root, boolean retained) throws IOException {
             Path ready = root.resolve("owner.ready");
             Path output = root.resolve("owner-process.log");
             String classpath = System.getProperty("surefire.test.class.path");
@@ -154,7 +169,7 @@ class PaimonSpillDirCleanerProcessIntegrationTest {
             Process process = new ProcessBuilder(
                     Paths.get(System.getProperty("java.home"), "bin", "java").toString(),
                     "-cp", classpath, SpillOwnerProcess.class.getName(),
-                    root.toString(), ready.toString())
+                    root.toString(), ready.toString(), Boolean.toString(retained))
                     .redirectErrorStream(true)
                     .redirectOutput(output.toFile())
                     .start();
@@ -239,6 +254,13 @@ class PaimonSpillDirCleanerProcessIntegrationTest {
                 Files.setLastModifiedTime(indexDir, OLD_TIME);
                 Files.setLastModifiedTime(channel, OLD_TIME);
                 Files.setLastModifiedTime(spill, OLD_TIME);
+                if (args.length > 2 && Boolean.parseBoolean(args[2])) {
+                    // 故障保留后丢弃原始引用并 GC，唯一受验证的资源根是静态 retained ledger。
+                    java.lang.ref.WeakReference<org.apache.paimon.disk.IOManager> reference = retainAndForget(built);
+                    built = null;
+                    for (int attempt = 0; attempt < 3; attempt++) { System.gc(); Thread.sleep(20); }
+                    if (reference.get() == null) { throw new AssertionError("retained IOManager lost after GC"); }
+                }
                 Path pending = ready.resolveSibling("owner.ready.pending");
                 Files.write(pending, Arrays.asList(spill.toString(), channel.toString()), StandardCharsets.UTF_8);
                 Files.move(pending, ready, StandardCopyOption.ATOMIC_MOVE);
@@ -249,9 +271,24 @@ class PaimonSpillDirCleanerProcessIntegrationTest {
                     throw new IllegalStateException("owner 子 JVM 未收到明确的 CLOSE 命令");
                 }
             } finally {
-                built.ioManager().close();
-                PaimonSpillDirCleaner.releaseAfterClose(built.spillDirs(), true);
+                if (built != null) {
+                    built.ioManager().close();
+                    PaimonSpillDirCleaner.releaseAfterClose(built.spillDirs(), true);
+                }
             }
         }
+        private static java.lang.ref.WeakReference<org.apache.paimon.disk.IOManager> retainAndForget(
+                PaimonSpillDirCleaner.IOManagerBuildResult built) {
+            io.tapdata.connector.paimon.service.PaimonStopController stop =
+                    new io.tapdata.connector.paimon.service.PaimonStopController("child-retained", 1, 1, 1);
+            io.tapdata.connector.paimon.service.PaimonStopResources ledger =
+                    new io.tapdata.connector.paimon.service.PaimonStopResources();
+            ledger.scope("retained IO", stop).reserve("IOManager").bind(built.ioManager());
+            stop.attachResourceRoot(ledger); stop.start();
+            stop.retain(new IOException("injected close proof failure"), ledger);
+            if (!stop.isFinished() || !stop.isRetained()) { throw new AssertionError("retained terminal missing"); }
+            return new java.lang.ref.WeakReference<>(built.ioManager());
+        }
+
     }
 }

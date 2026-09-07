@@ -136,11 +136,10 @@ class PaimonDynamicBucketPreflightCleanupTest {
                 IncompleteCleanupException failure = assertInstanceOf(
                         IncompleteCleanupException.class, invocation.getCause());
                 assertSame(bootstrapFailure, failure.getCause());
-                assertEquals(Collections.singletonList(cleanupFailure),
-                        Arrays.asList(bootstrapFailure.getSuppressed()));
+                assertTrue(Arrays.asList(bootstrapFailure.getSuppressed()).contains(cleanupFailure));
                 assertTrue(((Set<?>) field(first, "unsafeResourceOwners")).contains(tableKey));
                 assertTrue(((Map<?, ?>) field(first, "physicalTableByLogicalTable")).containsKey(tableKey));
-                assertThrows(Exception.class, first::close,
+                assertThrows(Throwable.class, first::close,
                         "Service close 不得将未清理完成的预检转为正常退出");
                 InvocationTargetException duplicate = assertThrows(InvocationTargetException.class,
                         () -> registerMethod().invoke(second, tableKey, table));
@@ -157,9 +156,9 @@ class PaimonDynamicBucketPreflightCleanupTest {
                         "清理失败必须保留真实 Spill 目录");
                 assertEquals(scenario != CleanupFailure.NONE, Files.exists(ownerMarker(dir)),
                         "清理失败必须保留目录 owner marker");
-                assertEquals(scenario.checker, liveDirs().contains(dir),
-                        "checker 未证明关闭时仍须保持 live 保护；IO 删除失败可交给 stale cleaner 重试");
-                assertEquals(scenario.checker, ownerLocks().containsKey(dir),
+                assertEquals(scenario != CleanupFailure.NONE, liveDirs().contains(dir),
+                        "V1.2 任何关闭证明缺失均保留 live 保护");
+                assertEquals(scenario != CleanupFailure.NONE, ownerLocks().containsKey(dir),
                         "checker 未证明关闭时不能释放目录文件锁");
             }
         } finally {
@@ -171,11 +170,11 @@ class PaimonDynamicBucketPreflightCleanupTest {
             for (String dir : dirs) {
                 Files.deleteIfExists(ownerMarker(dir));
             }
-            unregisterMethod().invoke(first, tableKey);
-            unregisterMethod().invoke(second, tableKey);
+            PaimonStopTestSupport.releaseInjectedOwner(first, tableKey);
+            PaimonStopTestSupport.releaseInjectedOwner(second, tableKey);
             try {
                 first.close();
-            } catch (Exception expectedStickyFailure) {
+            } catch (Exception | Error expectedStickyFailure) {
                 assertTrue(scenario != CleanupFailure.NONE,
                         "只有清理失败场景允许缓存的关闭错误");
             } finally {

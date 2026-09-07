@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.commit;
 import io.tapdata.connector.paimon.write.PaimonTableWriteContext;
+import io.tapdata.connector.paimon.service.PaimonStopController;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
@@ -47,18 +48,27 @@ public final class PaimonCommitStateStore implements PaimonTableWriteContext.Com
     private final KVMap<Object> stateMap;
     private final String stateKey;
     private final String commitUser;
+    private final PaimonStopController stopController;
 
     private PaimonCommitStateStore(
-            KVMap<Object> stateMap, String stateKey, String commitUser) {
+            KVMap<Object> stateMap, String stateKey, String commitUser, PaimonStopController stopController) {
         this.stateMap = stateMap;
         this.stateKey = stateKey;
         this.commitUser = commitUser;
+        this.stopController = stopController;
     }
 
     public static Binding bind(
             KVMap<Object> stateMap,
             String warehouse,
             FileStoreTable table) throws Exception {
+        return bind(stateMap, warehouse, table, null);
+    }
+
+    public static Binding bind(
+            KVMap<Object> stateMap,
+            String warehouse,
+            FileStoreTable table, PaimonStopController controller) throws Exception {
         if (stateMap == null) {
             throw new IllegalStateException("Tap task state map is required for stable Paimon commits");
         }
@@ -69,11 +79,11 @@ public final class PaimonCommitStateStore implements PaimonTableWriteContext.Com
                         VERSION,
                         "tapdata-paimon-" + UUID.randomUUID().toString().replace("-", ""),
                         0L);
-        Object stored = stateMap.get(key);
+        Object stored = call(controller, "read commit identity", () -> stateMap.get(key));
         if (stored == null) {
             String candidateJson = encode(candidate);
-            Object raced = stateMap.putIfAbsent(key, candidateJson);
-            stored = raced == null ? stateMap.get(key) : raced;
+            Object raced = call(controller, "create commit identity", () -> stateMap.putIfAbsent(key, candidateJson));
+            stored = raced == null ? call(controller, "verify commit identity", () -> stateMap.get(key)) : raced;
             if (stored == null) {
                 throw new IllegalStateException("Paimon commit state was not visible after putIfAbsent");
             }
@@ -81,11 +91,11 @@ public final class PaimonCommitStateStore implements PaimonTableWriteContext.Com
 
         State winner = parse(stored);
         PaimonCommitStateStore store =
-                new PaimonCommitStateStore(stateMap, key, winner.commitUser);
+                new PaimonCommitStateStore(stateMap, key, winner.commitUser, controller);
 
         Optional<Snapshot> latest =
-                table.snapshotManager()
-                        .latestSnapshotOfUserFromFilesystem(winner.commitUser);
+                call(controller, "reconcile latest user snapshot", () -> table.snapshotManager()
+                        .latestSnapshotOfUserFromFilesystem(winner.commitUser));
         // Reconciliation repairs "snapshot committed, task-state update failed" while that
         // same-user snapshot is still retained. It cannot recreate an expired snapshot's pending
         // CommitMessages or determine whether the source offset advanced with that snapshot.
@@ -104,7 +114,7 @@ public final class PaimonCommitStateStore implements PaimonTableWriteContext.Com
             throw new IllegalArgumentException("Negative Paimon next commit identifier");
         }
 
-        State current = parse(stateMap.get(stateKey));
+        State current = parse(call(stopController, "read stored commit identity", () -> stateMap.get(stateKey)));
         if (!commitUser.equals(current.commitUser)) {
             throw new IllegalStateException(
                     "Paimon commit user changed in task state; another writer may own the table");
@@ -116,16 +126,24 @@ public final class PaimonCommitStateStore implements PaimonTableWriteContext.Com
             return;
         }
 
-        stateMap.put(
-                stateKey,
-                encode(new State(VERSION, commitUser, nextCommitIdentifier)));
+        call(stopController, "save commit identity", () -> {
+            stateMap.put(stateKey, encode(new State(VERSION, commitUser, nextCommitIdentifier)));
+            return null;
+        });
         // KVMap offers put/get visibility but no fsync/checkpoint acknowledgement in its public
         // interface; this check detects adapter inconsistency, not storage-layer durability.
-        State verified = parse(stateMap.get(stateKey));
+        State verified = parse(call(stopController, "read stored commit identity", () -> stateMap.get(stateKey)));
         if (!commitUser.equals(verified.commitUser)
                 || verified.nextCommitIdentifier != nextCommitIdentifier) {
             throw new IllegalStateException("Paimon commit state update was not durably observable");
         }
+    }
+
+    private static <T> T call(PaimonStopController controller, String action,
+            PaimonStopController.CheckedSupplier<T> supplier) {
+        try { return controller == null ? supplier.get() : controller.call(action, supplier); }
+        catch (RuntimeException | Error failure) { throw failure; }
+        catch (Exception failure) { throw new IllegalStateException(action, failure); }
     }
 
     public static String stateKey(String warehouse, String physicalLocation) {

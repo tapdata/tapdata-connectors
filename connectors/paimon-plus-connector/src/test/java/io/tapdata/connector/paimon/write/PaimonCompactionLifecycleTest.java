@@ -25,38 +25,31 @@ import static org.mockito.Mockito.*;
 class PaimonCompactionLifecycleTest {
 
     @Test
-    void gracefulShutdownMustWaitForActualTaskWithoutInterruptingIt() throws Exception {
+    void boundedTerminationWaitMustNotClaimExitOrInterruptRunningTask() throws Exception {
         try (BlockedLifecycle fixture = new BlockedLifecycle("graceful")) {
-            AtomicReference<InterruptedException> interruption = new AtomicReference<>();
-            fixture.startWaiter(() -> interruption.set(fixture.lifecycle.shutdownAndAwaitCompletion()));
-            fixture.awaitShutdown();
-            assertFalse(fixture.returned.await(100L, TimeUnit.MILLISECONDS));
-            assertFalse(fixture.lifecycle.compactionExecutor().isTerminated());
+            fixture.lifecycle.shutdown();
+            assertFalse(fixture.lifecycle.awaitTermination(TimeUnit.MILLISECONDS.toNanos(50)));
+            assertFalse(fixture.lifecycle.isTerminated());
             assertFalse(fixture.workerInterrupted.get());
             fixture.release.countDown();
-            assertTrue(fixture.returned.await(5L, TimeUnit.SECONDS));
-            assertNull(interruption.get());
-            assertNull(fixture.waiterFailure.get());
-            assertTrue(fixture.lifecycle.compactionExecutor().isTerminated());
+            assertTrue(fixture.lifecycle.awaitTermination(TimeUnit.SECONDS.toNanos(5)));
             assertDoesNotThrow(fixture.lifecycle::auditControlFailure);
         }
     }
 
     @Test
-    void interruptedTerminationWaitMustContinueUntilActualTaskExit() throws Exception {
+    void interruptedTerminationWaitMustPropagateWithoutClaimingWorkerExit() throws Exception {
         try (BlockedLifecycle fixture = new BlockedLifecycle("interrupt")) {
-            AtomicReference<InterruptedException> interruption = new AtomicReference<>();
-            fixture.startWaiter(() -> interruption.set(fixture.lifecycle.shutdownAndAwaitCompletion()));
+            fixture.startWaiter(() -> {
+                fixture.lifecycle.shutdown();
+                fixture.lifecycle.awaitTermination(TimeUnit.SECONDS.toNanos(5));
+            });
             fixture.awaitShutdown();
             fixture.waiter.interrupt();
-            assertFalse(fixture.returned.await(100L, TimeUnit.MILLISECONDS),
-                    "等待者中断不得使运行中的 CompactTask 提前逃逸");
+            assertTrue(fixture.returned.await(3, TimeUnit.SECONDS));
+            assertInstanceOf(InterruptedException.class, fixture.waiterFailure.get());
+            assertFalse(fixture.lifecycle.isTerminated());
             assertFalse(fixture.workerInterrupted.get());
-            fixture.release.countDown();
-            assertTrue(fixture.returned.await(5L, TimeUnit.SECONDS));
-            assertNotNull(interruption.get(), "把首次中断交还 Context 作为硬错误");
-            assertNull(fixture.waiterFailure.get());
-            assertTrue(fixture.lifecycle.compactionExecutor().isTerminated());
         }
     }
 
@@ -122,7 +115,7 @@ class PaimonCompactionLifecycleTest {
             assertSame(writerError, assertThrows(IOException.class, context::close));
             assertSame(writerError, assertThrows(IOException.class, context::close));
             verify(strategy, times(1)).close();
-            verify(committer, times(1)).close();
+            verify(committer, never()).close();
             verify(io, never()).close();
             assertTrue(lifecycle.compactionExecutor().isTerminated());
             assertFalse(context.cleanupComplete());
@@ -173,7 +166,7 @@ class PaimonCompactionLifecycleTest {
     }
 
     @Test
-    void interruptedContextCloseMustFinishCleanupThenRestoreCallerInterruptAndFailure() throws Exception {
+    void interruptedContextCloseMustRetainWithoutTerminationAndRestoreInterrupt() throws Exception {
         try (BlockedLifecycle fixture = new BlockedLifecycle("context-interrupt")) {
             PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
             PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
@@ -182,15 +175,15 @@ class PaimonCompactionLifecycleTest {
             fixture.startWaiter(context::close);
             fixture.awaitShutdown();
             fixture.waiter.interrupt();
-            assertFalse(fixture.returned.await(100L, TimeUnit.MILLISECONDS));
+            assertTrue(fixture.returned.await(3L, TimeUnit.SECONDS));
             verify(io, never()).close();
             fixture.release.countDown();
             assertTrue(fixture.returned.await(5L, TimeUnit.SECONDS));
             assertInstanceOf(InterruptedException.class, fixture.waiterFailure.get());
             assertTrue(fixture.waiterInterruptRestored.get());
-            assertTrue(context.cleanupComplete(), "硬错误与完整资源证明彼此独立");
+            assertFalse(context.cleanupComplete(), "没有真实退场证明，必须保留而不是继续清理");
             assertSame(fixture.waiterFailure.get(), assertThrows(InterruptedException.class, context::close));
-            verify(io, times(1)).close();
+            verify(io, never()).close();
         }
     }
 
@@ -235,7 +228,8 @@ class PaimonCompactionLifecycleTest {
     @Test
     void explicitNoAsyncTestLifecycleCompletesWithoutCreatingAnExecutor() {
         PaimonCompactionLifecycle lifecycle = PaimonCompactionLifecycle.withoutCompactionExecutor();
-        assertNull(lifecycle.shutdownAndAwaitCompletion());
+        lifecycle.shutdown();
+        assertTrue(assertDoesNotThrow(() -> lifecycle.awaitTermination(1)));
         assertDoesNotThrow(lifecycle::sealFinalPrepare);
         assertDoesNotThrow(lifecycle::auditControlFailure);
     }

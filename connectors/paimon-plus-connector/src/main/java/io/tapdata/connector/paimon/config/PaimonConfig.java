@@ -102,6 +102,33 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // Paimon's file-operation.thread-num, which controls internal file operations instead.
     private Integer asyncCommitConcurrency = DEFAULT_ASYNC_COMMIT_CONCURRENCY;
 
+    // Service 停止预算；不是 Paimon 内核参数。超时不能作为删除 Spill 的证据。
+    private Integer stopTimeoutSeconds = 180;
+    private Integer finalCompactionTimeoutSeconds = 120;
+    private Integer compactionCancelGraceSeconds = 30;
+    public Integer getStopTimeoutSeconds() { return stopTimeoutSeconds == null ? 180 : stopTimeoutSeconds; }
+    public void setStopTimeoutSeconds(Integer value) { stopTimeoutSeconds = value; }
+    public Integer getFinalCompactionTimeoutSeconds() { return finalCompactionTimeoutSeconds == null ? 120 : finalCompactionTimeoutSeconds; }
+    public void setFinalCompactionTimeoutSeconds(Integer value) { finalCompactionTimeoutSeconds = value; }
+    public Integer getCompactionCancelGraceSeconds() { return compactionCancelGraceSeconds == null ? 30 : compactionCancelGraceSeconds; }
+    public void setCompactionCancelGraceSeconds(Integer value) { compactionCancelGraceSeconds = value; }
+
+    public void validateStopBudgets() {
+        if (getStopTimeoutSeconds() <= 0 || getFinalCompactionTimeoutSeconds() <= 0
+                || getCompactionCancelGraceSeconds() <= 0) {
+            throw new IllegalArgumentException("STOP budgets must be positive seconds");
+        }
+        if (getTableConfig() != null) {
+            for (Map<String, Object> properties : getTableConfig().values()) {
+                if (properties != null && (properties.containsKey("stopTimeoutSeconds")
+                        || properties.containsKey("finalCompactionTimeoutSeconds")
+                        || properties.containsKey("compactionCancelGraceSeconds"))) {
+                    throw new IllegalArgumentException("STOP budgets do not support table overrides");
+                }
+            }
+        }
+    }
+
     // Enable auto compaction (default: true)
     // Compaction merges small files for better query performance
     private Boolean enableAutoCompaction = true;
@@ -486,8 +513,21 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
      */
     @Override
     public PaimonConfig load(Map<String, Object> map) {
-        PaimonConfig loaded = (PaimonConfig) super.load(map);
+        Map<String, Object> normalized = new java.util.HashMap<>(map);
+        for (String key : java.util.Arrays.asList("stopTimeoutSeconds", "finalCompactionTimeoutSeconds", "compactionCancelGraceSeconds")) {
+            Object raw = normalized.get(key);
+            if (raw == null) { continue; }
+            try {
+                int seconds = new java.math.BigDecimal(raw.toString()).intValueExact();
+                if (seconds <= 0) { throw new ArithmeticException("non-positive"); }
+                normalized.put(key, seconds);
+            } catch (NumberFormatException | ArithmeticException invalid) {
+                throw new IllegalArgumentException(key + " must be a positive integer <= " + Integer.MAX_VALUE, invalid);
+            }
+        }
+        PaimonConfig loaded = (PaimonConfig) super.load(normalized);
         loaded.validateExpireMode();
+        loaded.validateStopBudgets();
         return loaded;
     }
 
@@ -616,6 +656,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
      */
     public void validate() {
         validateExpireMode();
+        validateStopBudgets();
         if (warehouse == null || warehouse.trim().isEmpty()) {
             throw new IllegalArgumentException("Warehouse path is required");
         }

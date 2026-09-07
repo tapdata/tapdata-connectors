@@ -1,4 +1,542 @@
-# Spec：Paimon Spill 简化与同步优雅停止
+# Spec：Paimon SYNC 停止、主动取消与超时资源保留
+
+> Spec ID：`paimon-spill-sync-graceful-stop`；版本：V1.2 实现契约；日期：2026-09-07。
+> 状态：用户已确认“最终 Compaction 不能无限等；取消后仍未终止时，STOP 可超时失败返回，保留文件与 owner，确认旧进程退出后恢复”。**已按后续开发授权实现，定向回归通过；完整构建结果见 §14。** 默认预算已实现为 180/120/30 秒，可在 Service 配置调整。设计审查记录见 §13，实现与生产 DDL 验证见 §14–15。
+> 实现基线：connector `962083ff6ae2369a6d85ded223099d09b89bb3f7`，V1.2 为其上的本地工作树修改，尚未提交；Paimon 1.3.2、Hadoop 3.3.6。本地 Paimon HEAD：`82a0b0914dc2dac84816bace2afd9abe2c908ec6`。
+> 本文前半部分 V1.2 条款是当前实现契约；末尾折叠保存的 V1.1 是源码与历史验收档案，其中无期限 STOP、取消一律失败、不得增加超时配置等规则不再是新版本目标。V1.1 的 636 项成绩不能证明 V1.2 通过。其余未被替代的业务恢复、SYNC、目录保护和内核语义继续有效。
+
+## 1. 目标与不可突破的边界
+
+将“持续等待最终 Compaction 成功或失败”改为“限时正常完成 → 主动取消 → 限时确认实际终止 → 无法证明时保留资源并失败返回”。只有取得实际执行终止和访问者归零证明后才能删除 Spill。超时是退出等待的理由，不是删除文件、释放 owner 或确认 offset 的证据。
+
+- 只支持有效 `snapshot.expire.execution-mode=SYNC`，不静默 ALTER。
+- 仅 STOP 业务屏障成功后的最终 Compaction 允许正常弃提交；业务提交、未知提交结果、callback、状态保存和清理错误仍是硬失败。
+- 不使用 Thread.stop，不杀死整个 Engine JVM，不删除仍可能被使用的文件。
+- 不增加 reaper、TTL 自动释放或后台持续重试恢复器；超时保留后本进程不自动恢复这些表的写入资格。
+- 用户确认不同机器、S3/兼容存储、允许确认旧进程退出后接管。**当前 JVM owner 不阻止另一机器写入，本 Spec 不宣称解决跨机器互斥。** P17 E01/E02 仍为部署边界；不能把 STOP 超时异常当成可安全调度新 writer 的 ACK。
+- 为了使整个 STOP 等待受限，超时观察必须独立于被阻塞的业务、prepare、commit 和 close 调用；不能只在 prepare 返回后检查时间。
+
+## 2. 时间预算与配置
+
+以下为已实现的可配置默认值，120 秒参考 Flink 专用 Append worker 的等待量级，**不是 Paimon 推荐的全局默认值**；总预算和取消宽限期为 connector 设计选择。
+
+| 配置（Service 级，禁止表级覆盖） | 默认值 | 起点与用途 |
+| --- | ---: | --- |
+| stopTimeoutSeconds | 180 | 首次 STOP 被发布时开始；包含 scheduler、ingress、业务 drain/callback、所有表最终 prepare、提交和资源清理 |
+| finalCompactionTimeoutSeconds | 120 | 每表进入 FINAL_PREPARE 前开始；包含 prepare 内 flush/等待/结果校验，不能仅计 Future.get |
+| compactionCancelGraceSeconds | 30 | 对该表首次发出受控取消时开始，等待原生调用展开及 executor 实际终止 |
+
+三个值为正整数，初始化时校验；拒绝 0、负数、溢出及隐含无限等待。使用 System.nanoTime 和有界差值计算，重复 close 不重置预算。约 5 秒生成并非阻塞交付进度事件，阶段切换即时生成事件；实际日志可见性为正常后端下的尽力目标，见 §10。
+
+- 总截止点 `Dstop = 首次STOP + 总预算`。
+- 单表正常阶段截止点 `Dfinal = min(FINAL_PREPARE开始 + 正常预算, Dstop - 取消宽限期)`；总预算不足以预留宽限期时，不再开启该表最终 prepare，直接进入取消/安全清理候选路径。业务屏障必须先成功。
+- 取消阶段截止点 `Dcancel = min(首次取消 + 取消宽限期, Dstop)`。
+- 任何表耗时不得重置 Dstop。若某表取消宽限期耗尽，直接将 Service 置为超时保留，不能继续为下一张表累计完整预算。
+- FINAL_COMMIT 已取得提交准入后，正常 Compaction 计时器失效；该提交仍受 Dstop 的调用者等待限制，但不能因超时把未知结果改记为弃提交。
+- 这些是 connector 算法等待预算，不是实时系统硬截止保证；JVM 停顿和线程饥饿仍会影响调度。监督路径不得执行外部 IO、直接调用 Log 或等待原生方法；日志阻塞只允许影响日志交付，不允许阻塞超时判定。
+
+## 3. 状态机：分离调用者终态与资源终态
+
+```mermaid
+stateDiagram-v2
+    [*] --> DRAIN
+    DRAIN --> FINAL_PREPARE: 业务和callback已确认
+    FINAL_PREPARE --> FINAL_COMMIT: 校验通过且提交准入胜出
+    FINAL_PREPARE --> CANCEL_REQUESTED: 正常预算到期且取消准入胜出
+    CANCEL_REQUESTED --> WAIT_TERMINATION
+    WAIT_TERMINATION --> CLEANUP: prepare退出且executor实际终止
+    FINAL_COMMIT --> CLEANUP: 精确提交确认且executor实际终止
+    CLEANUP --> SUCCESS: 资源完整关闭且无硬失败
+    DRAIN --> FAILED_RETAINED: 总预算耗尽
+    FINAL_PREPARE --> FAILED_RETAINED: 总预算耗尽
+    FINAL_COMMIT --> FAILED_RETAINED: 总预算耗尽且结果未确认
+    WAIT_TERMINATION --> FAILED_RETAINED: 宽限期耗尽
+    CLEANUP --> FAILED_RETAINED: 关闭证明缺失或总预算耗尽
+    FAILED_RETAINED --> [*]: STOP失败返回，资源隔离至进程退出
+```
+
+`SUCCESS` 可带 `compactionDiscarded=true`。纯最终 CompactTask 普通失败仍可沿无提交路径进入 WAIT_TERMINATION。任何阶段的硬失败优先于正常/弃提交；如果仍能在预算内安全清理，返回普通 FAILED，资源确实清理完成的表可以按原规则释放 owner。若清理报错且仍有未关闭资源，即使未到截止时间，也进入 FAILED_RETAINED 并保留原始错误；普通 FAILED 只用于所有资源已确认关闭的情况。
+
+`FAILED_RETAINED` 是不可逆的调用者失败终态；不等于执行线程已终止，不等于资源全部存在且从未被修改。重复 close 立即复用已发布结果，不开启新 worker、不再给新预算、不重试提交或清理。迟到结束不能改成 SUCCESS，不能打印正常退出。
+
+## 4. 监督路径与实际实现接缝
+
+保持单次 Service 停止操作和一个 close worker，由 PaimonStopController 承担协调，不增加每表定时线程。close 调用者作为监督者以最早截止点/日志间隔分段 await；多个调用者通过短临界区只执行一次取消或终态发布。不得依赖持有 Service `synchronized(this)` 或 Context monitor 的 worker 来触发超时，因为当前 closeForStop 会在这些锁内阻塞。
+
+新增职责必须集中，而不是在各 catch 中散落超时分支：
+
+| 组件 | 必须承担的职责 |
+| --- | --- |
+| PaimonStopController | 保存不可重置预算、单表 final attempt、提交/取消选择、不可逆保留态、唯一调用者结果；监督读状态和取消不取 Service/Context 长锁 |
+| PaimonCompactionExecutor | 保存仍未实际退场的受控任务，按 attempt 执行取消，停止新任务准入，提供真实 termination 和异常审计 |
+| PaimonTableWriteContext | prepare/校验后走提交准入；取消获胜则丢弃整次最终 messages；实际终止后才全 bucket sync 与关闭 |
+| 生命周期及中央提交/callback入口 | 阻断超时发布后的新外部动作；保留已有精确 pending 和错误分类，不将未知结果改成成功 |
+| 静态 retained owner 记录 | 强引用被保留的 Service/Context/IOManager/文件锁/提交状态；仅标记 token 而不保留资源不合格 |
+
+提取 PaimonStopController 承担现有 CloseOperation 的协调职责，替换原内嵌 CloseOperation，避免重复维护两套终态。现有 PaimonServiceLifecycle 继续只负责 ingress/consumer 计数与准入，不持有 Paimon 资源。静态资源记录只保留失败 Service 的实际资源，键为本次 service owner；禁止保存所有历史成功任务，不引入周期扫描器。同一物理表在该进程不允许反复超时后生成新代，因此不会靠重试无限新增同表保留实例；保留资源数量需要可诊断。
+
+锁纪律：Service 控制门禁只保护截止点、final decision、动作许可和结果发布；不得在其中调用 Lifecycle、executor、logger、原生库或外部回调。Executor 的 controlLock 只保护任务登记、接收和取消来源。先在 Service 门禁发布取消决定，释放门禁后再封闭 executor 并扫描已登记任务；在两步间已经接收的任务也在扫描范围内。任务提交按 executor controlLock → controller gate 顺序检查总截止点和取消意图；coordinator/Context 同样先取得自身状态锁，再进入 gate 执行纯内存发布。gate 内不反向取得这些组件锁；取消请求先释放 gate，再进入 executor。禁止形成 Service 控制锁 → executor 锁 → Service 控制锁或 Lifecycle 锁的环。
+
+## 5. 主动取消必须有来源证明
+
+Paimon 原生取消会吞掉 CancellationException，因此不能靠 prepare 的返回值判断“取消成功且可提交”。采用 connector 私有 STOP attempt 身份，关联 Service owner、Context 和 final identifier。
+
+取消范围包括业务屏障完成后该 Context 中仍在运行或排队的既有 Compaction，以及最终 prepare 新触发的任务；不能只追踪创建 final attempt 之后提交的任务。授权只改变本次停止阶段的处理方式，不追溯豁免这些任务已经发生的硬失败。
+
+1. 仅业务屏障成功、尚未取得 FINAL_COMMIT 准入的 final attempt 可以进入“可正常弃提交的主动取消”。
+2. 按 §4 发布取消决定后，在 executor 短临界区封闭接收并处理已登记任务，submit 与取消扫描共用 executor 锁。每个 Future 在实际 cancel 前登记私有授权；若 cancel 返回 false，不追溯认领它先前发生的取消或异常。外部 cancel 与授权审计也在该锁内，避免唤醒 get 后丢失来源。
+3. 任务登记在提交给真实 executor 之前完成；提交失败回滚登记。`Future.isDone()` 不作为移除正在执行任务的依据，取消后的 Callable 仍须保留到实际 run 退出。采用可见 run-finally 退场信息或 executor 终止后整体释放，不保存无界历史列表。
+4. 对已接收任务逐个调用带私有授权的 cancel(true)；底层 shutdownNow 返回的未启动 Runnable 也必须取消其 Future，避免移出队列后原生 get 永久等待。shutdownNow 自身不等于取消每个 Future。
+5. **受控取消不能让原生 get 返回 Optional.empty。** GuardedFuture.get 和 get(timeout) 捕获 CancellationException 后，在 executor 锁内核对该 Future 的实际取消归属，仅对本次私有授权取消改抛 `ExecutionException(StopCompactionCancelled)`；其中原因类型及 attempt 不能由外部构造，StopCompactionCancelled 不继承 CancellationException，也不复用普通 NativeCompactionFailure 分类。CompactFutureManager 只吞 CancellationException，因而该异常会让 prepare 展开，阻止它继续生成空 committable 后在 AbstractFileStoreWrite.prepareCommit 内联关闭 bucket writer。未经授权的取消也不能再向原生暴露可被吞掉的 CancellationException：记录硬失败并以 ExecutionException 包装私有控制失败向上传播，禁止正常弃提交。不能仅检查 Service 已进入取消态便豁免所有 Future。这是仅供已验证 Paimon CompactTask 使用的窄适配行为，偏离通用 Future.get 的取消异常形式，必须在代码注释说明，不能推广为公共通用执行器。
+6. prepare 也可能尚未到 get，正在 flush 或准备再次 triggerCompaction。取消已封闭 submit 时，通过带同一 attempt 的私有受控拒绝展开调用；普通 RejectedExecutionException 仍是硬失败。禁止接收新任务或转交其他池。已经进入原生方法的内部 IO/finally 无法逐条撤销，仍按在途动作处理，不把该限制掩盖成完全无副作用。
+7. 不中断整个 close worker 来代替取消 Compaction，因为它可能已在执行 commit、SYNC maintenance、callback 或文件删除。外部打断 STOP 调用者仍记硬失败；必要时进入安全保留，不变成可正常弃提交。
+8. 可豁免项仅为**被记录的本次控制动作直接产生**的取消/中断或受控提交拒绝。原先已记录的控制失败、任意 Error、未知任务、独立 I/O 失败和原因不明的中断均不得被授权 token 掩盖。取消后 Callable 的迟到异常仍单独审计，不能被 FutureTask 的取消状态丢弃。
+9. 即使所有 Future cancel 返回 true，仍必须确认 executor.isTerminated，并确认 final prepare 调用已返回/展开；prepare 线程自身也可能访问 writer、RocksDB 和 Spill。
+
+公共 `PaimonCompactionExecutor.shutdownNow()` 仍将无授权强制关闭记为硬失败；主动取消仅由 `cancelForStop(FinalAttempt)` 执行。原生 Future 的外部 cancel 不能冒用该私有授权。
+
+## 6. 提交与取消的线性化竞争
+
+final attempt 的短状态选择为 `PREPARING → COMMIT_ADMITTED` 或 `PREPARING → CANCEL_REQUESTED`，同一次 attempt 只能有一个胜者；无需用锁覆盖整个 S3 RPC。
+
+- 提交胜出：先审计业务增量、已有控制失败及截止状态，保存同一 identifier/messages 的 pending，再执行原有提交确认协议。计时器不得随后发起“正常弃提交”取消。总预算耗尽时，未确认的提交保留为未知结果。
+- 取消胜出：即使 prepare 稍后返回非空 messages，也不能提交这些 messages，不推进 identifier 或发布最终 offset；必须丢弃整表这次最终尝试，不挑出部分 bucket 提交。
+- 原生 prepare 返回的 DataIncrement 非空、消息类型不匹配仍是硬失败；不能因为正在取消而跳过消息校验。
+- 总超时与动作准入共用同一 Service 级短门禁。提交、提交重试、pending 状态保存、callback 开始和破坏性清理步骤都要经过它。实现使用动作门禁与短锁内发布，不能仅靠 sticky failure 阻止后续步骤。
+- 在超时之前已取得动作许可的操作视为在途，即使线程尚未进入外部库，也不能保证撤销；它可能迟到落地。超时之后不允许再取得新动作许可。未使用且可明确撤销的许可应作废；不能宣称跨外部存储与本地状态存在原子事务。
+- 结果未知时不清除 pending、不换 identifier/messages、不重试盲写。同进程 FAILED_RETAINED 期间保留精确 pending，但禁止继续重试。确认旧进程退出后的重启只按 stable commitUser、nextIdentifier 和 latest same-user snapshot 对账：现有持久状态不保存 CommitMessages 或 offset，无法重建原 pending envelope，不承诺跨进程精确重放该 envelope。数据重放仍依赖既有上游 offset/at-least-once 契约；超时响应不能承诺该提交完全没有发生。
+
+## 7. FAILED_RETAINED 的资源冻结与恢复
+
+监督者冻结动作准入后，先完成强引用保留登记，再发布不可变终态并唤醒所有 close 调用者；超时分支抛出专用超时异常。不得先发布 finished/SUCCESS 后才登记保留资源。超时异常包含阶段、table/owner、预算和已有原因；非超时的关闭证明失败保留原异常主因。所有调用者复用相同主因。控制门禁的发布不得等待原生 IO；日志输出也不能成为发布保留态的前置阻塞条件。
+
+保留未完整关闭 Context 的 writer/committer/IOManager、Spill 目录、owner 文件锁、Service owner 和必要的状态引用。不能在 performDrainAndCleanup.finally 无条件清空微批状态、boundTaskStateMap、Context 映射或释放 owner；不能随后关闭 Catalog/FileIO。`releaseAfterClose(spillDirs, false)` 已改为保留 live、文件锁与 marker。仅在 IO 正常关闭后释放目录保护，返回 ReleaseResult（完成状态、保留路径、异常原因）；Context/Factory/preflight 消费该结果。注册失败的 helper 不做无证明删除，而是保留 manager 和已经登记的 owner；未成功释放的引用仍保留，已完成的释放不重建。失败对象须有静态强可达引用，防止 Connector.onStop 将 service 置空后通过 GC/Cleaner 释放仍需要的资源。
+
+迟到 worker 从被阻塞调用返回后，只允许记录诊断、释放纯 Java 协调锁并退出；不进入新的提交、callback、原生 sync、writer/committer/IO close 或 owner 释放步骤。每个阶段和动作边界重新检查不可逆保留态。已在线程内获准并开始的原生方法，其内部动作不能被 Java 门禁逐条控制；这也是只能报告结果未知而不能保证“超时后绝无副作用”的原因。
+
+构造中的 ingress 同样纳入资源保留：超时后不得把新构造资源发布成可用 Context；迟到取得的资源必须挂入同一保留记录，不能丢失引用后做无证明回滚。已有业务/scheduler/读操作未归零时，不并发调用 writer.close 或 IOManager.close。Factory 创建每项资源前先登记构造占位，返回后绑定资源；其 catch/rollback 也必须经过控制门禁，不能在已保留后沿原 catch 继续关闭或丢失局部引用。
+
+有限读资源单独记账：入口 permit 只证明调用者活动，不能证明 reader.close 成功。batchRead、batchCount、queryByAdvanceFilter 的 reader 创建前登记占位、返回后绑定引用；关闭成功才注销。close 抛错时保留 reader 及关联 Table/Catalog/FileIO，传播或记录硬失败，不允许仅 WARN 后关闭共享 Catalog。超时后迟到 reader 的新读取、consumer 和新关闭动作也必须被门禁拒绝；已经开始的原生读取/关闭内部动作不宣称可撤销。长期 streamRead 不属于此次协议验收范围，不得把有限读门禁成绩表述为 StreamRead 安全退出已完成。
+
+正常清理已经完成并释放的表不重新锁住；在途 IO close 若在超时前已有完整访问者终止证明，可以继续其已授权内部操作，但返回后不能启动下一步释放。此时目录可能已部分或完全删除，仍保留 owner 并报告超时。不能承诺所有 timeout 都保留完整原始目录。
+
+不自动降级为正常退出、不增加 reaper、不按时间释放。恢复流程为确认旧进程退出后重新启动；OS 锁随实际进程退出解除，本地 stale cleaner 按既有 marker/live/grace 规则处理。裸历史 RocksDB 和已移除配置根仍不自动回收。**恢复并不补足跨机器表锁：另一个 Engine 必须等待真实旧进程退出，现有 connector 自身无法强制这一调度条件。**
+
+## 8. 与原生 Flink 的取舍
+
+| 原生事实 | 本 Spec 的使用方式 |
+| --- | --- |
+| endInput 调用 prepareCommit(true)；普通 checkpoint false | 保留业务屏障后的最终 prepare，不把所有业务提交改为强制等待 |
+| MergeTreeWriter.close 先 cancelCompaction 再 sync | 只借鉴主动取消意图；不将该 sync 当成取消后实际 termination 证明 |
+| CompactFutureManager 吞掉 CancellationException、清空 Future | 必须记录私有取消来源、禁止取消后伪成功提交，并保留实际执行追踪 |
+| AbstractFileStoreWrite.close 对自有池仅 shutdownNow，无 awaitTermination；注入池完全不关闭 | connector 自行等待实际终止；不能把原生 close 作为超时清理证明 |
+| AppendCompactWorkerOperator 最多 awaitTermination 120 秒，超时 WARN 后继续 compactor.close | 采用两阶段停止思路；不照搬超时继续清理，改为 FAILED_RETAINED |
+| CompactFutureManager 源码 TODO 提示取消可能留下 orphan files | 本地 Spill 安全不等于远端未提交文件自动回收；不在取消路径猜测并删除远端文件 |
+
+## 9. 源码核对记录（2026-09-07）
+
+core sources JAR SHA-256：`f8c6d7b57543fb1115dfbbeed1ce0f598d8322f2601c30838f983f64b7ddae63`。以下 11 个 core 文件与该 JAR 一致；4 个 Flink 文件与官方固定提交 `c05f7d1f1b1e5d37e64edab0f2978124d90b64f7` 原文一致。比较不代表整个本地分支等于 1.3.2。
+
+| 入口 | 证明事实 |
+| --- | --- |
+| [CompactFutureManager:34](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/compact/CompactFutureManager.java:34) | cancel(true)，47 行结果获取吞取消；Future 清空不证明线程终止 |
+| [CompactTask:47](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/compact/CompactTask.java:47) | doCompact 在 Callable 内执行且 finally 更新指标；取消后 Callable 仍可能执行/抛错 |
+| [MergeTreeWriter:251](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/mergetree/MergeTreeWriter.java:251) | prepare 会 flush、触发任务和等待；343 行 close 请求取消，之后 sync |
+| [AbstractFileStoreWrite:304](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/operation/AbstractFileStoreWrite.java:304) | bucket writer 顺序 close，自有池仅 shutdownNow；注入池的关闭权另由调用者持有 |
+| [TableWriteImpl:134](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java:134) | 可注入 connector executor，不需要修改内核 |
+| [TableCommitImpl](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/table/sink/TableCommitImpl.java) | 同步提交/维护可能阻塞，不能对整个 close worker 随意中断或把结果未知当弃提交 |
+| [IOManagerImpl:74](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/disk/IOManagerImpl.java:74) | close 委托 Channel Manager |
+| [FileChannelManagerImpl:125](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/disk/FileChannelManagerImpl.java:125) | close 删除管理的目录，因此必须在访问者退出后调用 |
+| [PrepareCommitOperator:96](/Users/SL/javaProject/paimon/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/PrepareCommitOperator.java:96) | checkpoint 与 endInput 的等待参数不同 |
+| [TableWriteOperator:141](/Users/SL/javaProject/paimon/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/TableWriteOperator.java:141) | 算子 close 下传到 StoreSinkWrite |
+| [StoreSinkWriteImpl:172](/Users/SL/javaProject/paimon/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/StoreSinkWriteImpl.java:172) | write.close 后 paimonIOManager.close；该方法不包含无限 termination 等待 |
+| [AppendCompactWorkerOperator:105](/Users/SL/javaProject/paimon/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/AppendCompactWorkerOperator.java:105) | shutdownNow、最多等 120 秒、超时 WARN 后继续 close |
+
+官方原文：[Flink 专用 Compaction worker](https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/AppendCompactWorkerOperator.java#L105)、[原生取消与结果获取](https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/compact/CompactFutureManager.java#L34)。
+
+JDK 依据：[ExecutorService.shutdownNow / awaitTermination](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/ExecutorService.html#shutdownNow()) 明确区分尝试中断与等待实际终止，无法保证不响应中断的任务结束。[Future.cancel](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/Future.html#cancel(boolean)) 的完成状态不是 Callable 物理退出证明。禁止用私有 API 强杀线程补足这项限制。
+
+本轮另以本地 JDK 17 运行独立并发探针：单线程池执行一个忽略中断、等待 latch 的任务，并排队第二个 Future；取消执行中任务后调用 shutdownNow。断言与实际输出如下，最后释放 latch 并确认线程池退出，探针未留下后台任务。
+
+```text
+cancelled Future done=true; executor terminated=false; drained queued Future done=false
+after actual task release: executor terminated=true
+```
+
+该探针验证“取消完成不等于实际退场”与“shutdownNow 移出的队列 Future 未自动取消”两个 JDK 行为；不等于 connector 主动取消功能已实现，也不替代 B01–B22 回归门禁。
+
+### 9.1 方法级调用链与关键代码位置
+
+以下范围是本轮逐段阅读位置，链接落到起始行。行号随本地分支变化，应同时核对方法名、固定依赖版本与后面的 SHA-256；不能只复制行号。
+
+| 编号 | Paimon 源码 / 方法 | 核对行范围 | 对本设计的约束 |
+| --- | --- | --- | --- |
+| PS01 | [PrepareCommitOperator.java#prepareSnapshotPreBarrier / endInput](/Users/SL/javaProject/paimon/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/PrepareCommitOperator.java:93) | 93–104 | checkpoint 发出 false；endInput 发出 true，并非所有 STOP 都先执行 endInput。 |
+| PS02 | [TableWriteOperator.java#prepareCommit / close](/Users/SL/javaProject/paimon/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/TableWriteOperator.java:141) | 141–152 | 下传 StoreSinkWrite；close 本身不调用 endInput。 |
+| PS03 | [StoreSinkWriteImpl.java#prepareCommit / close](/Users/SL/javaProject/paimon/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/StoreSinkWriteImpl.java:144) | 144–177 | 等待参数为 this.waitCompaction || waitCompaction；write.close 后调用 paimonIOManager.close。 |
+| PS04 | [TableWriteImpl.java#withCompactExecutor / prepareCommit / close](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java:134) | 134–137；260–274 | 注入池；prepare/close 委托 FileStoreWrite。 |
+| PS05 | [AbstractFileStoreWrite.java#prepareCommit](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/operation/AbstractFileStoreWrite.java:185) | 185–267 | 逐 bucket 准备；238–255 空结果分支会内联 writer.close，不能只保护外层 close。 |
+| PS06 | [MergeTreeWriter.java#flushWriteBuffer / prepareCommit / sync](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/mergetree/MergeTreeWriter.java:209) | 209–277 | flush 后 get 最新结果并 trigger；prepare 再等待并 drain 增量；sync 不新提交任务。 |
+| PS07 | [AppendOnlyWriter.java#prepareCommit / flush / sync / close](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/append/AppendOnlyWriter.java:221) | 221–265 | append 同样消费 Compaction Future；close 请求取消后 sync 并清理。 |
+| PS08 | [MergeTreeCompactManager.java#getCompactionResult](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/mergetree/compact/MergeTreeCompactManager.java:249) | 249–268 | 不吞 ExecutionException，能传播私有受控取消原因。 |
+| PS09 | [BucketedAppendCompactManager.java#getCompactionResult](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/append/BucketedAppendCompactManager.java:182) | 182–197 | 同样传播 ExecutionException，覆盖 bucketed append 分支。 |
+| PS10 | [CompactFutureManager.java#cancelCompaction / innerGetCompactionResult / obtainCompactResult](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/compact/CompactFutureManager.java:34) | 34–67 | cancel(true)；只吞 CancellationException；finally 清空 Future；底层调用 get。 |
+| PS11 | [MergeTreeWriter.java#close](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/mergetree/MergeTreeWriter.java:343) | 343–375 | cancel → sync → compactManager.close → 文件清理；必须在此之前阻止未终止任务的并发访问。 |
+| PS12 | [AbstractFileStoreWrite.java#withCompactExecutor / close](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/operation/AbstractFileStoreWrite.java:147) | 147–150；304–317 | 注入池关闭权归 connector；原生自有池 shutdownNow 没有 await。 |
+| PS13 | [TableCommitImpl.java#构造 / commitMultiple / maintain / close](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/table/sink/TableCommitImpl.java:118) | 118–124；225–238；348–400 | SYNC 使用 direct executor；commit 后内联维护；维护捕获 Throwable 保存，不能借中断 close worker 实现仅取消 Compaction。 |
+| PS14 | [IOManagerImpl.java#close](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/disk/IOManagerImpl.java:74) | 74–75 | 下传 Channel Manager；FileChannelManagerImpl.close:125–153 会删除目录。 |
+| PS15 | [AppendCompactWorkerOperator.java#close](/Users/SL/javaProject/paimon/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/AppendCompactWorkerOperator.java:105) | 105–114 | 专用 unaware-bucket compactor 最多等 120 秒，超时 WARN 后仍 close；不是通用 Flink sink STOP 的完整安全证明。 |
+
+```mermaid
+flowchart TD
+    F["Flink endInput / checkpoint · PS01"] --> FW["StoreSinkWriteImpl.prepareCommit · PS02/PS03"]
+    C["Connector prepareFinalCommit(true)"] --> TW["TableWriteImpl.prepareCommit · PS04"]
+    FW --> TW
+    TW --> AW["AbstractFileStoreWrite 逐 bucket prepare · PS05"]
+    AW --> RW["MergeTreeWriter / AppendOnlyWriter · PS06/PS07"]
+    RW --> FM["CompactFutureManager → Future.get · PS08/PS09/PS10"]
+    FM --> RAW["原始取消：吞异常 → 空结果"]
+    RAW --> INLINE["可能进入 prepare 内联 writer.close · PS05"]
+    FM --> CONTROL["V1.2 私有取消：ExecutionException → 展开 prepare"]
+    CONTROL --> BARRIER["Connector 确认 prepare 退出及 executor termination"]
+    BARRIER --> CLOSE["sync 全 bucket → writer → committer → IOManager"]
+    CLOSE --> DELETE["FileChannelManagerImpl.close 删除 Spill"]
+```
+
+关键代码摘录（保持原文，省略上下文只为定位）：
+
+**原生只吞 CancellationException，私有 ExecutionException 可以穿透**：[源码](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/compact/CompactFutureManager.java:52)（52–58 行）。
+
+```java
+try {
+    result = obtainCompactResult();
+} catch (CancellationException e) {
+    return Optional.empty();
+} finally {
+    taskFuture = null;
+}
+```
+
+**prepare 内部确实存在 writer.close，不能把它当纯计算阶段**：[源码](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/operation/AbstractFileStoreWrite.java:252)（252–255 行）。
+
+```java
+            commitIdentifier);
+}
+writerContainer.writer.close();
+bucketIter.remove();
+```
+
+**注入 executor 的关闭权**：[源码](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/operation/AbstractFileStoreWrite.java:147)（147–150 行）。
+
+```java
+public void withCompactExecutor(ExecutorService compactExecutor) {
+    this.lazyCompactExecutor = compactExecutor;
+    this.closeCompactExecutorWhenLeaving = false;
+}
+```
+
+**Flink 专用 worker 的 120 秒分支**：[源码](/Users/SL/javaProject/paimon/paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/AppendCompactWorkerOperator.java:105)（105–114 行）。
+
+```java
+public void close() throws Exception {
+    if (lazyCompactExecutor != null) {
+        // ignore runnable tasks in queue
+        lazyCompactExecutor.shutdownNow();
+        if (!lazyCompactExecutor.awaitTermination(120, TimeUnit.SECONDS)) {
+            LOG.warn(
+                    "Executors shutdown timeout, there may be some files aren't deleted correctly");
+        }
+        this.unawareBucketCompactor.close();
+    }
+```
+
+**IOManager 下游的目录删除位置**：[源码](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/disk/FileChannelManagerImpl.java:139)（139–154 行）。
+
+```java
+private AutoCloseable getFileCloser(File path) {
+    return () -> {
+        try {
+            FileIOUtils.deleteDirectory(path);
+            LOG.info(
+                    "FileChannelManager removed spill file directory {}",
+                    path.getAbsolutePath());
+        } catch (IOException e) {
+            String errorMessage =
+                    String.format(
+                            "FileChannelManager failed to properly clean up temp file directory: %s",
+                            path);
+            throw new UncheckedIOException(errorMessage, e);
+        }
+    };
+}
+```
+
+### 9.2 本轮原生取消机制探针
+
+2026-09-07 用当前测试 classpath 的 Paimon 1.3.2 `CompactFutureManager` 运行独立探针（`/tmp/PaimonNativeCancelProbe.java`）：后台任务用 latch 保持运行并忽略 interrupt。原始 Future 取消后，内核返回 empty；将 get 的受控取消转换成私有 ExecutionException 后，内核向上传播异常，后台任务仍须单独确认终止。实际输出：
+
+```text
+raw cancel: native result acquisition returns empty; worker still active=true
+translated cancel: native result acquisition propagates ExecutionException; worker still active=true
+```
+
+两个分支均在 finally 放行任务并 awaitTermination 成功。探针证明 PS10 的异常传播接缝有效，不证明整个 prepare、bucket 内联清理、提交门禁或 V1.2 的端到端协议已通过；这些由 B06/B19 等回归负责。
+
+### 9.3 逐文件校验
+
+逐文件 SHA-256（用于实现前复核漂移）：
+
+| 文件（Paimon 仓库相对路径） | SHA-256 |
+| --- | --- |
+| `paimon-core/src/main/java/org/apache/paimon/compact/CompactFutureManager.java` | `03d5ab04852cc05fd94e04684f30f18b7ddd1ac0c19339002f3010287a3d1be1` |
+| `paimon-core/src/main/java/org/apache/paimon/compact/CompactTask.java` | `4c7e48c29634ea292d527da4a88cf98d874d480f7a3cb316fa34d17f0b0ce004` |
+| `paimon-core/src/main/java/org/apache/paimon/mergetree/MergeTreeWriter.java` | `461117a6abbd2501cd68e60d55e5add5eded6f5230e785c044d7532b301564b6` |
+| `paimon-core/src/main/java/org/apache/paimon/operation/AbstractFileStoreWrite.java` | `b51366517a220c19389c70fdb3ca77577b2d9f3320a920bf179fc22baaea583e` |
+| `paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java` | `ad17a681f7c1ca37d0f5b769504402ca743fe9497147db31df6847e4010422c4` |
+| `paimon-core/src/main/java/org/apache/paimon/table/sink/TableCommitImpl.java` | `e93ee9bec2bfcde80276e8ba00922e01ec7b69d279c2dfbdeac47f681f139810` |
+| `paimon-core/src/main/java/org/apache/paimon/disk/IOManagerImpl.java` | `df39caa5cd57178cffc15f759573d8537729788ef5da994192efedf365e67253` |
+| `paimon-core/src/main/java/org/apache/paimon/disk/FileChannelManagerImpl.java` | `30b263a1270eb03b17021bd5db19a4f02b9c22c5bfbe83510251bf8121337a9b` |
+| `paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/PrepareCommitOperator.java` | `cf26d300627dda4176c5617a08df9bcba54b1888ea7100e7f384792c7a7ef1c3` |
+| `paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/StoreSinkWriteImpl.java` | `692f9d69a512bcaab538bfe00c41c127416f68425a4c34cc2079c1ea357bf878` |
+| `paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/TableWriteOperator.java` | `479aeb5aa09455a414797bc8bf80598114303e3f6b56afca53c47e7c9d6b272e` |
+| `paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/sink/AppendCompactWorkerOperator.java` | `920d3733bc6758bb89ac009e47aba83463f6d3b758ea33ef1089a891b7a87b48` |
+| `paimon-core/src/main/java/org/apache/paimon/append/AppendOnlyWriter.java` | `6902a53592b3038344c7ccf0621da6d1ba01b73434dc3b4be2569b85a7615713` |
+| `paimon-core/src/main/java/org/apache/paimon/append/BucketedAppendCompactManager.java` | `b0333fdc50bde7744ff6709697b7618143b8ab0883a35f5c33dc783fdfcaba75` |
+| `paimon-core/src/main/java/org/apache/paimon/mergetree/compact/MergeTreeCompactManager.java` | `07166260f13a702132bd0d30f9c3240918bc9e31c0d7b1f27cd85c2a3e47d792` |
+
+## 10. INFO、终态与诊断契约
+
+保留 `[paimon-stop]` 和原 table/owner/phase/elapsed 字段，增加 attempt、remainingMs、cancelRequested、executorTerminated、prepareReturned、inFlightAction。只能写实际已知值，不用 taskFuture.isDone 冒充 executorTerminated。
+
+控制线程与 close worker 的 INFO 输出使用非阻塞交付：只构造不可变事件并 offer，禁止直接调用可能阻塞的 Log、阻塞 put、CallerRunsPolicy 或等待日志线程结束。使用该 connector 类加载器内共享的一个有界 daemon 分发器，不按表/STOP 新建日志线程；连续 waiting 可以合并。队列满时不阻塞 STOP，记录丢弃计数；每次停止操作的唯一终态另存本地快照供诊断（不依赖日志队列存活），事件入队不等于日志已经送达。后端永久阻塞时不能保证约 5 秒日志可见，但 STOP 判定与结果发布仍必须推进。不能以“catch RuntimeException”冒充阻塞隔离。PaimonConnector.onStop 当前 catch 中的同步 warn 也在接线范围内，统一交给停止诊断出口，避免 Service 已返回后又被日志卡住。终态顺序固定为资源保留登记 → 原子结果发布 → countDown/唤醒 → 非阻塞事件交付；完整异常栈渲染在日志线程进行，不在控制锁或发布前进行。
+
+事件：start、phase-changed、waiting、cancel-requested、cancel-terminated、compaction-discarded、timeout-retained，以及唯一正常或失败终态。timeout-retained 明确“STOP 失败返回；资源/owner保留；需要确认旧进程退出”；不能使用“正常退出”。迟到 worker 仅输出 late-operation-finished 等诊断，不重复发布终态。正常日志后端下等待期间尽力维持约 5 秒 INFO；失败原因保留完整异常链。
+
+## 11. 必须通过的反例与回归门禁
+
+先补会在当前 V1.1 失败的测试，再实施。使用可注入单调时钟/短测试预算和 latch 控制交错，不让测试等待生产 180 秒。真实 Paimon 集成与双 JVM 强制退出仍必需；下表是待执行清单，不是已通过成绩。
+
+| ID | 场景与断言 |
+| --- | --- |
+| B01 | 正常 final 在预算内完成，业务、identifier、offset 顺序及已有 SYNC 行为不变 |
+| B02 | 最终 CompactTask 阻塞且响应中断：记录主动取消、prepare 返回、executor 真终止，整次 final 不提交，正常弃提交并完整清理 |
+| B03 | task 忽略中断：cancel 成功/isDone 为真仍不能 close IO；宽限期到后 STOP 失败返回，目录/marker/owner保留 |
+| B04 | B03 放行迟到线程：不发生新提交、callback、sync、IO close、owner释放或正常终态；同 JVM 新代仍拒绝 |
+| B05 | submit 与取消并发、任务已入队未启动、已出队尚未进入 Callable：无漏网任务，无永久未完成 Future，无新增接收 |
+| B06 | get 与 get(timeout) 的授权取消转换成私有 ExecutionException；未进入 get 而再次 trigger 时受控拒绝展开；普通取消/拒绝仍硬失败 |
+| B07 | final prepare返回与计时器竞争：COMMIT_ADMITTED 与 CANCEL_REQUESTED 恰有一个胜者；取消获胜即使messages非空也不能提交 |
+| B08 | commit已准入但RPC阻塞/响应丢失：总超时返回未知结果，不取消整个worker、不清pending、不重复提交或推进offset |
+| B09 | 已存在控制错误/迟到Error/自中断/普通IO异常与主动取消交错：不被授权token洗成正常弃提交 |
+| B10 | scheduler、ingress、业务drain、callback或构造卡住：总预算有效，资源注册不遗漏，迟到调用不能进入下一外部动作 |
+| B11 | 多表串行final/多次close：总预算不按表和调用者重置，所有调用者复用唯一结果，已清理表与未清理表正确区分 |
+| B12 | 控制线程遇到Service/Context monitor被占用：仍可触发取消和保留，不等待同一长锁；终态发布与日志不形成死锁 |
+| B13 | writer/committer/IO close失败或阻塞：失败不伪装终止；超时前已获准IO操作可完成，但之后不进入新清理步骤 |
+| B14 | 保留后Connector丢弃service引用并触发GC：资源强引用和owner锁仍在，同/另一可见磁盘JVM的cleaner跳过；进程实际死亡后才可回收 |
+| B15 | KEY_DYNAMIC与preflight约束目录、全局/表级根、无marker历史目录和SYMLINK保护不回退 |
+| B16 | 正常日志后端下等待节拍、取消、失败保留和唯一终态可关联；重复close/迟到worker不打印正常退出；中断标志恢复 |
+| B17 | 有限读入口 batchRead/batchCount/getTableCount/discoverTables/timestampToStreamOffset 的并发关闭缺口列为前置准入修复；reader/consumer存活期间不得释放相关共享资源 |
+| B18 | 真Paimon文件生成后取消可能留下远端未提交文件：不提交未知final结果、不删除历史快照引用文件；明确后续独立orphan治理边界 |
+| B19 | 真内核空 committable/可清理 bucket 分支：任务仍在执行时受控取消必须让 prepare 提前展开，不能进入内联 writer.close、manager.close 或文件删除；覆盖 MergeTree 与 bucketed append |
+| B20 | reader.close 抛错/阻塞，入口返回或发生GC后，reader及共享Catalog仍有引用；不得把activeIngress=0当作reader关闭成功；迟到consumer/新reader创建被拒绝 |
+| B21 | Log.info 及 Connector.onStop 的 Log.warn 永久阻塞、日志队列满：取消/截止/强引用登记/终态发布均不等待logger，事件不在控制锁内交付，重复STOP结果一致 |
+| B22 | 未超时但writer/committer/IO/reader关闭失败：原错误为主因，未关闭对象及未成功释放的目录保护进入FAILED_RETAINED；普通FAILED仅在资源已全部关闭时成立；无重复清理 |
+
+B17 的六个有限入口已统一准入，reader 与 outstanding batch 通过独立资源 scope 保留；具体用例见 §14。长期 StreamRead 的停止协议仍单独设计，不一概套入口 permit。
+
+## 12. 设计反例复核与实施状态
+
+- 只在 Future.get 增加 timeout：无法覆盖 prepare flush/commit/close 卡住，且内核 get 可吞 cancel；已由独立监督和总预算解决设计遗漏。
+- 只调用 shutdownNow：队列移出的 Future 可能未取消、执行线程仍活跃；已要求任务登记、队列Future取消、实际termination。
+- 在 Context synchronized 方法中取消：与正在阻塞的 prepare 相互等待；取消控制走独立短锁。
+- 取消后允许 prepare 返回的纯 Compaction messages 提交：会与定时器竞争；已要求唯一 final decision 和外部动作准入。
+- STOP 超时后后台继续 finally 清理：会恢复旧生命周期问题；已要求不可逆保留、每个阶段检查和静态强引用。
+- executor结束就关资源：漏掉prepare/业务/读线程；已要求全部访问者证明，及 B17 前置覆盖。
+- 把正常结束的任务全部存入静态集合：产生不必要泄漏；仅保留实际失败资源及未实际退场任务，不记录成功历史。
+- 凭此宣称A/B安全接管：本地协议无分布式能力；明确列为未解决的外部条件。
+
+本轮完成的是源码事实核对、审查修订与实施规划；未修改生产/测试 Java、未执行 V1.2 回归、未提交。计划与任务清单按用户确认保存至模块 tasks 目录。预算默认值尚待确认；实现前须把 B01–B22 转为可执行门禁并复核本节假设。不得以“源码同字节”或历史636项通过替代取消协议验证，也不承诺硬实时退出或跨机器绝无双写。
+
+## 13. 本轮五维审查与准入结论（2026-09-07）
+
+> 本节保留实施前设计审查快照；R01–R07 的 Connector 行号为基线位置，当前实现定位与关闭状态见 §14。56 项是设计阶段基线成绩。
+
+审查范围是 V1.2 设计及其依赖的当前 Connector/Paimon 实现；本轮没有新增生产代码。独立审查使用不同模型复核正确性与架构。初轮结论为 Request changes，以下问题已写回规范并经复核收敛；结论只升级为“可进入实施规划”，不授予新功能的代码合并/发布通过。
+
+| ID / 严重度 | 已核实问题与具体位置 | 本次文档修正 / 实施门禁 |
+| --- | --- | --- |
+| R01 / Critical | PS05 的 prepare 内联关闭 + PS10 吞取消可能绕过外层 termination 屏障；PS08/PS09 确认 ExecutionException 可传播 | §5 指定私有取消异常转换，B06/B19 验证不能提前内联 close；当前代码尚无受控取消，不把潜在 V1.2 回退说成当前新增事故 |
+| R02 / Required | [batchRead:2878](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:2878)、[batchCount:3059](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:3059)、[query:3195](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:3195) 的 reader.close 失败只告警；B17 的 permit 不足以证明读资源关闭 | §7 增加读资源账本/占位与失败保留，B17/B20 验证；生产缺口列入前置任务 |
+| R03 / Required | [Context:409](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/write/PaimonTableWriteContext.java:409) 关闭失败可保留 IO，但 [onStop:97](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/PaimonConnector.java:97) 清空 service；仅 owner token 不强引用所有资源，[Factory:244](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/write/PaimonTableWriteContextFactory.java:244) 的异常也不携带局部资源 | §3/§7 的 FAILED_RETAINED 覆盖超时及任意清理证明缺失；保留构造资源，B14/B22 验证 |
+| R04 / Required | [Service:3436](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:3436) 同步 Log 可阻塞；[publishCloseCompletion:3441](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:3441) 在 countDown 前打印，onStop 另有同步 warn | §10 固定非阻塞日志交付及终态发布顺序，B21 验证；只承诺正常后端下 INFO 可见 |
+| R05 / Required | 当前 final prepare → audit → commit 连续执行，外部增加 timer 会与 [closeForStop:337](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/write/PaimonTableWriteContext.java:337) 竞争；Service/Context monitor 均可被长 IO 占用 | §4/§6 集中控制门禁、单胜者和锁纪律，B05/B07/B08/B12 验证；不得堆砌无锁检查后盲写 |
+| R06 / Required | [PaimonCommitStateStore:35](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/commit/PaimonCommitStateStore.java:35) 仅持久化 commitUser/nextIdentifier；[Context:28](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/write/PaimonTableWriteContext.java:28) 的 pending messages 仅在内存 | §6 区分进程内精确保留与跨进程 snapshot 对账，不承诺恢复未持久化的 messages/offset；B08/B18 按此边界验收 |
+| R07 / Required | [releaseAfterClose:265](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/util/PaimonSpillDirCleaner.java:265) 在 deleted=false 时也移除live/文件锁引用；[OwnerLock.close:529](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/util/PaimonSpillDirCleaner.java:529) 吞关闭异常 | §7 禁止把该helper原样用于V1.2失败保留；T12固定目录保护释放证明，T13/T14消费结果，B13/B14/B22验证 |
+
+五维结论：正确性按上述反例收敛；可读性/架构要求提取一个 StopController 并替换旧协调状态，不在大型 Service 中再铺设计时分支；安全性保留目录 marker、owner、SYNC 与未知提交保护；性能使用有界日志和未退场任务登记，不新增依赖、每表线程或历史任务无界集合。资源强保留是失败隔离成本，不宣称代码量一定少于 V1.1。
+
+本轮执行的验证：
+
+```bash
+env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home \
+  mvn -o -B -pl connectors/paimon-plus-connector -am -DskipTests=false \
+  -Dtest=PaimonCompactionExecutorTest,PaimonFinalCompactionTest,PaimonServiceCloseTest,PaimonCompactionSpillLifecycleIntegrationTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+```
+
+结果：4 个测试类，56 项、0 失败、0 错误、0 跳过，5 个 reactor 项目成功；结束 2026-09-07 11:31:56 +08:00，耗时 28.590 秒。日志：`/tmp/paimon-stop-v12-review-tests.log`。这是当前 V1.1 基线测试，包括真实 Spill 删除竞态 fixture；没有执行新 V1.2 回归，也没有重跑全量 clean package。§9.2 原生探针单独成功。
+
+当前实施：[实施计划](../../../tasks/plan.md)、[任务清单](../../../tasks/todo.md)。实现采用可配置的 180/120/30 秒默认预算，执行证据在下节维护。
+
+## 14. V1.2 实现与验证记录（2026-09-07）
+
+本节对应 `962083ff` 基线上的工作树实现。没有修改 Paimon 内核、Engine、依赖版本或预先暂存的 StreamRead Spec。最终 CompactTask 的受控取消可正常弃提交；总超时或任一资源关闭证明缺失返回 FAILED_RETAINED，资源静态强保留到进程退出。旧无限 `shutdownAndAwaitCompletion` 已移除。
+
+| 职责 | 当前代码入口 | 实现事实 |
+| --- | --- | --- |
+| 监督与全 Service 总预算 | [PaimonService](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:3264) | 唯一 close worker；调用者轮询、主动取消、期限到后强保留与失败返回 |
+| 最终决策线性化 | [PaimonStopController](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonStopController.java:165) | 同一短 gate 决定 COMMIT_ADMITTED / CANCEL_REQUESTED；不在锁内进入外部 IO |
+| 原生取消适配 | [PaimonCompactionExecutor](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/write/PaimonCompactionExecutor.java:76) | 登记未实际退场任务；取消 get 私有异常展开原生 prepare；迟到硬错误独立审计 |
+| 清理证明 | [PaimonTableWriteContext](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/write/PaimonTableWriteContext.java:354) | prepare 展开 + executor 真终止 → sync → writer → committer → IO →目录保护；失败短路并保留 |
+| 构造和失败资源强引用 | [PaimonStopResources](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonStopResources.java:25) | 分配前占位，返回后先 bind 再检查 frozen；Service root 在终态发布前进入静态保留 |
+| 有限读和 outstanding batch | [PaimonGuardedReader](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonGuardedReader.java:7) | batch、reader 关闭成功才脱离 scope；任何关闭证明缺失都保留共享 Catalog |
+| 目录与文件锁释放 | [PaimonSpillDirCleaner](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/util/PaimonSpillDirCleaner.java:279) | ReleaseResult 明确完整/残留/异常；注册失败只保留，deleted=false 不释放锁 |
+| 动态桶预检 | [PaimonDynamicBucketPreflight](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonDynamicBucketPreflight.java:85) | snapshot、index open/bootstrap/end、reader 与 rollback 分步准入；索引约束目录保持 |
+| 停止日志 | [PaimonStopLog](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonStopLog.java:10) | 类加载器内共享一个 daemon + 256 队列，非阻塞 offer；终态不依赖日志输出 |
+
+有限入口 `getTableCount`、`discoverTables`、`timestampToStreamOffset`、`batchRead`、`batchCount`、`queryByAdvanceFilter` 全部持有 ingress。Paimon RecordReader.close 的接口承诺是释放所有资源；本适配器额外跟踪 outstanding batch，在提前结束或异常路径明确释放，避免无法证明的迭代器状态被丢弃。此措施是 connector 的证明约束，不声称 Paimon 接口没有 close 契约。
+
+R01–R07 已实现。独立复核的后续问题——注册失败错误删除、outstanding batch 丢失、owner/context/coordinator 非原子发布、四处 snapshot 文件系统调用漏准入——均已修复并复核。最终生产源码复核未发现确定性 Critical/Required；该复核不替代运行测试。
+
+完整验证命令：
+
+```bash
+env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home \
+  mvn -o -B -pl connectors/paimon-plus-connector -am -DskipTests=false clean package
+git diff --check
+```
+
+最终完整构建通过：2026-09-07 16:34:37 +08:00，JDK 17、Maven 离线 `clean package`，5 个 reactor 项目成功；paimon-plus-connector surefire XML 共 **62 个测试类、688 项，0 failures、0 errors、0 skipped**。耗时 2 分 15 秒。日志 `/tmp/paimon-review-fixes-full.log`，报告 `connectors/paimon-plus-connector/target/surefire-reports`。
+
+测试只在本地 Catalog/FileIO、受控故障注入和真实子 JVM 上运行。生产 S3/MinIO、真实用户数据规模与 Engine A/B 调度未执行验收。取消后可能残留的远端 orphan 文件不在 STOP 中自动删除，不将 Snapshot expiration 当成 orphan 清理。
+
+| 门禁 | 实际测试类 / 方法（均位于本模块 src/test/java） | 断言范围 |
+| --- | --- | --- |
+| B01 | `PaimonFinalCompactionTest；PaimonFinalCompactionIntegrationTest；PaimonServiceSyncStopIntegrationTest` | 正常 final、业务/identifier 顺序及 SYNC 回归 |
+| B02 | `PaimonBoundedStopTest.cooperativeCancellationMustDiscardFinalAttemptAndCloseOnlyAfterExit` | 受控取消、prepare 展开、实际终止后正常弃提交 |
+| B03/B04 | `PaimonBoundedStopTest.ignoredInterruptMustKeepSpillAndNeverCloseAfterLatePhysicalExit；PaimonServicePhysicalTableOwnerTest` | 忽略中断仍保留；迟到线程不清理；同 JVM owner 互斥 |
+| B05 | `PaimonCompactionExecutorTest.submitRacingAuthorizedCancellationMustLeaveNoAcceptedOrQueuedWorkBehind / dequeuedTaskNotYetInsideCallableMustStillBeCancelledAndActuallyExit` | 50 轮竞争、队列及已移交 Worker 尚未进入 Callable 的窗口 |
+| B06 | `PaimonCompactionExecutorTest.controlledCancellationMustUnwindNativeGetButStillWaitForPhysicalExit；同类 submit race` | get/get(timeout) 取消来源、再次 submit 受控拒绝 |
+| B07 | `PaimonStopControllerTest.commitAndCancellationMustHaveOneWinnerUnderConcurrentThreads；PaimonBoundedStopTest.cancellationWinningAfterNonEmptyPrepareMustNeverCommitMessages` | 50 轮决策竞争；非空结果不能绕过取消 |
+| B08 | `PaimonBoundedStopTest.admittedFinalCommitMustKeepExactPendingAndRefuseLateStateSaveOrRetry；PaimonTableWriteContextTest` | RPC 结果不明、精确 pending、禁止迟到重试/状态推进 |
+| B09 | `PaimonCompactionExecutorTest.authorizedCancellationMustNotHideLateErrorOrIndependentIOException；该类旧控制错误测试` | Error、独立 IO、自中断/外部取消不能洗成成功 |
+| B10 | `PaimonBoundedStopTest.blockedSchedulerMustConsumeTotalBudgetWithoutEnteringResourceCleanup / blockedBusinessPrepareMustNotStartCommitOrFinalPrepareAfterDeadline / admittedCallbackMustRemainUnconfirmedAfterTotalDeadlineAndLateReturn / allocationReturningAfterTimeoutMustBindToRetainedLedgerAndRejectNextAction` | scheduler、业务 drain、callback、半构造；有限读测试补 ingress |
+| B11/B12 | `PaimonStopControllerTest.totalBudgetIsNotResetAndRetainedOutcomeCannotBecomeSuccess / frozenStatePublicationMustBeRejectedAfterWaitingForApplicationLock / finalRegistrationWindowsMustNotBlockTimeoutOrPermitLatePrepare；PaimonServiceCloseTest` | 共享总预算、结果、长锁、两种 final 注册窗口；多表顺序由 Service 测试覆盖 |
+| B13/B22 | `PaimonCompactionLifecycleTest；PaimonTableWriteContextTest；PaimonSpillDirCleanerTest；PaimonDynamicBucketPreflightCleanupTest；PaimonBoundedStopTest.catalogCloseTimeoutMustReturnRetainAndRefuseLatePublication` | 关闭失败短路、目录锁保留、总超时与原始失败主因 |
+| B14 | `PaimonSpillDirCleanerProcessIntegrationTest；PaimonStopControllerTest.retainedRootMustKeepLateBoundScopeAliveAcrossGcAndRepeatedCompletion；PaimonBoundedStopTest.connectorStopFailureMustNotInvokeBlockingWarnAndMustKeepRetainedServiceReachable` | Connector 丢引用、GC 强达、另一 JVM cleaner 跳过及真实进程退出后回收 |
+| B15 | `PaimonSpillDirCleanerTest；PaimonServiceStaleSpillCleanupTest；PaimonTableWriteContextFactoryTest；KeyDynamicBucketWriterStrategyTest` | 限定 RocksDB 根、当前全局/表级根、marker/symlink/live/owner 防护 |
+| B16/B21 | `PaimonServiceCloseTest；PaimonServiceSyncStopIntegrationTest；PaimonBoundedStopTest.blockedLogBackendAndFullQueueMustNotBlockStopOrSpawnPerServiceThreads / connectorStopFailureMustNotInvokeBlockingWarnAndMustKeepRetainedServiceReachable` | INFO 等待/唯一终态，后端阻塞和队列满不拖住监督者 |
+| B17/B20 | `PaimonFiniteReadLifecycleTest（12 项）` | 三个有限元数据入口、batchRead/batchCount/query reader 失败、batch 释放失败、迟到创建和 callback |
+| B18/B19 | `PaimonCompactionSpillLifecycleIntegrationTest（6 项）；PaimonFinalCompactionIntegrationTest；PaimonCommitStateStoreTest` | 真实 MergeTree/Append prepare 取消、未提前内联 close、原 snapshot 文件不被误删；恢复仍按稳定用户对账 |
+
+测试类做了合并，Plan 中原拟建的 `PaimonFinalStopDecisionTest`、`PaimonStopResourcesTest`、`PaimonStopLogDispatcherTest`、`PaimonNativeStopCancellationIntegrationTest` 等并未单独创建；对应断言实际位于上表，不能按旧类名声称执行。
+
+## 15. 用户生产 DDL 的核对与回归
+
+目标表 `dl_ods.ods_opera_vision.future_inhousedate`：11 字段，主键为 ConfirmNo/InhouseDate/Resort/ExtractionDate/ExtractionHour/pt_extractiondate，分区字段 pt_extractiondate，bucket=-1。完整字段、类型和 28 个表配置项（不含生产 path）保存为测试事实来源：
+
+[FutureInhouseDateFixture](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/test/java/io/tapdata/connector/paimon/FutureInhouseDateFixture.java:15)
+
+| 用户配置/结构 | Paimon 1.3.2 源码事实 | 本次处理 |
+| --- | --- | --- |
+| 主键包含分区字段，bucket=-1 | TableSchema.crossPartitionUpdate=false，KeyValueFileStore.bucketMode=HASH_DYNAMIC | 按真实 HASH_DYNAMIC 执行；不能套 KEY_DYNAMIC writer RocksDB 分析，但本 connector 的历史污染预检仍会用 GlobalIndexAssigner/RocksDB |
+| snapshot.expire.execution-mode=async | TableCommitImpl 根据该选项选择维护 executor | 与本 connector SYNC 唯一契约冲突；写资源分配前拒绝，不静默改表。生产使用前需将有效表选项设置为 SYNC |
+| write-buffer-spillable=true，128mb buffer，spill disk=5gb | 写缓存 Spill 与 MergeSorter Compaction Spill 是两条路径 | 参数不是生命周期屏障，5gb 不能证明不存在 Compaction 临时文件或任务已经退出 |
+| sort-spill-threshold=10，sort-spill-buffer-size=64mb | MergeSorter.mergeSort 在输入 reader 数量 >10 时进入 spillMergeSort/spill | 真实回归保持这两个生产值，断言 MergeSorter.spill 栈与受保护目录 |
+| compaction-trigger=20，optimization-interval=60min | UniversalCompaction 先查 FullCompactTrigger；其 lastFullCompaction 为空且多 run 时可立即合并 | 首次不保证等待 60min，也不保证等到 20 run；测试先确认初次两 run 合并，再产生 11 个文件供显式 full compact |
+| commit.force-compact=false，changelog-producer=none | 不要求每次业务提交等待最终合并 | 保留业务 prepare(false)；STOP 在业务确认后执行 final prepare(true)，允许有来源证明的最终弃提交 |
+| num-sorted-run.stop-trigger=2147483647 | 放大写入停止阈值 | 不能作为 STOP 等待期限或安全删除依据 |
+| sink.parallelism=1，initial-buckets=1，max-buckets=50 | Flink 并行度参数不等于本 connector 的跨 JVM 排他所有权 | 不将它解释为 A/B Engine fencing |
+
+这份 DDL 能确认配置及可达调用链，不能独自证明生产 `.channel` 文件由谁删除。原故障归因仍区分“源码与回归可复现的竞态”和“生产环境的实际删除者”。
+
+### 15.1 新增固定源码证明
+
+以下三个文件均在本轮逐字节核对：本地 Paimon HEAD、Maven 1.3.2 sources JAR 与官方 release-1.3.2 固定提交原文一致。官方 tag peeled commit 已用 git ls-remote 核验为 c05f7d1f1b1e5d37e64edab0f2978124d90b64f7；本地 Git 未缓存该远端 commit object，因此使用官方 raw 原文比对，未将本地 git show 失败误记为源码不一致。
+
+| 记录 | 本地精确位置与命题 | SHA-256 |
+| --- | --- | --- |
+| PS16 | [TableSchema.crossPartitionUpdate:200](/Users/SL/javaProject/paimon/paimon-api/src/main/java/org/apache/paimon/schema/TableSchema.java:200)：主键包含全部分区键则返回 false | `ab695e219937e1852cf5abb4bede863747c6168cb3f3320ba8568772fef2eefd` |
+| PS17 | [KeyValueFileStore.bucketMode:100](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java:100)：bucket=-1 且非 crossPartitionUpdate 返回 HASH_DYNAMIC | `02ddb150e59cf1c2ed3922453b15bed746749aa2703951d18a94b77c5c914828` |
+| PS18 | [FullCompactTrigger.tryFullCompact:64](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/mergetree/compact/FullCompactTrigger.java:64)：lastFullCompaction=null 可立即触发 | `1d23475acf8f661c8436583aa085e5d421c642aa7aec4f7329da958a0b7ef795` |
+
+官方固定原文：[TableSchema](https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-api/src/main/java/org/apache/paimon/schema/TableSchema.java#L200)、[KeyValueFileStore](https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L100)、[FullCompactTrigger](https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/mergetree/compact/FullCompactTrigger.java#L64)。Compaction Spill 条件见 [MergeSorter:110](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/mergetree/MergeSorter.java:110)；写路径的该文件与 1.3.2 source JAR 一致的证明保留在 §9。
+
+### 15.2 三项实际回归
+
+1. `PaimonServiceDynamicBucketIntegrationTest.reportedProductionDdlAsyncMustFailBeforeWriterOwnerOrSpillAllocation`：使用真实表 schema，确认 HASH_DYNAMIC；ASYNC 在 writer/owner/Spill 分配前拒绝。
+2. `PaimonServiceDynamicBucketIntegrationTest.reportedProductionDdlSyncMustWriteAndReadPartitionedCompositeKey`：SYNC 下经 Service 写入，检查复合主键、DATE/DECIMAL/TIMESTAMP/分区字段，停止后临时根清空。
+3. `PaimonCompactionSpillLifecycleIntegrationTest.reportedProductionDdlMustCancelRealHashDynamicSpillWithoutEarlyDeletion`：保持生产字段和全部上述表参数，仅 ASYNC→SYNC，Catalog path 换成本地临时路径。写入 12 个版本，确认初始两 run 合并后有 11 文件；显式 full compact 进入真实 MergeSorter.spill，STOP 受控取消后 prepare 展开但 IO 未关闭，实际线程退出后才清理；原业务 snapshot 及 11 个有效文件不被 final 提交改动。
+
+测试显式 compact 是故障注入的触发器，不是生产新增的“每次 STOP 强制全量 compact”行为。测试使用 1 秒 final 预算加速触发取消；生产 Service 默认仍为 180/120/30 秒。没有连接用户的生产 S3 URI。
+
+## 16. 审查缺口修复（2026-09-07）
+
+本节是 V1.2 的收尾修正。保留原生外部调用的逐次准入、实际 executor 终止屏障、SYNC 限制和 FAILED_RETAINED 强保留，不改变业务提交与恢复语义。
+
+| 缺口 | 修复后的行为与入口 | 回归证据 |
+| --- | --- | --- |
+| 逐行 gate 重复登记 | [Context.write](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/write/PaimonTableWriteContext.java:531) 删除整行 scope.run；各 bucket 策略负责原生调用准入。HASH_DYNAMIC 一行从 3 次登记降到 2 次（assign + write）。[checkAction](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonStopController.java:98) 在 RUNNING 的纯检查走 volatile 快路径，实际 call/run 仍在 gate 内检查并登记 | HashDynamicBucketWriterStrategyTest.freezeAfterAssignmentMustRejectTheNextNativeWrite；全部 bucket 策略回归 |
+| worker 中断恢复 | [performClose](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:3314) 最外层 finally 恢复 worker 曾捕获并暂清的中断；caller 仅恢复自身中断。Context 捕获的次要 InterruptedException 也不因首因不同被遗漏 | BoundedStopTest.schedulerInterruptionMustBeRestoredOnlyOnCloseWorker；ServiceCloseTest.interruptedRetryOnCloseWorkerMustFinishCleanupWithoutInterruptingCaller |
+| 重复 suppressed | [PaimonFailures.append](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/util/PaimonFailures.java:9) 保留首因，跳过 self/null/已存在的同一异常对象；Service、Context、preflight、Factory、bucket/目录清理共享策略 | StopControllerTest.repeatedSecondaryFailureMustBeSuppressedOnceAndPreserveBusinessCause |
+| 清理根字符串去重 | [collectTmpDirRoots](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:360) 先拒绝配置根末级本身为符号链接，再取 canonical path；解析失败只跳过该根并记录 WARN | ServiceStaleSpillCleanupTest.canonicalAliasesMustDeduplicateWithoutFollowingSymlinkRoots；原表级根清理测试 |
+| 裸 rocksdb 负例 | 即使裸 rocksdb-orphan 含旧数据且旁有 owner marker，前缀拒绝仍保证其数据与 marker 不被 cleaner 删除；不能根据名称猜测历史裸目录归属 | SpillDirCleanerTest.bareRocksdbMustRemainEvenWithOldOwnerMarker |
+| 混合缩进 | 本轮触及 Java 文件的行首统一空格，保留字符串中的字符；Service 的大量 diff 含此机械变更，可配合 git diff -w 阅读 | git diff --check；全量重新编译 |
+| INFO 字段与事件 | [diagnostics](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonStopController.java:281) 补齐六个字段；executor 状态读取在控制锁外，只作为观察；prepareReturned 只在实际原生 prepare 调用的 finally 发布。终态保存不可变诊断字符串；超时打印 timeout-retained 与“需要确认旧进程退出” | StopControllerTest.diagnosticsMustDistinguishPrepareReturnFromExecutorTermination；BoundedStopTest.timeoutMustLogImmutableDiagnosticsAndProcessExitInstructionOnce；ServiceCloseTest 等待 INFO |
+| worker 抢先遇到期限 | [timeoutFailure](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonStopController.java:205) 缓存专用超时异常，带 phase/table/owner/耗时及三种预算；checkAction 到期抛此异常。已有业务首因优先，超时可作为次因，重复 close 不改终态 | StopControllerTest.workerDeadlineMustReportSameTimeoutWithBudgetsAndDeduplicateObservations |
+| reader.close 覆盖读取首因 | batchRead、batchCount、query 使用 try-with-resources；read A + close B 对调用者保留 A 并 suppressed B。资源账本仍保留关闭失败 B 及资源，不用 A 替换资源证明缺失这一原因 | FiniteReadLifecycleTest.readAndCloseFailureMustKeepReadCauseWithSuppressedCleanup（三入口） |
+
+清理根保持原 cleaner 的路径语义：拒绝配置根末级本身为符号链接，不新增禁止祖先路径别名的规则（例如 macOS `/tmp`、`/var`）。canonicalize 合并原本会扫描到的同一实际目录，不增加新的扫描根。异常去重针对同一首因下重复附加的直接 suppressed 对象，不声明重写调用方预先构造的任意 Throwable 图。
+
+HASH_DYNAMIC 的 gate 减少是静态调用链计数，不宣称未经基准测试的吞吐提升。STOP 到期后，已准入的 assign 可以迟到返回，但下一次 native write 必须被拒绝；没有把多行合并成一张长期许可。
+
+```mermaid
+flowchart LR
+    C[Context.write 状态检查] --> S[Strategy.write 状态检查]
+    S --> G1[gate 登记 assign]
+    G1 --> A[HashBucketAssigner.assign]
+    A --> E1[gate 移除 assign]
+    E1 --> G2[gate 重新准入 write]
+    G2 --> W[TableWriteImpl.write]
+    W --> E2[gate 移除 write]
+    F[STOP 超时或冻结] -. 拒绝下一次准入 .-> G2
+```
+
+### 16.1 固定内核证据与适配边界
+
+以下文件已逐字节验证：本地 `/Users/SL/javaProject/paimon`、Maven 1.3.2 sources JAR、官方固定 commit `c05f7d1f1b1e5d37e64edab0f2978124d90b64f7` raw 原文三者一致。
+
+| 本地源码位置 | 证明和 Connector 适配 | SHA-256 |
+| --- | --- | --- |
+| [ExceptionUtils.firstOrSuppressed](/Users/SL/javaProject/paimon/paimon-common/src/main/java/org/apache/paimon/utils/ExceptionUtils.java:284) | 内核保留首因并避免 self-suppression；内核不去重反复传入的同一次因。Connector 为多层 STOP 观察增加 identity 去重 | `97f974e832d2c2ea8135ee6037a39941fa7c21768c6db4b53d65373c6837fef6` |
+| [ExecutorUtils.gracefulShutdown](/Users/SL/javaProject/paimon/paimon-common/src/main/java/org/apache/paimon/utils/ExecutorUtils.java:63) | 内核捕获 InterruptedException 后恢复当前线程标志。Connector 为继续在有限预算内取得关闭证明，暂清标志并在 worker 最外层 finally 恢复；没有照搬 shutdownNow 后即返回作为删除证明 | `cb6264c221dd94951fcf3aeecff5f7fe95c98d467c7b637a3486c5f19d21fb35` |
+| [TableWriteImpl.write](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java:157) | write(row) / write(row,bucket) 分别委托原生写入；Connector 的 STOP gate 是自有协议，放在实际原生调用边界，非 Paimon 提供的 gate API | `ad17a681f7c1ca37d0f5b769504402ca743fe9497147db31df6847e4010422c4` |
+
+官方固定源码：[ExceptionUtils](https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-common/src/main/java/org/apache/paimon/utils/ExceptionUtils.java#L284)、[ExecutorUtils](https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-common/src/main/java/org/apache/paimon/utils/ExecutorUtils.java#L63)、[TableWriteImpl](https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java#L157)。
+
+### 16.2 验证记录
+
+2026-09-07 16:34:37 +08:00，JDK 17 离线 reactor `clean package` 成功，5 个项目成功；模块 **62 类、688 项，失败/错误/跳过均 0**。相比上一轮 677 项增加 11 项，并增强原中断与日志测试。日志 `/tmp/paimon-review-fixes-full.log`。最初定向编译发现一处 reader try-with-resources 转换遗漏，修正后 81 项定向测试及上述完整构建通过；不把首次失败算作通过。
+
+独立增量复核已完成：未发现本轮指定修复的确定性 Critical/Required 回归；复核中的父路径 symlink 与异常反向附加两项初始疑点，经基线/可达性核对后撤回。末级 symlink 的精确语义已在本节明确。
+
+本轮没有生产 S3/MinIO、真实规模吞吐或 Engine 跨机器接管验收。静态 RETAINED 无 TTL、关闭失败后保留其后资源、长期 StreamRead 独立停止协议等既定边界保持不变。
+
+---
+
+<details>
+<summary>V1.1 历史契约、内核证明与验收档案（非 V1.2 的等待/取消规范）</summary>
+
+## V1.1 历史：Paimon Spill 简化与同步优雅停止
 
 > Spec ID：`paimon-spill-sync-graceful-stop`；版本：V1.1；日期：2026-09-05。
 > 范围：`connectors/paimon-plus-connector`，固定 Apache Paimon 1.3.2。
@@ -789,3 +1327,6 @@ sequenceDiagram
 ### P18.2 验证门禁
 
 修复前真实 KEY_DYNAMIC 目录布局、表级根回收、查询 activeIngress 三项回归均失败（/tmp/paimon-gap-red.log）。修复后需验证实际 RocksDB 位于受保护目录、preflight 视图、跨 JVM 活跃保护与崩溃嵌套回收、查询等待及停止后拒绝，并执行完整模块测试。成绩记录在本轮实施验收中，不覆盖或改写历史 629 项与补充 3 项的原记录。
+
+
+</details>

@@ -29,6 +29,22 @@ class PaimonServiceStaleSpillCleanupTest {
     Path tempDir;
 
     @Test
+    void canonicalAliasesMustDeduplicateWithoutFollowingSymlinkRoots() throws Exception {
+        PaimonConfig config = new PaimonConfig(); config.setDatabase("default");
+        PaimonService service = new PaimonService(config, mock(Log.class));
+        Method collect = PaimonService.class.getDeclaredMethod("collectTmpDirRoots", String.class, java.util.Set.class);
+        collect.setAccessible(true);
+        java.util.Set<String> roots = new java.util.LinkedHashSet<>();
+        Path child = Files.createDirectory(tempDir.resolve("child"));
+        collect.invoke(service, tempDir.toString(), roots);
+        collect.invoke(service, child.resolve("..").toString(), roots);
+        org.junit.jupiter.api.Assertions.assertEquals(Collections.singleton(tempDir.toFile().getCanonicalPath()), roots);
+        Path link = Files.createSymbolicLink(tempDir.resolve("linked-root"), child);
+        collect.invoke(service, link.toString(), roots);
+        org.junit.jupiter.api.Assertions.assertEquals(1, roots.size(), "不能通过 canonicalize 绕过 symlink 拒绝策略");
+    }
+
+    @Test
     void startupCleanupMustCoverPerTableDiskTmpDirRoots() throws Exception {
         File staleDir = Files.createDirectory(tempDir.resolve("paimon-io-stale")).toFile();
         File staleData = Files.write(staleDir.toPath().resolve("data.sst"), new byte[] {1})

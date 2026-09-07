@@ -158,7 +158,7 @@ class PaimonServicePhysicalTableOwnerTest {
             state.when(() -> io.tapdata.connector.paimon.commit.PaimonCommitStateStore.physicalTableHash(
                     org.mockito.ArgumentMatchers.anyString())).thenReturn(physicalHash);
             state.when(() -> io.tapdata.connector.paimon.commit.PaimonCommitStateStore.bind(
-                    any(), any(), org.mockito.ArgumentMatchers.eq(table))).thenReturn(binding);
+                    any(), any(), org.mockito.ArgumentMatchers.eq(table), any(PaimonStopController.class))).thenReturn(binding);
             InvocationTargetException thrown = assertThrows(InvocationTargetException.class,
                     () -> contextAdmissionMethod().invoke(first, tableKey, "orders",
                             Identifier.create("default", "orders"), null, table,
@@ -508,7 +508,7 @@ class PaimonServicePhysicalTableOwnerTest {
             assertSame(closeFailure, thrown);
             assertFalse(fixture.context.cleanupComplete());
             verify(fixture.strategy, times(1)).close();
-            verify(fixture.committer, times(1)).close();
+            verify(fixture.committer, never()).close();
             verify(fixture.ioManager, never()).close();
             verifyNoInteractions(fixture.catalog);
             fixture.assertOwnerRejected();
@@ -771,8 +771,8 @@ class PaimonServicePhysicalTableOwnerTest {
                 assertTrue(lifecycle.compactionExecutor().awaitTermination(5L, TimeUnit.SECONDS),
                         "旧 compaction 必须退出");
                 awaitServiceCloseWorker(first);
-                unregister.invoke(first, TABLE_KEY);
-                unregister.invoke(second, TABLE_KEY);
+                PaimonStopTestSupport.releaseInjectedOwner(first, TABLE_KEY);
+                PaimonStopTestSupport.releaseInjectedOwner(second, TABLE_KEY);
                 try { second.close(); }
                 catch (Exception | Error expectedAfterInjectedFailure) {
                     // 第二个 Service 的 DDL 拒绝也保留原始失败，断言在用例主体中完成。

@@ -537,6 +537,30 @@
             }
           ]
         },
+        "stopTimeoutSeconds": {
+          "type": "number",
+          "title": "${stopTimeoutSeconds}",
+          "default": 180,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {"min": 1, "max": 2147483647, "precision": 0}
+        },
+        "finalCompactionTimeoutSeconds": {
+          "type": "number",
+          "title": "${finalCompactionTimeoutSeconds}",
+          "default": 120,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {"min": 1, "max": 2147483647, "precision": 0}
+        },
+        "compactionCancelGraceSeconds": {
+          "type": "number",
+          "title": "${compactionCancelGraceSeconds}",
+          "default": 30,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {"min": 1, "max": 2147483647, "precision": 0}
+        },
         "enableAsyncCommit": {
           "type": "boolean",
           "title": "${enableAsyncCommit}",
@@ -674,6 +698,9 @@
   "messages": {
     "default": "en_US",
     "en_US": {
+      "stopTimeoutSeconds": "STOP Total Timeout (seconds)",
+      "finalCompactionTimeoutSeconds": "Final Compaction Timeout (seconds)",
+      "compactionCancelGraceSeconds": "Compaction Cancellation Grace (seconds)",
       "doc": "docs/paimon_en_US.md",
       "warehouse": "Warehouse Path",
       "warehouse_placeholder": "e.g., /path/to/warehouse or s3://bucket/warehouse or s3a://bucket/warehouse",
@@ -733,6 +760,9 @@
       "enablePrimaryKeyUpdate_description": "When enabled, automatically detects primary key changes and converts update operations to delete+insert. Requires source database to provide before-update data. If unavailable, enabling this feature will cause errors. It is recommended to keep this feature disabled by default and only enable it when primary key values are expected to change. Enabling this feature will reduce update performance."
     },
     "zh_CN": {
+      "stopTimeoutSeconds": "STOP 总超时（秒）",
+      "finalCompactionTimeoutSeconds": "最终 Compaction 超时（秒）",
+      "compactionCancelGraceSeconds": "Compaction 取消宽限（秒）",
       "doc": "docs/paimon_zh_CN.md",
       "warehouse": "仓库路径",
       "warehouse_placeholder": "例如：/path/to/warehouse 或 s3://bucket/warehouse 或 s3a://bucket/warehouse",
@@ -792,6 +822,9 @@
       "enablePrimaryKeyUpdate_description": "开启后，会自动检查主键变更，将更新操作改为删除+写入，要求源库可以提供更新前数据，如果无法提供，开启此功能会报错退出。建议默认关闭该功能，如果确认主键值会变更再开启，开启后，更新性能会下降。"
     },
     "zh_TW": {
+      "stopTimeoutSeconds": "STOP 總超時（秒）",
+      "finalCompactionTimeoutSeconds": "最終 Compaction 超時（秒）",
+      "compactionCancelGraceSeconds": "Compaction 取消寬限（秒）",
       "doc": "docs/paimon_zh_TW.md",
       "warehouse": "倉庫路徑",
       "warehouse_placeholder": "例如：/path/to/warehouse 或 s3://bucket/warehouse 或 s3a://bucket/warehouse",

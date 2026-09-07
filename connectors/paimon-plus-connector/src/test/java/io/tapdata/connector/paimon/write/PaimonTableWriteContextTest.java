@@ -259,7 +259,7 @@ class PaimonTableWriteContextTest {
     }
 
     @Test
-    void resourceCloseFailureMustSuppressLaterErrorsAndRetainSpill() throws Exception {
+    void resourceCloseFailureMustStopFurtherCleanupAndRetainSpill() throws Exception {
         IOManager ioManager = mock(IOManager.class);
         Fixture fixture = new Fixture(0L, PaimonTableWriteContext.CommitStateStore.NOOP, ioManager);
         Exception strategyError = new Exception("strategy close");
@@ -270,12 +270,11 @@ class PaimonTableWriteContextTest {
         Exception thrown = assertThrows(Exception.class, fixture.context::close);
 
         assertSame(strategyError, thrown);
-        assertEquals(1, thrown.getSuppressed().length);
-        assertSame(committerError, thrown.getSuppressed()[0]);
+        assertEquals(0, thrown.getSuppressed().length);
         assertFalse(fixture.context.cleanupComplete());
         InOrder order = inOrder(fixture.strategy, fixture.committer, ioManager);
         order.verify(fixture.strategy).close();
-        order.verify(fixture.committer).close();
+        verify(fixture.committer, never()).close();
         verify(ioManager, never()).close();
     }
 

@@ -203,6 +203,131 @@ class PaimonCompactionSpillLifecycleIntegrationTest {
         verifyRealSpillWait(false);
     }
 
+    @Test
+    void realNativePrepareCancellationMustUnwindWithoutInlineWriterCloseOrEarlySpillDelete() throws Exception {
+        verifyRealNativeCancellation(3, v -> GenericRow.of(1, BinaryString.fromString("v" + v)));
+    }
+
+    @Test
+    void reportedProductionDdlMustCancelRealHashDynamicSpillWithoutEarlyDeletion() throws Exception {
+        catalog.dropTable(Identifier.create(DATABASE, TABLE), false);
+        catalog.createTable(Identifier.create(DATABASE, TABLE),
+                io.tapdata.connector.paimon.FutureInhouseDateFixture.schema("SYNC"), false);
+        assertEquals(org.apache.paimon.table.BucketMode.HASH_DYNAMIC, table().bucketMode());
+        // 保留生产 sort-spill-threshold=10/compaction-trigger=20/128mb 参数：
+        // 初次 optimization-interval 会立即合并前两个 run（lastFullCompaction=null），
+        // 因此写入 12 个版本，等待并提交初次结果后留下 11 个文件，再显式 full compact。
+        // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/mergetree/compact/FullCompactTrigger.java#L64
+        verifyRealNativeCancellation(12, io.tapdata.connector.paimon.FutureInhouseDateFixture::row);
+    }
+
+    private void verifyRealNativeCancellation(int versions,
+            java.util.function.IntFunction<GenericRow> rowFactory) throws Exception {
+        FileStoreTable table = table();
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        BlockingSpillIOManager io = new BlockingSpillIOManager(ioTmpDir, entered, release);
+        try (Fixture fixture = new Fixture(table, "cancel-real-spill", io, release)) {
+            io.tapdata.connector.paimon.service.PaimonStopController controller =
+                    new io.tapdata.connector.paimon.service.PaimonStopController("native-cancel", 20, 1, 10);
+            io.tapdata.connector.paimon.service.PaimonStopResources.Scope scope =
+                    new io.tapdata.connector.paimon.service.PaimonStopResources().scope("native-writer", controller);
+            scope.reserve("context").bind(fixture.context);
+            fixture.context.attachStopScope(scope);
+            for (int version = 0; version < versions; version++) {
+                fixture.context.write(rowFactory.apply(version));
+                fixture.context.commit();
+                if (version == 1 && versions > 3) {
+                    PaimonNativeWriteAccess.of(fixture.writer).syncAll();
+                    fixture.context.commit();
+                }
+            }
+            long snapshot = table.latestSnapshot().orElseThrow(AssertionError::new).id();
+            int filesBefore = versions > 3 ? versions - 1 : versions;
+            assertEquals(filesBefore, activeFileCount(table));
+            fixture.writer.compact(fixture.writer.getPartition(rowFactory.apply(0)), 0, true);
+            assertTrue(entered.await(10, TimeUnit.SECONDS));
+            assertRealSpillStack(io);
+            CountDownLatch prepareUnwound = new CountDownLatch(1);
+            fixture.closer = new Thread(() -> {
+                try {
+                    fixture.outcome.set(fixture.context.closeForStop(true, phase -> {
+                        if ("WAIT_COMPACTION".equals(phase)) { prepareUnwound.countDown(); }
+                    }));
+                } catch (Throwable failure) { fixture.closeFailure.set(failure); }
+                finally { fixture.closeReturned.countDown(); }
+            });
+            fixture.closer.setDaemon(true); fixture.closer.start();
+            long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            io.tapdata.connector.paimon.service.PaimonStopController.FinalAttempt cancellation = null;
+            while (cancellation == null && System.nanoTime() < end) {
+                cancellation = controller.pollCancellation();
+                if (cancellation == null) { Thread.sleep(5); }
+            }
+            assertNotNull(cancellation);
+            cancellation.requestCancellation();
+            assertTrue(prepareUnwound.await(3, TimeUnit.SECONDS), "真实 CompactFutureManager/prepare 必须异常退出");
+            assertFalse(fixture.lifecycle.isTerminated(), "Future 已取消，但真实 Spill 仍在 latch 内");
+            assertFalse(((org.apache.paimon.operation.AbstractFileStoreWrite<?>) fixture.writer.getWrite()).writers().isEmpty(),
+                    "不能把取消吞为空结果后内联关闭/移除 bucket writer");
+            assertEquals(0, io.closeCount());
+            for (File directory : spillingDirsOf(io)) { assertTrue(directory.exists()); assertTrue(ownerMarker(directory).exists()); }
+            release.countDown();
+            assertTrue(fixture.closeReturned.await(10, TimeUnit.SECONDS));
+            assertNull(fixture.closeFailure.get());
+            assertEquals(PaimonTableWriteContext.StopOutcome.SUCCESS_COMPACTION_DISCARDED, fixture.outcome.get());
+            assertEquals(snapshot, table.latestSnapshot().orElseThrow(AssertionError::new).id());
+            assertEquals(filesBefore, activeFileCount(table), "取消 final attempt 不得提交其 Compaction 文件");
+        }
+    }
+
+    @Test
+    void realBucketedAppendPrepareMustUnwindCancelledQueuedTaskWithoutInlineClose() throws Exception {
+        catalog.dropTable(Identifier.create(DATABASE, TABLE), false);
+        catalog.createTable(Identifier.create(DATABASE, TABLE), Schema.newBuilder()
+                .column("id", DataTypes.INT()).column("value", DataTypes.STRING())
+                .option("bucket", "1").option("bucket-key", "id").option("compaction.min.file-num", "100")
+                .option("compaction.max.file-num", "100")
+                .option("snapshot.expire.execution-mode", "SYNC").build(), false);
+        FileStoreTable table = table();
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        BlockingSpillIOManager io = new BlockingSpillIOManager(ioTmpDir, new CountDownLatch(0), new CountDownLatch(0));
+        try (Fixture fixture = new Fixture(table, "cancel-append", io, release)) {
+            io.tapdata.connector.paimon.service.PaimonStopController controller =
+                    new io.tapdata.connector.paimon.service.PaimonStopController("append-cancel", 20, 1, 10);
+            io.tapdata.connector.paimon.service.PaimonStopResources.Scope scope =
+                    new io.tapdata.connector.paimon.service.PaimonStopResources().scope("append", controller);
+            scope.reserve("context").bind(fixture.context); fixture.context.attachStopScope(scope);
+            for (int v = 0; v < 3; v++) {
+                fixture.context.write(GenericRow.of(v, BinaryString.fromString("v" + v))); fixture.context.commit();
+            }
+            long snapshot = table.latestSnapshot().orElseThrow(AssertionError::new).id();
+            // 把真实 BucketedAppendCompactManager.FullCompactTask 留在队列中；同时保留一个
+            // 已进入 Callable 且忽略中断的生产者，验证 prepare 不会因空结果内联 close。
+            fixture.lifecycle.compactionExecutor().submit(PaimonCompactionExecutorTest.task(() -> {
+                entered.countDown(); while (true) { try { release.await(); break; } catch (InterruptedException ignored) {} }
+                return new org.apache.paimon.compact.CompactResult(Collections.emptyList(), Collections.emptyList());
+            }));
+            assertTrue(entered.await(3, TimeUnit.SECONDS));
+            fixture.writer.compact(fixture.writer.getPartition(keyRow()), fixture.writer.getBucket(keyRow()), true);
+            assertEquals(2, ((PaimonCompactionExecutor) fixture.lifecycle.compactionExecutor()).outstandingCount());
+            fixture.startClose(true);
+            assertTrue(fixture.closePhaseEntered.await(3, TimeUnit.SECONDS));
+            io.tapdata.connector.paimon.service.PaimonStopController.FinalAttempt cancellation = null;
+            long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (cancellation == null && System.nanoTime() < end) { cancellation = controller.pollCancellation(); if (cancellation == null) { Thread.sleep(5); } }
+            assertNotNull(cancellation); cancellation.requestCancellation();
+            // 给真实 prepare 机会展开：只剩运行中的阻塞 task，queued native Future 已完成取消。
+            end = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (((PaimonCompactionExecutor) fixture.lifecycle.compactionExecutor()).outstandingCount() != 1 && System.nanoTime() < end) { Thread.sleep(5); }
+            assertFalse(fixture.lifecycle.isTerminated()); assertEquals(0, io.closeCount());
+            assertFalse(((org.apache.paimon.operation.AbstractFileStoreWrite<?>) fixture.writer.getWrite()).writers().isEmpty());
+            release.countDown(); assertTrue(fixture.closeReturned.await(10, TimeUnit.SECONDS));
+            assertNull(fixture.closeFailure.get());
+            assertEquals(PaimonTableWriteContext.StopOutcome.SUCCESS_COMPACTION_DISCARDED, fixture.outcome.get());
+            assertEquals(snapshot, table.latestSnapshot().orElseThrow(AssertionError::new).id());
+        }
+    }
+
     private void verifyRealSpillWait(boolean finalizeCompaction) throws Exception {
         FileStoreTable table = table();
         CountDownLatch entered = new CountDownLatch(1);

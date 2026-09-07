@@ -19,6 +19,136 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PaimonCompactionExecutorTest {
     @Test
+    void dequeuedTaskNotYetInsideCallableMustStillBeCancelledAndActuallyExit() throws Exception {
+        PaimonCompactionLifecycle lifecycle = PaimonCompactionLifecycle.forTable("dequeued");
+        PaimonCompactionExecutor executor = (PaimonCompactionExecutor) lifecycle.compactionExecutor();
+        io.tapdata.connector.paimon.service.PaimonStopController control =
+                new io.tapdata.connector.paimon.service.PaimonStopController("dequeued", 20, 1, 30);
+        control.start();
+        io.tapdata.connector.paimon.service.PaimonStopController.FinalAttempt attempt =
+                control.beginFinal("table", 0, lifecycle);
+        Field field = PaimonCompactionExecutor.class.getDeclaredField("delegate"); field.setAccessible(true);
+        java.util.concurrent.ThreadPoolExecutor delegate = (java.util.concurrent.ThreadPoolExecutor) field.get(executor);
+        CountDownLatch dequeued = new CountDownLatch(1), release = new CountDownLatch(1);
+        AtomicBoolean callableEntered = new AtomicBoolean();
+        // ThreadPoolExecutor 已把 firstTask 交给 Worker；阻塞在 Worker.run 前，队列为空，
+        // 但任务尚未进入 GuardedFuture.run / Callable。取消必须仍由 outstanding 登记覆盖。
+        delegate.setThreadFactory(worker -> {
+            Thread thread = new Thread(() -> { dequeued.countDown(); awaitIgnoringInterrupt(release); worker.run(); });
+            thread.setDaemon(true); return thread;
+        });
+        try {
+            Future<CompactResult> future = executor.submit(task(() -> { callableEntered.set(true); return emptyResult(); }));
+            assertTrue(dequeued.await(3, TimeUnit.SECONDS)); assertTrue(delegate.getQueue().isEmpty());
+            assertSame(attempt, control.pollCancellation()); attempt.requestCancellation();
+            assertTrue(lifecycle.isStopCancellation(assertThrows(ExecutionException.class, future::get), attempt));
+            assertFalse(executor.isTerminated()); assertEquals(1, executor.outstandingCount());
+            release.countDown(); assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+            assertFalse(callableEntered.get()); assertEquals(0, executor.outstandingCount());
+            assertDoesNotThrow(executor::audit);
+        } finally { release.countDown(); executor.shutdown(); assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS)); }
+    }
+
+    @Test
+    void submitRacingAuthorizedCancellationMustLeaveNoAcceptedOrQueuedWorkBehind() throws Exception {
+        for (int iteration = 0; iteration < 50; iteration++) {
+            PaimonCompactionLifecycle lifecycle = PaimonCompactionLifecycle.forTable("race-" + iteration);
+            PaimonCompactionExecutor executor = (PaimonCompactionExecutor) lifecycle.compactionExecutor();
+            io.tapdata.connector.paimon.service.PaimonStopController control =
+                    new io.tapdata.connector.paimon.service.PaimonStopController("race", 20, 1, 30);
+            control.start();
+            io.tapdata.connector.paimon.service.PaimonStopController.FinalAttempt attempt =
+                    control.beginFinal("table", iteration, lifecycle);
+            CountDownLatch start = new CountDownLatch(1);
+            AtomicReference<Future<CompactResult>> submitted = new AtomicReference<>();
+            AtomicReference<Throwable> rejection = new AtomicReference<>();
+            Thread submitter = new Thread(() -> {
+                awaitIgnoringInterrupt(start);
+                try { submitted.set(executor.submit(task(PaimonCompactionExecutorTest::emptyResult))); }
+                catch (Throwable failure) { rejection.set(failure); }
+            });
+            Thread canceller = new Thread(() -> {
+                awaitIgnoringInterrupt(start);
+                control.pollCancellation().requestCancellation();
+            });
+            submitter.setDaemon(true); canceller.setDaemon(true);
+            try {
+                submitter.start(); canceller.start(); start.countDown();
+                joinAndAssertStopped(submitter); joinAndAssertStopped(canceller);
+                assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+                assertEquals(0, executor.outstandingCount());
+                if (submitted.get() != null) { assertTrue(submitted.get().isDone()); }
+                else { assertTrue(lifecycle.isStopCancellation(rejection.get(), attempt)); }
+                assertDoesNotThrow(executor::audit);
+                assertTrue(lifecycle.isStopCancellation(assertThrows(RejectedExecutionException.class,
+                        () -> executor.submit(task(PaimonCompactionExecutorTest::emptyResult))), attempt));
+            } finally { start.countDown(); executor.shutdown(); }
+        }
+    }
+
+    @Test
+    void authorizedCancellationMustNotHideLateErrorOrIndependentIOException() throws Exception {
+        for (Throwable late : new Throwable[] {new AssertionError("late fatal"),
+                new IOException("independent object storage failure"),
+                new IOException("independent IO wrapping interruption", new InterruptedException("interrupt"))}) {
+            PaimonCompactionLifecycle lifecycle = PaimonCompactionLifecycle.forTable("late-error");
+            PaimonCompactionExecutor executor = (PaimonCompactionExecutor) lifecycle.compactionExecutor();
+            io.tapdata.connector.paimon.service.PaimonStopController control =
+                    new io.tapdata.connector.paimon.service.PaimonStopController("late", 20, 1, 30);
+            control.start();
+            io.tapdata.connector.paimon.service.PaimonStopController.FinalAttempt attempt =
+                    control.beginFinal("table", 0, lifecycle);
+            CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+            try {
+                Future<CompactResult> future = executor.submit(task(() -> {
+                    entered.countDown(); awaitIgnoringInterrupt(release);
+                    if (late instanceof Error) { throw (Error) late; }
+                    throw (Exception) late;
+                }));
+                assertTrue(entered.await(3, TimeUnit.SECONDS));
+                assertSame(attempt, control.pollCancellation()); attempt.requestCancellation();
+                assertTrue(lifecycle.isStopCancellation(assertThrows(ExecutionException.class, future::get), attempt));
+                release.countDown(); assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+                assertSame(late, assertThrows(IllegalStateException.class, executor::audit).getCause());
+            } finally { release.countDown(); executor.shutdown(); assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS)); }
+        }
+    }
+
+    @Test
+    void controlledCancellationMustUnwindNativeGetButStillWaitForPhysicalExit() throws Exception {
+        PaimonCompactionLifecycle lifecycle = PaimonCompactionLifecycle.forTable("controlled");
+        PaimonCompactionExecutor executor = (PaimonCompactionExecutor) lifecycle.compactionExecutor();
+        io.tapdata.connector.paimon.service.PaimonStopController stop =
+                new io.tapdata.connector.paimon.service.PaimonStopController("test", 1, 1, 2);
+        stop.start();
+        io.tapdata.connector.paimon.service.PaimonStopController.FinalAttempt attempt =
+                stop.beginFinal("table", 7, lifecycle);
+        lifecycle.beginFinal(attempt);
+        CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+        try {
+            Future<CompactResult> running = executor.submit(task(() -> {
+                entered.countDown(); awaitIgnoringInterrupt(release); return emptyResult();
+            }));
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            Future<CompactResult> queued = executor.submit(task(PaimonCompactionExecutorTest::emptyResult));
+            assertSame(attempt, stop.pollCancellation());
+            attempt.requestCancellation();
+            ExecutionException cancelled = assertThrows(ExecutionException.class, running::get);
+            assertTrue(lifecycle.isStopCancellation(cancelled, attempt));
+            assertTrue(queued.isDone());
+            assertFalse(executor.isTerminated());
+            assertEquals(1, executor.outstandingCount());
+            assertDoesNotThrow(executor::audit);
+            assertTrue(lifecycle.isStopCancellation(
+                    assertThrows(ExecutionException.class, () -> queued.get(1, TimeUnit.SECONDS)), attempt));
+        } finally {
+            release.countDown(); executor.shutdown();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+        assertEquals(0, executor.outstandingCount());
+    }
+
+    @Test
     void workerInterruptMustRemainHardEvenWhenTaskThrowsAnOrdinaryException() throws Exception {
         PaimonCompactionExecutor executor = new PaimonCompactionExecutor("interrupt-with-io");
         try {
@@ -95,7 +225,7 @@ class PaimonCompactionExecutorTest {
             }));
             assertTrue(entered.await(5, TimeUnit.SECONDS));
             assertTrue(future.cancel(true));
-            assertThrows(CancellationException.class, future::get);
+            assertThrows(ExecutionException.class, future::get);
             assertThrows(IllegalStateException.class, executor::auditAndSeal);
             executor.shutdown();
             assertFalse(executor.awaitTermination(50, TimeUnit.MILLISECONDS));
@@ -289,7 +419,7 @@ class PaimonCompactionExecutorTest {
             }
             joinAndAssertStopped(cancelling);
             assertEquals(Boolean.TRUE, cancelled.get());
-            assertThrows(CancellationException.class, future::get);
+            assertTrue(future.isDone()); // get 还需要同一锁核对取消来源，不能在这里同步等待。
             assertInstanceOf(CancellationException.class,
                     assertThrows(IllegalStateException.class, executor::auditAndSeal).getCause());
         } finally {
@@ -334,10 +464,10 @@ class PaimonCompactionExecutorTest {
             cancelling.start();
             assertTrue(cancellationVisible.await(5, TimeUnit.SECONDS));
             assertEquals(Boolean.TRUE, cancelled.get());
-            assertThrows(CancellationException.class, future::get);
+            assertTrue(future.isDone()); // get 还需要同一锁核对取消来源，不能在这里同步等待。
 
-            // Paimon 1.3.2 会吞掉 get 的 CancellationException；这里让取消已经对 get
-            // 可见，同时保持真实 controlLock，以确定性证明提交前审计不能越过临界区。
+            // 取消状态已经可见，get 与审计仍需等待取消来源登记的同一 controlLock。
+            // 私有 ExecutionException 防止原生把取消吞为可进入内联 close 的空结果。
             // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/compact/CompactFutureManager.java#L47-L61
             auditing = new Thread(() -> {
                 auditEntered.countDown();
@@ -356,6 +486,7 @@ class PaimonCompactionExecutorTest {
 
             releaseCancellationLock.countDown();
             joinAndAssertStopped(cancelling);
+            assertThrows(ExecutionException.class, future::get);
             assertTrue(auditFinished.await(5, TimeUnit.SECONDS));
             joinAndAssertStopped(auditing);
             assertInstanceOf(IllegalStateException.class, auditFailure.get());

@@ -1,4 +1,5 @@
 package io.tapdata.connector.paimon.write.bucket;
+import io.tapdata.connector.paimon.util.PaimonFailures;
 import io.tapdata.connector.paimon.schema.PaimonRowKindField;
 import io.tapdata.connector.paimon.write.PaimonTableWriteContextFactory.IncompleteCleanupException;
 
@@ -36,14 +37,14 @@ public final class KeyDynamicBucketWriterStrategy extends AbstractPaimonBucketWr
                 Objects.requireNonNull(runtimeFactory, "runtimeFactory");
         this.assigner =
                 Objects.requireNonNull(
-                        runtime.createGlobalIndexAssigner(table), "globalIndexAssigner");
+                        stopScope.create("allocate global index assigner", () -> runtime.createGlobalIndexAssigner(table)), "globalIndexAssigner");
         try {
-            assigner.open(
+            stopScope.run("open global index assigner", () -> assigner.open(
                     0L,
                     context.ioManager(),
                     1,
                     0,
-                    (row, bucket) -> emittedRows.add(new BucketedRow(row, bucket)));
+                    (row, bucket) -> emittedRows.add(new BucketedRow(row, bucket))));
             bootstrap(runtime);
         } catch (Exception | Error e) {
             try {
@@ -52,9 +53,9 @@ public final class KeyDynamicBucketWriterStrategy extends AbstractPaimonBucketWr
                 // 原生 close 失败不构成清理证明，向 Factory 传递同一不完整信号并保留 IO。
                 // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L114
                 // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L276
-                assigner.close();
+                stopScope.run("rollback global index assigner", assigner::close);
             } catch (Exception | Error closeError) {
-                if (closeError != e) { e.addSuppressed(closeError); }
+                if (closeError != e) { PaimonFailures.append(e, closeError); }
                 throw new IncompleteCleanupException(tableKey, e);
             }
             throw e;
@@ -71,23 +72,27 @@ public final class KeyDynamicBucketWriterStrategy extends AbstractPaimonBucketWr
     }
 
     private void bootstrap(PaimonBucketWriterRuntimeFactory runtimeFactory) throws Exception {
-        Long snapshotBefore = table.snapshotManager().latestSnapshotIdFromFileSystem();
-        try (RecordReader<InternalRow> reader = runtimeFactory.createIndexBootstrapReader(table)) {
+        Long snapshotBefore = stopScope.call("index bootstrap snapshot before",
+                () -> table.snapshotManager().latestSnapshotIdFromFileSystem());
+        try (RecordReader<InternalRow> reader = new io.tapdata.connector.paimon.service.PaimonGuardedReader<>(
+                stopScope.create("allocate index bootstrap reader", () -> runtimeFactory.createIndexBootstrapReader(table)), stopScope, false)) {
             RecordReader.RecordIterator<InternalRow> batch;
             while ((batch = reader.readBatch()) != null) {
                 try {
                     InternalRow row;
                     while ((row = batch.next()) != null) {
-                        assigner.bootstrapKey(row);
+                        final InternalRow key = row;
+                        stopScope.run("bootstrap global key", () -> assigner.bootstrapKey(key));
                     }
                 } finally {
                     batch.releaseBatch();
                 }
             }
         }
-        assigner.endBoostrap(false);
+        stopScope.run("end global index bootstrap", () -> assigner.endBoostrap(false));
         emittedRows.clear();
-        Long snapshotAfter = table.snapshotManager().latestSnapshotIdFromFileSystem();
+        Long snapshotAfter = stopScope.call("index bootstrap snapshot after",
+                () -> table.snapshotManager().latestSnapshotIdFromFileSystem());
         if (!Objects.equals(snapshotBefore, snapshotAfter)) {
             throw new IllegalStateException(
                     "Paimon table changed while bootstrapping KEY_DYNAMIC index; "
@@ -99,14 +104,14 @@ public final class KeyDynamicBucketWriterStrategy extends AbstractPaimonBucketWr
     protected void doWrite(InternalRow row) throws Exception {
         emittedRows.clear();
         try {
-            assigner.processInput(row);
+            stopScope.run("process global index input", () -> assigner.processInput(row));
             for (BucketedRow emitted : emittedRows) {
                 // GlobalIndexAssigner synthesizes cross-partition DELETE rows by copying the
                 // incoming row and changing only InternalRow.RowKind. RowKindGenerator later
                 // trusts the configured rowkind field, so keep both representations consistent.
                 PaimonRowKindField.apply(
                         writeSemanticContract(), emitted.row, emitted.row.getRowKind());
-                delegate.write(emitted.row, emitted.bucket);
+                stopScope.run("write global index emission", () -> delegate.write(emitted.row, emitted.bucket));
             }
         } finally {
             emittedRows.clear();
@@ -115,7 +120,7 @@ public final class KeyDynamicBucketWriterStrategy extends AbstractPaimonBucketWr
 
     @Override
     protected void closeModeResources() throws Exception {
-        assigner.close();
+        stopScope.run("close global index assigner", assigner::close);
     }
 
     private static final class BucketedRow {

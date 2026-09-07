@@ -1,11 +1,14 @@
 package io.tapdata.connector.paimon.write;
 
+import io.tapdata.connector.paimon.util.PaimonFailures;
 import io.tapdata.connector.paimon.write.bucket.DefaultPaimonBucketWriterRuntimeFactory;
 import io.tapdata.connector.paimon.write.bucket.PaimonBucketWriterStrategy;
 
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract;
 
 import io.tapdata.connector.paimon.util.PaimonSpillDirCleaner;
+import io.tapdata.connector.paimon.service.PaimonStopController;
+import io.tapdata.connector.paimon.service.PaimonStopResources;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.table.BucketMode;
@@ -44,6 +47,11 @@ public final class PaimonTableWriteContext implements AutoCloseable {
     private final List<String> spillDirs;
     private final PaimonCompactionLifecycle compactionLifecycle;
     private final PaimonNativeWriteAccess nativeWriteAccess;
+    private PaimonStopResources.Scope stopScope = PaimonStopResources.Scope.standalone("table-context");
+    public void attachStopScope(PaimonStopResources.Scope scope) {
+        this.stopScope = Objects.requireNonNull(scope);
+        if (compactionLifecycle != null) { compactionLifecycle.attachStopController(scope.controller()); }
+    }
     private boolean gracefulCloseFinished;
     private Throwable gracefulCloseFailure;
     private volatile boolean cleanupComplete;
@@ -249,12 +257,14 @@ public final class PaimonTableWriteContext implements AutoCloseable {
             // org/apache/paimon/index/HashBucketAssigner.java#prepareCommit, lines 101-124.
             // Baseline: apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e.
             messages = Objects.requireNonNull(
-                    writerStrategy.prepareCommit(identifier),
+                    stopScope.call("business prepare", () -> writerStrategy.prepareCommit(identifier)),
                     "Paimon prepareCommit messages for " + tableKey);
             compactionLifecycle.auditControlFailure();
             // Publish pending before the first external commit I/O. A direct failure is always an
             // unknown outcome until filterAndCommit confirms the same envelope.
-            pendingCommits.put(identifier, messages);
+            stopScope.controller().publish("retain pending business commit", () -> {
+                pendingCommits.put(identifier, messages); return null;
+            });
         } catch (Exception | Error e) {
             failed = true;
             throw e;
@@ -271,13 +281,13 @@ public final class PaimonTableWriteContext implements AutoCloseable {
             // Source: paimon-core/src/main/java/org/apache/paimon/table/sink/
             // StreamTableCommit.java#commit, lines 52-62. Baseline:
             // apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e.
-            tableCommitter.commit(identifier, messages);
+            stopScope.run("snapshot commit", () -> tableCommitter.commit(identifier, messages));
         } catch (RuntimeException directFailure) {
             try {
                 return confirmPendingCommit();
             } catch (Exception recoveryFailure) {
                 if (recoveryFailure != directFailure) {
-                    recoveryFailure.addSuppressed(directFailure);
+                    PaimonFailures.append(recoveryFailure, directFailure);
                 }
                 throw recoveryFailure;
             }
@@ -296,7 +306,7 @@ public final class PaimonTableWriteContext implements AutoCloseable {
         }
 
         Map<Long, List<CommitMessage>> snapshot = new LinkedHashMap<>(pendingCommits);
-        int committed = tableCommitter.filterAndCommit(snapshot);
+        int committed = stopScope.call("snapshot filterAndCommit", () -> tableCommitter.filterAndCommit(snapshot));
         if (committed < 0 || committed > snapshot.size()) {
             failed = true;
             throw new IllegalStateException(
@@ -317,13 +327,20 @@ public final class PaimonTableWriteContext implements AutoCloseable {
             throw new IllegalStateException(
                     "Paimon commit identifier is exhausted for " + tableKey);
         }
-        pendingCommits.clear();
-        nextCommitIdentifier = Math.max(nextCommitIdentifier, lastIdentifier + 1L);
+        stopScope.check("publish confirmed pending");
+        long confirmedNext = Math.max(nextCommitIdentifier, lastIdentifier + 1L);
         try {
-            commitStateStore.save(nextCommitIdentifier);
+            stopScope.run("save commit identity", () -> commitStateStore.save(confirmedNext));
+            stopScope.controller().publish("publish confirmed pending", () -> {
+                pendingCommits.clear(); nextCommitIdentifier = confirmedNext; return null;
+            });
         } catch (Exception | Error e) {
-            // The snapshot is already confirmed. Keep pending empty and fence until restart can
-            // reconcile this stable commit user against Paimon's latest user snapshot.
+            // 正常状态存储失败：snapshot 已确认，保留旧的失败栅栏语义；
+            // 超时/冻结时保留 pending，迟到返回不能推进身份或启动重试。
+            if (!stopScope.controller().isRetained() && !stopScope.controller().expired()) {
+                pendingCommits.clear();
+                nextCommitIdentifier = confirmedNext;
+            }
             failed = true;
             throw e;
         }
@@ -341,112 +358,151 @@ public final class PaimonTableWriteContext implements AutoCloseable {
             return stopOutcome;
         }
         if (compactionLifecycle == null) {
-            throw new IllegalStateException("Paimon spill barrier is missing for table " + tableKey);
+            IllegalStateException missing = new IllegalStateException("Paimon spill barrier is missing for table " + tableKey);
+            stopScope.retain(missing);
+            throw missing;
         }
+        PaimonStopController controller = stopScope.controller();
+        stopScope.check("close table");
         closeState = CloseState.CLOSING;
         Throwable failure = null;
         boolean discarded = false;
-        if (finalizeCompaction) {
-            try {
+        boolean interrupted = false;
+        PaimonStopController.FinalAttempt attempt = null;
+        List<CommitMessage> messages = null;
+        boolean hasFinalCompaction = false;
+        try {
+            if (finalizeCompaction) {
                 if (failed || !pendingCommits.isEmpty()) {
                     throw new IllegalStateException("Final Compaction requires a confirmed business barrier for " + tableKey);
                 }
+                if (!controller.isStarted()) { controller.start(); }
+                attempt = controller.beginFinal(tableKey, nextCommitIdentifier, compactionLifecycle);
                 phase(progress, "FINAL_PREPARE");
-                List<CommitMessage> messages = null;
-                Throwable prepareFailure = null;
-                boolean hasFinalCompaction = false;
-                try {
-                    messages = Objects.requireNonNull(writerStrategy.prepareFinalCommit(nextCommitIdentifier));
-                    hasFinalCompaction = PaimonNativeWriteAccess.hasFinalCompaction(messages);
-                } catch (Exception | Error caught) {
-                    prepareFailure = caught;
-                }
-                // prepare 可触发最后一个任务；这里才封闭提交，且先审计原生吞掉的取消。
-                // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/mergetree/MergeTreeWriter.java#L247
-                try { compactionLifecycle.sealFinalPrepare(); }
-                catch (Exception | Error control) {
-                    if (prepareFailure != null) { control.addSuppressed(prepareFailure); }
-                    throw control;
-                }
-                if (prepareFailure != null) {
-                    if (!PaimonCompactionExecutor.isNativeCompactionFailure(prepareFailure)) {
-                        throwIfPresent(prepareFailure);
+                if (attempt.permitsPrepare()) {
+                    try {
+                        PaimonStopController.FinalAttempt preparing = attempt;
+                        messages = Objects.requireNonNull(stopScope.call("final prepare", () -> {
+                            try { return writerStrategy.prepareFinalCommit(nextCommitIdentifier); }
+                            finally { preparing.markPrepareReturned(); }
+                        }));
+                        hasFinalCompaction = PaimonNativeWriteAccess.hasFinalCompaction(messages);
+                    } catch (Exception | Error caught) {
+                        if (compactionLifecycle.isStopCancellation(caught, attempt)
+                                || PaimonCompactionExecutor.isNativeCompactionFailure(caught)) {
+                            discarded = true;
+                            discardedPhase(progress, nextCommitIdentifier, caught);
+                        } else { failure = caught; interrupted |= caught instanceof InterruptedException; }
                     }
+                } else {
+                    PaimonStopController.FinalAttempt cancelled = controller.pollCancellation();
+                    if (cancelled != null) { observe(progress::compactionCancellationRequested); cancelled.requestCancellation(); }
                     discarded = true;
-                    discardedPhase(progress, nextCommitIdentifier, prepareFailure);
-                } else if (hasFinalCompaction) {
+                }
+                // 取消桥接让 CompactFutureManager 的 get 抛 ExecutionException，防止空结果触发
+                // AbstractFileStoreWrite.prepareCommit 内联 writer.close；外层才能先取得真实退出证明。
+                // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/operation/AbstractFileStoreWrite.java#L238-L254
+                compactionLifecycle.sealFinalPrepare();
+            }
+        } catch (Exception | Error caught) {
+            interrupted |= caught instanceof InterruptedException;
+            failure = appendFailure(failure, caught);
+        }
+
+        try {
+            phase(progress, "WAIT_COMPACTION");
+            stopScope.run("shutdown compaction submissions", compactionLifecycle::shutdown);
+            while (!compactionLifecycle.isTerminated()) {
+                stopScope.check("await compaction termination");
+                PaimonStopController.FinalAttempt cancelled = controller.pollCancellation();
+                if (cancelled != null) { observe(progress::compactionCancellationRequested); cancelled.requestCancellation(); }
+                compactionLifecycle.awaitTermination(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(50));
+            }
+            stopScope.check("consume terminated compaction");
+            if (attempt != null) {
+                controller.finalTerminated(attempt); // prepare 已返回 + 实际 executor terminated 两项证明。
+                discarded |= attempt.cancelRequested();
+            }
+            observe(progress::compactionTerminated);
+            for (Throwable syncFailure : nativeWriteAccess.syncAll(stopScope)) {
+                if (attempt != null && (compactionLifecycle.isStopCancellation(syncFailure, attempt)
+                        || (discarded && PaimonCompactionExecutor.isNativeCompactionFailure(syncFailure)))) {
+                    discardedPhase(progress, nextCommitIdentifier, syncFailure);
+                } else { failure = appendFailure(failure, syncFailure); }
+            }
+            compactionLifecycle.auditControlFailure();
+            if (attempt != null && failure == null && !discarded && hasFinalCompaction) {
+                if (controller.admitFinalCommit(attempt)) {
                     if (nextCommitIdentifier == Long.MAX_VALUE) {
                         throw new IllegalStateException("Paimon commit identifier is exhausted for " + tableKey);
                     }
                     phase(progress, "FINAL_COMMIT");
-                    // 与业务提交共享精确 pending 确认核心；不调用 Service 的 offset 发布路径。
-                    // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/table/sink/StreamTableCommit.java#L52
-                    pendingCommits.put(nextCommitIdentifier, messages);
+                    final List<CommitMessage> prepared = messages;
+                    controller.publish("retain final pending", () -> {
+                        pendingCommits.put(nextCommitIdentifier, prepared); return null;
+                    });
                     commitPrepared(nextCommitIdentifier, messages);
-                }
-            } catch (Exception | Error caught) {
-                failure = caught;
-            }
-        }
-        phase(progress, "WAIT_COMPACTION");
-        InterruptedException interruption = compactionLifecycle.shutdownAndAwaitCompletion();
-        failure = appendFailure(failure, interruption);
-        observe(progress::compactionTerminated);
-        try {
-            for (Throwable syncFailure : nativeWriteAccess.syncAll()) {
-                if (discarded && PaimonCompactionExecutor.isNativeCompactionFailure(syncFailure)) {
-                    discardedPhase(progress, nextCommitIdentifier, syncFailure);
                 } else {
-                    failure = appendFailure(failure, syncFailure);
+                    observe(progress::compactionCancellationRequested);
+                    attempt.requestCancellation();
+                    discarded = true;
                 }
             }
         } catch (Exception | Error caught) {
+            interrupted |= caught instanceof InterruptedException;
             failure = appendFailure(failure, caught);
         }
-        try { compactionLifecycle.auditControlFailure(); }
-        catch (Exception | Error control) { failure = appendFailure(failure, control); }
 
-        phase(progress, "CLOSE_WRITER");
-        boolean writerClosed = false;
-        boolean committerClosed = false;
-        try { writerStrategy.close(); writerClosed = true; }
-        catch (Exception | Error caught) { failure = appendFailure(failure, caught); }
-        phase(progress, "CLOSE_COMMITTER");
-        try { tableCommitter.close(); committerClosed = true; }
-        catch (Exception | Error caught) { failure = appendFailure(failure, caught); }
-        // AbstractFileStoreWrite.close 某桶普通 I/O 错误可能截断后续 bucket；不能把 executor
-        // 已终止等价为全部 writer 已关闭。未取得资源证明时保留 IOManager 和目录保护。
-        // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/operation/AbstractFileStoreWrite.java#L304
-        if (writerClosed && committerClosed) {
-            boolean deleted = ioManager == null;
+        // shutdown/cancel/isDone 都不是删除证据；冻结后每个新清理动作都会被短门禁拒绝。
+        // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/operation/AbstractFileStoreWrite.java#L304-L317
+        try {
+            if (!compactionLifecycle.isTerminated()) {
+                throw new IllegalStateException("Compaction has not physically terminated for " + tableKey);
+            }
+            phase(progress, "CLOSE_WRITER");
+            stopScope.run("close writer", writerStrategy::close);
+            phase(progress, "CLOSE_COMMITTER");
+            stopScope.run("close committer", tableCommitter::close);
             if (ioManager != null) {
                 phase(progress, "CLOSE_SPILL");
-                try { ioManager.close(); deleted = true; }
-                catch (Exception | Error caught) { failure = appendFailure(failure, caught); }
-                PaimonSpillDirCleaner.releaseAfterClose(spillDirs, deleted);
-                if (deleted) { observe(progress::spillClosed); }
+                stopScope.run("close IOManager", ioManager::close);
+                PaimonSpillDirCleaner.ReleaseResult release = stopScope.call("release spill owner",
+                        () -> PaimonSpillDirCleaner.releaseAfterClose(spillDirs, true, controller));
+                throwIfPresent(release.failure());
+                if (!release.complete()) { throw new IllegalStateException("Spill owner release incomplete"); }
+                observe(progress::spillClosed);
             }
-            cleanupComplete = deleted;
+            stopScope.check("publish table cleanup proof");
+            cleanupComplete = true;
+            stopScope.completed();
+        } catch (Exception | Error caught) {
+            interrupted |= caught instanceof InterruptedException;
+            failure = appendFailure(failure, caught);
+        }
+        if (!cleanupComplete) {
+            if (failure == null) { failure = new IllegalStateException("Missing table cleanup proof " + tableKey); }
+            stopScope.retain(failure);
         }
         gracefulCloseFailure = failure;
-        stopOutcome = failure != null ? StopOutcome.FAILED
+        stopOutcome = !cleanupComplete ? StopOutcome.FAILED_RETAINED : failure != null ? StopOutcome.FAILED
                 : discarded ? StopOutcome.SUCCESS_COMPACTION_DISCARDED : StopOutcome.SUCCESS;
         gracefulCloseFinished = true;
         closeState = CloseState.CLOSED;
-        if (interruption != null) { Thread.currentThread().interrupt(); }
+        if (interrupted) { Thread.currentThread().interrupt(); }
         throwIfPresent(failure);
         return stopOutcome;
     }
 
     public boolean cleanupComplete() { return cleanupComplete; }
 
-    public enum StopOutcome { SUCCESS, SUCCESS_COMPACTION_DISCARDED, FAILED }
+    public enum StopOutcome { SUCCESS, SUCCESS_COMPACTION_DISCARDED, FAILED, FAILED_RETAINED }
 
     @FunctionalInterface
     public interface CloseObserver {
         void phase(String phase);
         default void compactionDiscarded(long identifier, Throwable failure) {}
         default void compactionTerminated() {}
+        default void compactionCancellationRequested() {}
         default void spillClosed() {}
     }
 
@@ -464,9 +520,7 @@ public final class PaimonTableWriteContext implements AutoCloseable {
     }
 
     private static Throwable appendFailure(Throwable first, Throwable next) {
-        if (first == null) { return next; }
-        if (next != null && next != first) { first.addSuppressed(next); }
-        return first;
+        return PaimonFailures.append(first, next);
     }
 
     private static void throwIfPresent(Throwable failure) throws Exception {
@@ -477,6 +531,8 @@ public final class PaimonTableWriteContext implements AutoCloseable {
     public void write(InternalRow row) throws Exception {
         ensureWritable();
         try {
+            // 原生 assigner 与 TableWriteImpl.write 各自准入，Context 不重复登记整行。
+            // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/table/sink/TableWriteImpl.java#L163
             writerStrategy.write(row);
         } catch (Exception | Error e) {
             failed = true;
@@ -492,6 +548,7 @@ public final class PaimonTableWriteContext implements AutoCloseable {
     public void close() throws Exception { closeForStop(false, phase -> {}); }
 
     private void ensureOpen() {
+        stopScope.check("table access");
         if (closeState != CloseState.ACTIVE) {
             throw new IllegalStateException(
                     "Paimon table write context is closing or closed: " + tableKey);

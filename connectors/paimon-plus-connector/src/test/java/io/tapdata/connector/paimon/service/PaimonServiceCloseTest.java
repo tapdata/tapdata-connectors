@@ -308,6 +308,12 @@ class PaimonServiceCloseTest {
                     assertThrows(InterruptedException.class, service::close);
 
             assertEquals("close interrupted", thrown.getMessage());
+            java.lang.reflect.Field operationField = PaimonService.class.getDeclaredField("closeOperation");
+            operationField.setAccessible(true);
+            Thread worker = ((PaimonStopController) operationField.get(service)).worker;
+            worker.join(3000);
+            assertFalse(worker.isAlive());
+            assertTrue(worker.isInterrupted(), "中断只恢复在实际 close worker 上");
             assertFalse(Thread.currentThread().isInterrupted());
             assertEquals(2, waits.get());
             verify(table.strategy, times(1)).prepareCommit(0L);
@@ -887,6 +893,10 @@ class PaimonServiceCloseTest {
             assertTrue(waiting.contains("owner="), waiting);
             assertTrue(waiting.contains("elapsedMs="), waiting);
             assertTrue(waiting.contains("phaseElapsedMs="), waiting);
+            for (String field : new String[] {"attempt=", "remainingMs=", "cancelRequested=",
+                    "executorTerminated=true", "prepareReturned=true", "inFlightAction="}) {
+                assertTrue(waiting.contains(field), waiting);
+            }
         } finally {
             allowFinalPrepare.countDown();
             release.countDown();
@@ -895,8 +905,11 @@ class PaimonServiceCloseTest {
         assertFalse(caller.isAlive());
         assertNull(failure.get());
         service.close();
+        awaitEvent(events, "event=start");
         assertEquals(1, countEvents(events, "event=start"));
+        awaitEvent(events, "event=finished");
         assertEquals(1, countEvents(events, "event=finished"));
+        awaitEvent(events, "正常退出");
         assertEquals(1, countEvents(events, "正常退出"));
     }
 
@@ -935,8 +948,9 @@ class PaimonServiceCloseTest {
 
         assertFalse(table.context.cleanupComplete());
         verify(table.strategy, times(1)).close();
-        verify(table.committer, times(1)).close();
+        verify(table.committer, never()).close();
         assertEquals(0, countEvents(events, "正常退出"));
+        awaitEvent(events, "event=finished");
         assertEquals(1, countEvents(events, "event=finished"));
     }
 
@@ -991,7 +1005,9 @@ class PaimonServiceCloseTest {
         verify(table.committer, never()).filterAndCommit(anyMap());
         verify(table.strategy, times(1)).close();
         verify(table.committer, times(1)).close();
+        awaitEvent(events, "event=compaction-discarded");
         assertEquals(1, countEvents(events, "event=compaction-discarded"));
+        awaitEvent(events, "event=finished");
         assertEquals(1, countEvents(events, "event=finished"));
         String discarded = events.stream().filter(event -> event.contains("event=compaction-discarded"))
                 .findFirst().get();
@@ -1033,6 +1049,7 @@ class PaimonServiceCloseTest {
         assertTrue(table.context.cleanupComplete());
         assertEquals(0, countEvents(events, "event=compaction-discarded"));
         assertEquals(0, countEvents(events, "正常退出"));
+        awaitEvent(events, "outcome=FAILED");
         assertEquals(1, countEvents(events, "outcome=FAILED"));
     }
 
@@ -1054,6 +1071,7 @@ class PaimonServiceCloseTest {
         assertTrue(table.context.cleanupComplete());
         assertEquals(0, countEvents(events, "event=compaction-discarded"));
         assertEquals(0, countEvents(events, "正常退出"));
+        awaitEvent(events, "outcome=FAILED");
         assertEquals(1, countEvents(events, "outcome=FAILED"));
     }
 
@@ -1114,6 +1132,7 @@ class PaimonServiceCloseTest {
             assertEquals(stage == HardErrorStage.OFFSET_CALLBACK ? 1 : 0, callbacks.get());
             assertEquals(0, countEvents(events, "event=compaction-discarded"));
             assertEquals(0, countEvents(events, "正常退出"));
+            awaitEvent(events, "outcome=FAILED");
             assertEquals(1, countEvents(events, "outcome=FAILED"));
             assertDoesNotThrow(() -> register.invoke(nextService, "default.a", physical));
         } finally {
@@ -1144,6 +1163,11 @@ class PaimonServiceCloseTest {
                 return new CompactResult();
             }
         };
+    }
+
+    private static void awaitEvent(List<String> events, String token) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        while (countEvents(events, token) == 0 && System.nanoTime() < deadline) { Thread.sleep(5); }
     }
 
     private static Log recordingStopLog(List<String> events) {
@@ -1252,6 +1276,14 @@ class PaimonServiceCloseTest {
                                 compactionLifecycle != null
                                         ? compactionLifecycle
                                         : PaimonCompactionLifecycle.withoutCompactionExecutor()));
+        Field controllerField = PaimonService.class.getDeclaredField("stopController");
+        controllerField.setAccessible(true);
+        Field resourcesField = PaimonService.class.getDeclaredField("stopResources");
+        resourcesField.setAccessible(true);
+        PaimonStopResources.Scope scope = ((PaimonStopResources) resourcesField.get(service)).scope(
+                tableKey, (PaimonStopController) controllerField.get(service));
+        scope.reserve("test context").bind(tableContexts(service).get(tableKey));
+        tableContexts(service).get(tableKey).attachStopScope(scope);
         fieldCache(service).put(
                 tableKey, Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
         return new TableFixture(strategy, committer, tableContexts(service).get(tableKey));

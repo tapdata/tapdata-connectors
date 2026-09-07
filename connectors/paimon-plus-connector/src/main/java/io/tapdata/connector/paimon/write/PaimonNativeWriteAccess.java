@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.write;
 
+import io.tapdata.connector.paimon.service.PaimonStopResources;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -38,7 +39,9 @@ public final class PaimonNativeWriteAccess {
     static PaimonNativeWriteAccess withoutNativeWriters() { return new PaimonNativeWriteAccess(null); }
 
     /** 调用前必须取得实际 executor termination；遍历全部 bucket，即使前一个失败。 */
-    public List<Throwable> syncAll() {
+    public List<Throwable> syncAll() { return syncAll(null); }
+
+    public List<Throwable> syncAll(PaimonStopResources.Scope scope) {
         if (write == null) { return Collections.emptyList(); }
         List<RecordWriter<?>> writers = new ArrayList<>();
         for (Map<Integer, ? extends AbstractFileStoreWrite.WriterContainer<?>> buckets : write.writers().values()) {
@@ -53,7 +56,8 @@ public final class PaimonNativeWriteAccess {
                 // 清空失败 Future，避免原生 close 在第一桶重复抛错而截断其他桶的清理。
                 // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/mergetree/MergeTreeWriter.java#L276
                 // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/compact/CompactFutureManager.java#L47
-                writer.sync();
+                if (scope == null) { writer.sync(); }
+                else { scope.run("consume bucket compaction", writer::sync); }
             } catch (Exception | Error failure) {
                 errors.add(failure);
             }

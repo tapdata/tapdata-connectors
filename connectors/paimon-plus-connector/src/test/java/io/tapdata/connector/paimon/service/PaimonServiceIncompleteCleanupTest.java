@@ -96,10 +96,12 @@ class PaimonServiceIncompleteCleanupTest {
         Method unregister = PaimonService.class.getDeclaredMethod("unregisterPhysicalTableOwner", String.class);
         register.setAccessible(true);
         unregister.setAccessible(true);
-        try (MockedStatic<PaimonTableWriteContext> factory = mockStatic(PaimonTableWriteContext.class)) {
-            MockedStatic.Verification creation = () -> PaimonTableWriteContext.create(
+        try (MockedStatic<PaimonTableWriteContextFactory> factory = mockStatic(PaimonTableWriteContextFactory.class)) {
+            MockedStatic.Verification creation = () -> PaimonTableWriteContextFactory.create(
                     eq("default.orders"), eq("orders"), same(table), anyString(), anyString(), anyLong(),
-                    any(PaimonTableWriteContext.CommitStateStore.class), any(PaimonWriteSemanticContract.class));
+                    any(PaimonTableWriteContext.CommitStateStore.class),
+                    any(io.tapdata.connector.paimon.write.bucket.PaimonBucketWriterRuntimeFactory.class),
+                    any(PaimonWriteSemanticContract.class), any(PaimonStopResources.Scope.class));
             factory.when(creation).thenThrow(incomplete);
 
             assertSame(incomplete, assertThrows(Exception.class, () -> service.writeRecords(
@@ -126,8 +128,8 @@ class PaimonServiceIncompleteCleanupTest {
         } finally {
             try { service.close(); } catch (Exception expectedIncompleteCleanup) { /* 故障终态保持。 */ }
             // 本 fixture 的 Incomplete 信号来自故障注入，未创建实际 writer；仅测试收尾清除其登记。
-            unregister.invoke(service, "default.orders");
-            unregister.invoke(contender, "default.orders");
+            PaimonStopTestSupport.releaseInjectedOwner(service, "default.orders");
+            PaimonStopTestSupport.releaseInjectedOwner(contender, "default.orders");
             contender.close();
             catalog.close();
         }

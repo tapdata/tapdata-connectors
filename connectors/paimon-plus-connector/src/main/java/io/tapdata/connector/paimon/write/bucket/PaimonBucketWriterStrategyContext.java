@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.write.bucket;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract;
+import io.tapdata.connector.paimon.service.PaimonStopResources;
 
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -10,6 +11,8 @@ import java.util.Objects;
 /** Immutable construction context shared by all bucket writer strategies. */
 public final class PaimonBucketWriterStrategyContext {
 
+    private final PaimonStopResources.Scope stopScope;
+    PaimonStopResources.Scope stopScope() { return stopScope; }
     private final String tableKey;
     private final FileStoreTable table;
     private final StreamTableWrite writer;
@@ -24,6 +27,18 @@ public final class PaimonBucketWriterStrategyContext {
             String commitUser,
             IOManager ioManager,
             PaimonWriteSemanticContract writeSemanticContract) {
+        this(tableKey, table, writer, commitUser, ioManager, writeSemanticContract,
+                PaimonStopResources.Scope.standalone("bucket strategy " + tableKey));
+    }
+
+    public PaimonBucketWriterStrategyContext(
+            String tableKey,
+            FileStoreTable table,
+            StreamTableWrite writer,
+            String commitUser,
+            IOManager ioManager,
+            PaimonWriteSemanticContract writeSemanticContract, PaimonStopResources.Scope stopScope) {
+        this.stopScope = Objects.requireNonNull(stopScope);
         this.tableKey = Objects.requireNonNull(tableKey, "tableKey");
         this.table = Objects.requireNonNull(table, "table");
         this.writer = Objects.requireNonNull(writer, "writer");

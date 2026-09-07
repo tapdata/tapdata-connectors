@@ -20,6 +20,31 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class PaimonConfigTest {
 
+    @Test
+    void stopBudgetsMustRejectFractionOverflowNonPositiveAndTableOverrides() {
+        for (String key : Arrays.asList("stopTimeoutSeconds", "finalCompactionTimeoutSeconds", "compactionCancelGraceSeconds")) {
+            for (Object value : Arrays.asList(0, -1, 1.5, Long.MAX_VALUE, "2147483648", true, "invalid")) {
+                assertThrows(IllegalArgumentException.class, () -> new PaimonConfig().load(Collections.singletonMap(key, value)), key + "=" + value);
+            }
+            PaimonConfig config = new PaimonConfig();
+            config.setTableConfig(Collections.singletonMap("a", DataMap.create().kv(key, 10)));
+            assertThrows(IllegalArgumentException.class, config::validateStopBudgets);
+            assertDoesNotThrow(() -> new PaimonConfig().load(Collections.singletonMap(key, Integer.MAX_VALUE)));
+        }
+    }
+
+    @Test
+    void stopBudgetsMissingNullAndLayeredDefaultsMustMatch() {
+        PaimonConfig config = new PaimonConfig().load(Collections.emptyMap());
+        assertEquals(180, config.getStopTimeoutSeconds());
+        assertEquals(120, config.getFinalCompactionTimeoutSeconds());
+        assertEquals(30, config.getCompactionCancelGraceSeconds());
+        config.load(Collections.singletonMap("stopTimeoutSeconds", 20)).load(Collections.singletonMap("stopTimeoutSeconds", null));
+        config.setFinalCompactionTimeoutSeconds(null); config.setCompactionCancelGraceSeconds(null);
+        assertEquals(180, config.getStopTimeoutSeconds()); assertEquals(120, config.getFinalCompactionTimeoutSeconds());
+        assertEquals(30, config.getCompactionCancelGraceSeconds());
+    }
+
     @ParameterizedTest
     @MethodSource("unsupportedExpireModes")
     void expirationModeMustBeRejectedDuringLoadAndValidate(String value) {

@@ -1,5 +1,7 @@
 package io.tapdata.connector.paimon.commit;
 
+import io.tapdata.connector.paimon.service.PaimonStopController;
+
 import io.tapdata.connector.paimon.util.PaimonSpillDirCleaner;
 import io.tapdata.entity.event.TapCallbackOffset;
 
@@ -118,6 +120,12 @@ public final class PaimonMicroBatchCoordinator {
         synchronized (lock) {
             MutableTableState state = tables.get(tableKey);
             return state == null ? null : state.pendingCommitTarget;
+        }
+    }
+
+    public List<CallbackReservation> publishCommit(CommitTarget target, long completedAtMs, PaimonStopController controller) {
+        synchronized (lock) {
+            return controller.publish("publishCommit", () -> publishCommit(target, completedAtMs));
         }
     }
 
@@ -253,6 +261,12 @@ public final class PaimonMicroBatchCoordinator {
                             copyOffset(payload),
                             required);
             return reserveIfReadyLocked(lane);
+        }
+    }
+
+    public CallbackReservation completeCallback(CallbackReservation reservation, PaimonStopController controller) {
+        synchronized (lock) {
+            return controller.publish("completeCallback", () -> completeCallback(reservation));
         }
     }
 

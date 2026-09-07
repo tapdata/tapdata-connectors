@@ -1,4 +1,5 @@
 package io.tapdata.connector.paimon.write.bucket;
+import io.tapdata.connector.paimon.util.PaimonFailures;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract;
 
 import io.tapdata.connector.paimon.exception.PaimonFatalWriteException;
@@ -19,6 +20,7 @@ import java.util.Objects;
 /** Final lifecycle template shared by all concrete bucket-mode strategies. */
 public abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucketWriterStrategy {
 
+    protected final io.tapdata.connector.paimon.service.PaimonStopResources.Scope stopScope;
     protected final String tableKey;
     protected final FileStoreTable table;
     protected final StreamTableWrite delegate;
@@ -33,6 +35,7 @@ public abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucket
             BucketMode expectedMode,
             Collection<String> requiredTargetFields) {
         Objects.requireNonNull(context, "context");
+        this.stopScope = context.stopScope();
         this.tableKey = context.tableKey();
         this.table = context.table();
         this.delegate = context.writer();
@@ -118,12 +121,12 @@ public abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucket
 
     private List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier) throws Exception {
         ensureOpen();
-        beforePrepareCommit(commitIdentifier);
+        stopScope.run("prepare bucket assignment", () -> beforePrepareCommit(commitIdentifier));
         // Paimon 1.3.2 prepareCommit(true) 会 flush、等待并消费结果，flush 自身还可能调度
         // Compaction，调用前不能 shutdown executor。普通提交保留 false；不能绕过模式钩子。
         // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/mergetree/MergeTreeWriter.java#L252
         // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/append/AppendOnlyWriter.java#L221
-        return delegate.prepareCommit(waitCompaction, commitIdentifier);
+        return stopScope.call("native prepareCommit", () -> delegate.prepareCommit(waitCompaction, commitIdentifier));
     }
 
     protected void beforePrepareCommit(long commitIdentifier) throws Exception {
@@ -139,17 +142,17 @@ public abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucket
 
         Throwable failure = null;
         try {
-            closeModeResources();
+            stopScope.run("close bucket runtime", this::closeModeResources);
         } catch (Exception | Error e) {
             failure = e;
         }
         try {
-            delegate.close();
+            stopScope.run("close native table writer", delegate::close);
         } catch (Exception | Error e) {
             if (failure == null) {
                 failure = e;
             } else if (failure != e) {
-                failure.addSuppressed(e);
+                PaimonFailures.append(failure, e);
             }
         }
         if (failure != null) {
@@ -163,6 +166,7 @@ public abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucket
     }
 
     private void ensureOpen() {
+        stopScope.check("bucket strategy access");
         if (closed) {
             throw new IllegalStateException("Paimon bucket writer strategy is closed: " + tableKey);
         }

@@ -36,6 +36,6 @@ public final class BucketUnawareWriterStrategy extends AbstractPaimonBucketWrite
 
     @Override
     protected void doWrite(InternalRow row) throws Exception {
-        delegate.write(row);
+        stopScope.run("write native row", () -> delegate.write(row));
     }
 }

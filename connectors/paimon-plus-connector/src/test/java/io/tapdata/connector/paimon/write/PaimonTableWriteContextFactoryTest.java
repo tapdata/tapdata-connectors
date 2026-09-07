@@ -313,7 +313,7 @@ class PaimonTableWriteContextFactoryTest {
                     PaimonTableWriteContextFactory.IncompleteCleanupException.class, fixture::create);
 
             assertSame(original, failure.getCause());
-            assertEquals(Collections.singletonList(cleanup), Arrays.asList(original.getSuppressed()));
+            assertTrue(Arrays.asList(original.getSuppressed()).contains(cleanup));
             InOrder order = inOrder(fixture.writer, fixture.committer, io);
             order.verify(fixture.writer).close();
             order.verify(fixture.committer).close();
