@@ -69,6 +69,44 @@ class DefaultFileOperationServiceTest {
         assertNull(target.getFile("/orders/a.txt"));
     }
 
+    @Test
+    void checksumVerificationRejectsSameSizeDifferentContent() {
+        FakeStorage source = new FakeStorage();
+        source.put("/orders/a.txt", "hello".getBytes());
+        FakeStorage target = new FakeStorage();
+        target.put("/orders/a.txt", "world".getBytes());
+        DefaultFileOperationService service = new DefaultFileOperationService(
+                new InMemorySessions(source, target));
+
+        FileOperationException error = assertThrows(FileOperationException.class,
+                () -> service.copy(FileCopyRequest.builder()
+                        .source(request().getSource()).target(request().getTarget())
+                        .sourcePath("orders/a.txt").targetPath("orders/a.txt")
+                        .verifyMode(io.tapdata.file.operation.FileVerifyMode.CHECKSUM).build()));
+        assertEquals(FileOperationErrorCode.FILE_TARGET_CONFLICT, error.getCode());
+    }
+
+    @Test
+    void checksumVerificationAndRetryAreReported() {
+        FakeStorage source = new FakeStorage();
+        source.put("/orders/a.txt", "hello".getBytes());
+        FakeStorage target = new FakeStorage();
+        target.failSaveCount = 1;
+        DefaultFileOperationService service = new DefaultFileOperationService(
+                new InMemorySessions(source, target));
+
+        io.tapdata.file.operation.FileOperationResult result = service.copy(FileCopyRequest.builder()
+                .source(request().getSource()).target(request().getTarget())
+                .sourcePath("orders/a.txt").targetPath("orders/a.txt")
+                .verifyMode(io.tapdata.file.operation.FileVerifyMode.CHECKSUM)
+                .expectedChecksum("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+                .retryTimes(1).build());
+        assertEquals(FileOperationStatus.COPIED, result.getStatus());
+        assertEquals(2, result.getAttempts());
+        assertEquals("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+                result.getChecksum());
+    }
+
     private static FileCopyRequest request() {
         Map<String, Object> sourceParams = new HashMap<>();
         sourceParams.put("side", "source");
@@ -100,6 +138,7 @@ class DefaultFileOperationServiceTest {
     private static class FakeStorage implements TapFileStorage {
         private final Map<String, byte[]> files = new HashMap<>();
         private int publishCount;
+        private int failSaveCount;
 
         void put(String path, byte[] bytes) { files.put(path, bytes); }
         byte[] bytes(String path) { return files.get(path); }
@@ -127,6 +166,10 @@ class DefaultFileOperationServiceTest {
         }
         @Override public boolean delete(String path) { return files.remove(path) != null; }
         @Override public TapFile saveFile(String path, InputStream is, boolean canReplace) throws Exception {
+            if (failSaveCount > 0) {
+                failSaveCount--;
+                throw new java.io.IOException("temporary write failure");
+            }
             if (!canReplace && files.containsKey(path)) return getFile(path);
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] buffer = new byte[1024];
