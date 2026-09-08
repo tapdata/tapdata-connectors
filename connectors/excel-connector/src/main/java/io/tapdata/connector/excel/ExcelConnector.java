@@ -205,27 +205,32 @@ public class ExcelConnector extends FileConnector {
 
     @Override
     public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
-        initConnection(connectionContext);
-        if (EmptyKit.isBlank(fileConfig.getModelName())) {
-            return;
+        try {
+            initConnection(connectionContext);
+            if (EmptyKit.isBlank(fileConfig.getModelName())) {
+                return;
+            }
+            TapTable tapTable = table(fileConfig.getModelName());
+            ConcurrentMap<String, TapFile> excelFileMap = getFilteredFiles();
+            ExcelSchema excelSchema = new ExcelSchema((ExcelConfig) fileConfig, storage);
+            Map<String, Object> sample;
+            //excel has column header
+            if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
+                sample = excelSchema.sampleFixedFileData(excelFileMap);
+            } else //analyze every excel file
+            {
+                sample = excelSchema.sampleEveryFileData(excelFileMap);
+            }
+            if (EmptyKit.isEmpty(sample)) {
+                throw new RuntimeException("Load schema from excel files error: no headers and contents!");
+            }
+            makeTapTable(tapTable, sample, fileConfig.getJustString());
+            consumer.accept(Collections.singletonList(tapTable));
+        } finally {
+            if (storage != null) {
+                storage.destroy();
+            }
         }
-        TapTable tapTable = table(fileConfig.getModelName());
-        ConcurrentMap<String, TapFile> excelFileMap = getFilteredFiles();
-        ExcelSchema excelSchema = new ExcelSchema((ExcelConfig) fileConfig, storage);
-        Map<String, Object> sample;
-        //excel has column header
-        if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
-            sample = excelSchema.sampleFixedFileData(excelFileMap);
-        } else //analyze every excel file
-        {
-            sample = excelSchema.sampleEveryFileData(excelFileMap);
-        }
-        if (EmptyKit.isEmpty(sample)) {
-            throw new RuntimeException("Load schema from excel files error: no headers and contents!");
-        }
-        makeTapTable(tapTable, sample, fileConfig.getJustString());
-        consumer.accept(Collections.singletonList(tapTable));
-        storage.destroy();
     }
 
     @Override

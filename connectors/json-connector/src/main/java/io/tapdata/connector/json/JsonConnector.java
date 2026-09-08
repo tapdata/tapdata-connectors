@@ -118,20 +118,25 @@ public class JsonConnector extends FileConnector {
 
     @Override
     public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
-        initConnection(connectionContext);
-        if (EmptyKit.isBlank(fileConfig.getModelName())) {
-            return;
+        try {
+            initConnection(connectionContext);
+            if (EmptyKit.isBlank(fileConfig.getModelName())) {
+                return;
+            }
+            TapTable tapTable = table(fileConfig.getModelName());
+            ConcurrentMap<String, TapFile> jsonFileMap = getFilteredFiles();
+            JsonSchema jsonSchema = new JsonSchema((JsonConfig) fileConfig, storage);
+            Map<String, Object> sample = jsonSchema.sampleEveryFileData(jsonFileMap);
+            if (EmptyKit.isEmpty(sample)) {
+                throw new RuntimeException("Load schema from json files error: no contents found!");
+            }
+            SCHEMA_PARSER.parse(tapTable, sample);
+            consumer.accept(Collections.singletonList(tapTable));
+        } finally {
+            if (storage != null) {
+                storage.destroy();
+            }
         }
-        TapTable tapTable = table(fileConfig.getModelName());
-        ConcurrentMap<String, TapFile> jsonFileMap = getFilteredFiles();
-        JsonSchema jsonSchema = new JsonSchema((JsonConfig) fileConfig, storage);
-        Map<String, Object> sample = jsonSchema.sampleEveryFileData(jsonFileMap);
-        if (EmptyKit.isEmpty(sample)) {
-            throw new RuntimeException("Load schema from json files error: no contents found!");
-        }
-        SCHEMA_PARSER.parse(tapTable, sample);
-        consumer.accept(Collections.singletonList(tapTable));
-        storage.destroy();
     }
 
 }
