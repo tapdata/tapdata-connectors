@@ -66,6 +66,7 @@ public class XmlConnector extends FileConnector {
 
     @Override
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
+        registerFileStorageFunction(connectorFunctions);
         codecRegistry.registerFromTapValue(TapRawValue.class, "STRING", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null) return tapRawValue.getValue().toString();
             return "null";

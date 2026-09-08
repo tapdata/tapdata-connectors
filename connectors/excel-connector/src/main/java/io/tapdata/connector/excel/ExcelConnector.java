@@ -175,6 +175,7 @@ public class ExcelConnector extends FileConnector {
 
     @Override
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
+        registerFileStorageFunction(connectorFunctions);
         codecRegistry.registerToTapValue(LocalDate.class, (value, tapType) ->
                 new TapDateValue(new DateTime(((LocalDate) value).atStartOfDay())));
         codecRegistry.registerToTapValue(LocalTime.class, (value, tapType) ->

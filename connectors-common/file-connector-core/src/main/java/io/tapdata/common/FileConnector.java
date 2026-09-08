@@ -19,6 +19,7 @@ import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
@@ -40,6 +41,15 @@ public abstract class FileConnector extends ConnectorBase {
     protected String firstConnectorId;
     private static final String TAG = FileConnector.class.getSimpleName();
     protected Log tapLogger;
+
+    protected void registerFileStorageFunction(ConnectorFunctions connectorFunctions) {
+        connectorFunctions.supportFileStorageFunction(connectorContext -> {
+            if (storage == null) {
+                throw new IllegalStateException("File storage has not been initialized");
+            }
+            return storage;
+        });
+    }
 
     protected void initConnection(TapConnectionContext connectionContext) throws Exception {
         tapLogger = connectionContext.getLog();
