@@ -780,7 +780,11 @@
         0,
         17
       ],
-      "fixed": false
+      "fixed": false,
+      "value": [
+        "-1.7976931348623157E+308",
+        "1.7976931348623157E+308"
+      ]
     },
     "decimal[($precision,$scale)]": {
       "bit": 128,
