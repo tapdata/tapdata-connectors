@@ -22,7 +22,9 @@ import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
+import io.tapdata.pdk.apis.entity.ExecuteResult;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.entity.TapExecuteCommand;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.FilterResults;
@@ -181,6 +183,7 @@ public class PaimonConnector extends ConnectorBase {
         connectorFunctions.supportStreamRead(this::streamRead);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilter);
+        connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
 
         // Target capabilities
         connectorFunctions.supportWriteRecord(this::writeRecord);
@@ -569,6 +572,24 @@ public class PaimonConnector extends ConnectorBase {
         } catch (Exception e) {
             log.error("Error querying table " + table.getName() + ": " + e.getMessage(), e);
             throw e;
+        }
+    }
+
+    private void executeCommand(TapConnectorContext connectorContext, TapExecuteCommand command,
+                                Consumer<ExecuteResult> consumer) throws Throwable {
+        try {
+            if (command == null || !"executeQuery".equals(command.getCommand())) {
+                throw new IllegalArgumentException("Not supported command: "
+                        + (command == null ? null : command.getCommand()));
+            }
+            Object sql = command.getParams() == null ? null : command.getParams().get("sql");
+            if (!(sql instanceof String) || ((String) sql).trim().isEmpty()) {
+                throw new IllegalArgumentException("executeQuery requires a non-empty params.sql");
+            }
+            Object result = paimonService.executeQuery((String) sql, connectorContext.getLog());
+            consumer.accept(new ExecuteResult<>().result(result));
+        } catch (Throwable throwable) {
+            consumer.accept(new ExecuteResult<>().error(throwable));
         }
     }
 
