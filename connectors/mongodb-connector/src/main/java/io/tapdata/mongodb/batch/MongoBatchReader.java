@@ -141,7 +141,7 @@ public class MongoBatchReader {
         DocumentCodec codec = new DocumentCodec();
         DecoderContext decoderContext = DecoderContext.builder().build();
         AtomicReference<Exception> throwableAtomicReference = new AtomicReference<>();
-        ConcurrentProcessor<Object, Object> concurrentProcessor = TapExecutors.createSimple(8, 32, "MongoBatchReader-Processor");
+        ConcurrentProcessor<Object, Object> concurrentProcessor = TapExecutors.createSimple(mongoConfig.getDecodeThreads(), mongoConfig.getDecodeQueueSize(), "MongoBatchReader-Processor");
         Thread t = new Thread(() -> {
             List<TapEvent> events = list();
             while (checkAlive.getAsBoolean()) {
