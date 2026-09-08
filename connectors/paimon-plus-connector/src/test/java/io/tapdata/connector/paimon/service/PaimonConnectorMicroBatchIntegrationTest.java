@@ -39,6 +39,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -137,7 +138,12 @@ class PaimonConnectorMicroBatchIntegrationTest {
 
             assertEquals(0, callbacks.size());
             clock.set(1_100L);
-            scheduledTask.get().run();
+            scheduledTask.getAndSet(null).run();
+            // 单并发每轮只准入一张表；真实 executor 会继续执行下一轮零延迟任务。
+            // fake scheduler 必须手动执行第二轮，不能把第一张表提交当作两表屏障完成。
+            assertEquals(0, callbacks.size());
+            assertNotNull(scheduledTask.get());
+            scheduledTask.getAndSet(null).run();
 
             assertEquals(2, callbacks.size());
             assertEquals(
@@ -183,6 +189,7 @@ class PaimonConnectorMicroBatchIntegrationTest {
         config.setBatchAccumulationSize(100);
         config.setCommitIntervalMs(1_000);
         config.setEnableAsyncCommit(true);
+        config.setAsyncCommitConcurrency(1);
         config.setWriteBufferSize(8);
         return config;
     }
