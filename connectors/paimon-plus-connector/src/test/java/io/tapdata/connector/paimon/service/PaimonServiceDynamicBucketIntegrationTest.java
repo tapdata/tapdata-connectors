@@ -54,44 +54,14 @@ import static org.mockito.Mockito.when;
 
 class PaimonServiceDynamicBucketIntegrationTest {
 
-    @Test
-    void reportedProductionDdlAsyncMustFailBeforeWriterOwnerOrSpillAllocation() throws Exception {
-        PaimonConfig config = config("reported-ddl-async");
-        PaimonService service = service(config);
-        try {
-            Identifier id = Identifier.create(DATABASE, "future_inhousedate");
-            catalog(service).createTable(id,
-                    io.tapdata.connector.paimon.FutureInhouseDateFixture.schema("async"), false);
-            FileStoreTable table = (FileStoreTable) catalog(service).getTable(id);
-            // bucket=-1 且主键包含分区键，Paimon 选择 HASH_DYNAMIC。
-            // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L100
-            assertEquals(BucketMode.HASH_DYNAMIC, table.bucketMode());
-            java.lang.reflect.Method method = PaimonService.class.getDeclaredMethod(
-                    "getOrCreateTableWriteContext", String.class, String.class, Identifier.class,
-                    TapConnectorContext.class, FileStoreTable.class,
-                    io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract.class);
-            method.setAccessible(true);
-            java.lang.reflect.InvocationTargetException failure = assertThrows(
-                    java.lang.reflect.InvocationTargetException.class,
-                    () -> method.invoke(service, id.getFullName(), id.getObjectName(), id, null, table, null));
-            assertTrue(failure.getCause() instanceof IllegalArgumentException);
-            assertTrue(failure.getCause().getMessage().contains("SYNC"));
-            assertEquals(0, tableWriteContextCount(service));
-            assertTrue(derivedCache(service, "physicalTableByLogicalTable").isEmpty());
-            try (java.util.stream.Stream<java.nio.file.Path> files = Files.list(
-                    java.nio.file.Paths.get(config.getDiskTmpDir()))) {
-                assertEquals(0, files.count());
-            }
-        } finally { service.close(); }
-    }
-
-    @Test
-    void reportedProductionDdlSyncMustWriteAndReadPartitionedCompositeKey() throws Exception {
-        PaimonConfig config = config("reported-ddl-sync");
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"SYNC", "async"})
+    void reportedProductionDdlMustWriteAndReadWithSyncMaintenance(String inputMode) throws Exception {
+        PaimonConfig config = config("reported-ddl-" + inputMode);
         PaimonService service = service(config);
         try {
             String name = "future_inhousedate";
-            Schema schema = io.tapdata.connector.paimon.FutureInhouseDateFixture.schema("SYNC");
+            Schema schema = io.tapdata.connector.paimon.FutureInhouseDateFixture.schema(inputMode);
             catalog(service).createTable(Identifier.create(DATABASE, name), schema, false);
             TapTable tap = new TapTable(name);
             for (org.apache.paimon.types.DataField field : schema.fields()) {
@@ -110,6 +80,8 @@ class PaimonServiceDynamicBucketIntegrationTest {
             service.writeRecords(Collections.singletonList(cdcInsert(name, data)), tap, context(stateMap()));
             FileStoreTable table = (FileStoreTable) catalog(service).getTable(Identifier.create(DATABASE, name));
             assertEquals(BucketMode.HASH_DYNAMIC, table.bucketMode());
+            assertEquals(org.apache.paimon.CoreOptions.ExpireExecutionMode.SYNC,
+                    table.coreOptions().snapshotExpireExecutionMode());
             List<InternalRow> rows = readRows(table);
             assertEquals(1, rows.size());
             assertEquals(2, rows.get(0).getInt(2));

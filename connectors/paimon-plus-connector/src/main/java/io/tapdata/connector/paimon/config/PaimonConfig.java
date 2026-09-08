@@ -19,7 +19,7 @@ import java.util.Map;
 public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     private static final long serialVersionUID = 1L;
-    public static final int DEFAULT_ASYNC_COMMIT_CONCURRENCY = 4;
+    public static final int DEFAULT_ASYNC_COMMIT_CONCURRENCY = 1;
     public static final int MIN_ASYNC_COMMIT_CONCURRENCY = 1;
     public static final int MAX_ASYNC_COMMIT_CONCURRENCY = 16;
 
@@ -98,8 +98,9 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // Enable background deadline commits for low-traffic CDC tables (default: true)
     private Boolean enableAsyncCommit = true;
 
-    // Connector-level physical-table commit concurrency. This is deliberately not mapped to
-    // Paimon's file-operation.thread-num, which controls internal file operations instead.
+    // 后台定时提交最多同时处理的物理表数，默认 1；同表始终串行。
+    // 仅 enableAsyncCommit=true 且 commitIntervalMs>0 时启用调度；不控制 Compaction、
+    // snapshot.expire.execution-mode 或 Paimon file-operation.thread-num。
     private Integer asyncCommitConcurrency = DEFAULT_ASYNC_COMMIT_CONCURRENCY;
 
     // Service 停止预算；不是 Paimon 内核参数。超时不能作为删除 Spill 的证据。
@@ -532,10 +533,10 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     }
 
     private void validateExpireMode() {
-        PaimonSyncExpireMode.requireSyncProperties("<connection>", tableProperties);
+        PaimonSyncExpireMode.validateProperties("<connection>", tableProperties);
         if (getTableConfig() != null) {
             for (String tableKey : getTableConfig().keySet()) {
-                PaimonSyncExpireMode.requireSyncProperties(tableKey, getTableProperties(tableKey));
+                PaimonSyncExpireMode.validateProperties(tableKey, getTableProperties(tableKey));
             }
         }
     }
