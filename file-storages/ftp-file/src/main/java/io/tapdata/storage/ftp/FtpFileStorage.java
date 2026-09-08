@@ -2,7 +2,6 @@ package io.tapdata.storage.ftp;
 
 import io.tapdata.file.TapFile;
 import io.tapdata.file.TapFileStorage;
-import io.tapdata.file.operation.FileStorageCapability;
 import io.tapdata.storage.kit.FileMatchKit;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
@@ -18,7 +17,6 @@ import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -455,11 +453,6 @@ public class FtpFileStorage implements TapFileStorage {
             ftpClient.changeWorkingDirectory(currentDirectory);
         }
         return exists;
-    }
-
-    @Override
-    public EnumSet<FileStorageCapability> capabilities() {
-        return EnumSet.of(FileStorageCapability.ATOMIC_RENAME, FileStorageCapability.APPEND);
     }
 
     @Override
