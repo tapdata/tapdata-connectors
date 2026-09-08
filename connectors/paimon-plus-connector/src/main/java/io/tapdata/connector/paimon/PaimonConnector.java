@@ -89,7 +89,8 @@ public class PaimonConnector extends ConnectorBase {
             try {
                 paimonService.close();
             } catch (Exception e) {
-                connectionContext.getLog().warn("Error closing Paimon service: " + e.getMessage(), e);
+                io.tapdata.connector.paimon.service.PaimonStopLog.offer(connectionContext.getLog(),
+                        "[paimon-stop] event=connector-stop-failed", e);
                 // A close failure can mean buffered rows were not committed. Propagate it through
                 // the PDK stop-failure channel so shutdown is never reported as successful.
                 throw e;

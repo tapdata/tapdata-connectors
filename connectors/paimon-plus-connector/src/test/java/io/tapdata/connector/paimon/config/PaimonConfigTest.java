@@ -8,6 +8,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -18,6 +19,93 @@ import static org.junit.jupiter.api.Assertions.*;
  * Test class for PaimonConfig
  */
 class PaimonConfigTest {
+
+    @Test
+    void stopBudgetsMustRejectFractionOverflowNonPositiveAndTableOverrides() {
+        for (String key : Arrays.asList("stopTimeoutSeconds", "finalCompactionTimeoutSeconds", "compactionCancelGraceSeconds")) {
+            for (Object value : Arrays.asList(0, -1, 1.5, Long.MAX_VALUE, "2147483648", true, "invalid")) {
+                assertThrows(IllegalArgumentException.class, () -> new PaimonConfig().load(Collections.singletonMap(key, value)), key + "=" + value);
+            }
+            PaimonConfig config = new PaimonConfig();
+            config.setTableConfig(Collections.singletonMap("a", DataMap.create().kv(key, 10)));
+            assertThrows(IllegalArgumentException.class, config::validateStopBudgets);
+            assertDoesNotThrow(() -> new PaimonConfig().load(Collections.singletonMap(key, Integer.MAX_VALUE)));
+        }
+    }
+
+    @Test
+    void stopBudgetsMissingNullAndLayeredDefaultsMustMatch() {
+        PaimonConfig config = new PaimonConfig().load(Collections.emptyMap());
+        assertEquals(180, config.getStopTimeoutSeconds());
+        assertEquals(120, config.getFinalCompactionTimeoutSeconds());
+        assertEquals(30, config.getCompactionCancelGraceSeconds());
+        config.load(Collections.singletonMap("stopTimeoutSeconds", 20)).load(Collections.singletonMap("stopTimeoutSeconds", null));
+        config.setFinalCompactionTimeoutSeconds(null); config.setCompactionCancelGraceSeconds(null);
+        assertEquals(180, config.getStopTimeoutSeconds()); assertEquals(120, config.getFinalCompactionTimeoutSeconds());
+        assertEquals(30, config.getCompactionCancelGraceSeconds());
+    }
+
+    @ParameterizedTest
+    @MethodSource("unsupportedExpireModes")
+    void expirationModeMustBeRejectedDuringLoadAndValidate(String value) {
+        LinkedHashMap<String, String> property = new LinkedHashMap<>();
+        property.put("propKey", "snapshot.expire.execution-mode");
+        property.put("propValue", value);
+        PaimonConfig config = new PaimonConfig();
+        config.setWarehouse("/tmp/paimon");
+        config.setTableProperties(Collections.singletonList(property));
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class, config::validate);
+        assertTrue(failure.getMessage().contains("snapshot.expire.execution-mode"));
+        assertTrue(failure.getMessage().contains("SYNC"));
+        assertThrows(IllegalArgumentException.class,
+                () -> new PaimonConfig().load(Collections.singletonMap(
+                        "tableProperties", Collections.singletonList(property))));
+    }
+
+    private static Stream<Arguments> unsupportedExpireModes() {
+        return Stream.of(Arguments.of("ASYNC"), Arguments.of("invalid"), Arguments.of(""));
+    }
+
+    @Test
+    void expirationModeMustValidateTableOverridesWithoutChangingOtherOptions() {
+        LinkedHashMap<String, String> property = new LinkedHashMap<>();
+        property.put("propKey", "snapshot.expire.execution-mode");
+        property.put("propValue", "ASYNC");
+        PaimonConfig config = new PaimonConfig();
+        config.setWarehouse("/tmp/paimon");
+        config.setTableConfig(Collections.singletonMap("orders", DataMap.create()
+                .kv("tableProperties", Collections.singletonList(property))));
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class, config::validate);
+        assertTrue(failure.getMessage().contains("orders"));
+        property.put("propValue", "SYNC");
+        assertDoesNotThrow(config::validate);
+        assertEquals("SYNC", config.getTableProperties("orders").get(0).get("propValue"));
+        assertEquals(4, config.getAsyncCommitConcurrency());
+    }
+
+    @ParameterizedTest
+    @MethodSource("asyncCommitConfigLayers")
+    void asyncCommitDefaultsMustRespectConnectionThenNodeLoading(
+            Map<String, Object> connection, Map<String, Object> node, int expected) {
+        // 对齐 Connector.onStart 的真实 PDK 配置加载顺序，覆盖存量显式 1 与 null 回填。
+        PaimonConfig config = new PaimonConfig().load(connection).load(node);
+        assertEquals(expected, config.getAsyncCommitConcurrency());
+    }
+
+    private static Stream<Arguments> asyncCommitConfigLayers() {
+        Map<String, Object> missing = Collections.emptyMap();
+        Map<String, Object> one = Collections.singletonMap("asyncCommitConcurrency", 1);
+        Map<String, Object> four = Collections.singletonMap("asyncCommitConcurrency", 4);
+        Map<String, Object> explicitNull = Collections.singletonMap("asyncCommitConcurrency", null);
+        return Stream.of(
+                Arguments.of(missing, missing, 4),
+                Arguments.of(missing, one, 1),
+                Arguments.of(missing, four, 4),
+                Arguments.of(missing, explicitNull, 4),
+                Arguments.of(one, missing, 1),
+                Arguments.of(one, explicitNull, 4),
+                Arguments.of(one, four, 4));
+    }
 
     @Test
     void microBatchDefaultsMustSurviveExplicitNullValues() {

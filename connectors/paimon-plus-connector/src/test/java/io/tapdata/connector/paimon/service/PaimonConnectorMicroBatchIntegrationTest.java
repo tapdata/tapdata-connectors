@@ -75,7 +75,7 @@ class PaimonConnectorMicroBatchIntegrationTest {
                         })
                 .when(executor)
                 .execute(any(Runnable.class));
-        when(executor.awaitTermination(5L, TimeUnit.SECONDS)).thenReturn(true);
+        when(executor.awaitTermination(anyLong(), any(TimeUnit.class))).thenReturn(true);
         PaimonService service =
                 new PaimonService(
                         config,

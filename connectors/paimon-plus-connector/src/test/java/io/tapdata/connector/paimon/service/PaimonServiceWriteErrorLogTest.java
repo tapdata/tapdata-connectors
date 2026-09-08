@@ -515,6 +515,11 @@ class PaimonServiceWriteErrorLogTest {
         }
 
         @Override
+        public List<CommitMessage> prepareFinalCommit(long commitIdentifier) {
+            return Collections.emptyList();
+        }
+
+        @Override
         public void close() {
         }
 

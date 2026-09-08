@@ -101,8 +101,16 @@ class PaimonServiceAsyncCommitIntegrationTest {
     void staleSchedulerBlockedByDdlMustRecheckTheNewContextDeadline() throws Exception {
         Fixture fixture = fixture();
         Catalog catalog = mock(Catalog.class);
-        Table table = mock(Table.class, RETURNS_DEEP_STUBS);
+        org.apache.paimon.table.FileStoreTable table = mock(org.apache.paimon.table.FileStoreTable.class, RETURNS_DEEP_STUBS);
+        when(table.coreOptions()).thenReturn(org.apache.paimon.CoreOptions.fromMap(Collections.emptyMap()));
         when(catalog.getTable(Identifier.create("default", "t"))).thenReturn(table);
+        // 临时 truncate committer 使用实际 SYNC options；保持原 scheduler / DDL 竞争断言。
+        org.apache.paimon.table.sink.BatchWriteBuilder batchWriteBuilder =
+                mock(org.apache.paimon.table.sink.BatchWriteBuilder.class);
+        org.apache.paimon.table.sink.TableCommitImpl batchCommit =
+                mock(org.apache.paimon.table.sink.TableCommitImpl.class);
+        when(table.newBatchWriteBuilder()).thenReturn(batchWriteBuilder);
+        when(batchWriteBuilder.newCommit()).thenReturn(batchCommit);
         setField(fixture.service, "catalog", catalog);
 
         fixture.clock.set(100L);

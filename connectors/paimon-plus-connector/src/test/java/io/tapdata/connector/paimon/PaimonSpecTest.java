@@ -21,6 +21,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PaimonSpecTest {
 
     @Test
+    void stopBudgetsMustBeServiceScopedPositiveIntegersWithThreeLocales() throws Exception {
+        JsonObject spec = loadSpec();
+        JsonObject properties = spec.getAsJsonObject("configOptions").getAsJsonObject("node").getAsJsonObject("properties");
+        String[] keys = {"stopTimeoutSeconds", "finalCompactionTimeoutSeconds", "compactionCancelGraceSeconds"};
+        int[] defaults = {180, 120, 30};
+        for (int i = 0; i < keys.length; i++) {
+            JsonObject field = properties.getAsJsonObject(keys[i]);
+            assertEquals(defaults[i], field.get("default").getAsInt()); assertFalse(field.has("x-perTable"));
+            assertEquals(1, field.getAsJsonObject("x-component-props").get("min").getAsInt());
+            assertEquals(0, field.getAsJsonObject("x-component-props").get("precision").getAsInt());
+            for (String locale : Arrays.asList("en_US", "zh_CN", "zh_TW")) {
+                assertTrue(spec.getAsJsonObject("messages").getAsJsonObject(locale).get(keys[i]).getAsString().length() > 0);
+            }
+        }
+    }
+
+    @Test
     void microBatchDefaultsAndPlaceholdersMustStayAligned() throws Exception {
         JsonObject spec = loadSpec();
         JsonObject properties =

@@ -54,6 +54,74 @@ import static org.mockito.Mockito.when;
 
 class PaimonServiceDynamicBucketIntegrationTest {
 
+    @Test
+    void reportedProductionDdlAsyncMustFailBeforeWriterOwnerOrSpillAllocation() throws Exception {
+        PaimonConfig config = config("reported-ddl-async");
+        PaimonService service = service(config);
+        try {
+            Identifier id = Identifier.create(DATABASE, "future_inhousedate");
+            catalog(service).createTable(id,
+                    io.tapdata.connector.paimon.FutureInhouseDateFixture.schema("async"), false);
+            FileStoreTable table = (FileStoreTable) catalog(service).getTable(id);
+            // bucket=-1 且主键包含分区键，Paimon 选择 HASH_DYNAMIC。
+            // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/KeyValueFileStore.java#L100
+            assertEquals(BucketMode.HASH_DYNAMIC, table.bucketMode());
+            java.lang.reflect.Method method = PaimonService.class.getDeclaredMethod(
+                    "getOrCreateTableWriteContext", String.class, String.class, Identifier.class,
+                    TapConnectorContext.class, FileStoreTable.class,
+                    io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract.class);
+            method.setAccessible(true);
+            java.lang.reflect.InvocationTargetException failure = assertThrows(
+                    java.lang.reflect.InvocationTargetException.class,
+                    () -> method.invoke(service, id.getFullName(), id.getObjectName(), id, null, table, null));
+            assertTrue(failure.getCause() instanceof IllegalArgumentException);
+            assertTrue(failure.getCause().getMessage().contains("SYNC"));
+            assertEquals(0, tableWriteContextCount(service));
+            assertTrue(derivedCache(service, "physicalTableByLogicalTable").isEmpty());
+            try (java.util.stream.Stream<java.nio.file.Path> files = Files.list(
+                    java.nio.file.Paths.get(config.getDiskTmpDir()))) {
+                assertEquals(0, files.count());
+            }
+        } finally { service.close(); }
+    }
+
+    @Test
+    void reportedProductionDdlSyncMustWriteAndReadPartitionedCompositeKey() throws Exception {
+        PaimonConfig config = config("reported-ddl-sync");
+        PaimonService service = service(config);
+        try {
+            String name = "future_inhousedate";
+            Schema schema = io.tapdata.connector.paimon.FutureInhouseDateFixture.schema("SYNC");
+            catalog(service).createTable(Identifier.create(DATABASE, name), schema, false);
+            TapTable tap = new TapTable(name);
+            for (org.apache.paimon.types.DataField field : schema.fields()) {
+                TapField tapField = new TapField(field.name(), field.type().toString());
+                int keyIndex = schema.primaryKeys().indexOf(field.name());
+                if (keyIndex >= 0) { tapField.primaryKeyPos(keyIndex + 1); }
+                tap.add(tapField);
+            }
+            int date = (int) java.time.LocalDate.of(2026, 9, 7).toEpochDay();
+            Map<String, Object> data = map("ConfirmNo", "C001", "InhouseDate", date,
+                    "Rooms", 2, "RoomRate", new java.math.BigDecimal("123.45"), "Resort", "R01",
+                    "ExtractionDate", date, "ExtractionHour", 12,
+                    "LastModified", java.sql.Timestamp.valueOf("2026-09-07 12:00:00.123456"),
+                    "ods_updated_at", java.sql.Timestamp.valueOf("2026-09-07 12:00:00.123"),
+                    "pt_extractiondate", 20260907, "op", "u");
+            service.writeRecords(Collections.singletonList(cdcInsert(name, data)), tap, context(stateMap()));
+            FileStoreTable table = (FileStoreTable) catalog(service).getTable(Identifier.create(DATABASE, name));
+            assertEquals(BucketMode.HASH_DYNAMIC, table.bucketMode());
+            List<InternalRow> rows = readRows(table);
+            assertEquals(1, rows.size());
+            assertEquals(2, rows.get(0).getInt(2));
+            assertEquals(new java.math.BigDecimal("123.45"), rows.get(0).getDecimal(3, 18, 2).toBigDecimal());
+            assertEquals(20260907, rows.get(0).getInt(9));
+        } finally { service.close(); }
+        try (java.util.stream.Stream<java.nio.file.Path> files = Files.list(
+                java.nio.file.Paths.get(config.getDiskTmpDir()))) {
+            assertEquals(0, files.count(), "成功停止后预检 RocksDB 和 writer Spill 均须释放");
+        }
+    }
+
     private static final String DATABASE = "default";
 
     @TempDir

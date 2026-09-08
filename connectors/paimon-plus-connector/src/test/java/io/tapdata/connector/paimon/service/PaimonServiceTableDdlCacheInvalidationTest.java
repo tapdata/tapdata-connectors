@@ -172,6 +172,8 @@ class PaimonServiceTableDdlCacheInvalidationTest {
     void failedWriteContextCreationMustNotPublishFieldCache() throws Exception {
         Fixture fixture = fixture();
         FileStoreTable physicalTable = mock(FileStoreTable.class);
+        when(physicalTable.coreOptions()).thenReturn(org.apache.paimon.CoreOptions.fromMap(Collections.emptyMap()));
+        when(physicalTable.location()).thenReturn(new org.apache.paimon.fs.Path("file:///tmp/paimon-ddl-lock-order"));
         RowType rowType = mock(RowType.class);
         when(rowType.getFields())
                 .thenReturn(Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
@@ -238,6 +240,8 @@ class PaimonServiceTableDdlCacheInvalidationTest {
             throws Exception {
         Fixture fixture = fixture();
         FileStoreTable physicalTable = mock(FileStoreTable.class);
+        when(physicalTable.location()).thenReturn(new org.apache.paimon.fs.Path("file:///tmp/paimon-source-ddl-order"));
+        when(physicalTable.coreOptions()).thenReturn(org.apache.paimon.CoreOptions.fromMap(Collections.emptyMap()));
         when(physicalTable.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
         when(fixture.catalog.getTable(Identifier.create("default", TABLE_NAME)))
                 .thenReturn(physicalTable);
@@ -329,6 +333,11 @@ class PaimonServiceTableDdlCacheInvalidationTest {
         PaimonService service = new PaimonService(config, mock(Log.class));
         service.startForTest();
         Catalog catalog = mock(Catalog.class);
+        FileStoreTable physicalTable = mock(FileStoreTable.class);
+        when(physicalTable.coreOptions()).thenReturn(org.apache.paimon.CoreOptions.fromMap(Collections.emptyMap()));
+        when(physicalTable.location()).thenReturn(new org.apache.paimon.fs.Path(
+                "file:///tmp/paimon-ddl-cache-" + java.util.UUID.randomUUID()));
+        when(catalog.getTable(org.mockito.ArgumentMatchers.any(Identifier.class))).thenReturn(physicalTable);
         setField(service, "catalog", catalog);
         return new Fixture(service, catalog);
     }

@@ -60,6 +60,38 @@ class PaimonServiceCreateTableValidationTest {
     java.nio.file.Path tempDir;
 
     @Test
+    void existingAsyncTableMustBeRejectedWithoutAlteringItsMetadata() throws Exception {
+        String tableName = "existing_async_expiration";
+        Catalog catalog = catalog(tableName, Collections.emptyMap());
+        Identifier identifier = Identifier.create(DATABASE, tableName);
+        catalog.createTable(identifier, Schema.newBuilder().column("id", DataTypes.INT())
+                .primaryKey("id").option("bucket", "1")
+                .option("snapshot.expire.execution-mode", "ASYNC").build(), false);
+        Map<String, String> before = new HashMap<>(catalog.getTable(identifier).options());
+        PaimonService service = service(config(tableName), catalog);
+        try {
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> service.createTable(new TapTable(tableName)));
+            assertTrue(failure.getMessage().contains("ASYNC"));
+            assertEquals(before, catalog.getTable(identifier).options());
+        } finally { service.close(); }
+    }
+
+    @Test
+    void effectiveCatalogAsyncDefaultMustFailBeforeCreatingTable() throws Exception {
+        String tableName = "catalog_async_expiration";
+        Catalog catalog = catalog(tableName, Collections.singletonMap(
+                "table-default.snapshot.expire.execution-mode", "ASYNC"));
+        PaimonService service = service(config(tableName), catalog);
+        try {
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.createTable(crossPartitionTable(tableName)));
+            assertThrows(Catalog.TableNotExistException.class,
+                    () -> catalog.getTable(Identifier.create(DATABASE, tableName)));
+        } finally { service.close(); }
+    }
+
+    @Test
     void catalogFallbackDefaultMustBeRejectedBeforeTableCreation() throws Exception {
         Catalog catalog =
                 catalog(
