@@ -745,7 +745,7 @@ public class PostgresConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
-            postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
+            selectCdcNode();
             postgresJdbcContext.refresh();
             tapLogger.info("Postgres cdc connected to node: {}:{}", postgresConfig.getHost(), postgresConfig.getPort());
         }
@@ -887,7 +887,7 @@ public class PostgresConnector extends CommonDbConnector {
             });
         }
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
-            postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
+            selectCdcNode();
             postgresJdbcContext.refresh();
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
@@ -975,7 +975,7 @@ public class PostgresConnector extends CommonDbConnector {
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
-            postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
+            selectCdcNode();
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotBlank(postgresConfig.getPgtoHost())) {
@@ -1039,6 +1039,19 @@ public class PostgresConnector extends CommonDbConnector {
             }
         }
         return new PostgresOffset();
+    }
+
+    private void selectCdcNode() {
+        if ("physical".equals(postgresConfig.getLogPluginName())
+                && Boolean.TRUE.equals(postgresConfig.getCheckCdcSlave())) {
+            SlaveNodeState selected = selectTimelineHealthySlaveNode(observedTimelineFloor.get());
+            if (selected != null) {
+                postgresConfig.setHost(selected.host);
+                postgresConfig.setPort(selected.port);
+                return;
+            }
+        }
+        postgresTest.testHostPortForMasterSlave(true);
     }
 
     private void checkCdcSlaveConnected(PhysicalWalLogMiner miner) throws SQLException {
@@ -1200,6 +1213,10 @@ public class PostgresConnector extends CommonDbConnector {
                         state.host, state.port, state.timeline, requiredTimeline);
                 continue;
             }
+            if (state.host.equals(String.valueOf(postgresConfig.getHost()))
+                    && state.port == postgresConfig.getPort()) {
+                return state;
+            }
             if (selected == null
                     || state.readableLsn > selected.readableLsn
                     || (state.readableLsn == selected.readableLsn && state.timeline > selected.timeline)) {
@@ -1327,7 +1344,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private TapPdkRetryableEx newSlavePreferredRetryableException() {
-        return newSlavePreferredRetryableException("Master node detected, please switch to slave node for CDC");
+        return newSlavePreferredRetryableException("Postgres CDC reconnect requested to use a timeline-healthy standby node");
     }
 
     private TapPdkRetryableEx newSlavePreferredRetryableException(String message) {

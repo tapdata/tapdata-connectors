@@ -473,6 +473,114 @@ public class PostgresConnectorTest {
         second.shutdownNow();
     }
 
+    @Test
+    void testPhysicalSlavePreferredKeepsHealthyStandbyAcrossProbesAndRetries() throws Exception {
+        TimelineProbePostgresConnector connector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("current", 5433,
+                address("other", 5434), address("current", 5433), address("primary", 5432));
+        config.setCheckCdcSlave(true);
+        connector.addProbe("primary", 5432, false, "00000006", 6);
+        connector.addProbe("current", 5433, true, "00000006", 6, "0/00001000");
+        PostgresJdbcContext jdbcContext = mock(PostgresJdbcContext.class);
+        PostgresTest postgresTest = mock(PostgresTest.class);
+        ReflectionTestUtils.setField(connector, "postgresConfig", config);
+        ReflectionTestUtils.setField(connector, "postgresJdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(connector, "postgresTest", postgresTest);
+        ReflectionTestUtils.setField(connector, "tapLogger", mock(Log.class));
+
+        for (String readableLsn : new String[]{"0/00002000", "0/00003000", "0/00001000"}) {
+            connector.addProbe("other", 5434, true, "00000006", 6, readableLsn);
+            Boolean switched = ReflectionTestUtils.invokeMethod(connector, "ensureCdcConnectedToSlave", 6);
+            Assertions.assertFalse(Boolean.TRUE.equals(switched));
+            ReflectionTestUtils.invokeMethod(connector, "selectCdcNode");
+            Assertions.assertEquals("current", config.getHost());
+            Assertions.assertEquals(5433, config.getPort());
+        }
+        verify(jdbcContext, never()).refresh();
+        verify(postgresTest, never()).testHostPortForMasterSlave(anyBoolean());
+    }
+
+    @Test
+    void testPhysicalSlavePreferredSwitchesPromotedNodeOnlyOnce() throws Exception {
+        TimelineProbePostgresConnector connector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("promoted", 5432,
+                address("promoted", 5432), address("standby", 5433));
+        config.setCheckCdcSlave(true);
+        connector.addProbe("promoted", 5432, false, "00000007", 7);
+        connector.addProbe("standby", 5433, true, "00000007", 7, "0/00002000");
+        PostgresJdbcContext jdbcContext = mock(PostgresJdbcContext.class);
+        ReflectionTestUtils.setField(connector, "postgresConfig", config);
+        ReflectionTestUtils.setField(connector, "postgresJdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(connector, "tapLogger", mock(Log.class));
+
+        Assertions.assertEquals(Boolean.TRUE,
+                ReflectionTestUtils.invokeMethod(connector, "ensureCdcConnectedToSlave", 6));
+        ReflectionTestUtils.invokeMethod(connector, "selectCdcNode");
+        Assertions.assertEquals(Boolean.FALSE,
+                ReflectionTestUtils.invokeMethod(connector, "ensureCdcConnectedToSlave", 7));
+        Assertions.assertEquals("standby", config.getHost());
+        verify(jdbcContext, times(1)).refresh();
+    }
+
+    @Test
+    void testPhysicalSlavePreferredRetryRejectsStaleFirstAddress() throws Exception {
+        TimelineProbePostgresConnector connector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("stale", 5433,
+                address("stale", 5433), address("healthy", 5434), address("primary", 5432));
+        config.setCheckCdcSlave(true);
+        connector.addProbe("primary", 5432, false, "00000007", 7);
+        connector.addProbe("stale", 5433, true, "00000006", 6, "0/00003000");
+        connector.addProbe("healthy", 5434, true, "00000007", 7, "0/00002000");
+        ReflectionTestUtils.setField(connector, "postgresConfig", config);
+        ReflectionTestUtils.setField(connector, "tapLogger", mock(Log.class));
+
+        ReflectionTestUtils.invokeMethod(connector, "selectCdcNode");
+
+        Assertions.assertEquals("healthy", config.getHost());
+        Assertions.assertEquals(5434, config.getPort());
+    }
+
+    @Test
+    void testPhysicalSlavePreferredDoesNotPinUnavailableStandby() throws Exception {
+        TimelineProbePostgresConnector connector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("unavailable", 5433,
+                address("unavailable", 5433), address("healthy", 5434));
+        connector.addProbe("healthy", 5434, true, "00000007", 7, "0/00002000");
+        PostgresJdbcContext jdbcContext = mock(PostgresJdbcContext.class);
+        ReflectionTestUtils.setField(connector, "postgresConfig", config);
+        ReflectionTestUtils.setField(connector, "postgresJdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(connector, "tapLogger", mock(Log.class));
+
+        Assertions.assertEquals(Boolean.TRUE,
+                ReflectionTestUtils.invokeMethod(connector, "ensureCdcConnectedToSlave", 7));
+        Assertions.assertEquals("healthy", config.getHost());
+        verify(jdbcContext, times(1)).refresh();
+    }
+
+    @Test
+    void testPhysicalSlavePreferredRetryFallsBackToPrimaryWhenStandbysAreStale() throws Exception {
+        TimelineProbePostgresConnector connector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("primary", 5432,
+                address("stale", 5433), address("primary", 5432));
+        config.setCheckCdcSlave(true);
+        connector.addProbe("primary", 5432, false, "00000007", 7);
+        connector.addProbe("stale", 5433, true, "00000006", 6, "0/00003000");
+        PostgresTest postgresTest = mock(PostgresTest.class);
+        PostgresJdbcContext jdbcContext = mock(PostgresJdbcContext.class);
+        ReflectionTestUtils.setField(connector, "postgresConfig", config);
+        ReflectionTestUtils.setField(connector, "postgresTest", postgresTest);
+        ReflectionTestUtils.setField(connector, "postgresJdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(connector, "tapLogger", mock(Log.class));
+
+        ReflectionTestUtils.invokeMethod(connector, "selectCdcNode");
+        Assertions.assertEquals(Boolean.FALSE,
+                ReflectionTestUtils.invokeMethod(connector, "ensureCdcConnectedToSlave", 7));
+
+        verify(postgresTest).testHostPortForMasterSlave(true);
+        verify(jdbcContext, never()).refresh();
+        Assertions.assertEquals("primary", config.getHost());
+    }
+
     private static PostgresConfig physicalMasterSlaveConfig(String host, int port,
                                                            LinkedHashMap<String, Integer>... addresses) {
         PostgresConfig config = new PostgresConfig();
