@@ -27,6 +27,12 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private List<String> distributedKey = new ArrayList<>();
     private Boolean isPartition = false;
     private String customSlotName;
+    /**
+     * PostgreSQL 17+ logical failover slot. The slot is synchronized to
+     * physical standbys by PostgreSQL; it is not a connector-side multi-node
+     * flush mechanism.
+     */
+    private Boolean logicalSlotFailover = false;
     private String pgtoHost = "127.0.0.1";
     private int pgtoPort = 9876;
     private Integer defaultWalLogSize = 102400;
@@ -206,6 +212,14 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setCustomSlotName(String customSlotName) {
         this.customSlotName = customSlotName;
+    }
+
+    public Boolean getLogicalSlotFailover() {
+        return logicalSlotFailover;
+    }
+
+    public void setLogicalSlotFailover(Boolean logicalSlotFailover) {
+        this.logicalSlotFailover = logicalSlotFailover;
     }
 
     public void setPgtoHost(String pgtoHost) {

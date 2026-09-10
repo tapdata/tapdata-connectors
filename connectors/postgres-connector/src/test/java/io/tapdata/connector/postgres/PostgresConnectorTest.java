@@ -60,6 +60,36 @@ public class PostgresConnectorTest {
         Assertions.assertTrue(connectorFunctions.getQueryHashByAdvanceFilterFunction()!=null);
     }
 
+    @Test
+    void testBuildLogicalFailoverSlotSqlForPg17Pgoutput() {
+        PostgresConnector postgresConnector = new PostgresConnector();
+        PostgresConfig config = new PostgresConfig();
+        config.setLogPluginName("pgoutput");
+        config.setLogicalSlotFailover(true);
+        ReflectionTestUtils.setField(postgresConnector, "postgresConfig", config);
+        ReflectionTestUtils.setField(postgresConnector, "postgresVersion", "170011");
+
+        String sql = ReflectionTestUtils.invokeMethod(postgresConnector,
+                "buildCreateSlotSql", "tapdata_logical_failover_test");
+
+        Assertions.assertEquals("SELECT pg_create_logical_replication_slot('tapdata_logical_failover_test','pgoutput',false,false,true)", sql);
+    }
+
+    @Test
+    void testBuildLogicalSlotSqlKeepsLegacySignatureBeforePg17() {
+        PostgresConnector postgresConnector = new PostgresConnector();
+        PostgresConfig config = new PostgresConfig();
+        config.setLogPluginName("pgoutput");
+        config.setLogicalSlotFailover(true);
+        ReflectionTestUtils.setField(postgresConnector, "postgresConfig", config);
+        ReflectionTestUtils.setField(postgresConnector, "postgresVersion", "160000");
+
+        String sql = ReflectionTestUtils.invokeMethod(postgresConnector,
+                "buildCreateSlotSql", "tapdata_logical_failover_test");
+
+        Assertions.assertEquals("SELECT pg_create_logical_replication_slot('tapdata_logical_failover_test','pgoutput')", sql);
+    }
+
 
     @Test
     void testQueryTableHash() throws SQLException {

@@ -319,12 +319,7 @@ public class PostgresConnector extends CommonDbConnector {
     private void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
         if (EmptyKit.isNull(slotName)) {
             slotName = "tapdata_cdc_" + UUID.randomUUID().toString().replaceAll("-", "_");
-            String sql;
-            if ("physical".equals(postgresConfig.getLogPluginName())) {
-                sql = "SELECT pg_create_physical_replication_slot('" + slotName + "')";
-            } else {
-                sql = "SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')";
-            }
+            String sql = buildCreateSlotSql(slotName.toString());
             long begin = System.currentTimeMillis();
             try {
                 postgresJdbcContext.execute(sql, 20);
@@ -335,7 +330,11 @@ public class PostgresConnector extends CommonDbConnector {
                     throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_FAILED, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
                 }
             }
-            tapLogger.info("new logical replication slot created, slotName:{}", slotName);
+            tapLogger.info("new {} replication slot created, slotName:{}, logicalFailover={}",
+                    "physical".equals(postgresConfig.getLogPluginName()) ? "physical" : "logical",
+                    slotName,
+                    Boolean.TRUE.equals(postgresConfig.getLogicalSlotFailover())
+                            && "pgoutput".equals(postgresConfig.getLogPluginName()));
             connectorContext.getStateMap().put("tapdata_pg_slot", slotName);
         } else if (needCheck) {
             AtomicBoolean existSlot = new AtomicBoolean(true);
@@ -348,21 +347,34 @@ public class PostgresConnector extends CommonDbConnector {
                 tapLogger.info("Using an existing logical replication slot, slotName:{}", slotName);
             } else {
                 long begin = System.currentTimeMillis();
-                if ("physical".equals(postgresConfig.getLogPluginName())) {
-                    String sql = "SELECT pg_create_physical_replication_slot('" + slotName + "')";
-                    try {
-                        postgresJdbcContext.execute(sql, 20);
-                    } catch (SQLException e) {
-                        if (System.currentTimeMillis() - begin > 18000) {
-                            throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_TIMEOUT, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
-                        } else {
-                            throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_FAILED, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
-                        }
+                String sql = buildCreateSlotSql(slotName.toString());
+                try {
+                    postgresJdbcContext.execute(sql, 20);
+                } catch (SQLException e) {
+                    if (System.currentTimeMillis() - begin > 18000) {
+                        throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_TIMEOUT, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                    } else {
+                        throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_FAILED, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
                     }
                 }
                 tapLogger.warn("The previous logical replication slot no longer exists. Although it has been rebuilt, there is a possibility of data loss. Please check");
             }
         }
+    }
+
+    private String buildCreateSlotSql(String slotName) {
+        if ("physical".equals(postgresConfig.getLogPluginName())) {
+            return "SELECT pg_create_physical_replication_slot('" + slotName + "')";
+        }
+        if ("pgoutput".equals(postgresConfig.getLogPluginName())
+                && Boolean.TRUE.equals(postgresConfig.getLogicalSlotFailover())
+                && postgresVersion != null
+                && Integer.parseInt(postgresVersion) >= 170000) {
+            return "SELECT pg_create_logical_replication_slot('" + slotName + "','"
+                    + postgresConfig.getLogPluginName() + "',false,false,true)";
+        }
+        return "SELECT pg_create_logical_replication_slot('" + slotName + "','"
+                + postgresConfig.getLogPluginName() + "')";
     }
 
     private static final String PG_REPLICATE_IDENTITY = "select relname, relreplident from pg_class " +
