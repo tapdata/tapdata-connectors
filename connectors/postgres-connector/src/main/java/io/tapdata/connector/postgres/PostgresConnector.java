@@ -96,6 +96,7 @@ public class PostgresConnector extends CommonDbConnector {
     protected PostgresPartitionContext postgresPartitionContext;
     private ScheduledExecutorService asyncCheckSlaveExecutor;
     private final AtomicInteger observedTimelineFloor = new AtomicInteger(0);
+    private final PhysicalWalLogMiner.RecoveryState physicalRecoveryState = new PhysicalWalLogMiner.RecoveryState();
     private static final String TIMELINE_FROM_WAL_FILE_SQL =
             "SELECT substring(pg_walfile_name(CASE WHEN pg_is_in_recovery() "
                     + "THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END), 1, 8)";
@@ -744,6 +745,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
+        preparePhysicalRecovery();
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
             selectCdcNode();
             postgresJdbcContext.refresh();
@@ -769,6 +771,7 @@ public class PostgresConnector extends CommonDbConnector {
             buildSlot(nodeContext, true);
             try {
                 PhysicalWalLogMiner miner = new PhysicalWalLogMiner(postgresJdbcContext, tapLogger);
+                miner.useRecoveryState(physicalRecoveryState);
                 miner.useSlot(slotName.toString());
                 miner.watch(new ArrayList<>(tableList), nodeContext.getTableMap());
 
@@ -864,6 +867,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamReadMultiConnection(TapConnectorContext nodeContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offsetState, int batchSize, StreamReadConsumer consumer) throws Throwable {
+        preparePhysicalRecovery();
         Map<String, List<String>> schemaTableMap = new HashMap<>();
         for (ConnectionConfigWithTables withTables : connectionConfigWithTables) {
             if (null == withTables.getConnectionConfig())
@@ -909,6 +913,7 @@ public class PostgresConnector extends CommonDbConnector {
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
             PhysicalWalLogMiner miner = new PhysicalWalLogMiner(postgresJdbcContext, tapLogger);
+            miner.useRecoveryState(physicalRecoveryState);
             miner.useSlot(slotName.toString());
             miner.watch(schemaTableMap, nodeContext.getTableMap());
 
@@ -1041,8 +1046,27 @@ public class PostgresConnector extends CommonDbConnector {
         return new PostgresOffset();
     }
 
+    private void preparePhysicalRecovery() {
+        if ("physical".equals(postgresConfig.getLogPluginName())) {
+            if (physicalRecoveryState.isRecovering()) {
+                physicalRecoveryState.begin();
+            }
+            if (asyncCheckSlaveExecutor != null) {
+                asyncCheckSlaveExecutor.shutdownNow();
+            }
+        }
+    }
+
     private void selectCdcNode() {
+        if ("physical".equals(postgresConfig.getLogPluginName()) && physicalRecoveryState.isRecovering()) {
+            if (!postgresTest.testHostPortForMasterSlave(true)) {
+                throw new TapPdkRetryableEx("postgres", new IllegalStateException(
+                        "No primary available during physical WAL recovery; retry without advancing the offset"));
+            }
+            return;
+        }
         if ("physical".equals(postgresConfig.getLogPluginName())
+                && !physicalRecoveryState.isRecovering()
                 && Boolean.TRUE.equals(postgresConfig.getCheckCdcSlave())) {
             SlaveNodeState selected = selectTimelineHealthySlaveNode(observedTimelineFloor.get());
             if (selected != null) {
@@ -1056,7 +1080,9 @@ public class PostgresConnector extends CommonDbConnector {
 
     private void checkCdcSlaveConnected(PhysicalWalLogMiner miner) throws SQLException {
         if (Boolean.TRUE.equals(postgresConfig.getCheckCdcSlave())) {
-            ensureCdcConnectedToSlave(miner);
+            if (!physicalRecoveryState.isRecovering()) {
+                ensureCdcConnectedToSlave(miner);
+            }
             if (asyncCheckSlaveExecutor != null) {
                 asyncCheckSlaveExecutor.shutdownNow();
             }
@@ -1067,6 +1093,9 @@ public class PostgresConnector extends CommonDbConnector {
             });
             asyncCheckSlaveExecutor.scheduleAtFixedRate(() -> {
                 try {
+                    if (physicalRecoveryState.isRecovering()) {
+                        return;
+                    }
                     if ("master-slave".equals(postgresConfig.getDeploymentMode())
                             && "physical".equals(postgresConfig.getLogPluginName())) {
                         if (ensureCdcConnectedToSlave(miner)) {
@@ -1109,7 +1138,12 @@ public class PostgresConnector extends CommonDbConnector {
                     && selected.port == postgresConfig.getPort()) {
                 return false;
             }
-            return switchCdcConnectionToTimelineHealthySlave(selected);
+            synchronized (physicalRecoveryState) {
+                if (physicalRecoveryState.isRecovering()) {
+                    return false;
+                }
+                return switchCdcConnectionToTimelineHealthySlave(selected);
+            }
         }
         postgresJdbcContext.queryWithNext("SELECT pg_is_in_recovery()", resultSet -> {
             boolean isInRecovery = resultSet.getBoolean(1);

@@ -581,6 +581,84 @@ public class PostgresConnectorTest {
         Assertions.assertEquals("primary", config.getHost());
     }
 
+    @Test
+    void testFreshStartupSelectsHealthyStandbyWithoutRecovery() throws Exception {
+        TimelineProbePostgresConnector connector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("standby", 5433,
+                address("standby", 5433), address("primary", 5432));
+        config.setCheckCdcSlave(true);
+        connector.addProbe("standby", 5433, true, "00000007", 7);
+        connector.addProbe("primary", 5432, false, "00000007", 7);
+        PostgresTest postgresTest = mock(PostgresTest.class);
+        ReflectionTestUtils.setField(connector, "postgresConfig", config);
+        ReflectionTestUtils.setField(connector, "postgresTest", postgresTest);
+        ReflectionTestUtils.setField(connector, "tapLogger", mock(Log.class));
+        ReflectionTestUtils.invokeMethod(connector, "preparePhysicalRecovery");
+        ReflectionTestUtils.invokeMethod(connector, "selectCdcNode");
+        Assertions.assertEquals("standby", config.getHost());
+        verify(postgresTest, never()).testHostPortForMasterSlave(true);
+    }
+
+    @Test
+    void testPlannedStandbyHandoffDoesNotRestartPrimaryRecovery() throws Exception {
+        TimelineProbePostgresConnector connector = new TimelineProbePostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("primary", 5432,
+                address("standby", 5433), address("primary", 5432));
+        config.setCheckCdcSlave(true);
+        connector.addProbe("standby", 5433, true, "00000007", 7, "0/00003000");
+        connector.addProbe("primary", 5432, false, "00000007", 7);
+        PostgresTest postgresTest = mock(PostgresTest.class);
+        ReflectionTestUtils.setField(connector, "postgresConfig", config);
+        ReflectionTestUtils.setField(connector, "postgresTest", postgresTest);
+        ReflectionTestUtils.setField(connector, "postgresJdbcContext", mock(PostgresJdbcContext.class));
+        ReflectionTestUtils.setField(connector, "tapLogger", mock(Log.class));
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        PhysicalWalLogMiner.RecoveryState state =
+                (PhysicalWalLogMiner.RecoveryState)
+                        ReflectionTestUtils.getField(connector, "physicalRecoveryState");
+        Assertions.assertEquals(Boolean.TRUE,
+                ReflectionTestUtils.invokeMethod(connector, "ensureCdcConnectedToSlave", 7));
+        ReflectionTestUtils.invokeMethod(connector, "requestSlaveReconnect", miner);
+        ReflectionTestUtils.invokeMethod(connector, "preparePhysicalRecovery");
+        ReflectionTestUtils.invokeMethod(connector, "selectCdcNode");
+        Assertions.assertFalse(state.isRecovering());
+        Assertions.assertEquals("standby", config.getHost());
+        Assertions.assertEquals(5433, config.getPort());
+        Assertions.assertEquals(Boolean.FALSE,
+                ReflectionTestUtils.invokeMethod(connector, "ensureCdcConnectedToSlave", 7));
+        ReflectionTestUtils.invokeMethod(connector, "preparePhysicalRecovery");
+        ReflectionTestUtils.invokeMethod(connector, "selectCdcNode");
+        Assertions.assertFalse(state.isRecovering());
+        Assertions.assertEquals("standby", config.getHost());
+        verify(postgresTest, never()).testHostPortForMasterSlave(true);
+    }
+
+    @Test
+    void testPlannedStandbyHandoffDoesNotClearConcurrentRecovery() throws Exception {
+        PostgresConnector connector = new PostgresConnector();
+        PostgresConfig config = physicalMasterSlaveConfig("standby", 5433,
+                address("standby", 5433), address("primary", 5432));
+        config.setCheckCdcSlave(true);
+        PostgresTest postgresTest = mock(PostgresTest.class);
+        when(postgresTest.testHostPortForMasterSlave(true)).thenAnswer(invocation -> {
+            config.setHost("primary");
+            config.setPort(5432);
+            return true;
+        });
+        ReflectionTestUtils.setField(connector, "postgresConfig", config);
+        ReflectionTestUtils.setField(connector, "postgresTest", postgresTest);
+        PhysicalWalLogMiner.RecoveryState state = (PhysicalWalLogMiner.RecoveryState)
+                ReflectionTestUtils.getField(connector, "physicalRecoveryState");
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        ReflectionTestUtils.invokeMethod(connector, "requestSlaveReconnect", miner);
+        state.begin();
+        ReflectionTestUtils.invokeMethod(connector, "preparePhysicalRecovery");
+        ReflectionTestUtils.invokeMethod(connector, "selectCdcNode");
+        Assertions.assertTrue(state.isRecovering());
+        Assertions.assertEquals("primary", config.getHost());
+        verify(postgresTest).testHostPortForMasterSlave(true);
+    }
+
     private static PostgresConfig physicalMasterSlaveConfig(String host, int port,
                                                            LinkedHashMap<String, Integer>... addresses) {
         PostgresConfig config = new PostgresConfig();

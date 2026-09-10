@@ -58,6 +58,12 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     // first readable point on the current timeline when earlier ancestor WAL is
     // unavailable. This can skip unconfirmed WAL and is disabled by default.
     private Boolean walUnsafeTimelineResume = false;
+    // Independent WAL archive used when online PostgreSQL nodes no longer expose
+    // the saved ancestor WAL. The directory is shared with the CDC runtime.
+    private String walArchiveDir;
+    // Optional PostgreSQL-style restore hook. %f is the WAL/history filename,
+    // %p is the destination path, and %t is the timeline id.
+    private String walArchiveRestoreCommand;
     // EDB Postgres Advanced Server TDE WAL decryption. Enabled when the TDE key
     // file is uploaded in connection config.
     private String walTdeKey;
@@ -342,6 +348,22 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setWalUnsafeTimelineResume(Boolean walUnsafeTimelineResume) {
         this.walUnsafeTimelineResume = walUnsafeTimelineResume;
+    }
+
+    public String getWalArchiveDir() {
+        return walArchiveDir;
+    }
+
+    public void setWalArchiveDir(String walArchiveDir) {
+        this.walArchiveDir = walArchiveDir;
+    }
+
+    public String getWalArchiveRestoreCommand() {
+        return walArchiveRestoreCommand;
+    }
+
+    public void setWalArchiveRestoreCommand(String walArchiveRestoreCommand) {
+        this.walArchiveRestoreCommand = walArchiveRestoreCommand;
     }
 
     public String getWalTdeKey() {
