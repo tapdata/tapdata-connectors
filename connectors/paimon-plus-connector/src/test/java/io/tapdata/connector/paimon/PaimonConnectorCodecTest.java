@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class PaimonConnectorCodecTest {
@@ -80,6 +81,14 @@ class PaimonConnectorCodecTest {
                 "{\"id\":1}",
                 registry.getCustomFromTapValueCodec(TapRawValue.class)
                         .fromTapValue(new TapRawValue(map)));
+    }
+
+    @Test
+    void capabilitiesMustExposeReadOnlyExecuteQuery() {
+        ConnectorFunctions functions = new ConnectorFunctions();
+        new PaimonConnector().registerCapabilities(functions, new TapCodecsRegistry());
+
+        assertNotNull(functions.getExecuteCommandFunction());
     }
 
     private Object convertTime(Instant instant) {
