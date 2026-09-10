@@ -63,7 +63,7 @@ class PaimonConfigTest {
     }
 
     private static Stream<Arguments> unsupportedExpireModes() {
-        return Stream.of(Arguments.of("ASYNC"), Arguments.of("invalid"), Arguments.of(""));
+        return Stream.of(Arguments.of("invalid"), Arguments.of(""));
     }
 
     @Test
@@ -75,12 +75,14 @@ class PaimonConfigTest {
         config.setWarehouse("/tmp/paimon");
         config.setTableConfig(Collections.singletonMap("orders", DataMap.create()
                 .kv("tableProperties", Collections.singletonList(property))));
-        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class, config::validate);
-        assertTrue(failure.getMessage().contains("orders"));
+        assertDoesNotThrow(config::validate);
+        assertEquals("ASYNC", config.getTableProperties("orders").get(0).get("propValue"));
+        assertDoesNotThrow(() -> new PaimonConfig().load(Collections.singletonMap(
+                "tableProperties", Collections.singletonList(property))));
         property.put("propValue", "SYNC");
         assertDoesNotThrow(config::validate);
         assertEquals("SYNC", config.getTableProperties("orders").get(0).get("propValue"));
-        assertEquals(4, config.getAsyncCommitConcurrency());
+        assertEquals(1, config.getAsyncCommitConcurrency());
     }
 
     @ParameterizedTest
@@ -98,12 +100,12 @@ class PaimonConfigTest {
         Map<String, Object> four = Collections.singletonMap("asyncCommitConcurrency", 4);
         Map<String, Object> explicitNull = Collections.singletonMap("asyncCommitConcurrency", null);
         return Stream.of(
-                Arguments.of(missing, missing, 4),
+                Arguments.of(missing, missing, 1),
                 Arguments.of(missing, one, 1),
                 Arguments.of(missing, four, 4),
-                Arguments.of(missing, explicitNull, 4),
+                Arguments.of(missing, explicitNull, 1),
                 Arguments.of(one, missing, 1),
-                Arguments.of(one, explicitNull, 4),
+                Arguments.of(one, explicitNull, 1),
                 Arguments.of(one, four, 4));
     }
 
@@ -118,7 +120,7 @@ class PaimonConfigTest {
         assertEquals(100000, config.getBatchAccumulationSize());
         assertEquals(30000, config.getCommitIntervalMs());
         assertTrue(config.getEnableAsyncCommit());
-        assertEquals(4, config.getAsyncCommitConcurrency());
+        assertEquals(1, config.getAsyncCommitConcurrency());
     }
 
     @Test

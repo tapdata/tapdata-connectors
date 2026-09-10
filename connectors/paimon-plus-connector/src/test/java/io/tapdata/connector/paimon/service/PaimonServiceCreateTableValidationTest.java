@@ -60,7 +60,7 @@ class PaimonServiceCreateTableValidationTest {
     java.nio.file.Path tempDir;
 
     @Test
-    void existingAsyncTableMustBeRejectedWithoutAlteringItsMetadata() throws Exception {
+    void existingAsyncTableMustAlterOnlyExpireMode() throws Exception {
         String tableName = "existing_async_expiration";
         Catalog catalog = catalog(tableName, Collections.emptyMap());
         Identifier identifier = Identifier.create(DATABASE, tableName);
@@ -70,24 +70,39 @@ class PaimonServiceCreateTableValidationTest {
         Map<String, String> before = new HashMap<>(catalog.getTable(identifier).options());
         PaimonService service = service(config(tableName), catalog);
         try {
-            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
-                    () -> service.createTable(new TapTable(tableName)));
-            assertTrue(failure.getMessage().contains("ASYNC"));
+            assertFalse(service.createTable(new TapTable(tableName)));
+            before.put("snapshot.expire.execution-mode", "SYNC");
             assertEquals(before, catalog.getTable(identifier).options());
         } finally { service.close(); }
     }
 
     @Test
-    void effectiveCatalogAsyncDefaultMustFailBeforeCreatingTable() throws Exception {
+    void effectiveCatalogAsyncDefaultMustCreateSyncTable() throws Exception {
         String tableName = "catalog_async_expiration";
         Catalog catalog = catalog(tableName, Collections.singletonMap(
                 "table-default.snapshot.expire.execution-mode", "ASYNC"));
         PaimonService service = service(config(tableName), catalog);
         try {
-            assertThrows(IllegalArgumentException.class,
-                    () -> service.createTable(crossPartitionTable(tableName)));
-            assertThrows(Catalog.TableNotExistException.class,
-                    () -> catalog.getTable(Identifier.create(DATABASE, tableName)));
+            assertTrue(service.createTable(crossPartitionTable(tableName)));
+            assertEquals("SYNC", catalog.getTable(Identifier.create(DATABASE, tableName))
+                    .options().get("snapshot.expire.execution-mode"));
+        } finally { service.close(); }
+    }
+
+    @Test
+    void explicitAsyncPropertyMustCreateSyncTableAndWarnWithoutMutatingInput() throws Exception {
+        String name = "explicit_async_expiration";
+        PaimonConfig config = config(name);
+        LinkedHashMap<String, String> property = new LinkedHashMap<>();
+        property.put("propKey", "snapshot.expire.execution-mode"); property.put("propValue", "async");
+        config.setTableProperties(Collections.singletonList(property));
+        Catalog catalog = catalog(name, Collections.emptyMap()); Log log = mock(Log.class);
+        PaimonService service = service(config, catalog, log);
+        try {
+            assertTrue(service.createTable(crossPartitionTable(name)));
+            assertEquals("SYNC", catalog.getTable(Identifier.create(DATABASE, name)).options().get("snapshot.expire.execution-mode"));
+            assertEquals("async", property.get("propValue"));
+            verify(log).warn(org.mockito.ArgumentMatchers.contains("新建表将使用 SYNC"), eq(DATABASE + "." + name));
         } finally { service.close(); }
     }
 

@@ -693,8 +693,7 @@ public class PaimonService implements AutoCloseable {
         try {
             Table existingTable = stopController.call("catalog getTable", () -> catalog.getTable(identifier));
             if (existingTable instanceof FileStoreTable) {
-                FileStoreTable existingFileStoreTable = (FileStoreTable) existingTable;
-                PaimonSyncExpireMode.requireSync(identifier.getFullName(), existingFileStoreTable);
+                FileStoreTable existingFileStoreTable = ensureSyncExpireMode(identifier, existingTable);
                 BucketMode existingMode = existingFileStoreTable.bucketMode();
                 BucketMode configuredMode =
                         PaimonWriteSemanticContractResolver.deriveBucketMode(
@@ -864,8 +863,13 @@ public class PaimonService implements AutoCloseable {
         // Baseline: apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e.
         CatalogUtils.tableDefaultOptions(catalog.options())
                 .forEach(finalSchema.options()::putIfAbsent);
+        if (PaimonSyncExpireMode.configuredMode(identifier.getFullName(), finalSchema.options())
+                == CoreOptions.ExpireExecutionMode.ASYNC) {
+            log.warn("[paimon-expire-mode] table={} ASYNC -> SYNC：新建表将使用 SYNC；快照维护将计入提交耗时",
+                    identifier.getFullName());
+        }
+        finalSchema.options().put(PaimonSyncExpireMode.KEY, "SYNC");
         PaimonSyncExpireMode.requireSync(identifier.getFullName(), finalSchema.options());
-        finalSchema.options().putIfAbsent(PaimonSyncExpireMode.KEY, "SYNC");
         PaimonWriteSemanticContractResolver.validateNewTable(
                 identifier.getFullName(), finalSchema);
 
@@ -931,8 +935,8 @@ public class PaimonService implements AutoCloseable {
             // Enter the lifecycle gate before touching Catalog state. Native truncate keeps
             // partition keys, options, UUID and physical location intact.
             runTableDdl(tableKey, tableName, () -> {
-                Table currentTable = stopController.call("catalog getTable", () -> catalog.getTable(identifier));
-                PaimonSyncExpireMode.requireSync(tableKey, currentTable);
+                Table currentTable = ensureSyncExpireMode(identifier,
+                        stopController.call("catalog getTable", () -> catalog.getTable(identifier)));
                 PaimonStopResources.Scope ddlScope = stopResources.scope("DDL committer " + tableKey, stopController);
                 BatchTableCommit commit;
                 try { commit = ddlScope.create("allocate DDL committer", () -> currentTable.newBatchWriteBuilder().newCommit()); }
@@ -991,7 +995,7 @@ public class PaimonService implements AutoCloseable {
                         Table ddlTable;
                         try { ddlTable = stopController.call("catalog getTable", () -> catalog.getTable(Identifier.create(config.getDatabase(), tableName))); }
                         catch (Catalog.TableNotExistException absent) { return; }
-                        PaimonSyncExpireMode.requireSync(tableKey, ddlTable);
+                        // drop 不创建 committer；truncate 在 action 内转换并回读后再创建。
                         registerPhysicalTableOwner(tableKey, (FileStoreTable) ddlTable);
                         releasePhysicalOwner = true;
                     } else {
@@ -1687,13 +1691,12 @@ public class PaimonService implements AutoCloseable {
                 throw new IllegalArgumentException(
                         "Only FileStoreTable supports connector writes for " + tableKey);
             }
-            FileStoreTable fileStoreTable = (FileStoreTable) table;
-            PaimonSyncExpireMode.requireSync(tableKey, fileStoreTable);
+            FileStoreTable fileStoreTable = ensureSyncExpireMode(identifier, table);
             List<DataField> paimonFields = fileStoreTable.rowType().getFields();
             // Contract resolution must precede commit-state binding and the HASH_DYNAMIC
             // RocksDB pollution preflight, not merely raw writer construction.
             PaimonWriteSemanticContract writeSemanticContract =
-                    preResolvedContract == null
+                    preResolvedContract == null || fileStoreTable != preResolvedTable
                             ? PaimonWriteSemanticContractResolver.resolve(
                                     tableKey, fileStoreTable)
                             : preResolvedContract;
@@ -1807,6 +1810,48 @@ public class PaimonService implements AutoCloseable {
             if (boundTaskStateMap != stateMap) {
                 throw new IllegalStateException(
                         "Paimon service cannot be shared by multiple Tap task state maps; restart the connector");
+            }
+        }
+    }
+
+    /** 首次写入/建表检查/truncate 前持久转换；不得用于宣称旧 ASYNC 实例已停止。 */
+    private FileStoreTable ensureSyncExpireMode(Identifier identifier, Table table) throws Exception {
+        String tableKey = identifier.getFullName();
+        if (!PaimonSyncExpireMode.isAsync(tableKey, table)) {
+            PaimonSyncExpireMode.requireSync(tableKey, table);
+            return (FileStoreTable) table;
+        }
+        Object lock = commitLocks.computeIfAbsent(tableKey, key -> new Object());
+        synchronized (lock) {
+            boolean temporaryOwner = !physicalTableByLogicalTable.containsKey(tableKey);
+            FileStoreTable original = (FileStoreTable) table;
+            registerPhysicalTableOwner(tableKey, original);
+            try {
+                log.warn("[paimon-expire-mode] table={} 检测到 ASYNC，准备 ALTER 为 SYNC；"
+                        + "这会持久修改共享表配置，影响后续写入实例，不能终止其他进程已存在的 ASYNC 任务", tableKey);
+                // Paimon 1.3.2 用 SchemaChange.setOption 持久改选项，CachingCatalog 在 ALTER 后
+                // invalidate；仍显式失效并重新 getTable，不能沿用持有旧 CoreOptions 的 Table。
+                // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/catalog/CachingCatalog.java#L208-L212
+                // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-api/src/main/java/org/apache/paimon/schema/SchemaChange.java#L84
+                stopController.run("alter snapshot expiration to SYNC", () -> catalog.alterTable(identifier,
+                        Collections.singletonList(org.apache.paimon.schema.SchemaChange.setOption(
+                                PaimonSyncExpireMode.KEY, "SYNC")), false));
+                stopController.run("invalidate altered table", () -> catalog.invalidateTable(identifier));
+                Table refreshed = stopController.call("reload SYNC table", () -> catalog.getTable(identifier));
+                PaimonSyncExpireMode.requireSync(tableKey, refreshed);
+                FileStoreTable syncTable = (FileStoreTable) refreshed;
+                if (!original.location().equals(syncTable.location())) {
+                    throw new IllegalStateException("Paimon table location changed during expiration ALTER: " + tableKey);
+                }
+                stopController.checkAction("accept SYNC table");
+                log.warn("[paimon-expire-mode] table={} ASYNC -> SYNC 已持久修改并回读确认；"
+                        + "本次将创建同步维护实例，快照维护将计入提交耗时", tableKey);
+                return syncTable;
+            } finally {
+                // 若 ALTER 阻塞并超时，保留 owner；迟到返回不得释放或创建后续资源。
+                if (temporaryOwner && !stopController.isRetained() && !stopController.expired()) {
+                    unregisterPhysicalTableOwner(tableKey);
+                }
             }
         }
     }

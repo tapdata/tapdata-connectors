@@ -28,7 +28,7 @@ public final class PaimonSyncExpireMode {
                 () -> CoreOptions.fromMap(options).snapshotExpireExecutionMode());
     }
 
-    public static void requireSyncProperties(String tableKey, List<? extends Map<String, String>> properties) {
+    public static void validateProperties(String tableKey, List<? extends Map<String, String>> properties) {
         Map<String, String> options = new java.util.HashMap<>();
         if (properties != null) {
             for (Map<String, String> property : properties) {
@@ -42,7 +42,23 @@ public final class PaimonSyncExpireMode {
                 }
             }
         }
-        requireSync(tableKey, options);
+        configuredMode(tableKey, options);
+    }
+
+    /** 配置层允许 ASYNC；只有 Service 完成持久转换后才能通过底层 requireSync。 */
+    public static CoreOptions.ExpireExecutionMode configuredMode(String tableKey, Map<String, String> options) {
+        try { return CoreOptions.fromMap(options).snapshotExpireExecutionMode(); }
+        catch (IllegalArgumentException invalid) { throw unsupported(tableKey, options.get(KEY), invalid); }
+    }
+
+    public static boolean isAsync(String tableKey, Table table) {
+        if (!(table instanceof FileStoreTable)) {
+            throw new IllegalArgumentException("Only FileStoreTable supports connector writes: " + tableKey);
+        }
+        // 使用实际 Table 的 CoreOptions，与底层 Factory 校验保持一致。
+        try { return ((FileStoreTable) table).coreOptions().snapshotExpireExecutionMode()
+                == CoreOptions.ExpireExecutionMode.ASYNC; }
+        catch (IllegalArgumentException invalid) { throw unsupported(tableKey, table.options().get(KEY), invalid); }
     }
 
     private static void validate(String tableKey, String value,

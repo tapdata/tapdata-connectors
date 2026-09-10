@@ -1,7 +1,7 @@
 # Paimon Spill 修复前后对比与生命周期总览
 
 > 更新：2026-09-07。本文描述当前 V1.2 工作树实现；基线提交 `962083ff6ae2369a6d85ded223099d09b89bb3f7`，尚未提交。固定依赖 Paimon 1.3.2 / Hadoop 3.3.6。
-> 完整构建：62 个测试类、688 项，0 失败、0 错误、0 跳过；`clean package` 成功。当前契约及精确源码位置见 [Spec §14–15](../specs/SPEC-paimon-spill-sync-graceful-stop.md)。
+> 最新完整构建：63 个测试类、694 项，0 失败、0 错误、0 跳过；`clean package` 成功。当前契约及精确源码位置见 [Spec §17](../specs/SPEC-paimon-spill-sync-graceful-stop.md)。
 
 ## 1. 修复结果与证据边界
 
@@ -19,7 +19,7 @@ STOP 已改为有总预算的两阶段停止：先允许最终 Compaction 正常
 | 资源关闭失败 | 继续关闭后续资源可能误删 | 有局部保留，但 service 丢引用后缺完整强引用证明 | Service 资源账本覆盖半构造、reader、writer、IO 和锁；静态强保留 |
 | 最终提交 | 缺少 STOP final 专用失败边界 | 业务确认后 final prepare，普通最终任务失败可弃提交 | 提交/取消短锁单胜者；取消后即使 messages 非空也不提交 |
 | 未知业务/最终提交 | 不能凭错误推断未提交 | 精确 pending、稳定 commit identity | 保持协议；总超时后禁止新 retry、状态保存和 offset 确认 |
-| Snapshot maintenance | ASYNC 可脱离当前提交线程 | 只允许有效 SYNC | 保持 SYNC；已有 ASYNC 表拒绝，不自动 ALTER |
+| Snapshot maintenance | ASYNC 可脱离当前提交线程 | 只允许有效 SYNC | 运行时保持 SYNC；已有 ASYNC 自动 ALTER、WARN、回读，新建表直接 SYNC |
 | 有限读 | Catalog close 与 reader 生命周期竞争 | 仅 query 已准入 | 六个有限入口准入，reader 和 outstanding batch 独立记账 |
 | KEY_DYNAMIC/RocksDB | 索引可逃逸到原始临时根 | 已约束在 paimon-io 内 | 保持约束，补内部分配/预检准入和失败保留 |
 | stale cleaner | 漏表级根，无法保护未知活跃目录 | 全局与当前表级根并集 | 保持根/marker/live/symlink 检查；释放失败不丢锁引用 |
@@ -103,11 +103,11 @@ INFO 事件包含 owner、表、阶段、耗时及终态。队列满会丢弃事
 
 ## 6. 用户 future_inhousedate DDL 的结论
 
-该表 `bucket=-1` 且主键包含 `pt_extractiondate`，属于 **HASH_DYNAMIC**。原 DDL 的 `snapshot.expire.execution-mode=async` 与本 connector 契约冲突，使用当前实现前需将有效选项设为 SYNC；本轮未操作生产表。
+该表 `bucket=-1` 且主键包含 `pt_extractiondate`，属于 **HASH_DYNAMIC**。原 DDL 的 `snapshot.expire.execution-mode=async` 现在由 Connector 自动 ALTER 为 SYNC，WARN 并回读确认后再创建写资源；本轮没有操作生产表。
 
 `compaction.optimization-interval=60min` 不是“首次至少等 60 分钟”：Paimon 的 FullCompactTrigger 在上次执行时间为空且有多个 sorted run 时可立即合并，优先于普通 20 run 触发判断。[固定 1.3.2 原文](https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/mergetree/compact/FullCompactTrigger.java#L64)。
 
-生产字段和除 path 外的 28 个表选项已纳入 `FutureInhouseDateFixture`。三项回归验证：原 ASYNC 拒绝；SYNC 复合主键/分区写读；保留 128mb、64mb、spill threshold=10 等原参数的真实 HASH_DYNAMIC Spill 取消。第三项先写 12 个版本并确认首次合并，留下 11 文件，再显式触发 full compact，断言取消后 prepare 展开、线程未退出时目录不删、实际退出后清理且业务 snapshot 未被本次最终提交改变。测试 path 为本地临时 Catalog，未访问生产 S3。
+生产字段和除 path 外的 28 个表选项已纳入 `FutureInhouseDateFixture`。三项回归验证：原 ASYNC 自动转换后写读；SYNC 复合主键/分区写读；保留 128mb、64mb、spill threshold=10 等原参数的真实 HASH_DYNAMIC Spill 取消。第三项先写 12 个版本并确认首次合并，留下 11 文件，再显式触发 full compact，断言取消后 prepare 展开、线程未退出时目录不删、实际退出后清理且业务 snapshot 未被本次最终提交改变。测试 path 为本地临时 Catalog，未访问生产 S3。
 
 ## 7. 验证与剩余边界
 
@@ -126,3 +126,11 @@ INFO 事件包含 owner、表、阶段、耗时及终态。队列满会丢弃事
 HASH_DYNAMIC 每行登记由 3 次降为 2 次，纯状态检查在 RUNNING 无需进入 gate；原生 assigner 和 writer 的独立准入保留。close worker 在最外层恢复自身中断，异常聚合按对象身份去重。清理根按 canonical path 合并并继续拒绝符号链接根，增加“即使有 marker 也不删裸 rocksdb”负例。
 
 同时补齐六项 STOP 诊断字段、timeout-retained 事件、带阶段和预算的专用超时主因，以及有限读的 read/close 双重异常保留。具体源码位置、固定内核三方校验和 11 项新增回归见 [Spec §16](../specs/SPEC-paimon-spill-sync-graceful-stop.md#16-审查缺口修复2026-09-07)。全部 688 项通过仅证明本地回归，不代表生产吞吐或跨机器 fencing 已验收。
+
+## 9. ASYNC 输入兼容（2026-09-08）
+
+现在允许配置 ASYNC：已有表在写资源创建前自动持久修改为 SYNC，清除缓存并回读确认，打印 WARN；新建表直接使用 SYNC。运行时仍使用已验证的同步维护路径。修改或确认失败不继续分配资源，STOP 超时保留原有保护。ALTER 不会终止另一进程已运行的异步维护线程。
+
+具体调用顺序、源码和回归见 [Spec §17](../specs/SPEC-paimon-spill-sync-graceful-stop.md#17-async-配置自动转换为-sync2026-09-08)。此前 688 项为上一轮成绩，本轮完整验证结果见 Spec §17.2。
+
+本轮完整验证：2026-09-08 21:51:25 +08:00，JDK 17 离线 clean package 成功；63 类、694 项，失败/错误/跳过均 0，日志 `/tmp/paimon-auto-sync-full.log`。独立增量复核未发现确定性阻断问题。

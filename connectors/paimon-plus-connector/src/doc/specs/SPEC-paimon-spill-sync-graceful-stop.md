@@ -1,15 +1,15 @@
 # Spec：Paimon SYNC 停止、主动取消与超时资源保留
 
-> Spec ID：`paimon-spill-sync-graceful-stop`；版本：V1.2 实现契约；日期：2026-09-07。
-> 状态：用户已确认“最终 Compaction 不能无限等；取消后仍未终止时，STOP 可超时失败返回，保留文件与 owner，确认旧进程退出后恢复”。**已按后续开发授权实现，定向回归通过；完整构建结果见 §14。** 默认预算已实现为 180/120/30 秒，可在 Service 配置调整。设计审查记录见 §13，实现与生产 DDL 验证见 §14–15。
-> 实现基线：connector `962083ff6ae2369a6d85ded223099d09b89bb3f7`，V1.2 为其上的本地工作树修改，尚未提交；Paimon 1.3.2、Hadoop 3.3.6。本地 Paimon HEAD：`82a0b0914dc2dac84816bace2afd9abe2c908ec6`。
+> Spec ID：`paimon-spill-sync-graceful-stop`；版本：V1.2.1 实现契约；日期：2026-09-08。
+> 状态：用户已确认“最终 Compaction 不能无限等；取消后仍未终止时，STOP 可超时失败返回，保留文件与 owner，确认旧进程退出后恢复”。**已按后续开发授权实现，定向回归通过；最新完整构建结果见 §17.2。** 默认预算已实现为 180/120/30 秒，可在 Service 配置调整。设计审查记录见 §13，实现与生产 DDL 验证见 §14–15。
+> 实现基线：V1.2 已提交为 connector `7e50022d`；V1.2.1 自动转换为其上的本地工作树修改，尚未提交；Paimon 1.3.2、Hadoop 3.3.6。本地 Paimon HEAD：`82a0b0914dc2dac84816bace2afd9abe2c908ec6`。
 > 本文前半部分 V1.2 条款是当前实现契约；末尾折叠保存的 V1.1 是源码与历史验收档案，其中无期限 STOP、取消一律失败、不得增加超时配置等规则不再是新版本目标。V1.1 的 636 项成绩不能证明 V1.2 通过。其余未被替代的业务恢复、SYNC、目录保护和内核语义继续有效。
 
 ## 1. 目标与不可突破的边界
 
 将“持续等待最终 Compaction 成功或失败”改为“限时正常完成 → 主动取消 → 限时确认实际终止 → 无法证明时保留资源并失败返回”。只有取得实际执行终止和访问者归零证明后才能删除 Spill。超时是退出等待的理由，不是删除文件、释放 owner 或确认 offset 的证据。
 
-- 只支持有效 `snapshot.expire.execution-mode=SYNC`，不静默 ALTER。
+- 运行时只支持有效 `snapshot.expire.execution-mode=SYNC`；检测到合法 ASYNC 时，按 §17 自动 ALTER 并打印 WARN，回读确认后才创建写资源。无效值仍拒绝。
 - 仅 STOP 业务屏障成功后的最终 Compaction 允许正常弃提交；业务提交、未知提交结果、callback、状态保存和清理错误仍是硬失败。
 - 不使用 Thread.stop，不杀死整个 Engine JVM，不删除仍可能被使用的文件。
 - 不增加 reaper、TTL 自动释放或后台持续重试恢复器；超时保留后本进程不自动恢复这些表的写入资格。
@@ -393,7 +393,7 @@ env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home \
 
 | 职责 | 当前代码入口 | 实现事实 |
 | --- | --- | --- |
-| 监督与全 Service 总预算 | [PaimonService](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:3264) | 唯一 close worker；调用者轮询、主动取消、期限到后强保留与失败返回 |
+| 监督与全 Service 总预算 | [PaimonService](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:3309) | 唯一 close worker；调用者轮询、主动取消、期限到后强保留与失败返回 |
 | 最终决策线性化 | [PaimonStopController](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonStopController.java:165) | 同一短 gate 决定 COMMIT_ADMITTED / CANCEL_REQUESTED；不在锁内进入外部 IO |
 | 原生取消适配 | [PaimonCompactionExecutor](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/write/PaimonCompactionExecutor.java:76) | 登记未实际退场任务；取消 get 私有异常展开原生 prepare；迟到硬错误独立审计 |
 | 清理证明 | [PaimonTableWriteContext](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/write/PaimonTableWriteContext.java:354) | prepare 展开 + executor 真终止 → sync → writer → committer → IO →目录保护；失败短路并保留 |
@@ -449,7 +449,7 @@ git diff --check
 | 用户配置/结构 | Paimon 1.3.2 源码事实 | 本次处理 |
 | --- | --- | --- |
 | 主键包含分区字段，bucket=-1 | TableSchema.crossPartitionUpdate=false，KeyValueFileStore.bucketMode=HASH_DYNAMIC | 按真实 HASH_DYNAMIC 执行；不能套 KEY_DYNAMIC writer RocksDB 分析，但本 connector 的历史污染预检仍会用 GlobalIndexAssigner/RocksDB |
-| snapshot.expire.execution-mode=async | TableCommitImpl 根据该选项选择维护 executor | 与本 connector SYNC 唯一契约冲突；写资源分配前拒绝，不静默改表。生产使用前需将有效表选项设置为 SYNC |
+| snapshot.expire.execution-mode=async | TableCommitImpl 根据该选项选择维护 executor | Service 在写资源分配前自动 ALTER 为 SYNC、WARN 并回读确认；修改/确认失败仍拒绝。Factory 保持只接受 SYNC |
 | write-buffer-spillable=true，128mb buffer，spill disk=5gb | 写缓存 Spill 与 MergeSorter Compaction Spill 是两条路径 | 参数不是生命周期屏障，5gb 不能证明不存在 Compaction 临时文件或任务已经退出 |
 | sort-spill-threshold=10，sort-spill-buffer-size=64mb | MergeSorter.mergeSort 在输入 reader 数量 >10 时进入 spillMergeSort/spill | 真实回归保持这两个生产值，断言 MergeSorter.spill 栈与受保护目录 |
 | compaction-trigger=20，optimization-interval=60min | UniversalCompaction 先查 FullCompactTrigger；其 lastFullCompaction 为空且多 run 时可立即合并 | 首次不保证等待 60min，也不保证等到 20 run；测试先确认初次两 run 合并，再产生 11 个文件供显式 full compact |
@@ -473,8 +473,8 @@ git diff --check
 
 ### 15.2 三项实际回归
 
-1. `PaimonServiceDynamicBucketIntegrationTest.reportedProductionDdlAsyncMustFailBeforeWriterOwnerOrSpillAllocation`：使用真实表 schema，确认 HASH_DYNAMIC；ASYNC 在 writer/owner/Spill 分配前拒绝。
-2. `PaimonServiceDynamicBucketIntegrationTest.reportedProductionDdlSyncMustWriteAndReadPartitionedCompositeKey`：SYNC 下经 Service 写入，检查复合主键、DATE/DECIMAL/TIMESTAMP/分区字段，停止后临时根清空。
+1. `PaimonServiceDynamicBucketIntegrationTest.reportedProductionDdlMustWriteAndReadWithSyncMaintenance("async")`：保留用户原始 async DDL，经 Service 自动 ALTER；回读确认 SYNC 后实际写读，确认 HASH_DYNAMIC。
+2. 同一参数化方法的 `SYNC` 分支：无需 ALTER，检查复合主键、DATE/DECIMAL/TIMESTAMP/分区字段，停止后临时根清空。
 3. `PaimonCompactionSpillLifecycleIntegrationTest.reportedProductionDdlMustCancelRealHashDynamicSpillWithoutEarlyDeletion`：保持生产字段和全部上述表参数，仅 ASYNC→SYNC，Catalog path 换成本地临时路径。写入 12 个版本，确认初始两 run 合并后有 11 文件；显式 full compact 进入真实 MergeSorter.spill，STOP 受控取消后 prepare 展开但 IO 未关闭，实际线程退出后才清理；原业务 snapshot 及 11 个有效文件不被 final 提交改动。
 
 测试显式 compact 是故障注入的触发器，不是生产新增的“每次 STOP 强制全量 compact”行为。测试使用 1 秒 final 预算加速触发取消；生产 Service 默认仍为 180/120/30 秒。没有连接用户的生产 S3 URI。
@@ -486,7 +486,7 @@ git diff --check
 | 缺口 | 修复后的行为与入口 | 回归证据 |
 | --- | --- | --- |
 | 逐行 gate 重复登记 | [Context.write](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/write/PaimonTableWriteContext.java:531) 删除整行 scope.run；各 bucket 策略负责原生调用准入。HASH_DYNAMIC 一行从 3 次登记降到 2 次（assign + write）。[checkAction](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonStopController.java:98) 在 RUNNING 的纯检查走 volatile 快路径，实际 call/run 仍在 gate 内检查并登记 | HashDynamicBucketWriterStrategyTest.freezeAfterAssignmentMustRejectTheNextNativeWrite；全部 bucket 策略回归 |
-| worker 中断恢复 | [performClose](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:3314) 最外层 finally 恢复 worker 曾捕获并暂清的中断；caller 仅恢复自身中断。Context 捕获的次要 InterruptedException 也不因首因不同被遗漏 | BoundedStopTest.schedulerInterruptionMustBeRestoredOnlyOnCloseWorker；ServiceCloseTest.interruptedRetryOnCloseWorkerMustFinishCleanupWithoutInterruptingCaller |
+| worker 中断恢复 | [performClose](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:3359) 最外层 finally 恢复 worker 曾捕获并暂清的中断；caller 仅恢复自身中断。Context 捕获的次要 InterruptedException 也不因首因不同被遗漏 | BoundedStopTest.schedulerInterruptionMustBeRestoredOnlyOnCloseWorker；ServiceCloseTest.interruptedRetryOnCloseWorkerMustFinishCleanupWithoutInterruptingCaller |
 | 重复 suppressed | [PaimonFailures.append](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/util/PaimonFailures.java:9) 保留首因，跳过 self/null/已存在的同一异常对象；Service、Context、preflight、Factory、bucket/目录清理共享策略 | StopControllerTest.repeatedSecondaryFailureMustBeSuppressedOnceAndPreserveBusinessCause |
 | 清理根字符串去重 | [collectTmpDirRoots](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:360) 先拒绝配置根末级本身为符号链接，再取 canonical path；解析失败只跳过该根并记录 WARN | ServiceStaleSpillCleanupTest.canonicalAliasesMustDeduplicateWithoutFollowingSymlinkRoots；原表级根清理测试 |
 | 裸 rocksdb 负例 | 即使裸 rocksdb-orphan 含旧数据且旁有 owner marker，前缀拒绝仍保证其数据与 marker 不被 cleaner 删除；不能根据名称猜测历史裸目录归属 | SpillDirCleanerTest.bareRocksdbMustRemainEvenWithOldOwnerMarker |
@@ -530,6 +530,69 @@ flowchart LR
 独立增量复核已完成：未发现本轮指定修复的确定性 Critical/Required 回归；复核中的父路径 symlink 与异常反向附加两项初始疑点，经基线/可达性核对后撤回。末级 symlink 的精确语义已在本节明确。
 
 本轮没有生产 S3/MinIO、真实规模吞吐或 Engine 跨机器接管验收。静态 RETAINED 无 TTL、关闭失败后保留其后资源、长期 StreamRead 独立停止协议等既定边界保持不变。
+
+## 17. ASYNC 配置自动转换为 SYNC（2026-09-08）
+
+用户已明确授权：允许输入 ASYNC，检测到后自动 ALTER，使本 Connector 的实际维护行为变为 SYNC，并打印 WARN。本节替代此前“已有 ASYNC 表直接拒绝、不得 ALTER”的接入策略；不开放异步维护线程，不改变 STOP、Compaction 与跨机器交接边界。
+
+| 输入/入口 | 当前行为 |
+| --- | --- |
+| 连接级/表级 tableProperties 的合法 ASYNC | 配置加载与校验允许通过，保留输入值；执行时转换。空值、无效枚举值仍报错 |
+| 新建表显式 ASYNC 或 Catalog table-default ASYNC | 合并最终选项后写成 SYNC，打印 WARN；直接创建 SYNC 表，无需先创建再 ALTER |
+| createTable 检查已有表 / 首次创建写 Context | 检测 ASYNC 后，按下图持久修改并回读，后续只使用新 Table；已有 SYNC 不 ALTER、不打印转换 WARN |
+| truncate 临时 committer | 在既有 DDL drain/owner 屏障中完成转换，回读后创建 committer |
+| drop | 不创建维护 executor，保持 DDL drain 和 owner 屏障；不为了即将删除的表额外 ALTER |
+| ALTER 失败、权限不足、表消失、回读仍 ASYNC、位置变化 | 失败返回；不创建 writer、预检或 committer。ALTER 可能已成功，不能承诺回滚或打印转换已确认 |
+| ALTER 阻塞时 STOP 到期 | 按既有 FAILED_RETAINED 协议保留 Service/Catalog/owner。迟到返回不能开始 invalidate/getTable/写资源分配或释放 owner |
+
+```mermaid
+flowchart TD
+    A[读取有效表选项] --> B{是否 ASYNC}
+    B -- 否 --> C[requireSync 校验]
+    B -- 是 --> D[表级锁与同 JVM physical owner]
+    D --> E[WARN：将持久修改共享表配置]
+    E --> F[gate：Catalog.alterTable setOption SYNC]
+    F --> G[gate：invalidateTable]
+    G --> H[gate：重新 getTable]
+    H --> I[requireSync 与物理位置校验]
+    I --> J[WARN：已修改并回读确认]
+    J --> C
+    C --> K[使用新 Table 创建预检和写资源]
+```
+
+[Service.ensureSyncExpireMode](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:1818) 统一已有表转换。仅为 ALTER 临时取得的 owner 在调用已返回且未冻结/到期时释放；已有 Context/DDL 持有的 owner 不由此 helper 释放。[配置输入校验](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/config/PaimonSyncExpireMode.java:31) 接受合法 ASYNC，[Factory 最终校验](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/write/PaimonTableWriteContextFactory.java:59) 仍拒绝 ASYNC，不能由直接调用 Factory 绕过。
+
+WARN 前缀为 `[paimon-expire-mode]`。已有表打印“准备 ALTER 为 SYNC”和“已持久修改并回读确认”两条，包含表名、ASYNC→SYNC、共享配置影响与提交耗时影响；新建表打印使用 SYNC 的告警。成功告警只在回读校验通过后输出，SYNC 表不重复告警。转换属于普通 ingress，WARN 后端阻塞也不能阻止独立 STOP 监督者超时保留。
+
+### 17.1 固定源码证明
+
+- [SchemaChange.setOption:84](/Users/SL/javaProject/paimon/paimon-api/src/main/java/org/apache/paimon/schema/SchemaChange.java:84) 创建 SetOption；通过 Catalog.alterTable 持久修改一项选项，保留其他表属性。
+- [CachingCatalog.alterTable:208](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/catalog/CachingCatalog.java:208) 在 ALTER 后失效缓存；Connector 仍显式 invalidate/getTable，并对返回结果再次校验，旧 Table 不用于新建 writer。
+- [TableCommitImpl 构造:118](/Users/SL/javaProject/paimon/paimon-core/src/main/java/org/apache/paimon/table/sink/TableCommitImpl.java:118) 在构造时决定维护 executor。ALTER 不会改造已经创建的 ASYNC 实例，因此 WARN 不等于“旧进程已退出”，跨机器 A/B 原有交接要求继续有效。
+
+新增引用均指向官方固定提交 `c05f7d1f1b1e5d37e64edab0f2978124d90b64f7`，代码保留完整 URL。SchemaChange 与 CachingCatalog 已核对本地源码、Maven 1.3.2 sources JAR、官方固定 commit raw 原文三方一致。SHA-256 分别为 `9e267fddedeb1403f62a9c93032ddf499a0d2c335824c6ca4cc04549a9261b1c`、`27bbf80ca147e945ba9a934821d1e732b044d285659be212d936ab407b3e3604`。
+
+### 17.2 验证
+
+- `PaimonAutoSyncExpireModeTest`：ALTER→invalidate→reload 顺序与 WARN、重复 SYNC 检查不修改、回读仍 ASYNC、回读表消失、另一 Service owner 冲突、truncate 使用新 committer、ALTER 阻塞时 STOP 保留与迟到拒绝。
+- `PaimonServicePhysicalTableOwnerTest.failedAsyncAlterMustReleaseTemporaryOwnerBeforeWriterAllocation`：拒绝 ALTER 不创建写资源，不接触提交状态，临时 owner 释放。
+- `PaimonServiceCreateTableValidationTest`：真实 Catalog 的已有表只改变目标选项；Catalog ASYNC 默认和显式 async 输入都直接创建 SYNC；原输入对象不被修改且 WARN 可观察。
+- `PaimonConfigTest`：连接与表级配置接受 ASYNC，无效值仍拒绝。
+- `PaimonServiceDynamicBucketIntegrationTest.reportedProductionDdlMustWriteAndReadWithSyncMaintenance`：原始 async 与 SYNC 两分支真实 HASH_DYNAMIC 写读与停止清理。
+
+2026-09-08 21:51:25 +08:00，JDK 17 离线 reactor `clean package` 成功，5 个项目全部成功；模块 **63 类、694 项，0 failures、0 errors、0 skipped**，耗时 2 分 9 秒。日志 `/tmp/paimon-auto-sync-full.log`。独立增量复核未发现确定性 Critical/Required。此前 §14/§16 的 688 项为 V1.2 历史成绩。本地测试不涉及生产表、S3/MinIO 或 Engine 调度。
+
+---
+
+## 18. 后台定时提交并发默认值恢复为 1（2026-09-08）
+
+`asyncCommitConcurrency` 的 spec.json 默认值、Java 字段初值和 null 回退统一恢复为 **1**，范围仍为 1–16。显式配置值继续按用户设置生效；例如已有任务显式保存了 4，不会被默认值覆盖。界面名称改为“后台定时提交并发数”，英文与繁体同步完善。
+
+它控制每个 Service 的后台定时提交调度器最多同时处理多少张物理表。同表由 inFlightTables 与表级 commitLocks 保持串行；设为 1 时后台逐表提交，设为 4 时后台最多并发处理四张不同表。只有 enableAsyncCommit=true 且 commitIntervalMs>0 时启用此调度器。它不限制前台写入触发的所有提交总并发，也不设置 Compaction 线程数、文件操作线程数或 snapshot.expire.execution-mode；多个表的提交可以各自在自己的调用线程同步执行快照维护。
+
+调用接线见 [Service 构造调度器](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/service/PaimonService.java:269)，并发槽位计算见 [PaimonAsyncCommitScheduler](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/commit/PaimonAsyncCommitScheduler.java:126)。
+
+本次定向验证：PaimonConfigTest、PaimonSpecTest、PaimonAsyncCommitSchedulerTest，共 **61 项通过，0 失败/错误/跳过**；2026-09-08 22:07:45 +08:00，日志 `/tmp/paimon-concurrency-default-one.log`。覆盖缺省、显式 null、配置覆盖、三语文案和调度器并发；本次没有重跑完整 package，§17 的完整构建是默认值恢复前的验证记录。
 
 ---
 

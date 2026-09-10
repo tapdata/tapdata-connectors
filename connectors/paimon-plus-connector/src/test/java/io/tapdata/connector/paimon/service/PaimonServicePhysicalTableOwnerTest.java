@@ -96,7 +96,7 @@ class PaimonServicePhysicalTableOwnerTest {
     }
 
     @Test
-    void existingAsyncTableMustFailBeforeOwnerStateBindingOrWriterAllocation() throws Exception {
+    void failedAsyncAlterMustReleaseTemporaryOwnerBeforeWriterAllocation() throws Exception {
         PaimonService service = service();
         FileStoreTable table = physicalTable("async-admission");
         when(table.coreOptions()).thenReturn(org.apache.paimon.CoreOptions.fromMap(
@@ -105,19 +105,23 @@ class PaimonServicePhysicalTableOwnerTest {
         Field stateField = PaimonService.class.getDeclaredField("boundTaskStateMap");
         stateField.setAccessible(true);
         stateField.set(service, state);
+        org.apache.paimon.catalog.Catalog catalog = mock(org.apache.paimon.catalog.Catalog.class);
+        Field catalogField = PaimonService.class.getDeclaredField("catalog");
+        catalogField.setAccessible(true); catalogField.set(service, catalog);
+        IllegalStateException denied = new IllegalStateException("ALTER permission denied");
+        org.mockito.Mockito.doThrow(denied).when(catalog).alterTable(
+                org.mockito.ArgumentMatchers.any(Identifier.class), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.eq(false));
         Method admission = contextAdmissionMethod();
 
         InvocationTargetException failure = assertThrows(InvocationTargetException.class,
                 () -> admission.invoke(service, "default.orders", "orders",
                         Identifier.create("default", "orders"), null, table, null));
 
-        assertInstanceOf(IllegalArgumentException.class, failure.getCause());
-        assertTrue(failure.getCause().getMessage().contains("snapshot.expire.execution-mode"));
+        assertSame(denied, failure.getCause());
         assertTrue(((Map<?, ?>) serviceField(service, "physicalTableByLogicalTable")).isEmpty());
         assertTrue(unsafeResourceOwners(service).isEmpty());
         assertTrue(tableContexts(service).isEmpty());
         verifyNoInteractions(state);
-        verify(table, never()).location();
         verify(table, never()).rowType();
         verify(table, never()).snapshotManager();
         verify(table, never()).newStreamWriteBuilder();
