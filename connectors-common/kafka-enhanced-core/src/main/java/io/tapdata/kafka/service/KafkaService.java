@@ -475,7 +475,11 @@ public class KafkaService implements IKafkaService {
                     TapRecordEvent recordEvent = producerRecord.getRecordEvent();
                     if (exception != null) {
                         listResult.addError(recordEvent, exception);
-                        sendEx.set(new TapCodeException(KafkaErrorCodes.INVALID_TOPIC, exception.getMessage(), exception).dynamicDescriptionParameters(producerRecord.getProducerRecord().topic()));
+                        if (exception instanceof org.apache.kafka.common.errors.TimeoutException) {
+                            sendEx.set(new TapCodeException(KafkaErrorCodes.TIME_OUT, exception.getMessage(), exception).dynamicDescriptionParameters(producerRecord.getProducerRecord().topic()));
+                        } else {
+                            sendEx.set(new TapCodeException(KafkaErrorCodes.INVALID_TOPIC, exception.getMessage(), exception).dynamicDescriptionParameters(producerRecord.getProducerRecord().topic()));
+                        }
                     }
 
                     if (recordEvent instanceof TapInsertRecordEvent) {
