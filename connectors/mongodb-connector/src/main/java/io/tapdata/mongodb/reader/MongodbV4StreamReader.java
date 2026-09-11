@@ -84,7 +84,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
         running.compareAndSet(false, true);
         codec = new DocumentCodec();
         decoderContext = DecoderContext.builder().build();
-        concurrentProcessor = TapExecutors.createSimple(8, 32, "MongodbV4StreamReader-Processor");
+        concurrentProcessor = TapExecutors.createSimple(mongodbConfig.getDecodeThreads(), mongodbConfig.getDecodeQueueSize(), "MongodbV4StreamReader-Processor");
         connectionString = new ConnectionString(mongodbConfig.getUri());
     }
 
