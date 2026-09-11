@@ -27,6 +27,12 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private List<String> distributedKey = new ArrayList<>();
     private Boolean isPartition = false;
     private String customSlotName;
+    /**
+     * PostgreSQL 17+ logical failover slot. The slot is synchronized to
+     * physical standbys by PostgreSQL; it is not a connector-side multi-node
+     * flush mechanism.
+     */
+    private Boolean logicalSlotFailover = false;
     private String pgtoHost = "127.0.0.1";
     private int pgtoPort = 9876;
     private Integer defaultWalLogSize = 102400;
@@ -58,6 +64,12 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     // first readable point on the current timeline when earlier ancestor WAL is
     // unavailable. This can skip unconfirmed WAL and is disabled by default.
     private Boolean walUnsafeTimelineResume = false;
+    // Independent WAL archive used when online PostgreSQL nodes no longer expose
+    // the saved ancestor WAL. The directory is shared with the CDC runtime.
+    private String walArchiveDir;
+    // Optional PostgreSQL-style restore hook. %f is the WAL/history filename,
+    // %p is the destination path, and %t is the timeline id.
+    private String walArchiveRestoreCommand;
     // EDB Postgres Advanced Server TDE WAL decryption. Enabled when the TDE key
     // file is uploaded in connection config.
     private String walTdeKey;
@@ -202,6 +214,14 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
         this.customSlotName = customSlotName;
     }
 
+    public Boolean getLogicalSlotFailover() {
+        return logicalSlotFailover;
+    }
+
+    public void setLogicalSlotFailover(Boolean logicalSlotFailover) {
+        this.logicalSlotFailover = logicalSlotFailover;
+    }
+
     public void setPgtoHost(String pgtoHost) {
         this.pgtoHost = pgtoHost;
     }
@@ -342,6 +362,22 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setWalUnsafeTimelineResume(Boolean walUnsafeTimelineResume) {
         this.walUnsafeTimelineResume = walUnsafeTimelineResume;
+    }
+
+    public String getWalArchiveDir() {
+        return walArchiveDir;
+    }
+
+    public void setWalArchiveDir(String walArchiveDir) {
+        this.walArchiveDir = walArchiveDir;
+    }
+
+    public String getWalArchiveRestoreCommand() {
+        return walArchiveRestoreCommand;
+    }
+
+    public void setWalArchiveRestoreCommand(String walArchiveRestoreCommand) {
+        this.walArchiveRestoreCommand = walArchiveRestoreCommand;
     }
 
     public String getWalTdeKey() {

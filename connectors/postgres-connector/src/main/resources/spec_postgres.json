@@ -382,6 +382,52 @@
             }
           ]
         },
+        "walArchiveDir": {
+          "type": "string",
+          "title": "${walArchiveDir}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${walArchiveDirTip}"
+          },
+          "x-index": 88,
+          "x-reactions": [
+            {
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName"],
+              "fulfill": {
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='physical' ? null:\"none\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "walArchiveRestoreCommand": {
+          "type": "string",
+          "title": "${walArchiveRestoreCommand}",
+          "x-decorator": "FormItem",
+          "x-component": "Input.TextArea",
+          "x-decorator-props": {
+            "tooltip": "${walArchiveRestoreCommandTip}"
+          },
+          "x-component-props": {
+            "autoSize": {
+              "minRows": 2,
+              "maxRows": 4
+            }
+          },
+          "x-index": 89,
+          "x-reactions": [
+            {
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName"],
+              "fulfill": {
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='physical' ? null:\"none\"}}"
+                }
+              }
+            }
+          ]
+        },
         "pgtoHost": {
           "type": "string",
           "title": "${pgtoHost}",
@@ -893,11 +939,32 @@
             }
           ]
         },
+        "logicalSlotFailover": {
+          "type": "boolean",
+          "title": "${logicalSlotFailover}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-index": 19,
+          "x-decorator-props": {
+            "tooltip": "${logicalSlotFailoverTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "keepWalHours": {
           "type": "string",
           "title": "${keepWalHours}",
           "default": 0,
-          "x-index": 19,
+          "x-index": 20,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "x-decorator-props": {
@@ -918,7 +985,7 @@
           "type": "boolean",
           "title": "${autoClearSlot}",
           "default": true,
-          "x-index": 20,
+          "x-index": 21,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-reactions": [
@@ -937,7 +1004,7 @@
           "title": "${customPublicationName}",
           "x-decorator": "FormItem",
           "x-component": "Input",
-          "x-index": 21,
+          "x-index": 22,
           "x-decorator-props": {
             "tooltip": "${customPublicationNameTip}"
           },
@@ -956,7 +1023,7 @@
           "type": "boolean",
           "title": "${splitUpdatePk}",
           "default": true,
-          "x-index": 22,
+          "x-index": 23,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-reactions": [
@@ -974,7 +1041,7 @@
           "type": "boolean",
           "title": "${ddlTriggerEnable}",
           "default": true,
-          "x-index": 23,
+          "x-index": 24,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-reactions": [
@@ -992,7 +1059,7 @@
           "type": "boolean",
           "title": "${walDebug}",
           "default": false,
-          "x-index": 24,
+          "x-index": 25,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-decorator-props": {
@@ -1013,7 +1080,7 @@
           "type": "string",
           "title": "${walPageCacheCapacity}",
           "default": 0,
-          "x-index": 25,
+          "x-index": 26,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "x-decorator-props": {
@@ -1034,7 +1101,7 @@
           "type": "string",
           "title": "${walSpillThreshold}",
           "default": 500000,
-          "x-index": 26,
+          "x-index": 27,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "x-decorator-props": {
@@ -1054,7 +1121,7 @@
         "walSpillDir": {
           "type": "string",
           "title": "${walSpillDir}",
-          "x-index": 27,
+          "x-index": 28,
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-decorator-props": {
@@ -1075,7 +1142,7 @@
           "type": "string",
           "title": "${walLookbackSegments}",
           "default": 10,
-          "x-index": 28,
+          "x-index": 29,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "x-component-props": {
@@ -1132,6 +1199,10 @@
       "walTdeKeyPasswordTip": "Password used to unwrap the uploaded EDB TDE key file. Leave empty if the uploaded file is already an unwrapped raw key.",
       "walTdeKeyWrapAlgorithm": "TDE key wrap algorithm",
       "walTdeKeyWrapAlgorithmTip": "OpenSSL algorithm used by the EDB TDE key-wrap-command. Auto tries AES-256-CBC first, then AES-128-CBC.",
+      "walArchiveDir": "WAL archive directory",
+      "walArchiveDirTip": "Local directory readable by the Tapdata agent for archived WAL files. The connector looks for %f directly under this directory and under a timeline subdirectory before running the restore command.",
+      "walArchiveRestoreCommand": "WAL archive restore command",
+      "walArchiveRestoreCommandTip": "Command executed by the Tapdata agent when an archived WAL file is not found locally. Supports %f for the WAL file name, %p for the target local path, and %t for the timeline. The command must exit 0 and create %p.",
       "pgtoHost": "Pgto Server Host",
       "pgtoPort": "Pgto Server Port",
       "partPublication": "Part publication",
@@ -1165,6 +1236,8 @@
       "enableFileInput": "Enable file input",
       "customSlotName": "Specifies the logical replication slot name",
       "customSlotNameTip": "You can manually specify a logical replication slot that is created in advance in the database, and if the logical replication slot does not exist, the delta may not work",
+      "logicalSlotFailover": "Enable PostgreSQL 17 logical slot failover",
+      "logicalSlotFailoverTip": "Creates a pgoutput logical slot with failover=true on PostgreSQL 17+. PostgreSQL must be configured to synchronize failover slots to the standby nodes.",
       "customPublicationName": "Custom publication name",
       "customPublicationNameTip": "Only effective when partial publication is turned on. If it is left blank, the synchronization task will automatically create and destroy, but needs create publication, table owner permission. If you need to customize the settings of the publication, it is recommended that customers create the publication themselves according to the name. The synchronization account does not need additional permissions and will not be automatically destroyed",
       "splitUpdatePk": "Split update unique key",
@@ -1217,6 +1290,10 @@
       "walTdeKeyPasswordTip": "用于解开上传的EDB TDE密钥文件的密码。如果上传的是已解开的原始密钥，可以留空。",
       "walTdeKeyWrapAlgorithm": "TDE密钥包装算法",
       "walTdeKeyWrapAlgorithmTip": "EDB TDE key-wrap-command 使用的 OpenSSL 算法。Auto 会先尝试 AES-256-CBC，再尝试 AES-128-CBC。",
+      "walArchiveDir": "WAL归档目录",
+      "walArchiveDirTip": "Tapdata Agent 可读取的本地归档WAL目录。连接器会先在该目录和按timeline划分的子目录中查找%f，再执行恢复命令。",
+      "walArchiveRestoreCommand": "WAL归档恢复命令",
+      "walArchiveRestoreCommandTip": "当本地未找到归档WAL文件时，由 Tapdata Agent 执行的命令。支持%f表示WAL文件名，%p表示目标本地路径，%t表示timeline。命令必须返回0并生成%p。",
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
       "partPublication": "部分订阅",
@@ -1250,6 +1327,8 @@
       "enableFileInput": "启用文件输入",
       "customSlotName": "指定逻辑复制槽名字",
       "customSlotNameTip": "可以手动指定在数据库提前创建好的逻辑复制槽，如果逻辑复制槽不存在，则可能会导致增量不工作",
+      "logicalSlotFailover": "启用 PostgreSQL 17 逻辑槽故障切换",
+      "logicalSlotFailoverTip": "在 PostgreSQL 17+ 使用 failover=true 创建 pgoutput 逻辑槽。PostgreSQL 还必须配置将故障切换槽同步到备库节点。",
       "customPublicationName": "自定义订阅名",
       "customPublicationNameTip": "仅部分订阅开启时生效，如果置空时，同步任务会自动创建、销毁，但需要create publication，table owner权限，如果需要定制化推荐客户自行按该名称创建publication，则同步账号不需要有额外权限，也不会自动销毁",
       "splitUpdatePk": "修改唯一键拆分",
@@ -1295,6 +1374,8 @@
       "password" : "密碼",
       "logPluginName" : "日誌插件",
       "logPluginNameTip": "高版本PG自帶PGOUTPUT插件，但是日誌的before數據並不完整，筆者推薦使用WAL2JSON，安裝方式見MD文檔",
+      "logicalSlotFailover": "啟用 PostgreSQL 17 邏輯槽故障切換",
+      "logicalSlotFailoverTip": "在 PostgreSQL 17+ 使用 failover=true 建立 pgoutput 邏輯槽。PostgreSQL 還必須配置將故障切換槽同步到備庫節點。",
       "checkCdcSlave": "檢查CDC優先從庫",
       "walTdeKey": "EDB TDE密鑰文件",
       "walTdeKeyTip": "上傳EDB TDE包裝後的密鑰文件，通常是PGDATA/pg_encryption/key.bin。僅在日誌插件選擇PHYSICAL時用於解密加密WAL。",
@@ -1302,6 +1383,10 @@
       "walTdeKeyPasswordTip": "用於解開上傳的EDB TDE密鑰文件的密碼。如果上傳的是已解開的原始密鑰，可以留空。",
       "walTdeKeyWrapAlgorithm": "TDE密鑰包裝算法",
       "walTdeKeyWrapAlgorithmTip": "EDB TDE key-wrap-command 使用的 OpenSSL 算法。Auto 會先嘗試 AES-256-CBC，再嘗試 AES-128-CBC。",
+      "walArchiveDir": "WAL歸檔目錄",
+      "walArchiveDirTip": "Tapdata Agent 可讀取的本地歸檔WAL目錄。連接器會先在該目錄和按timeline劃分的子目錄中查找%f，再執行恢復命令。",
+      "walArchiveRestoreCommand": "WAL歸檔恢復命令",
+      "walArchiveRestoreCommandTip": "當本地未找到歸檔WAL文件時，由 Tapdata Agent 執行的命令。支持%f表示WAL文件名，%p表示目標本地路徑，%t表示timeline。命令必須返回0並生成%p。",
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
       "partPublication": "部分訂閱",
