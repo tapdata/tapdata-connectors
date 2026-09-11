@@ -329,6 +329,7 @@
                 <version>3.5.6</version>
                 <configuration>
                     <skipITs>${skipITs}</skipITs>
+                    <useModulePath>false</useModulePath>
                     <!-- MongodbWriter 依赖 AppType（引擎启动参数 app_type），fork JVM 需显式设置，
                         否则构造 writer 时抛 "app_type is blank" -->
                     <argLine>

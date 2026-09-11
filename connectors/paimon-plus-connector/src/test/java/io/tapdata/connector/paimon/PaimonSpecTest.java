@@ -49,7 +49,7 @@ class PaimonSpecTest {
         assertEquals(30000, properties.getAsJsonObject("commitIntervalMs").get("default").getAsInt());
         assertTrue(properties.getAsJsonObject("enableAsyncCommit").get("default").getAsBoolean());
         JsonObject concurrency = properties.getAsJsonObject("asyncCommitConcurrency");
-        assertEquals(4, concurrency.get("default").getAsInt());
+        assertEquals(1, concurrency.get("default").getAsInt());
         assertEquals(
                 1,
                 concurrency.getAsJsonObject("x-component-props").get("min").getAsInt());
@@ -65,7 +65,10 @@ class PaimonSpecTest {
                         .contains(".enableAsyncCommit"));
 
         JsonObject messages = spec.getAsJsonObject("messages");
-        for (String locale : Arrays.asList("en_US", "zh_CN", "zh_TW")) {
+        List<String> concurrencyDefaults = Arrays.asList("default: 1", "默认：1", "默認：1");
+        List<String> locales = Arrays.asList("en_US", "zh_CN", "zh_TW");
+        for (int i = 0; i < locales.size(); i++) {
+            String locale = locales.get(i);
             String placeholder =
                     messages.getAsJsonObject(locale)
                             .get("batchAccumulationSize_placeholder")
@@ -77,8 +80,8 @@ class PaimonSpecTest {
                     messages.getAsJsonObject(locale)
                             .get("asyncCommitConcurrency_placeholder")
                             .getAsString()
-                            .contains("4"),
-                    locale + " placeholder must show concurrency default 4");
+                            .contains(concurrencyDefaults.get(i)),
+                    locale + " placeholder must show concurrency default 1");
         }
     }
 

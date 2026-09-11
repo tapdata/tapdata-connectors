@@ -28,6 +28,8 @@
 	</modules>
 
 	<properties>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<maven.build.timestamp.format>yyyyMMddHHmm</maven.build.timestamp.format>
 		<connector.file.name>${project.artifactId}-v${project.version}-${maven.build.timestamp}</connector.file.name>
 		<java.version>8</java.version>
@@ -138,7 +140,41 @@
 			</plugin>
 
 		</plugins>
+		<pluginManagement>
+			<plugins>
+				<plugin>
+					<groupId>pl.project13.maven</groupId>
+					<artifactId>git-commit-id-plugin</artifactId>
+					<version>2.2.3</version>
+					<configuration>
+						<useNativeGit>true</useNativeGit>
+					</configuration>
+				</plugin>
+			</plugins>
+		</pluginManagement>
 	</build>
+	<profiles>
+		<profile>
+			<id>jdk9-test-opens</id>
+			<activation>
+				<jdk>[9,)</jdk>
+			</activation>
+			<properties>
+				<argLine></argLine>
+			</properties>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-surefire-plugin</artifactId>
+						<configuration>
+							<argLine>@{argLine} --add-opens=java.base/java.lang=ALL-UNNAMED</argLine>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 	<repositories>
 		<repository>
 			<id>nexus-releases</id>

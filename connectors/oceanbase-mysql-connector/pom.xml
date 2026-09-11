@@ -118,6 +118,12 @@
             <artifactId>tapdata-pdk-runner</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>javax.annotation</groupId>
+            <artifactId>javax.annotation-api</artifactId>
+            <version>1.3.2</version>
+            <scope>provided</scope>
+        </dependency>
         <!-- grpc相关依赖 begin -->
         <dependency>
             <groupId>com.google.protobuf</groupId>

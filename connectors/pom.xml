@@ -90,6 +90,7 @@
 		<guava.version>31.0.1-jre</guava.version>
 		<maven.compiler.encoding>UTF-8</maven.compiler.encoding>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<pdk-error-code.version>2.0-SNAPSHOT</pdk-error-code.version>
 		<mockito.version>4.11.0</mockito.version>
 		<byte-buddy.version>1.12.23</byte-buddy.version>
@@ -267,6 +268,14 @@
 		<pluginManagement>
 			<plugins>
 				<plugin>
+					<groupId>pl.project13.maven</groupId>
+					<artifactId>git-commit-id-plugin</artifactId>
+					<version>2.2.3</version>
+					<configuration>
+						<useNativeGit>true</useNativeGit>
+					</configuration>
+				</plugin>
+				<plugin>
 					<groupId>org.apache.maven.plugins</groupId>
 					<artifactId>maven-surefire-plugin</artifactId>
 					<version>2.22.1</version>
@@ -274,11 +283,33 @@
 				<plugin>
 					<groupId>org.jacoco</groupId>
 					<artifactId>jacoco-maven-plugin</artifactId>
-					<version>0.8.6</version>
+					<version>0.8.12</version>
 				</plugin>
 			</plugins>
 		</pluginManagement>
     </build>
+	<profiles>
+		<profile>
+			<id>jdk9-test-opens</id>
+			<activation>
+				<jdk>[9,)</jdk>
+			</activation>
+			<properties>
+				<argLine></argLine>
+			</properties>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-surefire-plugin</artifactId>
+						<configuration>
+							<argLine>@{argLine} --add-opens=java.base/java.lang=ALL-UNNAMED</argLine>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 	<repositories>
 		<repository>
 			<id>nexus-releases</id>
