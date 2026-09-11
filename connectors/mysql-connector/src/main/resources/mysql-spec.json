@@ -877,36 +877,37 @@
         "3.402823466E+38"
       ],
       "unsigned": "unsigned",
-      "fixed": false
+      "fixed": false,
+      "bit": 4,
+      "queryOnly": true
     },
     "float": {
       "to": "TapNumber",
-      "precision": [
-        1,
-        6
-      ],
+      "precision": 7,
+      "bit": 4,
+      "defaultPrecision": 7,
+      "defaultScale": 7,
       "scale": [
         0,
-        6
+        7
       ],
       "fixed": false
     },
     "double": {
       "to": "TapNumber",
-      "precision": [
-        1,
-        17
-      ],
-      "preferPrecision": 11,
-      "preferScale": 4,
+      "bit": 8,
+      "precision": [15, 16],
+      "defaultPrecision": 15,
+      "defaultScale": 16,
       "scale": [
         0,
-        17
+        16
       ],
       "fixed": false
     },
     "double[($precision,$scale)][unsigned]": {
       "to": "TapNumber",
+      "bit": 4,
       "precision": [
         1,
         255
@@ -920,7 +921,8 @@
         "1.7976931348623157E+308"
       ],
       "unsigned": "unsigned",
-      "fixed": false
+      "fixed": false,
+      "queryOnly": true
     },
     "date": {
       "to": "TapDate",
