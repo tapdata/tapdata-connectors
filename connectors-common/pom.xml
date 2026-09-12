@@ -18,7 +18,8 @@
 		<module>kafka-core</module>
 		<module>kafka-enhanced-core</module>
         <module>file-connector-core</module>
-        <module>api-loader-core</module>
+		<module>api-loader-core</module>
+		<module>oceanbase-cdc-runtime-loader</module>
 		<module>js-connector-core</module>
 		<module>js-connector-core-plus</module>
 		<module>read-partition</module>

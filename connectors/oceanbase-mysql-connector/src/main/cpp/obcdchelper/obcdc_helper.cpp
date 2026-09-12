@@ -258,7 +258,7 @@ int main()
 
     std::string task_id = "task";
     uint64_t start_timestamp = 0;
-    std::string conf_template = "/home/admin/oceanbase/etc/libobcdc.conf";
+    std::string conf_template = "obcdc/etc/libobcdc.conf";
     long launch_timeout = 300;
     std::map<std::string, std::string> overrides;
 
@@ -285,7 +285,7 @@ int main()
 
     std::string conf;
     if (!read_file(conf_template, conf)) {
-        log_line("cannot read conf template %s; is the obcdc module installed?", conf_template.c_str());
+        log_line("cannot read conf template %s", conf_template.c_str());
         return 2;
     }
     for (std::map<std::string, std::string>::const_iterator it = overrides.begin(); it != overrides.end(); ++it) {

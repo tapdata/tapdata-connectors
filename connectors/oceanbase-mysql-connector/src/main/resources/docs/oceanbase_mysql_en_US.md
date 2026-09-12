@@ -11,11 +11,11 @@ OceanBase 4.0+
 
 ### **3. CDC prerequisites**
 
-The CDC pre requirements for OceanBase are the same as MySQL
+The CDC prerequisites for OceanBase are the same as MySQL. Native CDC uses the packaged obcdc runtime and does not require ObLogProxy, an OceanBase CDC RPM installation, `OBCDC_HOME`, or `LD_LIBRARY_PATH`; Linux x86_64 is currently supported. ObLogProxy is required when Native CDC is disabled.
 - Enable binlog
 - Binlog_format: must be set to row or ROW
 - Binlog_row_image: must be set to full
-- Install ObLogProxy service
+- Install ObLogProxy when Native CDC is disabled
 
 ### **4. ObLogProxy**
 ```

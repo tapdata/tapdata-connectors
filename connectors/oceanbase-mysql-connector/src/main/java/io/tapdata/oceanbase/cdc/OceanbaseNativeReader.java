@@ -4,6 +4,7 @@ import io.netty.util.BooleanSupplier;
 import io.tapdata.data.ob.ReadLogPayload;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.oceanbase.bean.OceanbaseConfig;
+import io.tapdata.oceanbase.runtime.OceanbaseCdcRuntime;
 
 import java.io.BufferedReader;
 import java.io.DataInputStream;
@@ -26,12 +27,13 @@ import java.util.stream.Collectors;
 /**
  * Native CDC reader: spawns one obcdc-helper subprocess per task which drives
  * libobcdc directly and streams "4-byte big-endian length + ReadLogPayload"
- * frames on stdout. Replaces the ob-log-decoder gRPC server; only the obcdc
- * module needs to be installed on the engine host.
+ * frames on stdout. Replaces the ob-log-decoder gRPC server and loads the
+ * packaged obcdc runtime from Tapdata's shared native cache.
  */
 public class OceanbaseNativeReader extends OceanbaseReaderV2 {
 
     private static final String HELPER_NAME = "obcdc-helper";
+    private static final String HELPER_RESOURCE = "/native/obcdc/4.4.2.1/linux-x86_64/obcdc-helper";
 
     private final Log tapLogger;
     private volatile Process process;
@@ -50,19 +52,7 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
     @Override
     public void start(BooleanSupplier isAlive) throws Throwable {
         File helper = extractHelper();
-        // per-task working dir: holds the generated conf, libobcdc's ./storage
-        // RocksDB and its log directory
         ProcessBuilder pb = new ProcessBuilder(helper.getAbsolutePath()).directory(workDir);
-        // The helper's RUNPATH resolves libobcdc.so.4 from the standard install
-        // path /home/admin/oceanbase/lib64; OBCDC_HOME on the engine host points
-        // to a non-standard obcdc install (containing lib64/ and etc/).
-        String obcdcHome = System.getenv("OBCDC_HOME");
-        if (obcdcHome != null && !obcdcHome.isEmpty()) {
-            String libDir = obcdcHome + "/lib64";
-            String prev = pb.environment().get("LD_LIBRARY_PATH");
-            pb.environment().put("LD_LIBRARY_PATH", prev == null || prev.isEmpty() ? libDir : libDir + ":" + prev);
-            tapLogger.info("OBCDC_HOME={} -> LD_LIBRARY_PATH includes {}", obcdcHome, libDir);
-        }
         process = pb.start();
         tapLogger.info("obcdc-helper started, pid dir: {}", workDir.getAbsolutePath());
 
@@ -83,9 +73,7 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
         try (Writer writer = new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8)) {
             writeConf(writer, "_task_id", connectorId);
             writeConf(writer, "_start_timestamp", String.valueOf((Long) offsetState));
-            if (obcdcHome != null && !obcdcHome.isEmpty()) {
-                writeConf(writer, "_conf_template", obcdcHome + "/etc/libobcdc.conf");
-            }
+            writeConf(writer, "_conf_template", new File(workDir, "obcdc/etc/libobcdc.conf").getAbsolutePath());
             writeConf(writer, "cluster_user", oceanbaseConfig.getCdcUser());
             writeConf(writer, "cluster_password", oceanbaseConfig.getCdcPassword());
             writeConf(writer, "rootserver_list", oceanbaseConfig.getRootServerList());
@@ -119,9 +107,7 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
         return new IllegalStateException("obcdc-helper exited immediately"
                 + (exitCode == null ? "" : " (exit code " + exitCode + ")")
                 + " before accepting configuration; see preceding [obcdc-helper] log lines."
-                + " If it reports 'libobcdc.so.4: cannot open shared object file', install the obcdc module"
-                + " at /home/admin/oceanbase or set OBCDC_HOME=<obcdc install dir containing lib64/ and etc/>"
-                + " in the engine environment", cause);
+                + " The packaged OceanBase CDC runtime may be missing, corrupted, or unsupported on this host", cause);
     }
 
     /** Raise an error when the helper closed its stdout while the task is still running. */
@@ -164,16 +150,18 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
 
     private File extractHelper() throws IOException {
         workDir = Files.createTempDirectory("obcdc-" + connectorId).toFile();
+        File runtimeHome = OceanbaseCdcRuntime.prepare(OceanbaseNativeReader.class);
+        Files.createSymbolicLink(new File(workDir, "obcdc").toPath(), runtimeHome.toPath());
         ClassLoader classLoader = OceanbaseNativeReader.class.getClassLoader();
         if (classLoader == null) {
             classLoader = ClassLoader.getSystemClassLoader();
         }
-        InputStream in = classLoader.getResourceAsStream(HELPER_NAME);
+        InputStream in = classLoader.getResourceAsStream(HELPER_RESOURCE.substring(1));
         if (in == null) {
-            in = OceanbaseNativeReader.class.getResourceAsStream("/" + HELPER_NAME);
+            in = OceanbaseNativeReader.class.getResourceAsStream(HELPER_RESOURCE);
         }
         if (in == null) {
-            throw new IOException(HELPER_NAME + " not found on classpath; the connector was built without the obcdc-native profile");
+            throw new IOException(HELPER_RESOURCE + " not found in connector package");
         }
         File helper = new File(workDir, HELPER_NAME);
         try (OutputStream out = new FileOutputStream(helper)) {

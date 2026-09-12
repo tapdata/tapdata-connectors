@@ -25,6 +25,7 @@
         <protoc.version>3.19.1</protoc.version>
         <grpc.version>1.43.0</grpc.version>
         <origin.driver.class>com.oceanbase.jdbc.Driver</origin.driver.class>
+        <obcdc.runtime.version>4.4.2.1</obcdc.runtime.version>
     </properties>
 
     <artifactId>oceanbase-mysql-connector</artifactId>
@@ -165,18 +166,20 @@
             <artifactId>error_prone_annotations</artifactId>
             <version>2.9.0</version>
         </dependency>
+        <dependency>
+            <groupId>io.tapdata</groupId>
+            <artifactId>oceanbase-cdc-runtime-loader</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
     </dependencies>
 
     <profiles>
-        <!-- obcdc-helper 构建：仅在安装了 obcdc 模块（设置了 OBCDC_HOME，指向
-             /home/admin/oceanbase 这类目录，含 include/ 与 lib64/libobcdc.so.4）
-             的主机上激活，避免在没有 obcdc 头文件/库的环境下破坏常规构建。
-             产物是独立可执行文件，运行时通过 rpath 动态加载已安装的 libobcdc。 -->
+        <!-- Only for maintainers rebuilding the packaged helper binary. -->
         <profile>
-            <id>obcdc-native</id>
+            <id>obcdc-helper-build</id>
             <activation>
                 <property>
-                    <name>env.OBCDC_HOME</name>
+                    <name>obcdc.helper.build</name>
                 </property>
             </activation>
             <properties>
@@ -212,19 +215,19 @@
                                         -O2
                                         -D_GLIBCXX_USE_CXX11_ABI=0
                                         -DOB_USE_DRCMSG
-                                        -I${env.OBCDC_HOME}/include
-                                        -I${env.OBCDC_HOME}/include/libobcdc
-                                        -I${env.OBCDC_HOME}/include/drcmsg
+                                        -I${obcdc.sdk.home}/include
+                                        -I${obcdc.sdk.home}/include/libobcdc
+                                        -I${obcdc.sdk.home}/include/drcmsg
                                         -I${obcdc.cpp.dir}
                                         -static-libstdc++
                                         -static-libgcc
-                                        -o ${project.build.directory}/${obcdc.helper.name}
+                                        -o ${project.build.outputDirectory}/native/obcdc/${obcdc.runtime.version}/linux-x86_64/${obcdc.helper.name}
                                         ${obcdc.cpp.dir}/obcdc_helper.cpp
                                         -Wl,--push-state -Wl,-Bstatic -lstdc++ -Wl,--pop-state
-                                        -L${env.OBCDC_HOME}/lib64
+                                        -L${obcdc.sdk.home}/lib64
                                         -l:libobcdc.so.4
                                         -lpthread
-                                        -Wl,-rpath,/home/admin/oceanbase/lib64
+                                        -Wl,-rpath,$ORIGIN/obcdc/lib64
                                         -Wl,--enable-new-dtags
                                     </commandlineArgs>
                                 </configuration>
@@ -274,6 +277,33 @@
         </extensions>
 
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-obcdc-runtime</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>copy</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>io.tapdata.native</groupId>
+                                    <artifactId>oceanbase-cdc-runtime</artifactId>
+                                    <version>${obcdc.runtime.version}</version>
+                                    <type>zip</type>
+                                    <classifier>linux-x86_64</classifier>
+                                    <outputDirectory>${project.build.outputDirectory}/native/obcdc/${obcdc.runtime.version}/linux-x86_64</outputDirectory>
+                                    <destFileName>runtime.zip</destFileName>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-assembly-plugin</artifactId>
