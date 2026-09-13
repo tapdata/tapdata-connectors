@@ -27,7 +27,7 @@
         <origin.driver.class>com.oceanbase.jdbc.Driver</origin.driver.class>
         <obcdc.runtime.version>4.4.2.1</obcdc.runtime.version>
         <skipITs>true</skipITs>
-        <it.excludedGroups>tpcc,long-transaction</it.excludedGroups>
+        <it.excludedGroups>tpcc,long-transaction,performance</it.excludedGroups>
         <it.groups></it.groups>
     </properties>
 
@@ -183,6 +183,22 @@
     </dependencies>
 
     <profiles>
+        <profile>
+            <id>tpcc-only</id>
+            <properties>
+                <skipITs>false</skipITs>
+                <it.groups>tpcc</it.groups>
+                <it.excludedGroups></it.excludedGroups>
+            </properties>
+        </profile>
+        <profile>
+            <id>long-transaction-only</id>
+            <properties>
+                <skipITs>false</skipITs>
+                <it.groups>long-transaction</it.groups>
+                <it.excludedGroups></it.excludedGroups>
+            </properties>
+        </profile>
         <!-- Only for maintainers rebuilding the packaged helper binary. -->
         <profile>
             <id>obcdc-helper-build</id>

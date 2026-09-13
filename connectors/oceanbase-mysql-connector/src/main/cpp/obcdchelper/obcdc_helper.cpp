@@ -135,6 +135,33 @@ static void unix_time_to_str(char* strTime, size_t cap)
     strftime(strTime, cap, "%Y-%m-%d %H:%M:%S", &tmv);
 }
 
+static const char BASE64_CHARS[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static void base64_encode(const char* data, size_t len, std::string& out)
+{
+    out.reserve(out.size() + (len + 2) / 3 * 4);
+    size_t i = 0;
+    while (i + 2 < len) {
+        unsigned v = ((unsigned char)data[i] << 16) | ((unsigned char)data[i + 1] << 8)
+                     | (unsigned char)data[i + 2];
+        out += BASE64_CHARS[(v >> 18) & 63];
+        out += BASE64_CHARS[(v >> 12) & 63];
+        out += BASE64_CHARS[(v >> 6) & 63];
+        out += BASE64_CHARS[v & 63];
+        i += 3;
+    }
+    if (i < len) {
+        unsigned v = (unsigned)(unsigned char)data[i] << 16;
+        bool two = i + 1 < len;
+        if (two) v |= (unsigned)(unsigned char)data[i + 1] << 8;
+        out += BASE64_CHARS[(v >> 18) & 63];
+        out += BASE64_CHARS[(v >> 12) & 63];
+        out += two ? BASE64_CHARS[(v >> 6) & 63] : '=';
+        out += '=';
+    }
+}
+
 // Mirrors ob-log-decoder appendData. Returns 0: value_string, 1: value_bytes,
 // 2: null.
 static int append_data(std::string& field, const char* data, size_t len, int colType)
@@ -147,8 +174,7 @@ static int append_data(std::string& field, const char* data, size_t len, int col
         case DRCMSG_TYPE_LONG_BLOB:
         case DRCMSG_TYPE_MEDIUM_BLOB:
         case DRCMSG_TYPE_TINY_BLOB:
-            snprintf(dataBuf, sizeof(dataBuf), "<lobCol,len:%lu>", (unsigned long)len);
-            field.append(dataBuf);
+            base64_encode(data, len, field);
             break;
         case DRCMSG_TYPE_TIMESTAMP: {
             // with enable_convert_timestamp_to_unix_timestamp=1, mysql-mode
