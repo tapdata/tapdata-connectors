@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 import java.util.stream.Collectors;
 
 /**
@@ -55,12 +56,16 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
         ProcessBuilder pb = new ProcessBuilder(helper.getAbsolutePath()).directory(workDir);
         process = pb.start();
         tapLogger.info("obcdc-helper started, pid dir: {}", workDir.getAbsolutePath());
+        CountDownLatch ready = new CountDownLatch(1);
 
         Thread stderrPump = new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     tapLogger.info("[obcdc-helper] {}", line);
+                    if (line.contains("launch ok")) {
+                        ready.countDown();
+                    }
                 }
             } catch (IOException ignore) {
             }
@@ -85,6 +90,9 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
             throw helperEarlyExit(e);
         }
 
+        if (!ready.await(90, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("obcdc-helper did not become ready within 90 seconds; see preceding [obcdc-helper] log lines");
+        }
         DataInputStream dataIn = new DataInputStream(process.getInputStream());
         try {
             run(new FrameIterator(dataIn), isAlive);

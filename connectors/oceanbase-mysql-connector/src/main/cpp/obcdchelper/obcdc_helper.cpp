@@ -367,7 +367,7 @@ int main()
         }
         int metaRet = r->getTableMeta(tableMeta);
         int recordType = r->recordType();
-        int colCount = (metaRet == 0 && (recordType <= EREPLACE || recordType == EDDL))
+        int colCount = (tableMeta != NULL && metaRet == 0 && (recordType <= EREPLACE || recordType == EDDL))
                        ? tableMeta->getColCount() : 0;
 
         bool emitted = false;
@@ -423,9 +423,6 @@ int main()
                 break;
         }
 
-        if (r->isParsedRecord()) {
-            delete tableMeta;
-        }
         obcdc->release_record(r);
 
         if (emitted) {
@@ -439,7 +436,6 @@ int main()
 
     log_line("stopping obcdc ...");
     obcdc->stop();
-    obcdc->destroy();
     factory.deconstruct(obcdc);
     remove(conf_file.c_str());
     log_line("exit");

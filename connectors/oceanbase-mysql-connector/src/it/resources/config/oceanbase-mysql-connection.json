@@ -1,0 +1,13 @@
+{
+  "host": "127.0.0.1",
+  "port": 2881,
+  "database": "test",
+  "user": "root@mysqlt",
+  "password": "",
+  "tenant": "mysqlt",
+  "rootServerList": "127.0.0.1:2882:2881",
+  "cdcUser": "root@sys",
+  "cdcPassword": "",
+  "useNativeCdc": true,
+  "timezone": "+08:00"
+}

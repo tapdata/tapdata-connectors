@@ -39,10 +39,12 @@ public final class OceanbaseCdcRuntime {
 
     static {
         FILE_HASHES.put("lib64/libobcdc.so.4.4.2.1", "dac5929cefb923cf5b40c2a0ea1c2d93bd067ad6245d6bfc7d369b82f264d767");
+        FILE_HASHES.put("lib64/libaio.so.1.0.1", "74c6bb0192ba9b116c2567d88056b0d5c62f44bb6af7032e928ef452b0e132b5");
         FILE_HASHES.put("etc/libobcdc.conf", "b92ae713b45bf60687edf6df28c588b5256c5b5223670a0022c67402f7596007");
         FILE_HASHES.put("etc/obcdc_compatiable_ob_info.yaml", "9ae662a379c78907fe359c7233c20c7d574a2d8655a92005dddb570e6c6e2966");
         FILE_HASHES.put("etc/timezone_info.conf", "8902e04a06925d9bfd22919b9e346689882eddae2a6225cd2270ba433c70fce3");
         FILE_SIZES.put("lib64/libobcdc.so.4.4.2.1", 1031381816L);
+        FILE_SIZES.put("lib64/libaio.so.1.0.1", 6264L);
         FILE_SIZES.put("etc/libobcdc.conf", 5000L);
         FILE_SIZES.put("etc/obcdc_compatiable_ob_info.yaml", 797L);
         FILE_SIZES.put("etc/timezone_info.conf", 11940260L);
@@ -155,6 +157,7 @@ public final class OceanbaseCdcRuntime {
         Files.createDirectories(libDir);
         createOrReplaceLink(libDir.resolve("libobcdc.so.4"), "libobcdc.so.4.4.2.1");
         createOrReplaceLink(libDir.resolve("libobcdc.so"), "libobcdc.so.4");
+        createOrReplaceLink(libDir.resolve("libaio.so.1"), "libaio.so.1.0.1");
     }
 
     private static void createOrReplaceLink(Path link, String target) throws IOException {
@@ -187,7 +190,8 @@ public final class OceanbaseCdcRuntime {
             }
         }
         return Files.isSymbolicLink(runtimeHome.resolve("lib64/libobcdc.so.4"))
-                && Files.isSymbolicLink(runtimeHome.resolve("lib64/libobcdc.so"));
+                && Files.isSymbolicLink(runtimeHome.resolve("lib64/libobcdc.so"))
+                && Files.isSymbolicLink(runtimeHome.resolve("lib64/libaio.so.1"));
     }
 
     private static boolean layoutMatches(Path runtimeHome) throws IOException {
@@ -198,7 +202,8 @@ public final class OceanbaseCdcRuntime {
             }
         }
         return Files.isSymbolicLink(runtimeHome.resolve("lib64/libobcdc.so.4"))
-                && Files.isSymbolicLink(runtimeHome.resolve("lib64/libobcdc.so"));
+                && Files.isSymbolicLink(runtimeHome.resolve("lib64/libobcdc.so"))
+                && Files.isSymbolicLink(runtimeHome.resolve("lib64/libaio.so.1"));
     }
 
     private static String completionMarker() {
