@@ -5,8 +5,12 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoDatabase;
 import io.tapdata.exception.TapCodeException;
 import io.tapdata.mongodb.error.MongodbErrorCode;
+import io.tapdata.common.concurrent.SimpleConcurrentProcessorImpl;
+import io.tapdata.common.concurrent.TapExecutors;
+import io.tapdata.mongodb.entity.MongodbConfig;
 import org.bson.Document;
 import org.junit.jupiter.api.*;
+import org.mockito.MockedStatic;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Arrays;
@@ -45,6 +49,43 @@ class MongodbV4StreamReaderTest {
 
 		assertFalse(((AtomicBoolean) ReflectionTestUtils.getField(mongodbV4StreamReader, "running")).get());
 	}
+
+	@Test
+	void testOnStartUsesDecodeConfig() {
+		MongodbConfig mongodbConfig = mock(MongodbConfig.class);
+		when(mongodbConfig.getUri()).thenReturn("mongodb://localhost:27017/test");
+		when(mongodbConfig.getDecodeThreads()).thenReturn(2);
+		when(mongodbConfig.getDecodeQueueSize()).thenReturn(4);
+		MongoClient mongoClient = mock(MongoClient.class);
+		MongodbV4StreamReader mongodbV4StreamReader = new MongodbV4StreamReader();
+		ReflectionTestUtils.setField(mongodbV4StreamReader, "mongoClient", mongoClient);
+		@SuppressWarnings("unchecked")
+		SimpleConcurrentProcessorImpl<?, ?> processor = mock(SimpleConcurrentProcessorImpl.class);
+
+		try (MockedStatic<TapExecutors> tapExecutors = mockStatic(TapExecutors.class)) {
+			tapExecutors.when(() -> TapExecutors.createSimple(2, 4, "MongodbV4StreamReader-Processor")).thenReturn(processor);
+			mongodbV4StreamReader.onStart(mongodbConfig);
+			tapExecutors.verify(() -> TapExecutors.createSimple(2, 4, "MongodbV4StreamReader-Processor"));
+		}
+	}
+
+	@Test
+	void testOnStartUsesDefaultDecodeConfig() {
+		MongodbConfig mongodbConfig = new MongodbConfig();
+		mongodbConfig.setUri("mongodb://localhost:27017/test");
+		MongoClient mongoClient = mock(MongoClient.class);
+		MongodbV4StreamReader mongodbV4StreamReader = new MongodbV4StreamReader();
+		ReflectionTestUtils.setField(mongodbV4StreamReader, "mongoClient", mongoClient);
+		@SuppressWarnings("unchecked")
+		SimpleConcurrentProcessorImpl<?, ?> processor = mock(SimpleConcurrentProcessorImpl.class);
+
+		try (MockedStatic<TapExecutors> tapExecutors = mockStatic(TapExecutors.class)) {
+			tapExecutors.when(() -> TapExecutors.createSimple(8, 32, "MongodbV4StreamReader-Processor")).thenReturn(processor);
+			mongodbV4StreamReader.onStart(mongodbConfig);
+			tapExecutors.verify(() -> TapExecutors.createSimple(8, 32, "MongodbV4StreamReader-Processor"));
+		}
+	}
+
     @Nested
 	class OpenChangeStreamPreAndPostImagesTest{
 		MongoDatabase mongoDatabase;
