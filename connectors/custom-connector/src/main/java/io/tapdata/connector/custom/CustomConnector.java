@@ -41,11 +41,11 @@ import org.apache.commons.lang3.StringUtils;
 
 import javax.script.*;
 import java.io.Closeable;
-import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -55,10 +55,12 @@ import java.util.function.Consumer;
 public class CustomConnector extends ConnectorBase {
 
     private static final String TAG = CustomConnector.class.getSimpleName();
+    private static final long SCRIPT_THREAD_JOIN_TIMEOUT_MS = 2000L;
     private static final ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "engine"); //script factory
     private CustomConfig customConfig;
     private ScriptEngine initScriptEngine;
     private ConcurrentHashMap<String, ScriptEngine> writeEnginePool;
+    private final AtomicBoolean testRunCancelled = new AtomicBoolean(false);
     private final static String pdkId = "custom";
 
     private void initConnection(TapConnectionContext connectorContext) throws ScriptException {
@@ -82,14 +84,15 @@ public class CustomConnector extends ConnectorBase {
     @Override
     public void onStop(TapConnectionContext connectionContext) {
         try {
-            if (EmptyKit.isNotNull(customConfig) && customConfig.getCustomAfterOpr()) {
+            if (!testRunCancelled.get() && EmptyKit.isNotNull(customConfig) && Boolean.TRUE.equals(customConfig.getCustomAfterOpr())) {
                 ScriptUtil.executeScript(initScriptEngine, ScriptUtil.AFTER_FUNCTION_NAME);
             }
-            if (initScriptEngine instanceof Closeable) {
-                ((Closeable) initScriptEngine).close();
+        } catch (Exception e) {
+            if (connectionContext != null && connectionContext.getLog() != null) {
+                connectionContext.getLog().warn("{} execute after script error: {}", TAG, e.getMessage());
             }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        } finally {
+            closeAllScriptEngines();
         }
     }
 
@@ -132,12 +135,16 @@ public class CustomConnector extends ConnectorBase {
     private Object testRun(TapConnectionContext tapConnectionContext, CommandInfo commandInfo, CollectLog logger) {
         CountDownLatch countDownLatch = new CountDownLatch(1);
         Map<String, Object> argMap = commandInfo.getArgMap();
-        String threadName = "CustomConnector-Test-Runner";
+        String threadName = "CustomConnector-Test-Runner-" + UUID.randomUUID();
+        testRunCancelled.set(false);
         TapConnectionContext newTapConnectionContext = new TapConnectionContext(tapConnectionContext.getSpecification(),
                 DataMap.create(commandInfo.getConnectionConfig()), DataMap.create(commandInfo.getNodeConfig()), logger);
         Runnable runnable = () -> {
             Thread.currentThread().setName(threadName);
             try {
+                if (testRunCancelled.get() || Thread.currentThread().isInterrupted()) {
+                    return;
+                }
                 init(newTapConnectionContext);
                 String tableName = (String) commandInfo.getConnectionConfig().get("collectionName");
                 String type = commandInfo.getType();
@@ -190,9 +197,9 @@ public class CustomConnector extends ConnectorBase {
             }
         };
 
-        Thread thread = null;
+        Thread thread = new Thread(runnable, threadName);
+        thread.setDaemon(true);
         try {
-            thread = new Thread(runnable);
             thread.start();
             Integer timeout = (Integer) argMap.get("timeout");
             if (timeout == null || timeout <= 0) {
@@ -204,19 +211,76 @@ public class CustomConnector extends ConnectorBase {
             boolean threadFinished = countDownLatch.await(timeout, TimeUnit.SECONDS);
             if (!threadFinished) {
                 logger.warn("Execution has timed out and will terminate.");
-                stop(newTapConnectionContext);
+                cancelTestRun(thread, newTapConnectionContext, countDownLatch, logger);
             }
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             logger.error("Thread [{}] interrupted, {}", threadName, e);
+            cancelTestRun(thread, newTapConnectionContext, countDownLatch, logger);
         } catch (Throwable throwable) {
-            logger.error("[{}] execution failure， {}", throwable);
-        } finally {
-            if (thread != null && thread.isAlive()) {
-                thread.stop();
-            }
+            logger.error("[{}] execution failure, {}", threadName, throwable);
+            cancelTestRun(thread, newTapConnectionContext, countDownLatch, logger);
         }
 
         return logger.getLogs();
+    }
+
+    private void cancelTestRun(Thread thread, TapConnectionContext connectionContext, CountDownLatch countDownLatch, CollectLog logger) {
+        testRunCancelled.set(true);
+        if (thread != null) {
+            thread.interrupt();
+        }
+        closeAllScriptEngines();
+        try {
+            stop(connectionContext);
+        } catch (Throwable e) {
+            logger.warn("{} stop after timeout failed: {}", TAG, e.getMessage());
+        }
+        try {
+            if (!countDownLatch.await(SCRIPT_THREAD_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS) && thread != null && thread.isAlive()) {
+                logger.warn("Test runner {} did not finish after interrupt, abandoning the thread", thread.getName());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private synchronized void closeAllScriptEngines() {
+        closeScriptEngineQuietly(initScriptEngine);
+        initScriptEngine = null;
+        if (writeEnginePool != null) {
+            for (ScriptEngine engine : writeEnginePool.values()) {
+                closeScriptEngineQuietly(engine);
+            }
+            writeEnginePool.clear();
+        }
+    }
+
+    private void closeScriptEngineQuietly(ScriptEngine scriptEngine) {
+        if (scriptEngine instanceof Closeable) {
+            try {
+                ((Closeable) scriptEngine).close();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private void cancelScriptThread(Thread thread, ScriptEngine scriptEngine, Log logger) {
+        if (thread != null) {
+            thread.interrupt();
+        }
+        closeScriptEngineQuietly(scriptEngine);
+        if (thread == null) {
+            return;
+        }
+        try {
+            thread.join(SCRIPT_THREAD_JOIN_TIMEOUT_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (thread.isAlive() && logger != null) {
+            logger.warn("Script thread {} did not exit after interrupt, abandoning it", thread.getName());
+        }
     }
 
     private String toWriteListResultStr(WriteListResult<TapRecordEvent> writeListResult) {
@@ -526,9 +590,7 @@ public class CustomConnector extends ConnectorBase {
         if (isAlive() && EmptyKit.isNotEmpty(eventList)) {
             eventsOffsetConsumer.accept(eventList, new HashMap<>());
         }
-        if (t.isAlive()) {
-            t.stop();
-        }
+        cancelScriptThread(t, scriptEngine, tapConnectorContext.getLog());
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
@@ -582,9 +644,7 @@ public class CustomConnector extends ConnectorBase {
             consumer.accept(eventList, lastContextMap);
             contextMap.set(lastContextMap);
         }
-        if (t.isAlive()) {
-            t.stop();
-        }
+        cancelScriptThread(t, scriptEngine, nodeContext.getLog());
         consumer.streamReadEnded();
     }
 
