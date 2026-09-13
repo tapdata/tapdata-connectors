@@ -79,32 +79,37 @@ public class CsvConnector extends FileConnector {
     @Override
     public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
         //as file-connector: nodeConfig is supported, so initConnection can be used
-        initConnection(connectionContext);
-        if (EmptyKit.isBlank(fileConfig.getModelName())) {
-            return;
+        try {
+            initConnection(connectionContext);
+            if (EmptyKit.isBlank(fileConfig.getModelName())) {
+                return;
+            }
+            TapTable tapTable = table(fileConfig.getModelName());
+            ConcurrentMap<String, TapFile> csvFileMap = getFilteredFiles();
+            FileSchema csvSchema;
+            if (((CsvConfig) fileConfig).getOffStandard()) {
+                csvSchema = new OffStandardCsvSchema((CsvConfig) fileConfig, storage);
+            } else {
+                csvSchema = new CsvSchema((CsvConfig) fileConfig, storage);
+            }
+            Map<String, Object> sample;
+            //csv has column header
+            if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
+                sample = csvSchema.sampleFixedFileData(csvFileMap);
+            } else //analyze every csv file
+            {
+                sample = csvSchema.sampleEveryFileData(csvFileMap);
+            }
+            if (EmptyKit.isEmpty(sample)) {
+                throw new RuntimeException("Load schema from csv files error: no headers and contents!");
+            }
+            makeTapTable(tapTable, sample, fileConfig.getJustString());
+            consumer.accept(Collections.singletonList(tapTable));
+        } finally {
+            if (storage != null) {
+                storage.destroy();
+            }
         }
-        TapTable tapTable = table(fileConfig.getModelName());
-        ConcurrentMap<String, TapFile> csvFileMap = getFilteredFiles();
-        FileSchema csvSchema;
-        if (((CsvConfig) fileConfig).getOffStandard()) {
-            csvSchema = new OffStandardCsvSchema((CsvConfig) fileConfig, storage);
-        } else {
-            csvSchema = new CsvSchema((CsvConfig) fileConfig, storage);
-        }
-        Map<String, Object> sample;
-        //csv has column header
-        if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
-            sample = csvSchema.sampleFixedFileData(csvFileMap);
-        } else //analyze every csv file
-        {
-            sample = csvSchema.sampleEveryFileData(csvFileMap);
-        }
-        if (EmptyKit.isEmpty(sample)) {
-            throw new RuntimeException("Load schema from csv files error: no headers and contents!");
-        }
-        makeTapTable(tapTable, sample, fileConfig.getJustString());
-        consumer.accept(Collections.singletonList(tapTable));
-        storage.destroy();
     }
 
     protected void readOneFile(FileOffset fileOffset,

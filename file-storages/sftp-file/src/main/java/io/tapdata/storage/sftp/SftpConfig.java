@@ -12,7 +12,10 @@ public class SftpConfig implements Serializable {
     private int sftpPort = 22;
     private String sftpUsername;
     private String sftpPassword;
-    private String encoding;
+    private String encoding = "UTF-8";
+    private String sftpStrictHostKeyChecking = "yes";
+    private String sftpKnownHosts;
+    private int sftpConnectionTimeoutMillis = 10000;
 
     private static final BeanUtils beanUtils = InstanceFactory.instance(BeanUtils.class); //bean util
 
@@ -60,5 +63,55 @@ public class SftpConfig implements Serializable {
 
     public void setEncoding(String encoding) {
         this.encoding = encoding;
+    }
+
+    public String getSftpStrictHostKeyChecking() {
+        return sftpStrictHostKeyChecking;
+    }
+
+    public void setSftpStrictHostKeyChecking(String sftpStrictHostKeyChecking) {
+        this.sftpStrictHostKeyChecking = sftpStrictHostKeyChecking;
+    }
+
+    public String getSftpKnownHosts() {
+        return sftpKnownHosts;
+    }
+
+    public void setSftpKnownHosts(String sftpKnownHosts) {
+        this.sftpKnownHosts = sftpKnownHosts;
+    }
+
+    public int getSftpConnectionTimeoutMillis() {
+        return sftpConnectionTimeoutMillis;
+    }
+
+    public void setSftpConnectionTimeoutMillis(int sftpConnectionTimeoutMillis) {
+        this.sftpConnectionTimeoutMillis = sftpConnectionTimeoutMillis;
+    }
+
+    public void validate() {
+        if (sftpHost == null || sftpHost.trim().isEmpty()) {
+            throw new IllegalArgumentException("sftpHost is required");
+        }
+        if (sftpUsername == null || sftpUsername.trim().isEmpty()) {
+            throw new IllegalArgumentException("sftpUsername is required");
+        }
+        if (sftpPort <= 0 || sftpPort > 65535) {
+            throw new IllegalArgumentException("sftpPort is invalid");
+        }
+        if (encoding == null || encoding.trim().isEmpty()) {
+            encoding = "UTF-8";
+        }
+        if (sftpStrictHostKeyChecking == null || sftpStrictHostKeyChecking.trim().isEmpty()) {
+            sftpStrictHostKeyChecking = "yes";
+        }
+        if (!"yes".equalsIgnoreCase(sftpStrictHostKeyChecking)
+                && !"no".equalsIgnoreCase(sftpStrictHostKeyChecking)
+                && !"ask".equalsIgnoreCase(sftpStrictHostKeyChecking)) {
+            throw new IllegalArgumentException("sftpStrictHostKeyChecking must be yes, no or ask");
+        }
+        if (sftpConnectionTimeoutMillis <= 0) {
+            throw new IllegalArgumentException("sftpConnectionTimeoutMillis must be positive");
+        }
     }
 }

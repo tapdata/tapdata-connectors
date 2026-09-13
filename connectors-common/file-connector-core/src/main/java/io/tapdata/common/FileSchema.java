@@ -43,11 +43,13 @@ public abstract class FileSchema {
         try {
             countDownLatch.await();
         } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while sampling file data", e);
+        } finally {
+            executorService.shutdownNow();
         }
-        executorService.shutdown();
         if (EmptyKit.isNotEmpty(exceptionList)) {
-            throw new RuntimeException("sample every file error: {}", exceptionList.get(0));
+            throw new RuntimeException("sample every file error", exceptionList.get(0));
         }
         return sampleResult;
     }

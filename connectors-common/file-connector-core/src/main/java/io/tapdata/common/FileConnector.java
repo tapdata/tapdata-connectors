@@ -24,6 +24,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -94,14 +95,60 @@ public abstract class FileConnector extends ConnectorBase {
 
     @Override
     public void onStop(TapConnectionContext connectionContext) throws Throwable {
-        if (EmptyKit.isNotNull(fileRecordWriter)) {
-            if (!storage.supportAppendData()) {
-                fileRecordWriter.mergeCacheFiles();
+        Throwable failure = null;
+        try {
+            try {
+                shutdownMergeCacheExecutor();
+            } catch (Throwable throwable) {
+                failure = appendFailure(failure, throwable);
             }
-            fileRecordWriter.releaseResource();
+            if (EmptyKit.isNotNull(fileRecordWriter)) {
+                try {
+                    if (EmptyKit.isNotNull(storage) && !storage.supportAppendData()) {
+                        fileRecordWriter.mergeCacheFiles();
+                    }
+                } catch (Throwable throwable) {
+                    failure = appendFailure(failure, throwable);
+                }
+                try {
+                    fileRecordWriter.releaseResource();
+                } catch (Throwable throwable) {
+                    failure = appendFailure(failure, throwable);
+                }
+            }
+        } finally {
+            try {
+                if (EmptyKit.isNotNull(storage)) {
+                    storage.destroy();
+                }
+            } catch (Throwable throwable) {
+                failure = appendFailure(failure, throwable);
+            }
         }
-        if (EmptyKit.isNotNull(storage)) {
-            storage.destroy();
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    private Throwable appendFailure(Throwable failure, Throwable additionalFailure) {
+        if (failure == null) {
+            return additionalFailure;
+        }
+        if (failure != additionalFailure) {
+            failure.addSuppressed(additionalFailure);
+        }
+        return failure;
+    }
+
+    private void shutdownMergeCacheExecutor() throws InterruptedException {
+        ExecutorService executor = executorService;
+        executorService = null;
+        if (executor == null) {
+            return;
+        }
+        executor.shutdownNow();
+        if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+            TapLogger.warn(TAG, "Merge cache executor did not terminate within 10 seconds");
         }
     }
 
@@ -303,16 +350,25 @@ public abstract class FileConnector extends ConnectorBase {
         executorService = Executors.newFixedThreadPool(1);
         executorService.submit(() -> {
             int count = 0;
-            while (isAlive()) {
+            while (isAlive() && !Thread.currentThread().isInterrupted()) {
                 if (EmptyKit.isNotNull(fileRecordWriter)) {
                     count++;
                 }
-                TapSimplify.sleep(1000 * 60);
+                try {
+                    Thread.sleep(1000 * 60);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
                 if (count >= 5) {
                     try {
                         fileRecordWriter.mergeCacheFiles();
                     } catch (Exception e) {
-                        throw new RuntimeException(e);
+                        if (tapLogger != null) {
+                            tapLogger.warn(TAG, "Merge cache files failed: {}", e.getMessage());
+                        } else {
+                            TapLogger.warn(TAG, "Merge cache files failed: " + e.getMessage(), e);
+                        }
                     }
                     count = 0;
                 }
