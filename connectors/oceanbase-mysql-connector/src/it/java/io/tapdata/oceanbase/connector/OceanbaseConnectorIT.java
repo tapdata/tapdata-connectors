@@ -33,6 +33,11 @@ public class OceanbaseConnectorIT extends ConnectorIT {
     }
 
     @Override
+    protected boolean waitForStreamReadCatchUp() {
+        return true;
+    }
+
+    @Override
     protected void prepareStreamReadTable() throws Exception {
         Thread.sleep(20000L);
     }

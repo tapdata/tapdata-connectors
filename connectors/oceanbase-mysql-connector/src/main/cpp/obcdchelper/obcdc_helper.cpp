@@ -412,9 +412,7 @@ int main()
                 break;
             case HEARTBEAT: {
                 payload.op = OB_OP_HEARTBEAT;
-                struct timeval tv;
-                gettimeofday(&tv, NULL);
-                payload.transactionTime = tv.tv_sec;
+                payload.transactionTime = (int64_t)r->getTimestamp();
                 emitted = true;
                 break;
             }

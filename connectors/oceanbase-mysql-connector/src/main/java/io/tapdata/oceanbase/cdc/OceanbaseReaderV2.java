@@ -87,7 +87,10 @@ public class OceanbaseReaderV2 {
             if (tapTable != null) {
                 for (Map.Entry<String, TapField> entry : tapTable.getNameFieldMap().entrySet()) {
                     String dataType = entry.getValue().getDataType();
-                    dataTypeMap.put(table + "." + entry.getKey(), StringKit.removeParentheses(dataType));
+                    String column = table + "." + entry.getKey();
+                    String normalizedDataType = StringKit.removeParentheses(dataType);
+                    dataTypeMap.put(column, normalizedDataType);
+                    dataTypeMap.put(column.toLowerCase(Locale.ROOT), normalizedDataType);
                 }
             }
         }
@@ -162,6 +165,9 @@ public class OceanbaseReaderV2 {
             t.setName("OceanBaseReader-Consumer");
             t.start();
             while (isAlive.get() && payloads.hasNext()) {
+                if (EmptyKit.isNotNull(throwable.get())) {
+                    throw throwable.get();
+                }
                 ReadLogPayload payload = payloads.next();
                 while (ddlStop.get() && isAlive.get()) {
                     TapSimplify.sleep(500);
@@ -269,6 +275,9 @@ public class OceanbaseReaderV2 {
 
     private Object parseValueString(String column, Value value) throws UnsupportedEncodingException {
         String dataType = dataTypeMap.get(column);
+        if (dataType == null) {
+            dataType = dataTypeMap.get(column.toLowerCase(Locale.ROOT));
+        }
         if (value.getIsNull()) {
             return null;
         }
