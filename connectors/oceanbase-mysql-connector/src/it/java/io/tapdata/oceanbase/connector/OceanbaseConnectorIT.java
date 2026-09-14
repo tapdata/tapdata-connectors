@@ -12,6 +12,7 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.it.ConnectorTestContext;
 import io.tapdata.it.UnderTest;
+import io.tapdata.it.performance.PerformanceAdapter;
 import io.tapdata.it.schema.TestDataType;
 import io.tapdata.it.schema.TestFieldSpec;
 import io.tapdata.it.schema.TestTableSpec;
@@ -47,6 +48,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class OceanbaseConnectorIT extends TpccConnectorIT {
+
+    @Override
+    protected PerformanceAdapter createPerformanceAdapter() {
+        return new OceanbaseMysqlPerformanceAdapter(context.getConfig());
+    }
 
     @Override
     protected TpccAdapter createTpccAdapter() {

@@ -192,6 +192,14 @@
             </properties>
         </profile>
         <profile>
+            <id>performance-only</id>
+            <properties>
+                <skipITs>false</skipITs>
+                <it.groups>performance</it.groups>
+                <it.excludedGroups></it.excludedGroups>
+            </properties>
+        </profile>
+        <profile>
             <id>long-transaction-only</id>
             <properties>
                 <skipITs>false</skipITs>
