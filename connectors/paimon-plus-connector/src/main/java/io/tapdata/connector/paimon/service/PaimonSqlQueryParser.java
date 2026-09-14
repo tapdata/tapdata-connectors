@@ -5,20 +5,24 @@ import net.sf.jsqlparser.expression.DoubleValue;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.Function;
 import net.sf.jsqlparser.expression.LongValue;
+import net.sf.jsqlparser.expression.NotExpression;
 import net.sf.jsqlparser.expression.NullValue;
 import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.SignedExpression;
 import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.TimestampValue;
+import net.sf.jsqlparser.expression.CastExpression;
 import net.sf.jsqlparser.expression.BinaryExpression;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
+import net.sf.jsqlparser.expression.operators.relational.Between;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.GreaterThan;
 import net.sf.jsqlparser.expression.operators.relational.GreaterThanEquals;
 import net.sf.jsqlparser.expression.operators.relational.InExpression;
 import net.sf.jsqlparser.expression.operators.relational.IsNullExpression;
+import net.sf.jsqlparser.expression.operators.relational.LikeExpression;
 import net.sf.jsqlparser.expression.operators.relational.MinorThan;
 import net.sf.jsqlparser.expression.operators.relational.MinorThanEquals;
 import net.sf.jsqlparser.expression.operators.relational.NotEqualsTo;
@@ -78,8 +82,11 @@ final class PaimonSqlQueryParser {
             }
 
             PlainSelect outer = (PlainSelect) body;
-            if (isCountWrapper(outer)) {
-                return parseCountWrapper(outer, rowType);
+            if (isCountQuery(outer)) {
+                if (outer.getFromItem() instanceof SubSelect) {
+                    return parseCountWrapper(outer, rowType);
+                }
+                return parseDirectCount(outer, rowType);
             }
             return parseRows(outer, rowType);
         } catch (IllegalArgumentException e) {
@@ -106,7 +113,7 @@ final class PaimonSqlQueryParser {
                 throw unsupported("only a single plain SELECT is supported");
             }
             PlainSelect plainSelect = (PlainSelect) select.getSelectBody();
-            if (isCountWrapper(plainSelect)) {
+            if (isCountQuery(plainSelect) && plainSelect.getFromItem() instanceof SubSelect) {
                 SubSelect subSelect = (SubSelect) plainSelect.getFromItem();
                 if (!(subSelect.getSelectBody() instanceof PlainSelect)) {
                     throw unsupported("COUNT must wrap a plain SELECT");
@@ -129,18 +136,14 @@ final class PaimonSqlQueryParser {
         }
 
         Table table = requireTable(select.getFromItem());
-        Expression where = select.getWhere();
-        if (where == null) {
-            throw unsupported("a WHERE predicate is required");
-        }
-
         PredicateBuilder builder = new PredicateBuilder(rowType);
         return new ParsedQuery(table.getName(), false,
-                parsePredicate(where, table.getName(), rowType, builder));
+                parseOptionalPredicate(select.getWhere(), table.getName(), rowType, builder));
     }
 
     private static ParsedQuery parseCountWrapper(PlainSelect outer, RowType rowType) {
         validatePlainSelect(outer);
+        validateCountSelectItem(outer);
         if (outer.getWhere() != null) {
             throw unsupported("the count wrapper must not have an outer WHERE");
         }
@@ -159,10 +162,16 @@ final class PaimonSqlQueryParser {
         return new ParsedQuery(query.tableName(), true, query.predicate());
     }
 
-    private static boolean isCountWrapper(PlainSelect select) {
-        if (!(select.getFromItem() instanceof SubSelect)) {
-            return false;
-        }
+    private static ParsedQuery parseDirectCount(PlainSelect select, RowType rowType) {
+        validatePlainSelect(select);
+        validateCountSelectItem(select);
+        Table table = requireTable(select.getFromItem());
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        return new ParsedQuery(table.getName(), true,
+                parseOptionalPredicate(select.getWhere(), table.getName(), rowType, builder));
+    }
+
+    private static boolean isCountQuery(PlainSelect select) {
         List<SelectItem> items = select.getSelectItems();
         if (items == null || items.size() != 1 || !(items.get(0) instanceof SelectExpressionItem)) {
             return false;
@@ -177,8 +186,17 @@ final class PaimonSqlQueryParser {
             return false;
         }
         List<Expression> parameters = function.getParameters().getExpressions();
-        return parameters != null && parameters.size() == 1 && parameters.get(0) instanceof LongValue
-                && ((LongValue) parameters.get(0)).getValue() == 1L;
+        if (parameters == null || parameters.size() != 1 || !(parameters.get(0) instanceof LongValue)
+                || ((LongValue) parameters.get(0)).getValue() != 1L) {
+            return false;
+        }
+        return select.getFromItem() instanceof SubSelect || select.getFromItem() instanceof Table;
+    }
+
+    private static void validateCountSelectItem(PlainSelect select) {
+        if (!isCountQuery(select)) {
+            throw unsupported("only COUNT(1) is supported for count queries");
+        }
     }
 
     private static void validatePlainSelect(PlainSelect select) {
@@ -228,6 +246,11 @@ final class PaimonSqlQueryParser {
                     parsePredicate(binary.getLeftExpression(), tableName, rowType, builder),
                     parsePredicate(binary.getRightExpression(), tableName, rowType, builder));
         }
+        if (expression instanceof NotExpression) {
+            Predicate predicate = parsePredicate(((NotExpression) expression).getExpression(), tableName, rowType,
+                    builder);
+            return negate(predicate, expression);
+        }
         if (expression instanceof IsNullExpression) {
             IsNullExpression isNull = (IsNullExpression) expression;
             int index = fieldIndex(isNull.getLeftExpression(), tableName, rowType, builder);
@@ -235,6 +258,12 @@ final class PaimonSqlQueryParser {
         }
         if (expression instanceof InExpression) {
             return parseIn((InExpression) expression, tableName, rowType, builder);
+        }
+        if (expression instanceof Between) {
+            return parseBetween((Between) expression, tableName, rowType, builder);
+        }
+        if (expression instanceof LikeExpression) {
+            return parseLike((LikeExpression) expression, tableName, rowType, builder);
         }
         if (expression instanceof EqualsTo || expression instanceof NotEqualsTo
                 || expression instanceof GreaterThan || expression instanceof GreaterThanEquals
@@ -265,6 +294,68 @@ final class PaimonSqlQueryParser {
             return builder.lessThan(index, value);
         }
         return builder.lessOrEqual(index, value);
+    }
+
+    private static Predicate parseOptionalPredicate(Expression expression, String tableName, RowType rowType,
+                                                    PredicateBuilder builder) {
+        return expression == null ? null : parsePredicate(expression, tableName, rowType, builder);
+    }
+
+    private static Predicate parseBetween(Between expression, String tableName, RowType rowType,
+                                          PredicateBuilder builder) {
+        int index = fieldIndex(expression.getLeftExpression(), tableName, rowType, builder);
+        Object start = PredicateBuilder.convertJavaObject(rowType.getTypeAt(index),
+                literal(expression.getBetweenExpressionStart()));
+        Object end = PredicateBuilder.convertJavaObject(rowType.getTypeAt(index),
+                literal(expression.getBetweenExpressionEnd()));
+        Predicate predicate = builder.between(index, start, end);
+        return expression.isNot() ? negate(predicate, expression) : predicate;
+    }
+
+    private static Predicate parseLike(LikeExpression expression, String tableName, RowType rowType,
+                                       PredicateBuilder builder) {
+        if (expression.isCaseInsensitive()) {
+            throw unsupported("case-insensitive LIKE is not supported");
+        }
+        if (expression.getEscape() != null) {
+            throw unsupported("LIKE ESCAPE is not supported");
+        }
+        int index = fieldIndex(expression.getLeftExpression(), tableName, rowType, builder);
+        Object value = literal(expression.getRightExpression());
+        if (!(value instanceof String)) {
+            throw unsupported("LIKE pattern must be a string literal");
+        }
+        String pattern = (String) value;
+        boolean startsWithWildcard = pattern.startsWith("%");
+        boolean endsWithWildcard = pattern.endsWith("%");
+        String match = pattern;
+        if (startsWithWildcard) {
+            match = match.substring(1);
+        }
+        if (endsWithWildcard && !match.isEmpty()) {
+            match = match.substring(0, match.length() - 1);
+        }
+        if (match.indexOf('%') >= 0 || match.indexOf('_') >= 0) {
+            throw unsupported("LIKE supports only a single leading or trailing '%' wildcard");
+        }
+
+        Object converted = PredicateBuilder.convertJavaObject(rowType.getTypeAt(index), match);
+        Predicate predicate;
+        if (startsWithWildcard && endsWithWildcard) {
+            predicate = builder.contains(index, converted);
+        } else if (startsWithWildcard) {
+            predicate = builder.endsWith(index, converted);
+        } else if (endsWithWildcard) {
+            predicate = builder.startsWith(index, converted);
+        } else {
+            predicate = builder.equal(index, converted);
+        }
+        return expression.isNot() ? negate(predicate, expression) : predicate;
+    }
+
+    private static Predicate negate(Predicate predicate, Expression expression) {
+        return predicate.negate().orElseThrow(() ->
+                unsupported("cannot negate WHERE expression: " + expression));
     }
 
     private static Predicate parseIn(InExpression expression, String tableName, RowType rowType,
@@ -318,6 +409,9 @@ final class PaimonSqlQueryParser {
         if (expression instanceof TimestampValue) {
             return ((TimestampValue) expression).getValue();
         }
+        if (expression instanceof CastExpression) {
+            return castLiteral((CastExpression) expression);
+        }
         if (expression instanceof SignedExpression) {
             SignedExpression signed = (SignedExpression) expression;
             Object value = literal(signed.getExpression());
@@ -338,6 +432,50 @@ final class PaimonSqlQueryParser {
             throw unsupported("NULL is only supported by IS NULL or IS NOT NULL");
         }
         throw unsupported("unsupported literal: " + expression);
+    }
+
+    private static Object castLiteral(CastExpression expression) {
+        if (expression.getType() == null || expression.getLeftExpression() == null) {
+            throw unsupported("CAST requires a value and a target type");
+        }
+        Object value = literal(expression.getLeftExpression());
+        String type = expression.getType().getDataType();
+        if (type == null) {
+            throw unsupported("CAST target type is missing");
+        }
+        String normalizedType = type.trim().toUpperCase(java.util.Locale.ROOT);
+        if (normalizedType.startsWith("TIMESTAMP")) {
+            if (value instanceof java.sql.Timestamp) {
+                return value;
+            }
+            if (value instanceof java.sql.Date) {
+                return new java.sql.Timestamp(((java.sql.Date) value).getTime());
+            }
+            if (value instanceof String) {
+                String text = ((String) value).trim();
+                if (text.length() == 10) {
+                    text += " 00:00:00";
+                }
+                try {
+                    return java.sql.Timestamp.valueOf(text);
+                } catch (IllegalArgumentException e) {
+                    throw unsupported("invalid TIMESTAMP literal: " + value, e);
+                }
+            }
+        }
+        if ("DATE".equals(normalizedType)) {
+            if (value instanceof java.sql.Date) {
+                return value;
+            }
+            if (value instanceof String) {
+                try {
+                    return java.sql.Date.valueOf(((String) value).trim());
+                } catch (IllegalArgumentException e) {
+                    throw unsupported("invalid DATE literal: " + value, e);
+                }
+            }
+        }
+        throw unsupported("unsupported CAST target type: " + type);
     }
 
     private static IllegalArgumentException unsupported(String message) {

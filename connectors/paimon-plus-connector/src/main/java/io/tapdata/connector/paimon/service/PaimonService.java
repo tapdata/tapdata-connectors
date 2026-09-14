@@ -3136,7 +3136,10 @@ public class PaimonService implements AutoCloseable {
             throw new IllegalArgumentException("Paimon SQL table name changed during parsing");
         }
 
-        ReadBuilder readBuilder = paimonTable.newReadBuilder().withFilter(query.predicate());
+        ReadBuilder readBuilder = paimonTable.newReadBuilder();
+        if (query.predicate() != null) {
+            readBuilder.withFilter(query.predicate());
+        }
         TableScan.Plan plan = stopController.call("plan filtered scan", () -> readBuilder.newScan().plan());
         TableRead tableRead = readBuilder.newRead().executeFilter();
         List<DataField> paimonFields = paimonTable.rowType().getFields();

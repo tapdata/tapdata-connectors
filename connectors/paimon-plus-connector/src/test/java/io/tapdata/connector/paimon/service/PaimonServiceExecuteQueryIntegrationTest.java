@@ -55,6 +55,7 @@ class PaimonServiceExecuteQueryIntegrationTest {
                     Schema.newBuilder()
                             .column("id", DataTypes.INT())
                             .column("category", DataTypes.STRING())
+                            .column("created", DataTypes.TIMESTAMP(3))
                             .primaryKey("id")
                             .option("bucket", "1")
                             .option("write-buffer-size", "8mb")
@@ -63,12 +64,14 @@ class PaimonServiceExecuteQueryIntegrationTest {
 
             TapTable tapTable = new TapTable(TABLE)
                     .add(new TapField("id", "INT").primaryKeyPos(1))
-                    .add(new TapField("category", "STRING"));
+                    .add(new TapField("category", "STRING"))
+                    .add(new TapField("created", "TIMESTAMP"));
             TapConnectorContext context = context();
             service.writeRecords(Arrays.asList(
-                    cdcInsert(map("id", 1, "category", "A")),
-                    cdcInsert(map("id", 2, "category", "B")),
-                    cdcInsert(map("id", 3, "category", "A"))), tapTable, context);
+                    cdcInsert(map("id", 1, "category", "A", "created", timestamp("2026-03-31 00:00:00"))),
+                    cdcInsert(map("id", 2, "category", "B", "created", timestamp("2026-04-02 00:00:00"))),
+                    cdcInsert(map("id", 3, "category", "A", "created", timestamp("2026-04-03 00:00:00")))),
+                    tapTable, context);
 
             List<Map<String, Object>> rows = castRows(service.executeQuery(
                     "SELECT * FROM " + TABLE + " WHERE category = 'A'", mock(Log.class)));
@@ -80,10 +83,19 @@ class PaimonServiceExecuteQueryIntegrationTest {
                     "SELECT COUNT(1) FROM (SELECT * FROM " + TABLE
                             + " WHERE category = 'A') AS COUNT", mock(Log.class));
             assertEquals(2L, count);
+            assertEquals(3L, service.executeQuery(
+                    "SELECT COUNT(1) FROM " + TABLE, mock(Log.class)));
+            assertEquals(2L, service.executeQuery(
+                    "SELECT COUNT(1) FROM " + TABLE
+                            + " WHERE created > CAST('2026-04-01' AS TIMESTAMP)", mock(Log.class)));
+            assertEquals(3, castRows(service.executeQuery(
+                    "SELECT * FROM " + TABLE, mock(Log.class))).size());
 
             service.writeRecords(Arrays.asList(
-                    cdcUpdate(map("id", 1, "category", "A"), map("id", 1, "category", "C")),
-                    cdcDelete(map("id", 2, "category", "B"))), tapTable, context);
+                    cdcUpdate(map("id", 1, "category", "A", "created", timestamp("2026-03-31 00:00:00")),
+                            map("id", 1, "category", "C", "created", timestamp("2026-03-31 00:00:00"))),
+                    cdcDelete(map("id", 2, "category", "B", "created", timestamp("2026-04-02 00:00:00")))),
+                    tapTable, context);
             List<Map<String, Object>> finalRows = castRows(service.executeQuery(
                     "SELECT * FROM " + TABLE + " WHERE category = 'A'", mock(Log.class)));
             assertEquals(1, finalRows.size());
@@ -169,5 +181,9 @@ class PaimonServiceExecuteQueryIntegrationTest {
             result.put((String) values[i], values[i + 1]);
         }
         return result;
+    }
+
+    private java.sql.Timestamp timestamp(String value) {
+        return java.sql.Timestamp.valueOf(value);
     }
 }
