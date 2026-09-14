@@ -312,16 +312,24 @@ public class MysqlConnectorTest {
             UnitTestUtils.injectField(MysqlConnector.class, connector, "mysqlJdbcContext", jdbcContext);
             UnitTestUtils.injectField(CommonDbConnector.class, connector, "commonDbConfig", commonDbConfig);
             UnitTestUtils.injectField(CommonDbConnector.class, connector, "tapLogger", tapLogger);
+            UnitTestUtils.injectField(CommonDbConnector.class, connector, "exceptionCollector", mock(ExceptionCollector.class));
             doCallRealMethod().when(connector).batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
-            doCallRealMethod().when(connector).resolveHashReadOffset(any());
         }
 
         @Test
-        void testApplySplit() {
+        void testApplySplit() throws Throwable {
             int expectedMaxSplit = 5;
             when(commonDbConfig.getHashSplit()).thenReturn(true);
             when(commonDbConfig.getMaxSplit()).thenReturn(expectedMaxSplit);
             when(commonDbConfig.getBatchReadThreadSize()).thenReturn(3);
+            when(connector.isAlive()).thenReturn(true);
+            doReturn(new io.tapdata.common.entity.HashReadOffset(expectedMaxSplit)).when(connector).resolveHashReadOffset(any());
+            doReturn((io.tapdata.common.ResultSetConsumer) resultSet -> { }).when(connector).resultSetConsumer(any(), anyInt(), any(), any());
+            doAnswer(invocation -> {
+                io.tapdata.common.ResultSetConsumer resultSetConsumer = invocation.getArgument(1);
+                resultSetConsumer.accept(mock(ResultSet.class));
+                return null;
+            }).when(mysqlJdbcContextV2).queryWithStream(anyString(), any());
             assertDoesNotThrow(() -> connector.batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer));
             verify(connector, times(expectedMaxSplit)).resultSetConsumer(any(), anyInt(), any(), any());
         }
