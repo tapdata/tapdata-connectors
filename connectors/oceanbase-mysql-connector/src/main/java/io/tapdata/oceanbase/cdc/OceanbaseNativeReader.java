@@ -19,10 +19,12 @@ import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -35,6 +37,9 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
 
     private static final String HELPER_NAME = "obcdc-helper";
     private static final String HELPER_RESOURCE = "/native/obcdc/4.4.2.1/linux-x86_64/obcdc-helper";
+    private static final int HELPER_LAUNCH_TIMEOUT_SECONDS = 75;
+    private static final int HELPER_READY_TIMEOUT_SECONDS = 90;
+    private static final int NATIVE_LOG_TAIL_LINES = 80;
 
     private final Log tapLogger;
     private volatile Process process;
@@ -54,12 +59,13 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
     public void start(BooleanSupplier isAlive) throws Throwable {
         File helper = extractHelper();
         ProcessBuilder pb = new ProcessBuilder(helper.getAbsolutePath()).directory(workDir);
-        process = pb.start();
+        Process helperProcess = pb.start();
+        process = helperProcess;
         tapLogger.info("obcdc-helper started, pid dir: {}", workDir.getAbsolutePath());
         CountDownLatch ready = new CountDownLatch(1);
 
         Thread stderrPump = new Thread(() -> {
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(helperProcess.getErrorStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     tapLogger.info("[obcdc-helper] {}", line);
@@ -74,27 +80,29 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
         stderrPump.setDaemon(true);
         stderrPump.start();
 
-        // configuration goes through stdin so credentials never appear on argv
-        try (Writer writer = new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8)) {
-            writeConf(writer, "_task_id", connectorId);
-            writeConf(writer, "_start_timestamp", String.valueOf((Long) offsetState));
-            writeConf(writer, "_conf_template", new File(workDir, "obcdc/etc/libobcdc.conf").getAbsolutePath());
-            writeConf(writer, "cluster_user", oceanbaseConfig.getCdcUser());
-            writeConf(writer, "cluster_password", oceanbaseConfig.getCdcPassword());
-            writeConf(writer, "rootserver_list", oceanbaseConfig.getRootServerList());
-            writeConf(writer, "tb_white_list", tableList.stream()
-                    .map(table -> oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + "." + table)
-                    .collect(Collectors.joining("|")));
-        } catch (IOException e) {
-            // stdin pipe broken => the helper died before accepting configuration
-            throw helperEarlyExit(e);
-        }
-
-        if (!ready.await(90, TimeUnit.SECONDS)) {
-            throw new IllegalStateException("obcdc-helper did not become ready within 90 seconds; see preceding [obcdc-helper] log lines");
-        }
-        DataInputStream dataIn = new DataInputStream(process.getInputStream());
         try {
+            // configuration goes through stdin so credentials never appear on argv
+            try (Writer writer = new OutputStreamWriter(helperProcess.getOutputStream(), StandardCharsets.UTF_8)) {
+                writeConf(writer, "_task_id", connectorId);
+                writeConf(writer, "_start_timestamp", String.valueOf((Long) offsetState));
+                writeConf(writer, "_conf_template", new File(workDir, "obcdc/etc/libobcdc.conf").getAbsolutePath());
+                writeConf(writer, "_launch_timeout_sec", String.valueOf(HELPER_LAUNCH_TIMEOUT_SECONDS));
+                writeConf(writer, "cluster_user", oceanbaseConfig.getCdcUser());
+                writeConf(writer, "cluster_password", oceanbaseConfig.getCdcPassword());
+                writeConf(writer, "rootserver_list", oceanbaseConfig.getRootServerList());
+                writeConf(writer, "tb_white_list", tableList.stream()
+                        .map(table -> oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + "." + table)
+                        .collect(Collectors.joining("|")));
+            } catch (IOException e) {
+                throw helperEarlyExit(helperProcess, e);
+            }
+
+            if (!ready.await(HELPER_READY_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                dumpNativeLogTail();
+                throw new IllegalStateException("obcdc-helper did not become ready within "
+                        + HELPER_READY_TIMEOUT_SECONDS + " seconds; see preceding [obcdc-helper] and [libobcdc] log lines");
+            }
+            DataInputStream dataIn = new DataInputStream(helperProcess.getInputStream());
             run(new FrameIterator(dataIn), isAlive);
             checkUnexpectedExit(isAlive);
         } finally {
@@ -103,11 +111,11 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
     }
 
     /** Build a descriptive error for a helper that exited before reading its config. */
-    private Throwable helperEarlyExit(IOException cause) {
+    private Throwable helperEarlyExit(Process helperProcess, IOException cause) {
         Integer exitCode = null;
         try {
-            if (process.waitFor(3, TimeUnit.SECONDS)) {
-                exitCode = process.exitValue();
+            if (helperProcess.waitFor(3, TimeUnit.SECONDS)) {
+                exitCode = helperProcess.exitValue();
             }
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
@@ -116,6 +124,30 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
                 + (exitCode == null ? "" : " (exit code " + exitCode + ")")
                 + " before accepting configuration; see preceding [obcdc-helper] log lines."
                 + " The packaged OceanBase CDC runtime may be missing, corrupted, or unsupported on this host", cause);
+    }
+
+    private void dumpNativeLogTail() {
+        File nativeLog = new File(workDir, "log/libobcdc.log");
+        if (!nativeLog.isFile()) {
+            tapLogger.warn("[libobcdc] native log not found: {}", nativeLog.getAbsolutePath());
+            return;
+        }
+        Deque<String> tail = new ArrayDeque<>(NATIVE_LOG_TAIL_LINES);
+        try (BufferedReader reader = Files.newBufferedReader(nativeLog.toPath(), StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (tail.size() == NATIVE_LOG_TAIL_LINES) {
+                    tail.removeFirst();
+                }
+                tail.addLast(line);
+            }
+            tapLogger.warn("[libobcdc] last {} lines from {}", tail.size(), nativeLog.getAbsolutePath());
+            for (String logLine : tail) {
+                tapLogger.warn("[libobcdc] {}", logLine);
+            }
+        } catch (IOException e) {
+            tapLogger.warn("[libobcdc] failed to read {}: {}", nativeLog.getAbsolutePath(), e.getMessage());
+        }
     }
 
     /** Raise an error when the helper closed its stdout while the task is still running. */
