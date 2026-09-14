@@ -25,6 +25,8 @@
         <java.version>17</java.version>
         <tapdata.pdk.api.version>2.0.5-SNAPSHOT</tapdata.pdk.api.version>
         <skipITs>true</skipITs>
+        <it.groups></it.groups>
+        <it.excludedGroups>tpcc,performance,long-transaction</it.excludedGroups>
     </properties>
     <dependencies>
         <dependency>
@@ -80,6 +82,32 @@
             <artifactId>pdk-error-code</artifactId>
         </dependency>
     </dependencies>
+    <profiles>
+        <profile>
+            <id>tpcc-only</id>
+            <properties>
+                <skipITs>false</skipITs>
+                <it.groups>tpcc</it.groups>
+                <it.excludedGroups></it.excludedGroups>
+            </properties>
+        </profile>
+        <profile>
+            <id>performance-only</id>
+            <properties>
+                <skipITs>false</skipITs>
+                <it.groups>performance</it.groups>
+                <it.excludedGroups></it.excludedGroups>
+            </properties>
+        </profile>
+        <profile>
+            <id>long-transaction-only</id>
+            <properties>
+                <skipITs>false</skipITs>
+                <it.groups>long-transaction</it.groups>
+                <it.excludedGroups></it.excludedGroups>
+            </properties>
+        </profile>
+    </profiles>
     <build>
         <plugins>
             <plugin>
@@ -273,6 +301,8 @@
                 <version>3.5.6</version>
                 <configuration>
                     <skipITs>${skipITs}</skipITs>
+                    <groups>${it.groups}</groups>
+                    <excludedGroups>${it.excludedGroups}</excludedGroups>
                     <!-- 与引擎启动参数一致：cglib/反射框架在 JDK 17+ 需要 opens（否则 BeanMap 初始化失败）；
                     55 个 IT 用例全量运行时需较大堆，默认 fork 堆不足会 OOM -->
                     <argLine>
