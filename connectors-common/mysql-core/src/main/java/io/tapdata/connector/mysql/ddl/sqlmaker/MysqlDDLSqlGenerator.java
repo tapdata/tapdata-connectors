@@ -190,7 +190,7 @@ public class MysqlDDLSqlGenerator implements DDLSqlGenerator {
                 throw new RuntimeException("Append alter column name ddl sql failed, tapTable is blank");
             }
             Optional<TapField> tapFieldOptional = tapTable.getNameFieldMap().entrySet().stream()
-                    .filter(e -> StringUtils.equals(e.getKey(), after)).map(Map.Entry::getValue).findFirst();
+                    .filter(e -> StringUtils.equals(e.getKey(), before)).map(Map.Entry::getValue).findFirst();
             if (!tapFieldOptional.isPresent()) {
                 throw new RuntimeException("Append alter column name ddl sql failed, field is blank");
             }

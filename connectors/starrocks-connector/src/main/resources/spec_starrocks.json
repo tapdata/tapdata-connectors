@@ -753,7 +753,6 @@
     "largeint": {
       "bit": 128,
       "precision": 39,
-      "scale": 0,
       "to": "TapNumber"
     },
     "float": {
@@ -790,14 +789,15 @@
       "bit": 128,
       "precision": [
         1,
-        27
+        38
       ],
       "defaultPrecision": 10,
       "scale": [
         0,
-        9
+        38
       ],
       "defaultScale": 0,
+      "fixed": true,
       "to": "TapNumber"
     },
     "decimalv3[($precision,$scale)]": {

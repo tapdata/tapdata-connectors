@@ -44,6 +44,11 @@ public class DateTimeReader implements CustomSQLObject<Object, Void> {
 	}
 
 	private Object handleDocument(Document value) {
+		Object seconds = value.get("seconds");
+		Object nano = value.get("nano");
+		if (seconds instanceof Number && nano instanceof Number) {
+			return Instant.ofEpochSecond(((Number) seconds).longValue(), ((Number) nano).longValue());
+		}
 		try {
 			DateTime dateTime = TapSimplify.fromJson(value.toJson(), DateTime.class);
 			return dateTime.toInstant();
