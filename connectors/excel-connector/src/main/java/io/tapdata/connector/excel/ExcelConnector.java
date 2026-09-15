@@ -128,9 +128,7 @@ public class ExcelConnector extends FileConnector {
                             }
                         }
                         TapRecordEvent recordEvent = insertRecordEvent(after, tapTable.getId()).referenceTime(lastModified);
-                        recordEvent.addInfo("lastModified", lastModified);
-                        recordEvent.addInfo("filePath", fileOffset.getPath());
-                        recordEvent.addInfo("fileName", fileOffset.getPath().substring(fileOffset.getPath().lastIndexOf("/") + 1));
+                        addEventInfo(recordEvent, lastModified, fileOffset);
                         recordEvent.addInfo("sheetName", sheetName);
                         tapEvents.get().add(recordEvent);
                         if (tapEvents.get().size() == eventBatchSize) {

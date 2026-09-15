@@ -3,6 +3,7 @@ package io.tapdata.connector.xml.handler;
 import io.tapdata.common.FileOffset;
 import io.tapdata.common.util.MatchUtil;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.exception.StopException;
@@ -90,7 +91,11 @@ public class BigSaxDataHandler implements ElementHandler, HandlerBase {
                 blankSkip++;
                 return;
             }
-            tapEvents.get().add(insertRecordEvent(dataMap, tapTable.getId()).referenceTime(lastModified));
+            TapRecordEvent recordEvent = insertRecordEvent(dataMap, tapTable.getId()).referenceTime(lastModified);
+            recordEvent.addInfo("lastModified", lastModified);
+            recordEvent.addInfo("filePath", fileOffset.getPath());
+            recordEvent.addInfo("fileName", fileOffset.getPath().substring(fileOffset.getPath().lastIndexOf("/") + 1));
+            tapEvents.get().add(recordEvent);
             if (tapEvents.get().size() == eventBatchSize) {
                 fileOffset.setDataLine(fileOffset.getDataLine() + eventBatchSize + blankSkip);
                 blankSkip = 0;
