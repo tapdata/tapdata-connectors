@@ -3190,6 +3190,61 @@ public class PaimonService implements AutoCloseable {
 	}
 
 	/**
+     * Execute the connector's read-only Paimon SQL subset.
+     *
+     * <p>SQL is parsed and converted to a Paimon predicate before a scan is planned. Unsupported
+     * syntax is rejected, so this method never silently turns a failed filter into a full-table
+     * scan.
+     */
+    public Object executeQuery(String sql, Log log) throws Exception {
+        try (PaimonServiceLifecycle.Ingress ignored = enterIngress("executeQuery")) {
+            return executeQueryAdmitted(sql, log);
+        }
+    }
+
+    private Object executeQueryAdmitted(String sql, Log log) throws Exception {
+        String tableName = PaimonSqlQueryParser.tableName(sql);
+        Identifier identifier = Identifier.create(config.getDatabase(), tableName);
+        Table paimonTable = stopController.call("catalog getTable", () -> catalog.getTable(identifier));
+        PaimonSqlQueryParser.ParsedQuery query = PaimonSqlQueryParser.parse(sql, paimonTable.rowType());
+        if (!tableName.equals(query.tableName())) {
+            throw new IllegalArgumentException("Paimon SQL table name changed during parsing");
+        }
+
+        ReadBuilder readBuilder = paimonTable.newReadBuilder().withFilter(query.predicate());
+        TableScan.Plan plan = stopController.call("plan filtered scan", () -> readBuilder.newScan().plan());
+        TableRead tableRead = readBuilder.newRead().executeFilter();
+        List<DataField> paimonFields = paimonTable.rowType().getFields();
+        List<Map<String, Object>> rows = new ArrayList<>();
+        long count = 0;
+
+        for (Split split : plan.splits()) {
+            try (RecordReader<InternalRow> reader =
+                         createFiniteReader(() -> tableRead.createReader(split))) {
+                RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
+                while (iterator != null) {
+                    InternalRow row;
+                    while ((row = iterator.next()) != null) {
+                        RowKind rowKind = row.getRowKind();
+                        if (rowKind == RowKind.UPDATE_BEFORE || rowKind == RowKind.DELETE) {
+                            continue;
+                        }
+                        count++;
+                        if (!query.countQuery()) {
+                            rows.add(convertInternalRowToMap(row, paimonFields, Collections.emptyMap()));
+                        }
+                    }
+                    iterator.releaseBatch();
+                    iterator = reader.readBatch();
+                }
+            }
+        }
+
+        log.info("Paimon executeQuery completed for table: {}, count: {}", tableName, count);
+        return query.countQuery() ? count : rows;
+    }
+
+    /**
 	 * Query records by advance filter
 	 *
 	 * @param table    table definition
