@@ -50,6 +50,22 @@ class StarrocksDataTypeMappingTest {
         assertTrue(result.getResultItems() == null || result.getResultItems().isEmpty());
     }
 
+    @Test
+    void shouldPreserveDecimalFixedMetadata() throws IOException {
+        TypeExprResult<DataMap> mappingResult = dataTypesMap().get("decimal(10,4)");
+        assertNotNull(mappingResult);
+
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("precision", "10");
+        params.put("scale", "4");
+        TapNumber number = (TapNumber) tapNumberMapping(mappingResult)
+                .toTapType(mappingResult.getExpression(), params);
+
+        assertTrue(number.getFixed());
+        assertEquals(10, number.getPrecision());
+        assertEquals(4, number.getScale());
+    }
+
     private DefaultExpressionMatchingMap dataTypesMap() throws IOException {
         try (InputStream inputStream = getClass().getResourceAsStream("/spec_starrocks.json")) {
             assertNotNull(inputStream);
