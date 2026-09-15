@@ -7,6 +7,7 @@ import io.tapdata.connector.json.config.JsonConfig;
 import io.tapdata.connector.json.util.JsonReaderUtil;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.TapDateTimeValue;
 import io.tapdata.entity.schema.value.TapDateValue;
@@ -61,7 +62,9 @@ public class JsonConnector extends FileConnector {
                     String __key = jsonReader.nextName();
                     Map<String, Object> dataMap = JsonReaderUtil.traverseMap(jsonReader);
                     dataMap.put("__key", __key);
-                    tapEvents.get().add(insertRecordEvent(dataMap, tapTable.getId()).referenceTime(lastModified));
+                    TapRecordEvent recordEvent = insertRecordEvent(dataMap, tapTable.getId()).referenceTime(lastModified);
+                    addEventInfo(recordEvent, lastModified, fileOffset);
+                    tapEvents.get().add(recordEvent);
                     if (tapEvents.get().size() == eventBatchSize) {
                         fileOffset.setDataLine(fileOffset.getDataLine() + eventBatchSize);
                         fileOffset.setPath(fileOffset.getPath());
@@ -84,7 +87,9 @@ public class JsonConnector extends FileConnector {
             ) {
                 jsonReader.beginArray();
                 while (isAlive() && jsonReader.hasNext()) {
-                    tapEvents.get().add(insertRecordEvent(JsonReaderUtil.traverseMap(jsonReader), tapTable.getId()).referenceTime(lastModified));
+                    TapRecordEvent recordEvent = insertRecordEvent(JsonReaderUtil.traverseMap(jsonReader), tapTable.getId()).referenceTime(lastModified);
+                    addEventInfo(recordEvent, lastModified, fileOffset);
+                    tapEvents.get().add(recordEvent);
                     if (tapEvents.get().size() == eventBatchSize) {
                         fileOffset.setDataLine(fileOffset.getDataLine() + eventBatchSize);
                         fileOffset.setPath(fileOffset.getPath());
