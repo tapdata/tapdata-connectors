@@ -789,12 +789,12 @@
       "bit": 128,
       "precision": [
         1,
-        27
+        38
       ],
       "defaultPrecision": 10,
       "scale": [
         0,
-        9
+        38
       ],
       "defaultScale": 0,
       "fixed": true,
