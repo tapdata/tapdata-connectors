@@ -64,13 +64,6 @@ final class MongoPerformanceAdapter implements PerformanceAdapter {
     }
 
     @Override
-    public Map<String, Object> prepareWriteRecordRow(Map<String, Object> row) {
-        Map<String, Object> prepared = PerformanceAdapter.super.prepareWriteRecordRow(row);
-        prepared.put("_id", row.get("ID"));
-        return prepared;
-    }
-
-    @Override
     public long countRows() {
         try (MongoClient client = client()) {
             return collection(client).countDocuments();
