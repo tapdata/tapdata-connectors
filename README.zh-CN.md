@@ -95,14 +95,15 @@ mvn clean install -DskipTests \
 ## 注册连接器到 TapData 平台
 
 ```bash
-java -jar pdk-deploy.jar register -a ${access_code} -t ${tm_url} \
+java -jar pdk-deploy.jar register -u ${admin_email} -p ${admin_password} -t ${tm_url} \
   [-ak ${accessKey} [-sk ${secretKey}]] [-r ${oem_type}] [-f ${filter_type}] [-l] [-h] [-X] \
   /path/to/your-connector.jar
 ```
 
 **参数说明**：
 
-- `-a`（`--auth`）：TapData 中的 `access_code`（访问码），可登录至 TapData 管理平台，点击右上角用户名，选择**个人设置**，即可查看。
+- `-u`（`--user`）：TM 管理员邮箱，仅支持 `admin@admin.com`，默认即为 `admin@admin.com`。
+- `-p`（`--password`）：TM 管理员密码，必填。密码经 RC4 加密后发送给 TM，缺失时拒绝注册。
 - `-t`（`--tm`）：TapData 管理平台登录地址，例如 `http://localhost:3030`。
 - `-f`（`--filter`）：仅注册指定认证类型的连接器，多个值用逗号分隔。
 - `-l`（`--latest`）：替换为最新版本。
@@ -114,7 +115,8 @@ java -jar pdk-deploy.jar register -a ${access_code} -t ${tm_url} \
 
 ```bash
 java -jar pdk-deploy.jar register \
-  -a 3324***********8d4562f \
+  -u admin@admin.com \
+  -p ******** \
   -t http://127.0.0.1:3030 \
   connectors/starrocks-connector/target/starrocks-connector-1.0-SNAPSHOT.jar
 ```
