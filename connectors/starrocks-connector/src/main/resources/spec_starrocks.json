@@ -794,7 +794,8 @@
         38
       ],
       "defaultScale": 0,
-      "to": "TapNumber"
+      "to": "TapNumber",
+      "fixed": true
     },
     "decimalv3[($precision,$scale)]": {
       "to": "TapNumber",
