@@ -1,7 +1,8 @@
 package io.tapdata.connector.paimon.service;
 
 import io.tapdata.connector.paimon.util.PaimonFailures;
-import io.tapdata.connector.paimon.config.PaimonSyncExpireMode;
+import io.tapdata.connector.paimon.config.PaimonExpireMode;
+import io.tapdata.connector.paimon.write.PaimonNativeCommitterClose;
 
 import io.tapdata.connector.paimon.commit.PaimonAsyncCommitScheduler;
 import io.tapdata.connector.paimon.commit.PaimonCommitStateStore;
@@ -20,6 +21,7 @@ import io.tapdata.connector.paimon.schema.PaimonRowKindField;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import io.tapdata.connector.paimon.config.PaimonConfig;
+import io.tapdata.connector.paimon.config.PaimonWriteOptions;
 import io.tapdata.connector.paimon.exception.PaimonDynamicBucketPollutedException;
 import io.tapdata.connector.paimon.exception.PaimonFatalWriteException;
 import io.tapdata.connector.paimon.util.PaimonSpillDirCleaner;
@@ -693,8 +695,7 @@ public class PaimonService implements AutoCloseable {
         try {
             Table existingTable = stopController.call("catalog getTable", () -> catalog.getTable(identifier));
             if (existingTable instanceof FileStoreTable) {
-                FileStoreTable existingFileStoreTable = (FileStoreTable) existingTable;
-                PaimonSyncExpireMode.requireSync(identifier.getFullName(), existingFileStoreTable);
+                FileStoreTable existingFileStoreTable = requireWriteTable(identifier, existingTable);
                 BucketMode existingMode = existingFileStoreTable.bucketMode();
                 BucketMode configuredMode =
                         PaimonWriteSemanticContractResolver.deriveBucketMode(
@@ -795,7 +796,6 @@ public class PaimonService implements AutoCloseable {
         }
 
         if (Boolean.TRUE.equals(config.getDiskOverflowWrite())) {
-            schemaBuilder.option("write-buffer-spillable", "true");
             schemaBuilder.option("write-buffer-spill.max-disk-size", config.getDiskMaxSize() + "gb");
         }
 
@@ -864,8 +864,10 @@ public class PaimonService implements AutoCloseable {
         // Baseline: apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e.
         CatalogUtils.tableDefaultOptions(catalog.options())
                 .forEach(finalSchema.options()::putIfAbsent);
-        PaimonSyncExpireMode.requireSync(identifier.getFullName(), finalSchema.options());
-        finalSchema.options().putIfAbsent(PaimonSyncExpireMode.KEY, "SYNC");
+        // 界面开关在属性合并后生效，避免 false 被原生默认 true 或自定义属性覆盖。
+        finalSchema.options().put(
+                CoreOptions.WRITE_BUFFER_SPILLABLE.key(), PaimonWriteOptions.spillValue(config));
+        PaimonExpireMode.validate(identifier.getFullName(), finalSchema.options());
         PaimonWriteSemanticContractResolver.validateNewTable(
                 identifier.getFullName(), finalSchema);
 
@@ -931,11 +933,15 @@ public class PaimonService implements AutoCloseable {
             // Enter the lifecycle gate before touching Catalog state. Native truncate keeps
             // partition keys, options, UUID and physical location intact.
             runTableDdl(tableKey, tableName, () -> {
-                Table currentTable = stopController.call("catalog getTable", () -> catalog.getTable(identifier));
-                PaimonSyncExpireMode.requireSync(tableKey, currentTable);
+                Table currentTable = requireWriteTable(identifier,
+                        stopController.call("catalog getTable", () -> catalog.getTable(identifier)));
                 PaimonStopResources.Scope ddlScope = stopResources.scope("DDL committer " + tableKey, stopController);
                 BatchTableCommit commit;
-                try { commit = ddlScope.create("allocate DDL committer", () -> currentTable.newBatchWriteBuilder().newCommit()); }
+                PaimonNativeCommitterClose commitClose;
+                try {
+                    commit = ddlScope.create("allocate DDL committer", () -> currentTable.newBatchWriteBuilder().newCommit());
+                    commitClose = new PaimonNativeCommitterClose(commit, ddlScope);
+                }
                 catch (Exception | Error allocation) {
                     if (ddlScope.hasResources()) { ddlScope.retain(allocation); } else { ddlScope.completed(); }
                     throw allocation;
@@ -946,10 +952,8 @@ public class PaimonService implements AutoCloseable {
                 } catch (Throwable failure) {
                     actionFailure = failure;
                 } finally {
-                    // TableCommitImpl 的 SYNC maintenance 在提交调用内执行；close 保留原生行为，
-                    // 不接管维护执行器，也不通过空提交探测内核隐藏的 maintainError。
-                    // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/table/sink/TableCommitImpl.java#L118
-                    try { stopController.run("close DDL committer", commit::close);
+                    // truncate 本身不调度维护；关闭仍采用相同的原生主任务退出屏障。
+                    try { commitClose.close();
                         stopController.checkAction("publish DDL committer close proof"); ddlScope.completed(); }
                     catch (Throwable closeFailure) {
                         ddlScope.retain(closeFailure);
@@ -991,7 +995,7 @@ public class PaimonService implements AutoCloseable {
                         Table ddlTable;
                         try { ddlTable = stopController.call("catalog getTable", () -> catalog.getTable(Identifier.create(config.getDatabase(), tableName))); }
                         catch (Catalog.TableNotExistException absent) { return; }
-                        PaimonSyncExpireMode.requireSync(tableKey, ddlTable);
+                        // drop 不创建 committer；truncate 在 action 内校验原生选项后再创建。
                         registerPhysicalTableOwner(tableKey, (FileStoreTable) ddlTable);
                         releasePhysicalOwner = true;
                     } else {
@@ -1687,13 +1691,13 @@ public class PaimonService implements AutoCloseable {
                 throw new IllegalArgumentException(
                         "Only FileStoreTable supports connector writes for " + tableKey);
             }
-            FileStoreTable fileStoreTable = (FileStoreTable) table;
-            PaimonSyncExpireMode.requireSync(tableKey, fileStoreTable);
+            FileStoreTable fileStoreTable = PaimonWriteOptions.runtimeWriteTable(
+                    requireWriteTable(identifier, table), config);
             List<DataField> paimonFields = fileStoreTable.rowType().getFields();
             // Contract resolution must precede commit-state binding and the HASH_DYNAMIC
             // RocksDB pollution preflight, not merely raw writer construction.
             PaimonWriteSemanticContract writeSemanticContract =
-                    preResolvedContract == null
+                    preResolvedContract == null || fileStoreTable != preResolvedTable
                             ? PaimonWriteSemanticContractResolver.resolve(
                                     tableKey, fileStoreTable)
                             : preResolvedContract;
@@ -1809,6 +1813,12 @@ public class PaimonService implements AutoCloseable {
                         "Paimon service cannot be shared by multiple Tap task state maps; restart the connector");
             }
         }
+    }
+
+    /** 只校验当前表，不修改维护模式或共享表配置。 */
+    private static FileStoreTable requireWriteTable(Identifier identifier, Table table) {
+        PaimonExpireMode.validate(identifier.getFullName(), table);
+        return (FileStoreTable) table;
     }
 
     private void registerPhysicalTableOwner(String tableKey, FileStoreTable table) {

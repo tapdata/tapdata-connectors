@@ -78,7 +78,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 
-/** S12：真实同步维护仍可发布 OVERWRITE，必须留在 Service 的关闭与 owner 生命周期内。 */
+/** 真实 SYNC/ASYNC 维护仍可发布 OVERWRITE，必须留在 Service 的关闭与 owner 生命周期内。 */
 class PaimonServiceNativeMaintenanceIntegrationTest {
     private static final String TABLE_NAME = "native_sync_maintenance";
     private static final String TABLE_KEY = "default." + TABLE_NAME;
@@ -90,10 +90,11 @@ class PaimonServiceNativeMaintenanceIntegrationTest {
     @TempDir
     java.nio.file.Path tempDir;
 
-    @Test
-    void synchronousPartitionOverwriteMustFinishBeforeCloseReleasesSpillAndPhysicalOwner()
-            throws Exception {
-        try (Fixture fixture = new Fixture(false)) {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(CoreOptions.ExpireExecutionMode.class)
+    void nativePartitionOverwriteMustFinishBeforeCloseReleasesSpillAndPhysicalOwner(
+            CoreOptions.ExpireExecutionMode mode) throws Exception {
+        try (Fixture fixture = new Fixture(false, mode)) {
             fixture.startClose();
             assertTrue(fixture.dropEntered.await(15L, TimeUnit.SECONDS),
                     "必须进入真实 PartitionExpire 的 dropPartitions 接缝");
@@ -101,10 +102,12 @@ class PaimonServiceNativeMaintenanceIntegrationTest {
             assertNotNull(stack);
             assertTrue(stack.contains("org.apache.paimon.operation.PartitionExpire.doBatchExpire"), stack);
             assertTrue(stack.contains("org.apache.paimon.table.sink.TableCommitImpl.maintain"), stack);
-            assertTrue(stack.contains("io.tapdata.connector.paimon.service.PaimonService"), stack);
+            if (mode == CoreOptions.ExpireExecutionMode.SYNC) {
+                assertTrue(stack.contains("io.tapdata.connector.paimon.service.PaimonService"), stack);
+            }
             assertEquals(PaimonServiceLifecycle.State.STOPPING, lifecycle(fixture.service).state());
             assertFalse(fixture.closeReturned.await(200L, TimeUnit.MILLISECONDS),
-                    "SYNC 维护仍能提交 OVERWRITE 时，Service.close 必须仍在等待");
+                    "原生维护仍能提交 OVERWRITE 时，Service.close 必须仍在等待");
             assertNull(fixture.closeFailure.get());
             assertFalse(fixture.context.cleanupComplete());
             assertEquals(0L, fixture.normalExitCount());
@@ -177,7 +180,12 @@ class PaimonServiceNativeMaintenanceIntegrationTest {
         List<String> spillDirectories = Collections.emptyList();
         Thread closer;
 
+        private final CoreOptions.ExpireExecutionMode mode;
         Fixture(boolean failLastMaintenance) throws Exception {
+            this(failLastMaintenance, CoreOptions.ExpireExecutionMode.SYNC);
+        }
+        Fixture(boolean failLastMaintenance, CoreOptions.ExpireExecutionMode mode) throws Exception {
+            this.mode = mode;
             try {
                 catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(tempDir.toUri())));
                 catalog.createDatabase("default", true);
@@ -185,7 +193,7 @@ class PaimonServiceNativeMaintenanceIntegrationTest {
                 options.put("bucket", "1");
                 options.put("num-levels", "2");
                 options.put("num-sorted-run.compaction-trigger", "100");
-                options.put("snapshot.expire.execution-mode", "SYNC");
+                options.put("snapshot.expire.execution-mode", mode.name());
                 options.put("partition.expiration-time", "1 d");
                 options.put("partition.expiration-check-interval", "0 ms");
                 catalog.createTable(IDENTIFIER, Schema.newBuilder()
@@ -280,11 +288,11 @@ class PaimonServiceNativeMaintenanceIntegrationTest {
         }
 
         private TableCommitImpl newNativeCommitter(Runnable expireSnapshots, PartitionExpire partitionExpire) {
-            // 1.3.2 的 SYNC 使用 direct executor，维护在 commit 调用栈中完成。
+            // 1.3.2 的 SYNC 使用 direct executor，ASYNC 使用此 committer 的单线程执行器。
             // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/table/sink/TableCommitImpl.java#L94-L134
             return new TableCommitImpl(table.store().newCommit(COMMIT_USER, table), expireSnapshots,
                     partitionExpire, null, null, new ConsumerManager(table.fileIO(), table.location()),
-                    CoreOptions.ExpireExecutionMode.SYNC, TABLE_KEY, false, 1).ignoreEmptyCommit(false);
+                    mode, TABLE_KEY, false, 1).ignoreEmptyCommit(false);
         }
 
         void startClose() {

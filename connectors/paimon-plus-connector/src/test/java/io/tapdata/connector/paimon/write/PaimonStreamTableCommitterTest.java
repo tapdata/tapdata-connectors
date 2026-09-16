@@ -26,7 +26,7 @@ class PaimonStreamTableCommitterTest {
 
     @Test
     void directCommitMustDelegateTheExactIdentifierAndMessages() {
-        StreamTableCommit delegate = mock(StreamTableCommit.class);
+        StreamTableCommit delegate = io.tapdata.connector.paimon.NativeCommitterFixture.committer();
         PaimonStreamTableCommitter committer = new PaimonStreamTableCommitter(delegate);
         List<CommitMessage> messages =
                 Collections.singletonList(mock(CommitMessage.class));
@@ -39,7 +39,7 @@ class PaimonStreamTableCommitterTest {
 
     @Test
     void filterAndCommitMustDelegateSameMapAndReturnSameCount() {
-        StreamTableCommit delegate = mock(StreamTableCommit.class);
+        StreamTableCommit delegate = io.tapdata.connector.paimon.NativeCommitterFixture.committer();
         PaimonStreamTableCommitter committer = new PaimonStreamTableCommitter(delegate);
         Map<Long, List<CommitMessage>> pending = pendingMap();
         when(delegate.filterAndCommit(pending)).thenReturn(1);
@@ -52,7 +52,7 @@ class PaimonStreamTableCommitterTest {
 
     @Test
     void delegateFailureMustNotModifyInput() {
-        StreamTableCommit delegate = mock(StreamTableCommit.class);
+        StreamTableCommit delegate = io.tapdata.connector.paimon.NativeCommitterFixture.committer();
         PaimonStreamTableCommitter committer = new PaimonStreamTableCommitter(delegate);
         Map<Long, List<CommitMessage>> pending = pendingMap();
         Map<Long, List<CommitMessage>> before = new LinkedHashMap<>(pending);
@@ -67,7 +67,7 @@ class PaimonStreamTableCommitterTest {
 
     @Test
     void closeMustBeIdempotentAndRejectLaterCommit() throws Exception {
-        StreamTableCommit delegate = mock(StreamTableCommit.class);
+        StreamTableCommit delegate = io.tapdata.connector.paimon.NativeCommitterFixture.committer();
         PaimonStreamTableCommitter committer = new PaimonStreamTableCommitter(delegate);
         Map<Long, List<CommitMessage>> pending = pendingMap();
 
@@ -85,13 +85,13 @@ class PaimonStreamTableCommitterTest {
 
     @Test
     void closeFailureMustStillMakeAdapterClosed() throws Exception {
-        StreamTableCommit delegate = mock(StreamTableCommit.class);
+        StreamTableCommit delegate = io.tapdata.connector.paimon.NativeCommitterFixture.committer();
         PaimonStreamTableCommitter committer = new PaimonStreamTableCommitter(delegate);
         Exception failure = new Exception("close failed");
         doThrow(failure).when(delegate).close();
 
         assertSame(failure, assertThrows(Exception.class, committer::close));
-        committer.close();
+        assertSame(failure, assertThrows(Exception.class, committer::close));
         verify(delegate).close();
         assertThrows(IllegalStateException.class, () -> committer.filterAndCommit(pendingMap()));
     }

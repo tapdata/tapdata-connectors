@@ -64,6 +64,10 @@ class PaimonServiceIncompleteCleanupTest {
                 .option("snapshot.expire.execution-mode", "SYNC").build(), false);
         FileStoreTable table = spy((FileStoreTable) catalog.getTable(identifier));
         doReturn(table).when(catalog).getTable(identifier);
+        FileStoreTable runtimeTable = table.copyWithoutTimeTravel(
+                Collections.singletonMap("write-buffer-spillable", "false"));
+        doReturn(runtimeTable).when(table).copyWithoutTimeTravel(
+                Collections.singletonMap("write-buffer-spillable", "false"));
         PaimonConfig config = new PaimonConfig();
         config.setWarehouse(tempDir.toUri().toString());
         config.setDatabase("default");
@@ -98,7 +102,7 @@ class PaimonServiceIncompleteCleanupTest {
         unregister.setAccessible(true);
         try (MockedStatic<PaimonTableWriteContextFactory> factory = mockStatic(PaimonTableWriteContextFactory.class)) {
             MockedStatic.Verification creation = () -> PaimonTableWriteContextFactory.create(
-                    eq("default.orders"), eq("orders"), same(table), anyString(), anyString(), anyLong(),
+                    eq("default.orders"), eq("orders"), same(runtimeTable), anyString(), anyString(), anyLong(),
                     any(PaimonTableWriteContext.CommitStateStore.class),
                     any(io.tapdata.connector.paimon.write.bucket.PaimonBucketWriterRuntimeFactory.class),
                     any(PaimonWriteSemanticContract.class), any(PaimonStopResources.Scope.class));

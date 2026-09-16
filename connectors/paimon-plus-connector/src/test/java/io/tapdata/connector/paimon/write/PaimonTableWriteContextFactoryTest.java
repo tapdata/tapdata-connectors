@@ -50,14 +50,15 @@ class PaimonTableWriteContextFactoryTest {
     private static final String COMMIT_USER = "factory-test-user";
 
     @Test
-    void asyncTableMustFailBeforeWriterOrIoAllocation() {
+    void asyncTableMustAllocateAndCloseNormally() throws Exception {
         Fixture fixture = new Fixture(BucketMode.HASH_FIXED);
         when(fixture.coreOptions.snapshotExpireExecutionMode())
                 .thenReturn(CoreOptions.ExpireExecutionMode.ASYNC);
-        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class, fixture::create);
-        assertTrue(failure.getMessage().contains("snapshot.expire.execution-mode"));
-        verify(fixture.table, never()).newStreamWriteBuilder();
-        verify(fixture.builder, never()).newWrite();
+        try (PaimonTableWriteContext context = fixture.create()) {
+            verify(fixture.builder).newWrite();
+            verify(fixture.builder).newCommit();
+        }
+        verify(fixture.committer).close();
     }
 
     @Test
@@ -213,11 +214,12 @@ class PaimonTableWriteContextFactoryTest {
         StreamTableCommit drifted = mock(StreamTableCommit.class);
         when(fixture.builder.newCommit()).thenReturn(drifted);
 
-        IllegalArgumentException thrown =
-                assertThrows(IllegalArgumentException.class, fixture::create);
+        PaimonTableWriteContextFactory.IncompleteCleanupException thrown =
+                assertThrows(PaimonTableWriteContextFactory.IncompleteCleanupException.class, fixture::create);
 
-        assertTrue(thrown.getMessage().contains("TableCommitImpl"));
+        assertTrue(thrown.getCause().getMessage().contains("TableCommitImpl"));
         verify(fixture.writer).close();
+        verify(drifted, never()).close();
     }
 
     @Test
@@ -446,7 +448,7 @@ class PaimonTableWriteContextFactoryTest {
         @SuppressWarnings("unchecked")
         private final TableWriteImpl<org.apache.paimon.table.sink.CommitMessage> writer =
                 mock(TableWriteImpl.class);
-        private final TableCommitImpl committer = mock(TableCommitImpl.class);
+        private final TableCommitImpl committer = io.tapdata.connector.paimon.NativeCommitterFixture.committer();
         private final PaimonBucketWriterRuntimeFactory runtimeFactory =
                 mock(PaimonBucketWriterRuntimeFactory.class);
 
