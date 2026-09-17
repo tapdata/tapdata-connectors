@@ -4,6 +4,7 @@ import io.tapdata.connector.mysql.MysqlConnector;
 import io.tapdata.connector.mysql.MysqlExceptionCollector;
 import io.tapdata.connector.mysql.MysqlJdbcContextV2;
 import io.tapdata.connector.mysql.MysqlReader;
+import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
@@ -14,7 +15,9 @@ import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
 import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
+import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
@@ -101,6 +104,28 @@ public class MariadbConnector extends MysqlConnector {
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
         started.set(true);
+    }
+
+    @Override
+    protected TapField makeTapField(DataMap dataMap) {
+        DataMap normalizedDataMap = new DataMap();
+        normalizedDataMap.putAll(dataMap);
+        String defaultValue = dataMap.getString("columnDefault");
+        if ("NULL".equalsIgnoreCase(defaultValue)) {
+            normalizedDataMap.put("columnDefault", null);
+        } else if (defaultValue != null && defaultValue.length() >= 2
+                && defaultValue.charAt(0) == '\''
+                && defaultValue.charAt(defaultValue.length() - 1) == '\'') {
+            normalizedDataMap.put(
+                    "columnDefault",
+                    defaultValue.substring(1, defaultValue.length() - 1).replace("''", "'")
+            );
+        }
+        return new MysqlColumn(normalizedDataMap)
+                .withSeedValue(autoStartValue)
+                .withIncrementValue(autoIncrementValue)
+                .withAutoIncCacheValue(autoIncCacheValue)
+                .getTapField();
     }
 
     @Override
