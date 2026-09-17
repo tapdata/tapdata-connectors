@@ -108,7 +108,7 @@ class PaimonServiceAsyncCommitIntegrationTest {
         org.apache.paimon.table.sink.BatchWriteBuilder batchWriteBuilder =
                 mock(org.apache.paimon.table.sink.BatchWriteBuilder.class);
         org.apache.paimon.table.sink.TableCommitImpl batchCommit =
-                mock(org.apache.paimon.table.sink.TableCommitImpl.class);
+                io.tapdata.connector.paimon.NativeCommitterFixture.committer();
         when(table.newBatchWriteBuilder()).thenReturn(batchWriteBuilder);
         when(batchWriteBuilder.newCommit()).thenReturn(batchCommit);
         setField(fixture.service, "catalog", catalog);

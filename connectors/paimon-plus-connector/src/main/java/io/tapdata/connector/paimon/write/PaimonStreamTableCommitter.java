@@ -20,9 +20,16 @@ public final class PaimonStreamTableCommitter implements PaimonTableCommitter {
 
     private final StreamTableCommit delegate;
     private volatile boolean closed;
+    private final PaimonNativeCommitterClose nativeClose;
 
     PaimonStreamTableCommitter(StreamTableCommit delegate) {
+        this(delegate, io.tapdata.connector.paimon.service.PaimonStopResources.Scope.standalone("committer"));
+    }
+
+    PaimonStreamTableCommitter(StreamTableCommit delegate,
+            io.tapdata.connector.paimon.service.PaimonStopResources.Scope scope) {
         this.delegate = Objects.requireNonNull(delegate, "delegate");
+        this.nativeClose = new PaimonNativeCommitterClose(delegate, scope);
     }
 
     @Override
@@ -39,11 +46,8 @@ public final class PaimonStreamTableCommitter implements PaimonTableCommitter {
 
     @Override
     public void close() throws Exception {
-        if (closed) {
-            return;
-        }
         closed = true;
-        delegate.close();
+        nativeClose.close();
     }
 
     private void ensureOpen() {

@@ -21,6 +21,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PaimonSpecTest {
 
     @Test
+    void spillSwitchMustDescribeNativeWriteBufferScopeInEveryLocale() throws Exception {
+        JsonObject spec = loadSpec();
+        JsonObject field = spec.getAsJsonObject("configOptions").getAsJsonObject("node")
+                .getAsJsonObject("properties").getAsJsonObject("diskOverflowWrite");
+        assertFalse(field.get("default").getAsBoolean());
+        assertFalse(field.has("x-perTable"));
+        assertEquals("${diskOverflowWriteTip}", field.getAsJsonObject("x-decorator-props")
+                .get("tooltip").getAsString());
+        for (String locale : Arrays.asList("en_US", "zh_CN", "zh_TW")) {
+            String tip = spec.getAsJsonObject("messages").getAsJsonObject(locale)
+                    .get("diskOverflowWriteTip").getAsString();
+            assertTrue(tip.contains("write-buffer-spillable"), locale);
+        }
+    }
+
+    @Test
     void stopBudgetsMustBeServiceScopedPositiveIntegersWithThreeLocales() throws Exception {
         JsonObject spec = loadSpec();
         JsonObject properties = spec.getAsJsonObject("configOptions").getAsJsonObject("node").getAsJsonObject("properties");
@@ -80,8 +96,8 @@ class PaimonSpecTest {
                     messages.getAsJsonObject(locale)
                             .get("asyncCommitConcurrency_placeholder")
                             .getAsString()
-                            .contains(concurrencyDefaults.get(i)),
-                    locale + " placeholder must show concurrency default 1");
+                            .contains("4"),
+                    locale + " placeholder must show concurrency default 4");
         }
     }
 

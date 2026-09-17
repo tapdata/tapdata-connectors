@@ -1,7 +1,7 @@
 package io.tapdata.connector.paimon.write;
 
 import io.tapdata.connector.paimon.util.PaimonFailures;
-import io.tapdata.connector.paimon.config.PaimonSyncExpireMode;
+import io.tapdata.connector.paimon.config.PaimonExpireMode;
 import io.tapdata.connector.paimon.service.PaimonStopResources;
 import io.tapdata.connector.paimon.write.bucket.DefaultPaimonBucketWriterRuntimeFactory;
 import io.tapdata.connector.paimon.write.bucket.PaimonBucketWriterRuntimeFactory;
@@ -56,7 +56,7 @@ public final class PaimonTableWriteContextFactory {
         }
 
         FileStoreTable fileStoreTable = (FileStoreTable) paimonTable;
-        PaimonSyncExpireMode.requireSync(tableKey, fileStoreTable);
+        PaimonExpireMode.validate(tableKey, fileStoreTable);
         Optional<Snapshot> latestUserSnapshot =
                 fileStoreTable.snapshotManager().latestSnapshotOfUserFromFilesystem(commitUser);
         long nextCommitIdentifier =
@@ -101,7 +101,7 @@ public final class PaimonTableWriteContextFactory {
             PaimonTableWriteContext.CommitStateStore commitStateStore,
             PaimonBucketWriterRuntimeFactory runtimeFactory)
             throws Exception {
-        PaimonSyncExpireMode.requireSync(tableKey, fileStoreTable);
+        PaimonExpireMode.validate(tableKey, fileStoreTable);
         PaimonWriteSemanticContract writeSemanticContract =
                 PaimonWriteSemanticContractResolver.resolve(tableKey, fileStoreTable);
         return create(
@@ -145,7 +145,7 @@ public final class PaimonTableWriteContextFactory {
             PaimonStopResources.Scope scope)
             throws Exception {
         Objects.requireNonNull(fileStoreTable, "fileStoreTable");
-        PaimonSyncExpireMode.requireSync(tableKey, fileStoreTable);
+        PaimonExpireMode.validate(tableKey, fileStoreTable);
         Objects.requireNonNull(writeSemanticContract, "writeSemanticContract");
         if (nextCommitIdentifier < 0L) {
             throw new IllegalArgumentException("Negative Paimon commit identifier for " + tableKey);
@@ -206,7 +206,7 @@ public final class PaimonTableWriteContextFactory {
             if (!(rawCommitter instanceof org.apache.paimon.table.sink.TableCommitImpl)) {
                 throw new IllegalArgumentException("Paimon committer type drift: expected TableCommitImpl");
             }
-            tableCommitter = new PaimonStreamTableCommitter(rawCommitter);
+            tableCommitter = new PaimonStreamTableCommitter(rawCommitter, scope);
             // GlobalIndexAssigner.open 使用 tempDirs() 创建 rocksdb-*，必须约束在已登记目录内。
             // Paimon 1.3.2: https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L136
             IOManager strategyIoManager = ioManager == null ? null
@@ -259,7 +259,8 @@ public final class PaimonTableWriteContextFactory {
                     }
                 }
                 safe &= closeSuppressed(writerStrategy != null ? writerStrategy : rawWriter, failure, scope);
-                safe &= closeSuppressed(tableCommitter != null ? tableCommitter : rawCommitter, failure, scope);
+                safe &= closeSuppressed(tableCommitter != null ? tableCommitter : rawCommitter == null ? null
+                        : new PaimonNativeCommitterClose(rawCommitter, scope), failure, scope);
                 if (ioManager != null && safe) {
                     boolean deleted = closeSuppressed(ioManager, failure, scope);
                     final List<String> ownedDirs = spillDirs;

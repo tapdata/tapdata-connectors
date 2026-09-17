@@ -218,6 +218,9 @@ class PaimonDynamicBucketPreflightCleanupTest {
 
     private static FileStoreTable table(Path location) {
         FileStoreTable table = mock(FileStoreTable.class);
+        // 此夹具只测试失败收尾；真实副本语义由 PaimonSpillOptionsIntegrationTest 覆盖。
+        when(table.copyWithoutTimeTravel(Collections.singletonMap("write-buffer-spillable", "false")))
+                .thenReturn(table);
         when(table.location()).thenReturn(new org.apache.paimon.fs.Path(location.toUri()));
         when(table.uuid()).thenReturn("preflight-cleanup-table");
         when(table.bucketMode()).thenReturn(BucketMode.HASH_DYNAMIC);

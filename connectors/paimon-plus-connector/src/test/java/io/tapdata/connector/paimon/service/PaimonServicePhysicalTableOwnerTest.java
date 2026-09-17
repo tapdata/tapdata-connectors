@@ -96,15 +96,18 @@ class PaimonServicePhysicalTableOwnerTest {
     }
 
     @Test
-    void existingAsyncTableMustFailBeforeOwnerStateBindingOrWriterAllocation() throws Exception {
+    void invalidModeMustFailValidationBeforeOwnerOrWriterAllocation() throws Exception {
         PaimonService service = service();
         FileStoreTable table = physicalTable("async-admission");
         when(table.coreOptions()).thenReturn(org.apache.paimon.CoreOptions.fromMap(
-                Collections.singletonMap("snapshot.expire.execution-mode", "ASYNC")));
+                Collections.singletonMap("snapshot.expire.execution-mode", "INVALID")));
         io.tapdata.entity.utils.cache.KVMap<Object> state = mock(io.tapdata.entity.utils.cache.KVMap.class);
         Field stateField = PaimonService.class.getDeclaredField("boundTaskStateMap");
         stateField.setAccessible(true);
         stateField.set(service, state);
+        org.apache.paimon.catalog.Catalog catalog = mock(org.apache.paimon.catalog.Catalog.class);
+        Field catalogField = PaimonService.class.getDeclaredField("catalog");
+        catalogField.setAccessible(true); catalogField.set(service, catalog);
         Method admission = contextAdmissionMethod();
 
         InvocationTargetException failure = assertThrows(InvocationTargetException.class,
@@ -112,12 +115,11 @@ class PaimonServicePhysicalTableOwnerTest {
                         Identifier.create("default", "orders"), null, table, null));
 
         assertInstanceOf(IllegalArgumentException.class, failure.getCause());
-        assertTrue(failure.getCause().getMessage().contains("snapshot.expire.execution-mode"));
+        verifyNoInteractions(catalog);
         assertTrue(((Map<?, ?>) serviceField(service, "physicalTableByLogicalTable")).isEmpty());
         assertTrue(unsafeResourceOwners(service).isEmpty());
         assertTrue(tableContexts(service).isEmpty());
         verifyNoInteractions(state);
-        verify(table, never()).location();
         verify(table, never()).rowType();
         verify(table, never()).snapshotManager();
         verify(table, never()).newStreamWriteBuilder();
@@ -692,7 +694,7 @@ class PaimonServicePhysicalTableOwnerTest {
         private final Method register =
                 method("registerPhysicalTableOwner", String.class, FileStoreTable.class);
         private final Method unregister = method("unregisterPhysicalTableOwner", String.class);
-        private final TableCommitImpl truncateCommitter = mock(TableCommitImpl.class);
+        private final TableCommitImpl truncateCommitter = io.tapdata.connector.paimon.NativeCommitterFixture.committer();
         private final PaimonCompactionLifecycle lifecycle = PaimonCompactionLifecycle.forTable(TABLE_KEY);
         private final CountDownLatch releaseCompaction = new CountDownLatch(1);
         private final PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
@@ -846,6 +848,8 @@ class PaimonServicePhysicalTableOwnerTest {
 
     private static FileStoreTable physicalTable(String suffix) {
         FileStoreTable table = mock(FileStoreTable.class);
+        when(table.copyWithoutTimeTravel(Collections.singletonMap("write-buffer-spillable", "false")))
+                .thenReturn(table);
         when(table.coreOptions()).thenReturn(org.apache.paimon.CoreOptions.fromMap(Collections.emptyMap()));
         when(table.location())
                 .thenReturn(new Path("file:///tmp/paimon-owner-" + suffix + '-' + UUID.randomUUID()));
