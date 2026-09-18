@@ -119,6 +119,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
             //2、table name/comment
             String table = subTable.getString("tableName");
             TapTable tapTable = table(table);
+            if ("VIEW".equalsIgnoreCase(subTable.getString("tableType"))) {
+                tapTable.setType("view");
+            }
             tapTable.setTableAttr(getSpecificAttr(subTable));
             tapTable.setComment(subTable.getString("tableComment"));
             String tableCollation = subTable.getString("tableCollation");
