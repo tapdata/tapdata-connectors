@@ -180,7 +180,7 @@ public class KafkaConnector extends ConnectorBase {
                 if (partitionNum <= existTopicPartition) {
                     TapLogger.warn(TAG, "The number of partitions set is less than or equal to the number of partitions of the existing table，will skip");
                 } else {
-                    admin.increaseTopicPartitions(tapCreateTableEvent.getTableId(), partitionNum);
+                    admin.increaseTopicPartitions(tableId, partitionNum);
                 }
                 createTableOptions.setTableExists(true);
             }
