@@ -5,6 +5,7 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
@@ -18,6 +19,14 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.sql.SQLException;
+
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class CommonDbConnectorTest {
 
@@ -76,5 +85,23 @@ public class CommonDbConnectorTest {
         String indexSQL = common.getCreateIndexSql(tapTable, tapIndex);
         Matcher matcher = Pattern.compile("create unique index \"IDX_test_aaa([a-z0-9]{8})\" on \"test\"\\(\"aaaaaaaaaaaaaaaaaaa\" asc,\"a2\" desc\\)").matcher(indexSQL);
         Assertions.assertTrue(matcher.matches());
+    }
+
+    @Test
+    void discoverSchemaMarksInformationSchemaViewAsView() throws SQLException {
+        JdbcContext jdbcContext = mock(JdbcContext.class);
+        when(jdbcContext.queryAllColumns(anyList())).thenReturn(Collections.emptyList());
+        when(jdbcContext.queryAllIndexes(anyList())).thenReturn(Collections.emptyList());
+        when(jdbcContext.queryAllForeignKeys(anyList())).thenReturn(Collections.emptyList());
+        ReflectionTestUtils.setField(common, "jdbcContext", jdbcContext);
+        DataMap view = DataMap.create();
+        view.put("tableName", "orders_view");
+        view.put("tableType", "VIEW");
+        List<TapTable> discovered = new ArrayList<>();
+
+        common.singleThreadDiscoverSchema(Collections.singletonList(view), discovered::addAll);
+
+        Assertions.assertEquals(1, discovered.size());
+        Assertions.assertEquals("view", discovered.get(0).getType());
     }
 }
