@@ -13,6 +13,7 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.it.ConnectorTestContext;
 import io.tapdata.it.UnderTest;
 import io.tapdata.it.performance.PerformanceAdapter;
+import io.tapdata.it.dbforge.DbForgeLeaseProvider;
 import io.tapdata.it.schema.TestDataType;
 import io.tapdata.it.schema.TestFieldSpec;
 import io.tapdata.it.schema.TestTableSpec;
@@ -23,6 +24,7 @@ import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
@@ -48,6 +50,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class OceanbaseConnectorIT extends TpccConnectorIT {
+
+    private static DbForgeLeaseProvider dbForgeLeaseProvider;
+    private static DataMap dbForgeConnectionConfig;
 
     @Override
     protected PerformanceAdapter createPerformanceAdapter() {
@@ -396,7 +401,7 @@ public class OceanbaseConnectorIT extends TpccConnectorIT {
     @Override
     protected ConnectorTestContext createContext() throws Throwable {
         OceanbaseConnector connector = new OceanbaseConnector();
-        DataMap config = readConnectionConfig("config/oceanbase-mysql-connection.json");
+        DataMap config = loadConnectionConfig();
         config.put("port", Integer.parseInt(String.valueOf(config.get("port"))));
         config.put("useNativeCdc", Boolean.parseBoolean(String.valueOf(config.get("useNativeCdc"))));
         TapLog log = new TapLog();
@@ -408,6 +413,53 @@ public class OceanbaseConnectorIT extends TpccConnectorIT {
         connector.registerCapabilities(functions, codecRegistry);
         return ConnectorTestContext.builder().connector(connector).nodeContext(nodeContext)
                 .connectorFunctions(functions).codecRegistry(codecRegistry).config(config).log(log).build();
+    }
+
+    private DataMap loadConnectionConfig() throws Exception {
+        if (!DbForgeLeaseProvider.isDbForgeSelected()) {
+            return readConnectionConfig("config/oceanbase-mysql-connection.json");
+        }
+        return loadDbForgeConnectionConfig();
+    }
+
+    private static synchronized DataMap loadDbForgeConnectionConfig() throws Exception {
+        if (dbForgeConnectionConfig == null) {
+            dbForgeLeaseProvider = DbForgeLeaseProvider.fromEnvironment("tapdata-oceanbase-mysql-connector-it");
+            DbForgeLeaseProvider.Connection connection = dbForgeLeaseProvider.acquire("oceanbase-mysql", "dedicated", "single");
+            String user = connection.firstRequired("user", "username");
+            String password = connection.required("password");
+            dbForgeConnectionConfig = DataMap.create();
+            dbForgeConnectionConfig.put("host", connection.required("host"));
+            dbForgeConnectionConfig.put("port", connection.requiredPort());
+            dbForgeConnectionConfig.put("database", connection.required("database"));
+            dbForgeConnectionConfig.put("user", user);
+            dbForgeConnectionConfig.put("password", password);
+            dbForgeConnectionConfig.put("tenant", "sys");
+            dbForgeConnectionConfig.put("rootServerList", connection.required("rootServerList"));
+            dbForgeConnectionConfig.put("cdcUser", user);
+            dbForgeConnectionConfig.put("cdcPassword", password);
+            dbForgeConnectionConfig.put("useNativeCdc", true);
+            dbForgeConnectionConfig.put("timezone", "");
+            System.out.printf("[IT] DBForge OceanBase MySQL lease acquired: leaseId=%s, database=%s%n",
+                    dbForgeLeaseProvider.getLeaseId(), dbForgeConnectionConfig.getString("database"));
+        }
+        DataMap config = DataMap.create();
+        config.putAll(dbForgeConnectionConfig);
+        return config;
+    }
+
+    @AfterAll
+    void releaseDbForgeLease() {
+        if (dbForgeLeaseProvider == null) {
+            return;
+        }
+        try {
+            dbForgeLeaseProvider.release();
+            dbForgeLeaseProvider = null;
+            dbForgeConnectionConfig = null;
+        } catch (Exception error) {
+            throw new RuntimeException("Failed to release DBForge OceanBase MySQL lease", error);
+        }
     }
 
     private static final class Capture {

@@ -21,12 +21,14 @@ import io.tapdata.it.schema.TestDataType;
 import io.tapdata.it.schema.TestFieldSpec;
 import io.tapdata.it.schema.TestTableSpec;
 import io.tapdata.it.support.TestStateMap;
+import io.tapdata.it.dbforge.DbForgeLeaseProvider;
 import io.tapdata.it.tpcc.TpccAdapter;
 import io.tapdata.it.tpcc.TpccConnectorIT;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -54,6 +56,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class MySQLConnectorIT extends TpccConnectorIT {
+
+    private DbForgeLeaseProvider dbForgeLeaseProvider;
+    private DataMap dbForgeConnectionConfig;
 
     @Override
     protected PerformanceAdapter createPerformanceAdapter() {
@@ -515,7 +520,7 @@ public class MySQLConnectorIT extends TpccConnectorIT {
     @Override
     protected ConnectorTestContext createContext() throws Throwable {
         MysqlConnector connector = new MysqlConnector();
-        DataMap config = readConnectionConfig("config/mysql-connection.json");
+        DataMap config = loadConnectionConfig();
         config.put("port", Integer.parseInt(String.valueOf(config.get("port"))));
         TapLog log = new TapLog();
         TapConnectorContext nodeContext = new TapConnectorContext(loadSpecification("mysql-spec.json"), config,
@@ -526,6 +531,43 @@ public class MySQLConnectorIT extends TpccConnectorIT {
         connector.registerCapabilities(functions, codecRegistry);
         return ConnectorTestContext.builder().connector(connector).nodeContext(nodeContext)
                 .connectorFunctions(functions).codecRegistry(codecRegistry).config(config).log(log).build();
+    }
+
+    private DataMap loadConnectionConfig() throws Exception {
+        if (!DbForgeLeaseProvider.isDbForgeSelected()) {
+            return readConnectionConfig("config/mysql-connection.json");
+        }
+        if (dbForgeConnectionConfig == null) {
+            dbForgeLeaseProvider = DbForgeLeaseProvider.fromEnvironment("tapdata-mysql-connector-it");
+            DbForgeLeaseProvider.Connection connection = dbForgeLeaseProvider.acquire("mysql", "dedicated", "single");
+            dbForgeConnectionConfig = DataMap.create();
+            dbForgeConnectionConfig.put("host", connection.required("host"));
+            dbForgeConnectionConfig.put("port", connection.requiredPort());
+            dbForgeConnectionConfig.put("database", connection.required("database"));
+            dbForgeConnectionConfig.put("user", connection.firstRequired("user", "username"));
+            dbForgeConnectionConfig.put("password", connection.required("password"));
+            dbForgeConnectionConfig.put("highPerformance", true);
+            System.out.printf("[IT] DBForge MySQL lease acquired: leaseId=%s, host=%s, port=%s, database=%s, user=%s%n",
+                    dbForgeLeaseProvider.getLeaseId(), dbForgeConnectionConfig.getString("host"),
+                    dbForgeConnectionConfig.getInteger("port"), dbForgeConnectionConfig.getString("database"),
+                    dbForgeConnectionConfig.getString("user"));
+        }
+        DataMap config = DataMap.create();
+        config.putAll(dbForgeConnectionConfig);
+        return config;
+    }
+
+    @AfterAll
+    void releaseDbForgeLease() {
+        if (dbForgeLeaseProvider == null) {
+            return;
+        }
+        try {
+            dbForgeLeaseProvider.release();
+            System.out.println("[IT] DBForge MySQL lease released");
+        } catch (Exception error) {
+            System.err.println("[IT] Failed to release DBForge MySQL lease: " + error.getMessage());
+        }
     }
 
     private static final class Capture {

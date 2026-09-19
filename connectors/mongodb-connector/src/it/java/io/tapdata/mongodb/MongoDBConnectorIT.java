@@ -14,6 +14,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.it.ConnectorTestContext;
 import io.tapdata.it.UnderTest;
+import io.tapdata.it.dbforge.DbForgeLeaseProvider;
 import io.tapdata.it.performance.PerformanceAdapter;
 import io.tapdata.it.support.TestStateMap;
 import io.tapdata.it.tpcc.TpccAdapter;
@@ -30,6 +31,7 @@ import org.bson.types.Decimal128;
 import org.bson.types.ObjectId;
 import org.bson.types.Symbol;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -66,6 +68,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class MongoDBConnectorIT extends TpccConnectorIT {
 
     private MongoClient directClient;
+    private DbForgeLeaseProvider dbForgeLeaseProvider;
+    private DataMap dbForgeConnectionConfig;
 
     @Override
     protected PerformanceAdapter createPerformanceAdapter() {
@@ -241,7 +245,7 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
     @Override
     protected ConnectorTestContext createContext() throws Throwable {
         MongodbConnector connector = new MongodbConnector();
-        DataMap config = readConnectionConfig("config/mongodb-connection.json");
+        DataMap config = loadConnectionConfig();
         TapLog log = new TapLog();
         TapConnectorContext nodeContext = new TapConnectorContext(
                 loadSpecification("spec.json"), config, DataMap.create(), log);
@@ -267,6 +271,36 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
         testContext.getLog().info("[IT] MongoDB connection: uri={}, database={}",
                 config.getString("uri"), config.getString("database"));
         return testContext;
+    }
+
+    private synchronized DataMap loadConnectionConfig() throws Exception {
+        if (!DbForgeLeaseProvider.isDbForgeSelected()) {
+            return readConnectionConfig("config/mongodb-connection.json");
+        }
+        if (dbForgeConnectionConfig == null) {
+            dbForgeLeaseProvider = DbForgeLeaseProvider.fromEnvironment("tapdata-mongodb-connector-it");
+            DbForgeLeaseProvider.Connection connection = dbForgeLeaseProvider.acquire("mongodb", "dedicated", "replicaset");
+            dbForgeConnectionConfig = DataMap.create();
+            dbForgeConnectionConfig.put("uri", connection.required("uri"));
+            dbForgeConnectionConfig.put("database", connection.required("database"));
+            System.out.printf("[IT] DBForge MongoDB lease acquired: leaseId=%s, database=%s%n",
+                    dbForgeLeaseProvider.getLeaseId(), dbForgeConnectionConfig.getString("database"));
+        }
+        DataMap config = DataMap.create();
+        config.putAll(dbForgeConnectionConfig);
+        return config;
+    }
+
+    @AfterAll
+    void releaseDbForgeLease() {
+        if (dbForgeLeaseProvider == null) {
+            return;
+        }
+        try {
+            dbForgeLeaseProvider.release();
+        } catch (Exception error) {
+            throw new RuntimeException("Failed to release DBForge MongoDB lease", error);
+        }
     }
 
     @Override
