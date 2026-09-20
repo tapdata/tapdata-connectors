@@ -63,3 +63,23 @@ mvn -pl connectors/mysql-connector -am verify -Plong-transaction-only
 Connection values can be overridden with `connector.it.*` system properties or `CONNECTOR_IT_*`
 environment variables. TPCC uses BenchmarkSQL from `TPCC_BENCHMARK_HOME` and writes generated
 properties/logs under `TPCC_WORK_DIR`.
+
+## DBForge configuration source
+
+The default source remains `src/it/resources/config/mysql-connection.json`. To acquire a
+`mysql/dedicated/single` lease from DBForge instead, select `dbforge` explicitly:
+
+```bash
+CONNECTOR_IT_CONFIG_SOURCE=dbforge \
+CONNECTOR_IT_DBFORGE_URL=http://<dbforge-host>:<port> \
+CONNECTOR_IT_DBFORGE_TOKEN="$DBFORGE_TOKEN" \
+CONNECTOR_IT_DBFORGE_TTL_MINUTES=60 \
+mvn -pl connectors/mysql-connector -DskipITs=false -Djacoco.skip=true \
+  -Dit.test=MySQLConnectorIT verify
+```
+
+The equivalent Maven properties are `connector.it.config.source`,
+`connector.it.dbforge.url`, `connector.it.dbforge.token`, and
+`connector.it.dbforge.ttl.minutes`. The lease is acquired once for the test class and released
+in `@AfterAll`; TTL remains the recovery path for an abnormal test-process exit. DBForge errors
+fail the test and never fall back silently to the JSON configuration.
