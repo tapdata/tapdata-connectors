@@ -122,11 +122,13 @@ class KeyDynamicBucketWriterStrategyTest {
                 .open(eq(0L), org.mockito.ArgumentMatchers.same(fixture.ioManager), eq(1), eq(0), any());
         doThrow(closeFailure).when(fixture.assigner).close();
 
-        Exception thrown = assertThrows(Exception.class, fixture::create);
+        Exception thrown = assertThrows(
+                io.tapdata.connector.paimon.write.PaimonTableWriteContextFactory.IncompleteCleanupException.class,
+                fixture::create);
 
-        assertSame(openFailure, thrown);
-        assertEquals(1, thrown.getSuppressed().length);
-        assertSame(closeFailure, thrown.getSuppressed()[0]);
+        assertSame(openFailure, thrown.getCause());
+        assertEquals(1, openFailure.getSuppressed().length);
+        assertSame(closeFailure, openFailure.getSuppressed()[0]);
         verify(fixture.runtime, never()).createIndexBootstrapReader(fixture.table);
     }
 

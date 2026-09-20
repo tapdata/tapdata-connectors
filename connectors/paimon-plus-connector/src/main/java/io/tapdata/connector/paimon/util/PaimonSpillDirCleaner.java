@@ -1,5 +1,9 @@
 package io.tapdata.connector.paimon.util;
 
+import io.tapdata.connector.paimon.service.PaimonStopResources;
+import org.apache.paimon.disk.BufferFileReader;
+import org.apache.paimon.disk.BufferFileWriter;
+import org.apache.paimon.disk.FileIOChannel;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 
@@ -19,6 +23,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -92,15 +97,47 @@ public final class PaimonSpillDirCleaner {
     /**
      * Resolves the temporary-directory list, creates a Paimon {@link IOManager} over it, and registers
      * the resulting spill directories with {@link #registerLiveDirs(IOManager)}. The returned
-     * {@link IOManagerBuildResult} carries both the manager and the registered paths; callers must
-     * {@link IOManager#close()} the manager and {@link #unregisterLiveDirs(List)} the paths on failure
-     * and shutdown.
+     * {@link IOManagerBuildResult} 保存 manager 与已注册路径。调用者在全部访问者终止后
+     * 关闭 manager，再以实际目录删除结果调用 {@link #releaseAfterClose(List, boolean)}。
      */
     public static IOManagerBuildResult resolveAndCreateIOManager(String configuredTmpDirs) {
+        try {
+            return resolveAndCreateIOManager(configuredTmpDirs, PaimonStopResources.Scope.standalone("spill-build"));
+        } catch (RuntimeException | Error failure) { throw failure; }
+        catch (Exception failure) { throw new IllegalStateException(failure); }
+    }
+
+    public static IOManagerBuildResult resolveAndCreateIOManager(String configuredTmpDirs,
+            PaimonStopResources.Scope scope) throws Exception {
         String[] roots = splitTmpDirRoots(resolveTmpDirs(configuredTmpDirs));
-        IOManager ioManager = IOManager.create(roots);
-        List<String> spillDirs = registerLiveDirs(ioManager);
-        return new IOManagerBuildResult(ioManager, spillDirs);
+        // IOManager 的目录是懒创建的；先绑定原始对象，再物化目录/登记 owner。
+        // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/disk/IOManagerImpl.java#L67
+        IOManager manager = scope.create("allocate IOManager", () -> IOManager.create(roots));
+        return registerCreatedIOManager(manager, scope);
+    }
+
+    static IOManagerBuildResult registerCreatedIOManager(IOManager ioManager) {
+        PaimonStopResources.Scope scope = PaimonStopResources.Scope.standalone("spill-register");
+        scope.reserve("IOManager").bind(ioManager);
+        return registerCreatedIOManager(ioManager, scope);
+    }
+
+    private static IOManagerBuildResult registerCreatedIOManager(IOManager ioManager,
+            PaimonStopResources.Scope scope) {
+        List<String> registered = new ArrayList<>();
+        try {
+            scope.check("materialize spill directories");
+            List<String> paths = spillDirPaths(ioManager);
+            scope.run("register spill owners", () -> registerPaths(paths, registered));
+            return new IOManagerBuildResult(ioManager, paths);
+        } catch (Exception | Error failure) {
+            // 任一路径注册失败后完整保留；IOManager.close 会覆盖全部 root，不能删除外部 owner
+            // 的目录。这里既不猜测局部关闭证明，也不通过递归删除绕过 manager 生命周期。
+            // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/disk/IOManagerImpl.java#L74
+            scope.retain(failure);
+            if (failure instanceof Error) { throw (Error) failure; }
+            throw new IllegalStateException("Paimon spill registration incomplete; resources retained: " + registered, failure);
+        }
     }
 
     /** Carries the products of {@link #resolveAndCreateIOManager(String)} for caller cleanup. */
@@ -123,49 +160,170 @@ public final class PaimonSpillDirCleaner {
     }
 
     /**
+     * Delegating {@link IOManager} whose {@link IOManager#tempDirs()} reports the canonical
+     * spill directories instead of the raw configured roots. Paimon 1.3.2's
+     * {@code GlobalIndexAssigner} picks {@code ioManager.tempDirs()} to create its
+     * {@code rocksdb-<uuid>} index directory; without this confinement that directory is a
+     * sibling of {@code paimon-io-*} under the raw root — invisible to the live-dir registry,
+     * never deleted by the IOManager close barrier, and never reclaimed by the stale cleaner
+     * after a crash. Spill channels keep flowing through the delegate's FileChannelManager
+     * (real {@code paimon-io-*} directories) unchanged.
+     *
+     * <p>Source: {@code paimon-core/src/main/java/org/apache/paimon/crosspartition/
+     * GlobalIndexAssigner.java#open}, lines 136-142. Baseline:
+     * 已与 Paimon 1.3.2 sources JAR 逐字节核对。
+     * https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/crosspartition/GlobalIndexAssigner.java#L136
+     */
+    public static IOManager withConfinedTempDirs(IOManager delegate, List<String> spillDirs) {
+        return new ConfinedTempDirsIOManager(delegate, spillDirs);
+    }
+
+    private static final class ConfinedTempDirsIOManager implements IOManager {
+        private final IOManager delegate;
+        private final String[] confinedDirs;
+
+        private ConfinedTempDirsIOManager(IOManager delegate, List<String> spillDirs) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+            if (spillDirs == null || spillDirs.isEmpty()) {
+                throw new IllegalArgumentException("Confined temp dirs must not be empty");
+            }
+            this.confinedDirs = spillDirs.toArray(new String[0]);
+        }
+
+        @Override
+        public FileIOChannel.ID createChannel() {
+            return delegate.createChannel();
+        }
+
+        @Override
+        public FileIOChannel.ID createChannel(String prefix) {
+            return delegate.createChannel(prefix);
+        }
+
+        @Override
+        public String[] tempDirs() {
+            return confinedDirs.clone();
+        }
+
+        @Override
+        public FileIOChannel.Enumerator createChannelEnumerator() {
+            return delegate.createChannelEnumerator();
+        }
+
+        @Override
+        public BufferFileWriter createBufferFileWriter(FileIOChannel.ID channelID)
+                throws IOException {
+            return delegate.createBufferFileWriter(channelID);
+        }
+
+        @Override
+        public BufferFileReader createBufferFileReader(FileIOChannel.ID channelID)
+                throws IOException {
+            return delegate.createBufferFileReader(channelID);
+        }
+
+        @Override
+        public void close() throws Exception {
+            delegate.close();
+        }
+    }
+
+    /**
      * Materialize and register the spill directories owned by the given IOManager so startup
      * cleanup never deletes them while they are in use by this JVM.
      *
-     * @return canonical paths of the registered spill directories (to be passed to {@link #unregisterLiveDirs})
+     * @return canonical paths of the registered spill directories (to be passed to {@link #releaseAfterClose})
      */
     public static List<String> registerLiveDirs(IOManager ioManager) {
         List<String> paths = spillDirPaths(ioManager);
         List<String> registered = new ArrayList<>();
         try {
-            for (String path : paths) {
-                OwnerLock ownerLock = OwnerLock.tryAcquire(lockFile(path));
-                if (ownerLock == null) {
-                    throw new IllegalStateException(
-                            "Paimon spill directory is already owned by another process");
-                }
-                OwnerLock raced = OWNER_LOCKS.putIfAbsent(path, ownerLock);
-                if (raced != null) {
-                    ownerLock.close();
-                    throw new IllegalStateException(
-                            "Paimon spill directory is already registered in this JVM");
-                }
-                LIVE_DIRS.add(path);
-                registered.add(path);
-            }
+            registerPaths(paths, registered);
             return paths;
-        } catch (RuntimeException e) {
-            unregisterLiveDirs(registered);
-            throw e;
+        } catch (RuntimeException failure) {
+            // 独立调用者仍持有 IOManager；这里不擅自删除目录，marker 留给其显式清理。
+            releaseAfterClose(registered, false);
+            throw failure;
         }
     }
 
-    /** Remove previously registered spill directories from the live set. */
-    public static void unregisterLiveDirs(List<String> spillDirs) {
+    private static void registerPaths(List<String> paths, List<String> registered) {
+        RuntimeException failure = null;
+        for (String path : paths) {
+            OwnerLock ownerLock = OwnerLock.tryAcquire(lockFile(path));
+            if (ownerLock == null) {
+                if (failure == null) {
+                    failure = new IllegalStateException("Paimon spill directory is already owned: " + path);
+                }
+                continue;
+            }
+            OwnerLock raced = OWNER_LOCKS.putIfAbsent(path, ownerLock);
+            if (raced != null) {
+                ownerLock.close();
+                if (failure == null) {
+                    failure = new IllegalStateException("Paimon spill directory is already registered in this JVM: " + path);
+                }
+                continue;
+            }
+            LIVE_DIRS.add(path);
+            registered.add(path);
+        }
+        if (failure != null) { throw failure; }
+    }
+
+    /**
+     * 调用者已证明没有访问者后收尾。删除失败保留 live/owner/marker，直到进程退出；
+     * 访问者仍可能存在时不能调用。Paimon IOManager.close 的目录删除可抛 IOException。
+     * https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/disk/FileChannelManagerImpl.java#L125
+     */
+    public static ReleaseResult releaseAfterClose(List<String> spillDirs, boolean deleted) {
+        return releaseAfterClose(spillDirs, deleted, null);
+    }
+
+    public static ReleaseResult releaseAfterClose(List<String> spillDirs, boolean deleted,
+            io.tapdata.connector.paimon.service.PaimonStopController controller) {
+        List<String> retained = new ArrayList<>();
+        Throwable failure = null;
         if (spillDirs != null) {
             for (String path : spillDirs) {
-                LIVE_DIRS.remove(path);
-                OwnerLock ownerLock = OWNER_LOCKS.remove(path);
-                if (ownerLock != null) {
-                    ownerLock.close();
-                    deleteQuietly(ownerLock.file);
+                if (!deleted) {
+                    retained.add(path);
+                    continue;
                 }
+                OwnerLock ownerLock = OWNER_LOCKS.get(path);
+                Throwable closeFailure;
+                try {
+                    closeFailure = controller == null ? (ownerLock == null ? null : ownerLock.close())
+                            : controller.call("close spill owner " + path, () -> ownerLock == null ? null : ownerLock.close());
+                    if (controller != null) { controller.checkAction("publish spill owner close proof"); }
+                } catch (Exception | Error rejected) { closeFailure = rejected; }
+                if (closeFailure != null) {
+                    retained.add(path);
+                    if (failure == null) { failure = closeFailure; }
+                    else { PaimonFailures.append(failure, closeFailure); }
+                    continue;
+                }
+                if (ownerLock != null) { OWNER_LOCKS.remove(path, ownerLock); }
+                LIVE_DIRS.remove(path);
+                if (ownerLock != null) { deleteQuietly(ownerLock.file); }
             }
         }
+        if (!retained.isEmpty() && failure == null) {
+            failure = new IOException("Paimon spill release lacks close proof: " + retained);
+        }
+        return new ReleaseResult(retained, failure);
+    }
+
+    public static final class ReleaseResult {
+        private final List<String> retained;
+        private final Throwable failure;
+        private ReleaseResult(List<String> retained, Throwable failure) {
+            this.retained = java.util.Collections.unmodifiableList(retained);
+            this.failure = failure;
+        }
+        public boolean complete() { return retained.isEmpty() && failure == null; }
+        public List<String> retainedPaths() { return retained; }
+        public Throwable failure() { return failure; }
     }
 
     private static List<String> spillDirPaths(IOManager ioManager) {
@@ -417,13 +575,16 @@ public final class PaimonSpillDirCleaner {
             }
         }
 
-        private void close() {
-            try {
-                lock.release();
-            } catch (IOException ignored) {
-                // Best effort; closing the channel also releases the process lock.
+        private Throwable close() {
+            Throwable failure = null;
+            try { lock.release(); } catch (IOException | RuntimeException e) { failure = e; }
+            try { channel.close(); } catch (IOException | RuntimeException e) {
+                if (failure == null) { failure = e; } else { PaimonFailures.append(failure, e); }
             }
-            closeQuietly(channel, randomAccessFile);
+            try { randomAccessFile.close(); } catch (IOException | RuntimeException e) {
+                if (failure == null) { failure = e; } else { PaimonFailures.append(failure, e); }
+            }
+            return failure;
         }
 
         private static void closeQuietly(

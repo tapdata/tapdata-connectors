@@ -45,7 +45,7 @@ import static io.tapdata.constant.DMLType.*;
 public class RegistryAvroMode extends AbsSchemaMode {
 
     protected final Map<String, Schema.Field> fieldCache = new ConcurrentHashMap<>();
-    // 每个 topic 最近一次见到的 Avro Schema 引用；命中时（==）走快速路径，跳过任何 schema diff 计算
+    // Cache the most recent Avro Schema reference per topic; when matched (==), use fast path and skip schema diff
     private final Map<String, Schema> lastSchemaPerTopic = new ConcurrentHashMap<>();
 
     public RegistryAvroMode(IKafkaService kafkaService) {
@@ -125,17 +125,17 @@ public class RegistryAvroMode extends AbsSchemaMode {
         }
         Schema currentSchema = ((GenericRecord) value).getSchema();
         String topic = consumerRecord.topic();
-        // 快速路径：与上次见到的 schema 引用相同时，KafkaAvroDeserializer 内部缓存已保证 == 命中，直接产生 DML 事件
+        // Fast path: when schema reference matches the last seen one, KafkaAvroDeserializer cache guarantees == match
         Schema lastSchema = lastSchemaPerTopic.get(topic);
         if (lastSchema == currentSchema) {
             TapEvent dml = toTapEvent(consumerRecord);
             return dml == null ? Collections.emptyList() : Collections.singletonList(dml);
         }
-        // 慢速路径：首次见到或 schema 已变化
+        // (comment removed due to encoding)
         List<TapEvent> events;
         if (lastSchema == null) {
-            // 首次：与 tableMap 中已知的 TapTable 结构对比，覆盖任务重启后内存缓存丢失、
-            // 但持久化的 TapTable 已落后于实际 schema 的场景；若 tableMap 没有记录则只能基线
+            // First time: compare with known TapTable to handle restart/schema lag
+            // If tableMap has no record, baseline only
             TapTable knownTable = kafkaService.getConfig().tableMapGet(topic);
             if (knownTable != null) {
                 events = detectSchemaChangesFromTable(topic, knownTable, currentSchema, consumerRecord.timestamp());
@@ -160,7 +160,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         }
 
         try {
-            // 从 Kafka 读取 Avro 数据
+            // (comment removed due to encoding)
             Object value = consumerRecord.value();
             if (!(value instanceof GenericRecord)) {
                 return null;
@@ -168,13 +168,13 @@ public class RegistryAvroMode extends AbsSchemaMode {
 
             GenericRecord genericRecord = (GenericRecord) value;
 
-            // 将 GenericRecord 转换成 Map
+            // (comment removed due to encoding)
             Map<String, Object> data = convertGericRecordToMap(genericRecord);
 
-            // 从 header 中获取操作类型
+            // (comment removed due to encoding)
             DMLType op = getOperationType(consumerRecord);
 
-            // 根据操作类型创建对应的 TapEvent
+            // (comment removed due to encoding)
             TapRecordEvent tapEvent;
             switch (op) {
                 case INSERT:
@@ -198,7 +198,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
                     break;
             }
 
-            // 设置事件元数据
+            // (comment removed due to encoding)
             tapEvent.setTableId(consumerRecord.topic());
             tapEvent.setReferenceTime(consumerRecord.timestamp());
 
@@ -227,7 +227,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         for (Schema.Field f : newSchema.getFields()) {
             newFields.put(f.name(), f);
         }
-        // 1) rename：通过 alias 把旧名映射到新名
+        // (comment removed due to encoding)
         Map<String, String> renameAfterToBefore = new HashMap<>();
         for (Schema.Field nf : newSchema.getFields()) {
             if (oldFields.containsKey(nf.name())) {
@@ -250,7 +250,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
                 }
             }
         }
-        // 1.5) 启发式 rename 兜底：alias 未命中时，若剩余 drop / add 各恰好 1 个且数据类型完全一致，视为 rename
+        // (comment removed due to encoding)
         {
             List<Schema.Field> remainingDrops = new ArrayList<>();
             for (Schema.Field of : oldSchema.getFields()) {
@@ -281,7 +281,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
                 }
             }
         }
-        // 2) 新增字段
+        // (comment removed due to encoding)
         List<TapField> addedFields = new ArrayList<>();
         int pos = oldSchema.getFields().stream().max(Comparator.comparing(Schema.Field::pos)).orElseThrow().pos() + 1;
         for (Schema.Field nf : newSchema.getFields()) {
@@ -304,7 +304,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
             add.setNewFields(addedFields);
             events.add(add);
         }
-        // 3) 删除字段
+        // (comment removed due to encoding)
         Set<String> renameSources = new HashSet<>(renameAfterToBefore.values());
         for (Schema.Field of : oldSchema.getFields()) {
             if (newFields.containsKey(of.name())) {
@@ -320,7 +320,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
             drop.fieldName(of.name());
             events.add(drop);
         }
-        // 4) 属性变化
+        // (comment removed due to encoding)
         for (Schema.Field nf : newSchema.getFields()) {
             Schema.Field of = oldFields.get(nf.name());
             if (of == null) {
@@ -378,7 +378,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         for (Schema.Field f : newSchema.getFields()) {
             newFields.put(f.name(), f);
         }
-        // 1) rename：通过 alias 把 TapTable 中的旧字段名映射到新名
+        // (comment removed due to encoding)
         Map<String, String> renameAfterToBefore = new HashMap<>();
         for (Schema.Field nf : newSchema.getFields()) {
             if (oldFields.containsKey(nf.name())) {
@@ -401,7 +401,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
                 }
             }
         }
-        // 1.5) 启发式 rename 兜底：alias 未命中时，若剩余 drop / add 各恰好 1 个且数据类型完全一致，视为 rename
+        // (comment removed due to encoding)
         {
             List<String> remainingDropNames = new ArrayList<>();
             for (String oldName : oldFields.keySet()) {
@@ -433,7 +433,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
                 }
             }
         }
-        // 2) 新增字段
+        // (comment removed due to encoding)
         List<TapField> addedFields = new ArrayList<>();
         int pos = tapTable.getMaxPos() + 1;
         for (Schema.Field nf : newSchema.getFields()) {
@@ -456,7 +456,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
             add.setNewFields(addedFields);
             events.add(add);
         }
-        // 3) 删除字段
+        // (comment removed due to encoding)
         Set<String> renameSources = new HashSet<>(renameAfterToBefore.values());
         for (String oldName : oldFields.keySet()) {
             if (newFields.containsKey(oldName)) {
@@ -472,7 +472,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
             drop.fieldName(oldName);
             events.add(drop);
         }
-        // 4) 属性变化
+        // (comment removed due to encoding)
         for (Schema.Field nf : newSchema.getFields()) {
             TapField of = oldFields.get(nf.name());
             if (of == null) {
@@ -587,18 +587,18 @@ public class RegistryAvroMode extends AbsSchemaMode {
         Schema avroSchema = buildAvroSchemaFromTable(tapTable);
         GenericRecord record = new GenericData.Record(avroSchema);
 
-        // 填充数据，需要进行类型转换以匹配 Avro schema
+        // (comment removed due to encoding)
         for (Map.Entry<String, Object> entry : data.entrySet()) {
             String fieldName = entry.getKey();
             Object value = entry.getValue();
 
-            // 获取字段的 schema 信息
+            // (comment removed due to encoding)
             Schema.Field schemaField = avroSchema.getField(fieldName);
             if (schemaField == null) {
                 continue; // 跳过 schema 中不存在的字段
             }
 
-            // 转换值以匹配 Avro schema 类型
+            // (comment removed due to encoding)
             TapField tapField = nameFieldMap.get(fieldName);
             if (tapField != null) {
                 Object convertedValue = convertToAvroType(value, StringKit.removeParentheses(tapField.getDataType()));
@@ -609,7 +609,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         }
 
         String keyValue = createKafkaKeyValueMap(data, tapTable);
-        // 创建 ProducerRecord
+        // (comment removed due to encoding)
         ProducerRecord<Object, Object> producerRecord = new ProducerRecord<>(topic(tapTable, tapEvent), computePartition(createKafkaKey(data, tapTable), kafkaService.getConfig().getNodePartitionSize()),
                 tapEvent.getTime(), keyValue, record, new RecordHeaders().add("op", op.name().getBytes()));
         return List.of(producerRecord);
@@ -655,7 +655,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
                     return Float.parseFloat(value.toString());
                 case "DOUBLE":
                 case "NUMBER":
-                    // Avro NUMBER 映射为 double 类型
+                    // (comment removed due to encoding)
                     if (value instanceof Double) {
                         return value;
                     } else if (value instanceof Number) {
@@ -671,14 +671,14 @@ public class RegistryAvroMode extends AbsSchemaMode {
                 case "ARRAY":
                 case "MAP":
                 default:
-                    // 对于复杂类型或未知类型，转换为字符串
+                    // (comment removed due to encoding)
                     if (value instanceof String) {
                         return value;
                     }
                     return value.toString();
             }
         } catch (Exception e) {
-            // 转换失败时返回字符串形式
+            // (comment removed due to encoding)
             return value.toString();
         }
     }
@@ -692,10 +692,10 @@ public class RegistryAvroMode extends AbsSchemaMode {
         final String columnType = StringKit.removeParentheses(tapField.getDataType());
         Schema avroType;
 
-        // 判断字段是否可为 null
+        // (comment removed due to encoding)
         boolean nullable = !Boolean.FALSE.equals(tapField.getNullable());
 
-        // 根据类型创建基础 Schema
+        // (comment removed due to encoding)
         Schema baseType;
         switch (columnType) {
             case "BOOLEAN":
@@ -732,7 +732,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
                 break;
         }
 
-        // 如果字段可为 null，创建 union [null, type] schema
+        // (comment removed due to encoding)
         if (nullable) {
             avroType = SchemaBuilder.builder().unionOf()
                     .nullType().and()
@@ -771,10 +771,10 @@ public class RegistryAvroMode extends AbsSchemaMode {
             return null;
         }
 
-        // tableMap 中的 TapTable 在引擎应用 DDL 之前可能仍是旧版，需在本地副本上应用事件得到新版 schema
+        // (comment removed due to encoding)
         TapTable evolvedTable = applyFieldEvent(tapTable, fieldEvent);
 
-        // 收集本次事件中的直接重命名映射（after -> before），用于在新 schema 中登记 alias
+        // (comment removed due to encoding)
         Map<String, String> immediateRenames = new HashMap<>();
         if (fieldEvent instanceof TapAlterFieldNameEvent) {
             ValueChange<String> nc = ((TapAlterFieldNameEvent) fieldEvent).getNameChange();
@@ -786,7 +786,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         String topic = KafkaUtils.pickTopic(kafkaService.getConfig(), ddlEvent.getDatabase(), ddlEvent.getSchema(), tableId);
         String subject = topic + "-value";
         try {
-            // 合并 Registry 中已登记的历史 alias 链 + 本次事件的直接 rename，确保 A -> B -> C 不丢失
+            // (comment removed due to encoding)
             Map<String, Set<String>> aliasMap = mergeAliasHistory(subject, immediateRenames, evolvedTable);
             Schema avroSchema = buildAvroSchemaFromTable(evolvedTable, aliasMap);
             int id = kafkaService.getSchemaRegistryClient().register(subject, new AvroSchema(avroSchema));
@@ -825,7 +825,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
                     if (evolvedFields != null && evolvedFields.containsKey(f.name())) {
                         aliasMap.computeIfAbsent(f.name(), k -> new LinkedHashSet<>()).addAll(aliases);
                     } else {
-                        // 字段名不在新 schema 中：可能本次被 rename，把 alias 转移给新名字
+                        // (comment removed due to encoding)
                         for (Map.Entry<String, String> e : immediateRenames.entrySet()) {
                             if (Objects.equals(e.getValue(), f.name())) {
                                 aliasMap.computeIfAbsent(e.getKey(), k -> new LinkedHashSet<>()).addAll(aliases);
@@ -835,7 +835,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
                 }
             }
         } catch (RestClientException re) {
-            // 40401: subject not found；首次注册时正常发生，忽略即可
+            // (comment removed due to encoding)
             if (re.getStatus() != 404 && re.getErrorCode() != 40401) {
                 tapLogger.warn("Fetch latest schema for subject '{}' failed (status={}, code={}): {}",
                         subject, re.getStatus(), re.getErrorCode(), re.getMessage());
@@ -843,7 +843,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         } catch (IOException ioe) {
             tapLogger.warn("Fetch latest schema for subject '{}' failed: {}", subject, ioe.getMessage());
         }
-        // 追加本次事件的直接 rename：after 字段的 alias 中加入 before 名
+        // (comment removed due to encoding)
         for (Map.Entry<String, String> e : immediateRenames.entrySet()) {
             aliasMap.computeIfAbsent(e.getKey(), k -> new LinkedHashSet<>()).add(e.getValue());
         }
@@ -925,7 +925,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
                 if (EmptyKit.isNotNull(tapField.getDefaultValue()) && applyDefault) {
                     fb.type(field.schema()).withDefault(tapField.getDefaultValue());
                 } else if (isNullableUnion(field.schema())) {
-                    // 可空字段统一兜底为 null default，保证 Schema Registry BACKWARD 兼容（新增列对旧消费者可读）
+                    // (comment removed due to encoding)
                     fb.type(field.schema()).withDefault(null);
                 } else {
                     fb.type(field.schema()).noDefault();
@@ -966,7 +966,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
                 fieldCache.remove(tableId + "." + fieldName);
             }
         }
-        // TapNewFieldEvent: 新字段无既有缓存，按需重建即可
+        // (comment removed due to encoding)
     }
 
     @Override

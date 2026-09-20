@@ -24,23 +24,23 @@ public final class HashDynamicBucketWriterStrategy extends AbstractPaimonBucketW
 
     HashDynamicBucketWriterStrategy(
             PaimonBucketWriterStrategyContext context,
-            PaimonBucketWriterRuntimeFactory runtimeFactory) {
+            PaimonBucketWriterRuntimeFactory runtimeFactory) throws Exception {
         super(context, BucketMode.HASH_DYNAMIC, requiredPrimaryKeyFields(context.table()));
         PaimonBucketWriterRuntimeFactory runtime =
                 Objects.requireNonNull(runtimeFactory, "runtimeFactory");
         this.extractor = new RowPartitionKeyExtractor(table.schema());
         this.assigner =
                 Objects.requireNonNull(
-                        runtime.createHashBucketAssigner(table, context.commitUser()),
+                        stopScope.create("allocate hash bucket assigner", () -> runtime.createHashBucketAssigner(table, context.commitUser())),
                         "hashBucketAssigner");
     }
 
     @Override
     protected void doWrite(InternalRow row) throws Exception {
         int bucket =
-                assigner.assign(
-                        extractor.partition(row), extractor.trimmedPrimaryKey(row).hashCode());
-        delegate.write(row, bucket);
+                stopScope.call("assign hash bucket", () -> assigner.assign(
+                        extractor.partition(row), extractor.trimmedPrimaryKey(row).hashCode()));
+        stopScope.run("write assigned hash row", () -> delegate.write(row, bucket));
     }
 
     @Override

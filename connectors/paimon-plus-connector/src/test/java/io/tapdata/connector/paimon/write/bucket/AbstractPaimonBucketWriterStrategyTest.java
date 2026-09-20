@@ -30,6 +30,20 @@ import static org.mockito.Mockito.when;
 
 class AbstractPaimonBucketWriterStrategyTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(BucketMode.class)
+    void finalPrepareMustPreserveModeHookAndWaitForCompaction(BucketMode mode) throws Exception {
+        Fixture fixture = new Fixture(mode);
+        TestStrategy strategy = fixture.strategy(mode, Collections.emptyList());
+        List<CommitMessage> messages = Collections.singletonList(mock(CommitMessage.class));
+        when(fixture.writer.prepareCommit(true, 18L)).thenReturn(messages);
+        assertSame(messages, strategy.prepareFinalCommit(18L));
+        InOrder order = inOrder(fixture.lifecycle, fixture.writer);
+        order.verify(fixture.lifecycle).beforePrepare(18L);
+        order.verify(fixture.writer).prepareCommit(true, 18L);
+        verify(fixture.writer, never()).prepareCommit(false, 18L);
+    }
+
     @Test
     void modeMismatchMustFailConstruction() {
         Fixture fixture = new Fixture(BucketMode.KEY_DYNAMIC);
@@ -138,6 +152,30 @@ class AbstractPaimonBucketWriterStrategyTest {
         strategy.close();
         verify(fixture.lifecycle).closeModeResources();
         verify(fixture.writer).close();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "mode close Error 后 delegateCloseFails={0}")
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void modeCloseErrorMustStillCloseDelegateAndPreserveSuppressedFailure(boolean delegateCloseFails)
+            throws Exception {
+        Fixture fixture = new Fixture(BucketMode.KEY_DYNAMIC);
+        TestStrategy strategy = fixture.strategy(BucketMode.KEY_DYNAMIC, Collections.emptyList());
+        AssertionError modeError = new AssertionError("mode resource close Error");
+        AssertionError writerError = new AssertionError("delegate close Error");
+        doThrow(modeError).when(fixture.lifecycle).closeModeResources();
+        if (delegateCloseFails) { doThrow(writerError).when(fixture.writer).close(); }
+
+        AssertionError failure = assertThrows(AssertionError.class, strategy::close);
+
+        assertSame(modeError, failure);
+        assertEquals(delegateCloseFails ? Collections.singletonList(writerError) : Collections.emptyList(),
+                Arrays.asList(failure.getSuppressed()));
+        InOrder order = inOrder(fixture.lifecycle, fixture.writer);
+        order.verify(fixture.lifecycle).closeModeResources();
+        order.verify(fixture.writer).close();
+        strategy.close();
+        verify(fixture.lifecycle, org.mockito.Mockito.times(1)).closeModeResources();
+        verify(fixture.writer, org.mockito.Mockito.times(1)).close();
     }
 
     @Test

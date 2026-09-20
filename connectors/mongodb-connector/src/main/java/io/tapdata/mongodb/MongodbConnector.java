@@ -758,7 +758,11 @@ public class MongodbConnector extends ConnectorBase {
 				IndexOptions indexOptions = new IndexOptions();
 				// 1. 遍历 index, 生成 indexOptions
 				dIndex.forEach((key, value) -> {
-					if ("unique".equals(key)) {
+					if ("name".equals(key)) {
+						if (value instanceof String && EmptyKit.isNotEmpty((String) value)) {
+							indexOptions.name((String) value);
+						}
+					} else if ("unique".equals(key)) {
 						indexOptions.unique((Boolean) value);
 					} else if ("sparse".equals(key)) {
 						indexOptions.sparse((Boolean) value);

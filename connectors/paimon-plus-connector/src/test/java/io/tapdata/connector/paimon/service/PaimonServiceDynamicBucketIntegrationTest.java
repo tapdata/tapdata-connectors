@@ -54,6 +54,48 @@ import static org.mockito.Mockito.when;
 
 class PaimonServiceDynamicBucketIntegrationTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"SYNC", "async"})
+    void reportedProductionDdlMustWriteAndReadWithOriginalMaintenanceMode(String inputMode) throws Exception {
+        PaimonConfig config = config("reported-ddl-" + inputMode);
+        PaimonService service = service(config);
+        try {
+            String name = "future_inhousedate";
+            Schema schema = io.tapdata.connector.paimon.FutureInhouseDateFixture.schema(inputMode);
+            catalog(service).createTable(Identifier.create(DATABASE, name), schema, false);
+            TapTable tap = new TapTable(name);
+            for (org.apache.paimon.types.DataField field : schema.fields()) {
+                TapField tapField = new TapField(field.name(), field.type().toString());
+                int keyIndex = schema.primaryKeys().indexOf(field.name());
+                if (keyIndex >= 0) { tapField.primaryKeyPos(keyIndex + 1); }
+                tap.add(tapField);
+            }
+            int date = (int) java.time.LocalDate.of(2026, 9, 7).toEpochDay();
+            Map<String, Object> data = map("ConfirmNo", "C001", "InhouseDate", date,
+                    "Rooms", 2, "RoomRate", new java.math.BigDecimal("123.45"), "Resort", "R01",
+                    "ExtractionDate", date, "ExtractionHour", 12,
+                    "LastModified", java.sql.Timestamp.valueOf("2026-09-07 12:00:00.123456"),
+                    "ods_updated_at", java.sql.Timestamp.valueOf("2026-09-07 12:00:00.123"),
+                    "pt_extractiondate", 20260907, "op", "u");
+            service.writeRecords(Collections.singletonList(cdcInsert(name, data)), tap, context(stateMap()));
+            FileStoreTable table = (FileStoreTable) catalog(service).getTable(Identifier.create(DATABASE, name));
+            assertEquals(BucketMode.HASH_DYNAMIC, table.bucketMode());
+            assertEquals(org.apache.paimon.CoreOptions.fromMap(Collections.singletonMap(
+                            "snapshot.expire.execution-mode", inputMode)).snapshotExpireExecutionMode(),
+                    table.coreOptions().snapshotExpireExecutionMode());
+            assertEquals(inputMode, table.options().get("snapshot.expire.execution-mode"));
+            List<InternalRow> rows = readRows(table);
+            assertEquals(1, rows.size());
+            assertEquals(2, rows.get(0).getInt(2));
+            assertEquals(new java.math.BigDecimal("123.45"), rows.get(0).getDecimal(3, 18, 2).toBigDecimal());
+            assertEquals(20260907, rows.get(0).getInt(9));
+        } finally { service.close(); }
+        try (java.util.stream.Stream<java.nio.file.Path> files = Files.list(
+                java.nio.file.Paths.get(config.getDiskTmpDir()))) {
+            assertEquals(0, files.count(), "成功停止后预检 RocksDB 和 writer Spill 均须释放");
+        }
+    }
+
     private static final String DATABASE = "default";
 
     @TempDir

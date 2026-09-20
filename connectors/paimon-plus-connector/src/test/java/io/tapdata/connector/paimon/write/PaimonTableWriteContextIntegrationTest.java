@@ -81,6 +81,37 @@ class PaimonTableWriteContextIntegrationTest {
     }
 
     @Test
+    void keyDynamicRocksDbIndexMustLiveInsideTheSpillDirectory() throws Exception {
+        Table table = createKeyDynamicTable("key_dynamic_rocksdb");
+        java.nio.file.Path ioRoot = Files.createDirectory(tempDir.resolve("key-rocksdb-io"));
+        String commitUser = "stable-key-rocksdb-user";
+
+        try (PaimonTableWriteContext context = PaimonTableWriteContext.create(
+                "default.key_dynamic_rocksdb", "key_dynamic_rocksdb",
+                table, commitUser, ioRoot.toString())) {
+            // The GlobalIndexAssigner's rocksdb index must be a child of the connector-owned
+            // paimon-io-<uuid> directory, never a rocksdb-<uuid> sibling under the raw root:
+            // only the spill directory is protected by the live registry, the termination
+            // barrier, and the stale cleaner.
+            java.io.File[] rootChildren =
+                    ioRoot.toFile().listFiles((dir, name) -> name.startsWith("paimon-io-"));
+            assertEquals(1, rootChildren.length);
+            assertEquals(
+                    0,
+                    ioRoot.toFile().listFiles((dir, name) -> name.startsWith("rocksdb-")).length,
+                    "rocksdb index leaked to the raw tmp root");
+            java.io.File[] spillChildren = rootChildren[0]
+                    .listFiles((dir, name) -> name.startsWith("rocksdb-"));
+            assertEquals(1, spillChildren.length);
+        }
+
+        // Closing the context deletes the whole spill directory including the confined rocksdb
+        // index; the raw root is clean for the next generation.
+        String[] remaining = ioRoot.toFile().list();
+        assertEquals(0, remaining == null ? 0 : remaining.length);
+    }
+
+    @Test
     void hashDynamicShouldKeepOneLatestRowAcrossContextRestart() throws Exception {
         Table table = createHashDynamicTable("hash_dynamic");
         String ioPath = Files.createDirectory(tempDir.resolve("hash-io")).toString();
@@ -879,6 +910,11 @@ class PaimonTableWriteContextIntegrationTest {
         @Override
         public List<CommitMessage> prepareCommit(long commitIdentifier) throws Exception {
             return writer.prepareCommit(false, commitIdentifier);
+        }
+
+        @Override
+        public List<CommitMessage> prepareFinalCommit(long commitIdentifier) throws Exception {
+            return writer.prepareCommit(true, commitIdentifier);
         }
 
         @Override

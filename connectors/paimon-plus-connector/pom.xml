@@ -360,4 +360,29 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>jdk-modular-config-tests</id>
+            <activation>
+                <jdk>[9,)</jdk>
+            </activation>
+            <properties>
+                <!-- JaCoCo 跳过时也保留合法的 Surefire late property。 -->
+                <argLine></argLine>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <!-- PDK BaseConfig.load 使用 CGLIB BeanMap；仅为测试 JVM 开放所需反射。 -->
+                            <argLine>@{argLine} --add-opens=java.base/java.lang=ALL-UNNAMED</argLine>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

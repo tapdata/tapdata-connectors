@@ -1,5 +1,7 @@
 package io.tapdata.connector.paimon.commit;
 
+import io.tapdata.connector.paimon.service.PaimonStopController;
+
 import io.tapdata.connector.paimon.util.PaimonSpillDirCleaner;
 import io.tapdata.entity.event.TapCallbackOffset;
 
@@ -118,6 +120,12 @@ public final class PaimonMicroBatchCoordinator {
         synchronized (lock) {
             MutableTableState state = tables.get(tableKey);
             return state == null ? null : state.pendingCommitTarget;
+        }
+    }
+
+    public List<CallbackReservation> publishCommit(CommitTarget target, long completedAtMs, PaimonStopController controller) {
+        synchronized (lock) {
+            return controller.publish("publishCommit", () -> publishCommit(target, completedAtMs));
         }
     }
 
@@ -256,6 +264,12 @@ public final class PaimonMicroBatchCoordinator {
         }
     }
 
+    public CallbackReservation completeCallback(CallbackReservation reservation, PaimonStopController controller) {
+        synchronized (lock) {
+            return controller.publish("completeCallback", () -> completeCallback(reservation));
+        }
+    }
+
     public CallbackReservation completeCallback(CallbackReservation reservation) {
         if (reservation == null) {
             throw new IllegalArgumentException("Callback reservation must not be null");
@@ -294,16 +308,6 @@ public final class PaimonMicroBatchCoordinator {
             }
             lane.inFlight.consumerStarted = true;
             return true;
-        }
-    }
-
-    public boolean consumerStarted(CallbackReservation reservation) {
-        if (reservation == null) {
-            return false;
-        }
-        synchronized (lock) {
-            LaneOffsetState lane = lanes.get(reservation.sourceLane);
-            return matches(lane, reservation) && lane.inFlight.consumerStarted;
         }
     }
 
@@ -637,10 +641,6 @@ public final class PaimonMicroBatchCoordinator {
 
         public String sourceLane() {
             return sourceLane;
-        }
-
-        public long version() {
-            return version;
         }
 
         public long token() {

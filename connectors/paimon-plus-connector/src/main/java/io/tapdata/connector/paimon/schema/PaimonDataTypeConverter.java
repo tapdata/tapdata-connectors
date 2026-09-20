@@ -198,10 +198,6 @@ public final class PaimonDataTypeConverter {
         }
     }
 
-    public static int getFieldLength(String dataType) {
-        return length(parse(dataType));
-    }
-
     public static int getFieldFraction(String dataType) {
         ParsedType parsedType = parse(dataType);
         return "TIME".equals(parsedType.name)

@@ -21,6 +21,6 @@ public final class PostponeBucketWriterStrategy extends AbstractPaimonBucketWrit
 
     @Override
     protected void doWrite(InternalRow row) throws Exception {
-        delegate.write(row);
+        stopScope.run("write native row", () -> delegate.write(row));
     }
 }

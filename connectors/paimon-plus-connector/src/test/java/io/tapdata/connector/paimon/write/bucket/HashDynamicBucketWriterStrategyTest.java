@@ -39,7 +39,27 @@ import static org.mockito.Mockito.when;
 class HashDynamicBucketWriterStrategyTest {
 
     @Test
-    void targetPrimaryKeysMustBeValidatedAfterRowMaterialization() {
+    void freezeAfterAssignmentMustRejectTheNextNativeWrite() throws Exception {
+        Fixture fixture = new Fixture();
+        java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<Throwable> error = new java.util.concurrent.atomic.AtomicReference<>();
+        when(fixture.assigner.assign(any(BinaryRow.class), anyInt())).thenAnswer(call -> {
+            entered.countDown(); org.junit.jupiter.api.Assertions.assertTrue(release.await(3, java.util.concurrent.TimeUnit.SECONDS)); return 4;
+        });
+        Thread writer = new Thread(() -> { try { fixture.strategy.write(fixture.row()); } catch (Throwable failure) { error.set(failure); } });
+        writer.start();
+        try {
+            org.junit.jupiter.api.Assertions.assertTrue(entered.await(3, java.util.concurrent.TimeUnit.SECONDS));
+            fixture.strategy.stopScope.controller().retain(new Exception("freeze"), fixture);
+        } finally { release.countDown(); writer.join(3000); }
+        org.junit.jupiter.api.Assertions.assertFalse(writer.isAlive());
+        org.junit.jupiter.api.Assertions.assertInstanceOf(io.tapdata.connector.paimon.service.PaimonStopController.FrozenException.class, error.get());
+        verify(fixture.writer, never()).write(any(InternalRow.class), anyInt());
+    }
+
+    @Test
+    void targetPrimaryKeysMustBeValidatedAfterRowMaterialization() throws Exception {
         Fixture fixture = new Fixture();
         InternalRow row = fixture.row();
 
@@ -47,7 +67,7 @@ class HashDynamicBucketWriterStrategyTest {
     }
 
     @Test
-    void nullTargetPrimaryKeyMustBeRejected() {
+    void nullTargetPrimaryKeyMustBeRejected() throws Exception {
         Fixture fixture = new Fixture();
         InternalRow row = GenericRow.of(7, null, BinaryString.fromString("value"));
 
@@ -133,7 +153,7 @@ class HashDynamicBucketWriterStrategyTest {
         private final TableSchema schema = schema();
         private final HashDynamicBucketWriterStrategy strategy;
 
-        private Fixture() {
+        private Fixture() throws Exception {
             when(table.bucketMode()).thenReturn(BucketMode.HASH_DYNAMIC);
             when(table.schema()).thenReturn(schema);
             when(table.rowType()).thenReturn(schema.logicalRowType());

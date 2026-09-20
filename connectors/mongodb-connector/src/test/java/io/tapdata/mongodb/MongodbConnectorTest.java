@@ -612,6 +612,56 @@ class MongodbConnectorTest {
                 verify(log).warn(anyString());
             }
         }
+
+        @Test
+        void shouldPreserveCustomIndexNameFromEncodedDiscoverSchemaDocument() {
+            Document uniqueIndex = new Document("v", 2)
+                    .append("key", new Document("code", 1))
+                    .append("name", "idx_tap_12655_code")
+                    .append("unique", true);
+            Document compoundIndex = new Document("v", 2)
+                    .append("key", new Document("name", 1).append("created", -1))
+                    .append("name", "idx_tap_12655_name_created");
+            Document ttlIndex = new Document("v", 2)
+                    .append("key", new Document("expire_at", 1))
+                    .append("name", "idx_tap_12655_ttl")
+                    .append("expireAfterSeconds", 3600);
+
+            List<TapIndex> encodedIndexes = new ArrayList<>();
+            encodedIndexes.add(encodedTapIndex(uniqueIndex));
+            encodedIndexes.add(encodedTapIndex(compoundIndex));
+            encodedIndexes.add(encodedTapIndex(ttlIndex));
+
+            MongoCollection<Document> targetCollection = mock(MongoCollection.class);
+            when(mongoDatabase.getCollection("table")).thenReturn(targetCollection);
+            doCallRealMethod().when(mongodbConnector).createIndex(table, encodedIndexes, log);
+
+            mongodbConnector.createIndex(table, encodedIndexes, log);
+
+            ArgumentCaptor<List<IndexModel>> captor = ArgumentCaptor.forClass(List.class);
+            verify(targetCollection).createIndexes(captor.capture());
+            List<IndexModel> created = captor.getValue();
+            assertEquals(3, created.size());
+
+            assertEquals("idx_tap_12655_code", created.get(0).getOptions().getName());
+            assertEquals(Boolean.TRUE, created.get(0).getOptions().isUnique());
+            Document uniqueKeys = (Document) created.get(0).getKeys();
+            assertEquals(1, ((Number) uniqueKeys.get("code")).intValue());
+
+            assertEquals("idx_tap_12655_name_created", created.get(1).getOptions().getName());
+            Document compoundKeys = (Document) created.get(1).getKeys();
+            assertEquals(Arrays.asList("name", "created"), new ArrayList<>(compoundKeys.keySet()));
+            assertEquals(-1, ((Number) compoundKeys.get("created")).intValue());
+
+            assertEquals("idx_tap_12655_ttl", created.get(2).getOptions().getName());
+            assertEquals(3600L, created.get(2).getOptions().getExpireAfter(java.util.concurrent.TimeUnit.SECONDS));
+        }
+
+        private TapIndex encodedTapIndex(Document indexDoc) {
+            TapIndex tapIndex = new TapIndex();
+            tapIndex.setName("__t__" + indexDoc.toJson());
+            return tapIndex;
+        }
     }
     @Nested
     class createIndexWithTapCreateIndexEvent{

@@ -103,6 +103,9 @@ public class ClickhouseConnector extends CommonDbConnector {
         clickhouseVersion = clickhouseJdbcContext.queryVersion();
         dbTimeZone = TimeZone.getTimeZone(clickhouseJdbcContext.queryTimeZone());
         commonSqlMaker = new ClickhouseSqlMaker().withVersion(clickhouseVersion);
+        if (Boolean.TRUE.equals(clickhouseConfig.getApplyDefault())) {
+            commonSqlMaker.applyDefault(true);
+        }
         exceptionCollector = new ClickhouseExceptionCollector();
     }
 

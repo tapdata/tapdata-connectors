@@ -161,7 +161,11 @@ public enum KafkaSchemaMode {
         @Override
         public void setSerializer(KafkaConfig kafkaConfig, Properties props) {
             props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaJsonSchemaSerializer.class.getName());
+            if ("HORTONWORKS".equalsIgnoreCase(kafkaConfig.getConnectionSchemaRegistryType())) {
+                props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+            } else {
+                props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaJsonSchemaSerializer.class.getName());
+            }
         }
 
         @Override

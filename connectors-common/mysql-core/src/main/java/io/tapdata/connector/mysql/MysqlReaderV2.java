@@ -306,6 +306,9 @@ public class MysqlReaderV2 {
 
         // 保存映射关系
         tableMapEventByTableId.put(tableId, tableMapEventData);
+        if (!isTableInObservation(database, table)) {
+            return;
+        }
         if (withSchema) {
             ddlFlush(database, table);
         } else {
@@ -315,33 +318,31 @@ public class MysqlReaderV2 {
     }
 
     private void ddlFlush(String table) {
-        if (EmptyKit.isBlank(table)) {
-            return;
-        }
-        if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive()) && "_tap_double_active".equals(table)) {
-            return;
-        }
-        LinkedHashMap<String, String> dataTypes = tableMap.get(table).getNameFieldMap().entrySet().stream()
-                .collect(Collectors.toMap(Map.Entry::getKey, e -> StringKit.removeParentheses(e.getValue().getDataType()),
-                        (existing, replacement) -> existing, LinkedHashMap::new));
-        dataTypeMap.put(table, dataTypes);
-        Map<String, Object[]> enumMap = generateEnumMap(tableMap.get(table).getNameFieldMap().entrySet().stream().filter(v -> v.getValue().getDataType().startsWith("enum")));
-        enumDataTypeMap.put(table, enumMap);
+        refreshTableMetadata(table, table);
     }
 
     private void ddlFlush(String database, String table) {
+        refreshTableMetadata(table, escapeDatabaseAndTable(database, table));
+    }
+
+    private void refreshTableMetadata(String table, String tableKey) {
         if (EmptyKit.isBlank(table)) {
             return;
         }
         if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive()) && "_tap_double_active".equals(table)) {
             return;
         }
-        LinkedHashMap<String, String> dataTypes = tableMap.get(escapeDatabaseAndTable(database, table)).getNameFieldMap().entrySet().stream()
+        TapTable tapTable = tableMap.get(tableKey);
+        if (tapTable == null || EmptyKit.isEmpty(tapTable.getNameFieldMap())) {
+            tapLogger.debug("Skip refreshing metadata for table {}, table metadata is unavailable", tableKey);
+            return;
+        }
+        LinkedHashMap<String, String> dataTypes = tapTable.getNameFieldMap().entrySet().stream()
                 .collect(Collectors.toMap(Map.Entry::getKey, e -> StringKit.removeParentheses(e.getValue().getDataType()),
                         (existing, replacement) -> existing, LinkedHashMap::new));
-        dataTypeMap.put(escapeDatabaseAndTable(database, table), dataTypes);
-        Map<String, Object[]> enumMap = generateEnumMap(tableMap.get(escapeDatabaseAndTable(database, table)).getNameFieldMap().entrySet().stream().filter(v -> v.getValue().getDataType().startsWith("enum")));
-        enumDataTypeMap.put(escapeDatabaseAndTable(database, table), enumMap);
+        dataTypeMap.put(tableKey, dataTypes);
+        Map<String, Object[]> enumMap = generateEnumMap(tapTable.getNameFieldMap().entrySet().stream().filter(v -> v.getValue().getDataType().startsWith("enum")));
+        enumDataTypeMap.put(tableKey, enumMap);
     }
 
     private Map<String, Object[]> generateEnumMap(Stream<Map.Entry<String, TapField>> stream) {

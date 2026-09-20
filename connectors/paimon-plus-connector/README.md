@@ -129,6 +129,34 @@ The connector JAR will be generated in `target/` and copied to `../dist/`.
 - Hadoop Client 3.3.6
 - Tapdata PDK API 2.0.8-SNAPSHOT
 
+### Spill 生命周期与升级验收
+
+当前关闭与目录删除屏障以[同步优雅停止主 Spec](/Users/SL/javaProject/tapdata-connectors/connectors/paimon-plus-connector/src/doc/specs/SPEC-paimon-spill-sync-graceful-stop.md)为准，执行记录见 [最终修复对比与生命周期总览](src/doc/reviews/SPILL-修复前后对比与生命周期总览.md)。过程 Plan/Todo 已清理；保留各份 Spec 与最终总览。
+
+仅支持有效 `snapshot.expire.execution-mode=SYNC`。已有 ASYNC 表在创建写入资源前拒绝，连接器不会静默修改表属性。STOP 先确认业务数据和 callback，再执行 `prepareCommit(true, identifier)` 收集最终 Compaction；即使没有新业务记录也会执行。只有来源已确认的最终 Compaction 任务失败可以放弃该表本次最终提交，业务或提交结果不确定的错误仍返回失败。
+
+关闭会持续等待真实 Compaction 终止，每 5 秒输出 `[paimon-stop]` INFO；5 秒是观察间隔，没有 30 秒提前返回。完整关闭 writer、committer、IOManager 和目录后才允许同 JVM 新代接管；无法证明资源关闭时保留 owner。等待、弃提交、目录关闭和唯一终态日志均可按 owner/table 关联。任务可迁移至另一 Engine，但 JVM 内 owner 不能阻止其他进程提交；宿主必须保证旧实例先停止或提供分布式 fencing。目录文件锁只负责保护共享可见磁盘上的 Spill 删除，具体 A/B 边界见主 Spec P17。
+
+```mermaid
+flowchart LR
+    A[STOP 禁止新写入] --> B[业务 drain / pending 确认 / callback 屏障]
+    B --> C[最终 prepareCommit true]
+    C --> D[封闭任务提交并审计控制失败]
+    D --> E{最终结果}
+    E -->|纯 Compaction 增量| F[精确 envelope 提交与确认]
+    E -->|已标记的任务失败| G[放弃整表最终尝试]
+    E -->|业务或控制错误| H[保留硬失败]
+    F --> I[shutdown / await 实际终止 / 全桶 sync]
+    G --> I
+    H --> I
+    I --> J[writer / committer / Spill 关闭]
+    J --> K{完整清理证明}
+    K -->|成立| L[按旧 token 释放 owner]
+    K -->|不成立| M[保持 owner fence]
+```
+
+Paimon/Hadoop/RocksDB 版本及共享 FileIO 语义保持原基线。较早的默认值与 S3A 说明见 [最终修复对比与生命周期总览](src/doc/reviews/SPILL-修复前后对比与生命周期总览.md)，其中旧关闭协议以本轮主 Spec 为准。
+
 ## Usage Example
 
 ### 1. Configure Connection

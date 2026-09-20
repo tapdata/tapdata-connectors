@@ -86,6 +86,25 @@
           "apiServerKey": "schemaRegisterUrl",
           "x-index": 3
         },
+        "schemaRegistryType": {
+          "type": "string",
+          "title": "${schemaRegistryType}",
+          "default": "CONFLUENT",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "apiServerKey": "schemaRegistryType",
+          "x-index": 5,
+          "enum": [
+            {
+              "label": "CONFLUENT",
+              "value": "CONFLUENT"
+            },
+            {
+              "label": "HORTONWORKS",
+              "value": "HORTONWORKS"
+            }
+          ]
+        },
         "registrySchemaType": {
           "type": "string",
           "title": "${registrySchemaType}",
@@ -93,7 +112,7 @@
           "x-decorator": "FormItem",
           "x-component": "Select",
           "apiServerKey": "registrySchemaType",
-          "x-index": 4,
+          "x-index": 6,
           "enum": [
             {
               "label": "JSON",
@@ -126,7 +145,7 @@
               }
             }
           ],
-          "x-index": 5
+          "x-index": 7
         },
         "authCredentialsSource": {
           "type": "string",
@@ -137,7 +156,7 @@
           "x-component-props": {
             "optionType": "button"
           },
-          "x-index": 6,
+          "x-index": 8,
           "enum": [
             {
               "label": "USER_INFO",
@@ -156,7 +175,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "database_username",
-          "x-index": 7
+          "x-index": 9
         },
         "authPassword": {
           "required": true,
@@ -165,7 +184,7 @@
           "x-decorator": "FormItem",
           "x-component": "Password",
           "apiServerKey": "database_password",
-          "x-index": 8
+          "x-index": 10
         },
         "schemaMode": {
           "type": "string",
@@ -182,7 +201,7 @@
             {"label": "${schemaModeFlinkCDC}", "value": "FLINK_CDC"},
             {"label": "${schemaModeCustom}", "value": "CUSTOM"}
           ],
-          "x-index": 9
+          "x-index": 12
         },
         "analyzeScript": {
           "type": "string",
@@ -1064,6 +1083,7 @@
       "schemaRegisterTip": "To register a center using third-party mode, an additional address is required. If basic authentication is enabled, authentication information is also required",
       "schemaRegisterUrl": "Schema Registry Url",
       "schemaRegisterUrlTip": "Registry Url with http or https prefix, if bootstrap split with comma, such as: http://localhost:8081,localhost:8082",
+      "schemaRegistryType": "Schema Registry Type",
       "registrySchemaType": "Schema Type",
       "authCredentialsSource": "Auth Credentials Source",
       "authUserName": "Auth UserName",
@@ -1155,6 +1175,7 @@
       "schemaRegisterTip": "使用第三方模式注册中心，需要额外提供地址，若打开基本认证还需要提供认证信息等",
       "schemaRegisterUrl": "模式注册地址",
       "schemaRegisterUrlTip": "注册地址，需要 http或https 前缀，如集群地址使用逗号间隔，如：http://localhost:8081,localhost:8082",
+      "schemaRegistryType": "模式注册类型",
       "registrySchemaType": "模式类型",
       "authCredentialsSource": "认证凭据来源",
       "authUserName": "认证用户名",
@@ -1246,6 +1267,7 @@
       "schemaRegisterTip": "使用第三方模式註冊中心，需要額外提供地址，若打開基本認證還需要提供認證信息等",
       "schemaRegisterUrl": "模式註冊地址",
       "schemaRegisterUrlTip": "註冊地址，需要 http或https 前綴，如集群地址使用逗號間隔，如：http://localhost:8081,localhost:8082",
+      "schemaRegistryType": "模式註冊類型",
       "registrySchemaType": "模式類型",
       "authCredentialsSource": "認證憑據來源",
       "authUserName": "認證用戶名",
