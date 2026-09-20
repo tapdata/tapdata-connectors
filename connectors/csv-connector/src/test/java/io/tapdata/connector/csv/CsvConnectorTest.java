@@ -8,8 +8,8 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
-import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -18,7 +18,6 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CsvConnectorTest {
 
@@ -112,7 +111,9 @@ class CsvConnectorTest {
     void parseCsvDateTimeSupportsSingleDigitParts() {
         Object parsed = CsvValueConverter.parse("2026/8/8 8:00:1", CsvValueConverter.DATETIME);
 
-        assertTrue(parsed instanceof Instant);
+        assertEquals(LocalDateTime.of(2026, 8, 8, 8, 0, 1), parsed);
+        assertEquals(LocalDateTime.of(2026, 9, 18, 12, 0, 1),
+                CsvValueConverter.parse("2026-09-18 12:00:01", CsvValueConverter.DATETIME));
         assertNull(CsvValueConverter.parse("2026/2/30 8:00:1", CsvValueConverter.DATETIME));
     }
 

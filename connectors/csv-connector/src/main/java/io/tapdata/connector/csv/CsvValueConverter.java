@@ -5,11 +5,9 @@ import io.tapdata.util.DateUtil;
 
 import java.math.BigDecimal;
 import java.time.DateTimeException;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.Locale;
@@ -144,14 +142,18 @@ final class CsvValueConverter {
         }
     }
 
-    private static Instant parseDateTime(String value) {
+    private static LocalDateTime parseDateTime(String value) {
         if (FLEXIBLE_DATETIME.matcher(value).matches()) {
             return parseFlexibleDateTime(value);
         }
-        return (Instant) DateUtil.parseInstant(value);
+        String dateFormat = DateUtil.determineDateFormat(value);
+        if (dateFormat == null) {
+            throw new DateTimeParseException("Unsupported CSV datetime format", value, 0);
+        }
+        return LocalDateTime.parse(value, DateTimeFormatter.ofPattern(dateFormat));
     }
 
-    private static Instant parseFlexibleDateTime(String value) {
+    private static LocalDateTime parseFlexibleDateTime(String value) {
         Matcher matcher = FLEXIBLE_DATETIME.matcher(value);
         if (!matcher.matches()) {
             throw new DateTimeParseException("Unsupported CSV datetime format", value, 0);
@@ -170,8 +172,7 @@ final class CsvValueConverter {
             timeValue.append('.').append(matcher.group(8));
         }
         LocalTime time = parseTime(timeValue.toString());
-        LocalDateTime dateTime = LocalDateTime.of(date, time);
-        return dateTime.atZone(ZoneId.systemDefault()).toInstant();
+        return LocalDateTime.of(date, time);
     }
 
     private static LocalDate parseDate(String value) {
