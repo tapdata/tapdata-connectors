@@ -99,6 +99,43 @@ public class MySQLConnectorIT extends TpccConnectorIT {
     }
 
     @Test
+    @UnderTest(value = "discoverSchema", requiresVerifier = true)
+    @UnderTest(value = "batchRead", requiresVerifier = true)
+    @UnderTest(value = "writeRecord", requiresVerifier = true)
+    void should_discover_and_copy_mysql_view_snapshot() throws Throwable {
+        String tableName = spec.getTableName();
+        String viewName = tableName + "_view";
+        String targetName = tableName + "_target";
+        try {
+            execute("CREATE TABLE " + qualified(tableName) + " (id BIGINT PRIMARY KEY, value VARCHAR(64) NOT NULL)");
+            execute("INSERT INTO " + qualified(tableName) + " VALUES (1, 'from-view')");
+            execute("CREATE VIEW " + qualified(viewName) + " AS SELECT id, value FROM " + qualified(tableName));
+            execute("CREATE TABLE " + qualified(targetName) + " (id BIGINT PRIMARY KEY, value VARCHAR(64) NOT NULL)");
+
+            List<TapTable> discovered = new ArrayList<>();
+            ((MysqlConnector) context.getConnector()).discoverSchema(connectionContext(),
+                    Collections.singletonList(viewName), 100, discovered::addAll);
+            TapTable view = discovered.stream().filter(table -> viewName.equals(table.getId())).findFirst()
+                    .orElseThrow(() -> new AssertionError("MySQL view was not discovered: " + viewName));
+            assertEquals("view", view.getType());
+
+            registerTable(view);
+            List<Map<String, Object>> snapshot = batchReadAll(view);
+            assertEquals("from-view", findRow(snapshot, 1L).get("value"));
+
+            TapTable target = new TapTable(targetName)
+                    .add(new TapField("id", "BIGINT").tapType(TapSimplify.tapNumber().bit(64)).isPrimaryKey(true).primaryKeyPos(1))
+                    .add(new TapField("value", "VARCHAR(64)").tapType(TapSimplify.tapString()));
+            registerTable(target);
+            assertEquals(1L, writeInsertEventsViaEngineCodec(snapshot, target));
+            assertEquals("from-view", findRow(batchReadAll(target), 1L).get("value"));
+        } finally {
+            execute("DROP VIEW IF EXISTS " + qualified(viewName));
+            execute("DROP TABLE IF EXISTS " + qualified(targetName));
+        }
+    }
+
+    @Test
     @UnderTest(value = "batchRead", requiresVerifier = true)
     @UnderTest(value = "writeRecord", requiresVerifier = true)
     @UnderTest(value = "streamRead", requiresVerifier = true)
