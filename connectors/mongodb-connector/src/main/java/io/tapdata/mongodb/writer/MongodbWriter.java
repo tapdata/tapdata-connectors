@@ -33,6 +33,7 @@ import io.tapdata.utils.AppType;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -506,7 +507,11 @@ public class MongodbWriter {
 				bulkWriteModel.setAllInsert(false);
 				final List<WriteModel<Document>> mergeWriteModels = MongodbMergeOperate.merge(inserted, updated, deleted, recordEvent);
 				if (CollectionUtils.isNotEmpty(mergeWriteModels)) {
-					mergeWriteModels.forEach(bulkWriteModel::addAnyOpModel);
+					for (WriteModel<Document> mergeWriteModel : mergeWriteModels) {
+						if (checkMergeIntoArrayEmptyFilter(mergeWriteModel, table)) {
+							bulkWriteModel.addAnyOpModel(mergeWriteModel);
+						}
+					}
 				}
 			} else {
 				List<WriteModel<Document>> writeModels = normalWriteMode(inserted, updated, deleted, options, table, pks, recordEvent);
@@ -516,6 +521,41 @@ public class MongodbWriter {
 			}
 		}
 		return bulkWriteModel;
+	}
+
+	/**
+	 * TAP-12967: a "merge into array" write model may end up with an empty document level filter while
+	 * arrayFilters is not empty (nested array sub table). Such an UpdateManyModel makes MongoDB scan the
+	 * whole collection, and it may modify documents which should not be touched, so make it visible and
+	 * let the node setting mergeIntoArrayEmptyFilterPolicy control it: WRITE (default) keeps the model,
+	 * SKIP drops the model, FAIL throws.
+	 *
+	 * @return false when the model must be dropped (SKIP), true when it can be written
+	 */
+	boolean checkMergeIntoArrayEmptyFilter(WriteModel<Document> writeModel, TapTable table) {   // package private for unit test
+		if (!(writeModel instanceof UpdateManyModel)) {
+			return true;
+		}
+		UpdateManyModel<Document> updateManyModel = (UpdateManyModel<Document>) writeModel;
+		UpdateOptions options = updateManyModel.getOptions();
+		Bson filter = updateManyModel.getFilter();
+		boolean emptyFilter = null == filter || (filter instanceof Document && ((Document) filter).isEmpty());
+		if (!emptyFilter || null == options || CollectionUtils.isEmpty(options.getArrayFilters())) {
+			return true;
+		}
+		String detail = String.format("Merge into array write model has an empty document level filter while arrayFilters is not empty, collection: %s, update: %s, arrayFilters: %s",
+				null == table ? null : table.getId(), safeToJson(updateManyModel.getUpdate()), options.getArrayFilters());
+		String policy = null == mongodbConfig ? null : mongodbConfig.getMergeIntoArrayEmptyFilterPolicy();
+		if (MongodbConfig.MERGE_INTO_ARRAY_EMPTY_FILTER_POLICY_SKIP.equalsIgnoreCase(policy)) {
+			tapLogger.warn("{}, the write model is dropped by mergeIntoArrayEmptyFilterPolicy=SKIP", detail);
+			return false;
+		}
+		if (MongodbConfig.MERGE_INTO_ARRAY_EMPTY_FILTER_POLICY_FAIL.equalsIgnoreCase(policy)) {
+			tapLogger.error("{}, the write is rejected by mergeIntoArrayEmptyFilterPolicy=FAIL", detail);
+			throw new RuntimeException(detail + ", it is rejected by mergeIntoArrayEmptyFilterPolicy=FAIL");
+		}
+		tapLogger.warn("{}, MongoDB has to scan the whole collection, check the join keys of the sub table or set mergeIntoArrayEmptyFilterPolicy to SKIP/FAIL", detail);
+		return true;
 	}
 
 	private static BulkWriteOptions buildBulkWriteOptions(BulkWriteModel bulkWriteModel) {

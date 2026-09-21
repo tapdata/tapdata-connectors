@@ -1,8 +1,10 @@
 package io.tapdata.mongodb.writer;
 
 import com.mongodb.client.MongoClient;
+import com.mongodb.client.model.ReplaceOneModel;
 import com.mongodb.client.model.UpdateManyModel;
 import com.mongodb.client.model.UpdateOptions;
+import com.mongodb.client.model.UpdateOneModel;
 import com.mongodb.client.model.WriteModel;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -662,6 +664,71 @@ class MongodbWriterTest {
 			assertInstanceOf(UpdateManyModel.class, writeModels.get(1));
 			update = (Document) ((UpdateManyModel<Document>) (writeModels.get(1))).getUpdate();
 			assertTrue(update.containsKey("$unset"));
+		}
+	}
+
+	@Nested
+	@DisplayName("Method checkMergeIntoArrayEmptyFilter test (TAP-12967)")
+	class checkMergeIntoArrayEmptyFilterTest {
+
+		/** the state a nested updateIntoArray grandchild used to produce: no document level filter, only arrayFilters */
+		private UpdateManyModel<Document> emptyFilterModel() {
+			return new UpdateManyModel<>(new Document(),
+					new Document("$addToSet", new Document("ENROLLMENT.$[element1].COURSE", new Document("course_id", "C1"))),
+					new UpdateOptions().arrayFilters(Collections.singletonList(new Document("element1.enroll_id", 1001))));
+		}
+
+		@Test
+		@DisplayName("default policy WRITE keeps the model")
+		void testWritePolicy() {
+			mongodbConfig.setMergeIntoArrayEmptyFilterPolicy(MongodbConfig.MERGE_INTO_ARRAY_EMPTY_FILTER_POLICY_WRITE);
+			assertTrue(mongodbWriter.checkMergeIntoArrayEmptyFilter(emptyFilterModel(), new TapTable("MDM_EDU_STUDENT")));
+		}
+
+		@Test
+		@DisplayName("a null or unknown policy falls back to WRITE and keeps the model, data is never dropped by default")
+		void testDefaultPolicy() {
+			mongodbConfig.setMergeIntoArrayEmptyFilterPolicy(null);
+			assertTrue(mongodbWriter.checkMergeIntoArrayEmptyFilter(emptyFilterModel(), new TapTable("MDM_EDU_STUDENT")));
+			mongodbConfig.setMergeIntoArrayEmptyFilterPolicy("whatever");
+			assertTrue(mongodbWriter.checkMergeIntoArrayEmptyFilter(emptyFilterModel(), new TapTable("MDM_EDU_STUDENT")));
+		}
+
+		@Test
+		@DisplayName("policy SKIP drops the model")
+		void testSkipPolicy() {
+			mongodbConfig.setMergeIntoArrayEmptyFilterPolicy(MongodbConfig.MERGE_INTO_ARRAY_EMPTY_FILTER_POLICY_SKIP);
+			assertFalse(mongodbWriter.checkMergeIntoArrayEmptyFilter(emptyFilterModel(), new TapTable("MDM_EDU_STUDENT")));
+		}
+
+		@Test
+		@DisplayName("policy FAIL rejects the write and names the collection")
+		void testFailPolicy() {
+			mongodbConfig.setMergeIntoArrayEmptyFilterPolicy(MongodbConfig.MERGE_INTO_ARRAY_EMPTY_FILTER_POLICY_FAIL);
+			RuntimeException exception = assertThrows(RuntimeException.class,
+					() -> mongodbWriter.checkMergeIntoArrayEmptyFilter(emptyFilterModel(), new TapTable("MDM_EDU_STUDENT")));
+			assertTrue(exception.getMessage().contains("MDM_EDU_STUDENT"));
+			assertTrue(exception.getMessage().contains("FAIL"));
+		}
+
+		@Test
+		@DisplayName("models which are not a nested array merge are always kept, even with policy FAIL")
+		void testKeptModels() {
+			mongodbConfig.setMergeIntoArrayEmptyFilterPolicy(MongodbConfig.MERGE_INTO_ARRAY_EMPTY_FILTER_POLICY_FAIL);
+			TapTable table = new TapTable("MDM_EDU_STUDENT");
+			assertTrue(mongodbWriter.checkMergeIntoArrayEmptyFilter(
+					new UpdateOneModel<>(new Document("_id", 1), new Document("$set", new Document("a", 1))), table));
+			assertTrue(mongodbWriter.checkMergeIntoArrayEmptyFilter(
+					new ReplaceOneModel<>(new Document("_id", 1), new Document("a", 1)), table));
+			// no arrayFilters: a plain updateMany with an empty filter is not the case this guard targets
+			assertTrue(mongodbWriter.checkMergeIntoArrayEmptyFilter(
+					new UpdateManyModel<>(new Document(), new Document("$set", new Document("a", 1))), table));
+			// the document level filter is present: the fix did its job, nothing to report
+			assertTrue(mongodbWriter.checkMergeIntoArrayEmptyFilter(
+					new UpdateManyModel<>(new Document("ENROLLMENT.enroll_id", 1001),
+							new Document("$set", new Document("a", 1)),
+							new UpdateOptions().arrayFilters(Collections.singletonList(new Document("element1.enroll_id", 1001)))),
+					table));
 		}
 	}
 }

@@ -55,6 +55,16 @@ public class MongodbConfig extends CommonDbConfig {
 	private boolean timeSeriesCollection;
 	private String writeConcern = "w1";
 
+	/**
+	 * TAP-12967: behavior when a "merge into array" write model ends up with an empty document level
+	 * filter while arrayFilters is set (WRITE / SKIP / FAIL). Default WRITE never drops data.
+	 */
+	public static final String MERGE_INTO_ARRAY_EMPTY_FILTER_POLICY_WRITE = "WRITE";
+	public static final String MERGE_INTO_ARRAY_EMPTY_FILTER_POLICY_SKIP = "SKIP";
+	public static final String MERGE_INTO_ARRAY_EMPTY_FILTER_POLICY_FAIL = "FAIL";
+
+	private String mergeIntoArrayEmptyFilterPolicy = MERGE_INTO_ARRAY_EMPTY_FILTER_POLICY_WRITE;
+
 	public static final int DEFAULT_DECODE_THREADS = 8;
 	public static final int DEFAULT_DECODE_QUEUE_SIZE = 32;
 	private int decodeThreads = DEFAULT_DECODE_THREADS;
@@ -273,6 +283,14 @@ public class MongodbConfig extends CommonDbConfig {
 
 	public void setWriteConcern(String writeConcern) {
 		this.writeConcern = writeConcern;
+	}
+
+	public String getMergeIntoArrayEmptyFilterPolicy() {
+		return mergeIntoArrayEmptyFilterPolicy;
+	}
+
+	public void setMergeIntoArrayEmptyFilterPolicy(String mergeIntoArrayEmptyFilterPolicy) {
+		this.mergeIntoArrayEmptyFilterPolicy = mergeIntoArrayEmptyFilterPolicy;
 	}
 
 	public int getDecodeThreads() {
