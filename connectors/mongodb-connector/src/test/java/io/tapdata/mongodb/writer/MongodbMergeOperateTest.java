@@ -331,8 +331,10 @@ class MongodbMergeOperateTest {
 
 			Document filter = mergeResult.getFilter();
 			assertFalse(filter.isEmpty());
-			assertTrue(filter.containsKey("ENROLLMENT.enroll_id") || filter.containsKey("$or"));
-			assertEquals(1001, filter.getInteger("ENROLLMENT.enroll_id"));
+			// TAP-12967: the document level condition is always arrayPath + "." + <element key>, never an $or branch
+			assertEquals(new Document("ENROLLMENT.enroll_id", 1001), filter);
+			assertFalse(filter.containsKey("$or"));
+			assertFalse(filter.containsKey("$and"));
 
 			// the arrayFilters are byte-for-byte the same as before the fix
 			assertEquals("{\"element1.enroll_id\": 1001}", firstArrayFilterJson(mergeResult));
@@ -896,8 +898,10 @@ class MongodbMergeOperateTest {
 
 			assertNotNull(result);
 			assertFalse(result.getFilter().isEmpty());
-			// data is the same map as the arrayFilters above, both candidates of every join key are kept
-			assertTrue(result.getFilter().containsKey("$and"));
+			// data is the same map as the arrayFilters above, the document level conditions are flat
+			assertEquals(new Document("array.id", 1).append("array.src", "x"), result.getFilter());
+			assertFalse(result.getFilter().containsKey("$and"));
+			assertFalse(result.getFilter().containsKey("$or"));
 			List<? extends Bson> arrayFilters = result.getUpdateOptions().getArrayFilters();
 			assertEquals(1, arrayFilters.size());
 			assertEquals(1, arrayFilters.get(0).toBsonDocument().getInt32("element1.id").getValue());
@@ -1170,21 +1174,17 @@ class MongodbMergeOperateTest {
 	class documentFilterForArrayNodeTest {
 
 		@Test
-		@DisplayName("candidates of one join key are OR-ed, different join keys are AND-ed")
-		void testAndOrStructure() {
+		@DisplayName("multiple join keys become an AND inside one flat Document, never an $and/$or")
+		void testMultipleJoinKeysFlatAndStructure() {
 			MergeTableProperties properties = arrayNodeProperties("ENROLLMENT",
 					Arrays.asList(joinKey("a", "ENROLLMENT.a"), joinKey("b", "b")));
 			Document filter = MongodbMergeOperate.documentFilterForArrayNode(new Document("a", 1).append("b", 2), properties);
 
-			assertTrue(filter.containsKey("$and"));
-			List<Document> blocks = (List<Document>) filter.get("$and");
-			assertEquals(2, blocks.size());
-			// target already carries the arrayPath prefix, the two candidates collapse into one condition
-			assertEquals(new Document("ENROLLMENT.a", 1), blocks.get(0));
-			List<Document> branches = (List<Document>) blocks.get(1).get("$or");
-			assertEquals(2, branches.size());
-			assertTrue(branches.contains(new Document("b", 2)));
-			assertTrue(branches.contains(new Document("ENROLLMENT.b", 2)));
+			// one flat Document: every key is a condition, different keys are AND-ed implicitly, both target
+			// conventions (with and without the arrayPath prefix) map to the very same document level path
+			assertEquals(new Document("ENROLLMENT.a", 1).append("ENROLLMENT.b", 2), filter);
+			assertFalse(filter.containsKey("$and"));
+			assertFalse(filter.containsKey("$or"));
 		}
 
 		@Test
@@ -1220,11 +1220,11 @@ class MongodbMergeOperateTest {
 		void testTargetConventions() {
 			Document filter = MongodbMergeOperate.documentFilterForArrayNode(new Document("enroll_id", 1001),
 					arrayNodeProperties("ENROLLMENT", Arrays.asList(joinKey("enroll_id", "enroll_id"))));
-			// target does not carry the arrayPath prefix, both candidates are kept as an $or branch
-			List<Document> branches = (List<Document>) filter.get("$or");
-			assertEquals(2, branches.size());
-			assertTrue(branches.contains(new Document("enroll_id", 1001)));
-			assertTrue(branches.contains(new Document("ENROLLMENT.enroll_id", 1001)));
+			// target does not carry the arrayPath prefix: after stripping (getArrayMatchString) it is the very
+			// same element key, so both conventions map to the same document level path
+			assertEquals(new Document("ENROLLMENT.enroll_id", 1001), filter);
+			assertFalse(filter.containsKey("$or"));
+			assertFalse(filter.containsKey("$and"));
 
 			Document prefixedFilter = MongodbMergeOperate.documentFilterForArrayNode(new Document("enroll_id", 1001),
 					arrayNodeProperties("ENROLLMENT", Arrays.asList(joinKey("enroll_id", "ENROLLMENT.enroll_id"))));
@@ -1256,6 +1256,23 @@ class MongodbMergeOperateTest {
 			assertFalse(filter.containsKey("$and"));
 			assertEquals(new Document("ENROLLMENT.p", 2), filter);
 		}
+
+		@Test
+		@DisplayName("TAP-12967: targets which differ raw but strip to the same element key keep the last value, they must not become an $and")
+		void testSameElementKeyDifferentRawTarget() {
+			// "ENROLLMENT.p" and "p" are two different raw targets of the same element field "p".
+			// $and:[{...p:1},{...p:2}] would require both values on the same array element, i.e. a strict
+			// subset of the documents arrayFilters can update -> the update would silently be lost.
+			Document filter = MongodbMergeOperate.documentFilterForArrayNode(
+					new Document("a", 1).append("b", 2),
+					arrayNodeProperties("ENROLLMENT",
+							Arrays.asList(joinKey("a", "ENROLLMENT.p"), joinKey("b", "p"))));
+
+			assertFalse(filter.containsKey("$and"));
+			assertFalse(filter.containsKey("$or"));
+			assertEquals(1, filter.size());
+			assertEquals(new Document("ENROLLMENT.p", 2), filter);
+		}
 	}
 
 	@Nested
@@ -1274,6 +1291,8 @@ class MongodbMergeOperateTest {
 			MongodbMergeOperate.updateIntoArrayMerge(mergeBundle, properties, mergeResult, new MergeFilter(true));
 			assertFalse(mergeResult.getFilter().isEmpty());
 			assertEquals("{\"element1.ENROLLMENT_X.y\": 1}", firstArrayFilterJson(mergeResult));
+			// the colliding prefix must not be stripped and must not be doubled: the element key is kept as is
+			assertEquals("{\"ENROLL.ENROLLMENT_X.y\": 1}", mergeResult.getFilter().toJson());
 
 			MergeTableProperties samePathProperties = arrayNodeProperties("ENROLL", Arrays.asList(joinKey("v", "ENROLL")));
 			samePathProperties.setTargetPath("ENROLL");
@@ -1281,6 +1300,8 @@ class MongodbMergeOperateTest {
 			MergeResult samePathResult = new MergeResult();
 			assertDoesNotThrow(() -> MongodbMergeOperate.updateIntoArrayMerge(mergeBundle, samePathProperties, samePathResult, new MergeFilter(true)));
 			assertEquals("{\"element1.ENROLL\": 1}", firstArrayFilterJson(samePathResult));
+			// target equals arrayPath: neither stripped (that would leave an empty key) nor thrown, kept as is
+			assertEquals("{\"ENROLL.ENROLL\": 1}", samePathResult.getFilter().toJson());
 		}
 	}
 

@@ -22,14 +22,19 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 
 /**
  * @author samuel
@@ -729,6 +734,61 @@ class MongodbWriterTest {
 							new Document("$set", new Document("a", 1)),
 							new UpdateOptions().arrayFilters(Collections.singletonList(new Document("element1.enroll_id", 1001)))),
 					table));
+		}
+
+		@Test
+		@DisplayName("SKIP (TAP-12967): every dropped model sets the flag, so a batch dropped as a whole is not a failure")
+		void testSkippedFlagIsSet() throws Exception {
+			mongodbConfig.setMergeIntoArrayEmptyFilterPolicy(MongodbConfig.MERGE_INTO_ARRAY_EMPTY_FILTER_POLICY_SKIP);
+			TapTable table = new TapTable("MDM_EDU_STUDENT");
+			TapUpdateRecordEvent event = TapUpdateRecordEvent.create().init()
+					.before(new Document("_id", 1))
+					.after(new Document("_id", 1).append("a", 2));
+			event.addInfo(MergeInfo.EVENT_INFO_KEY, new MergeInfo());
+			List<TapRecordEvent> events = Collections.singletonList(event);
+			AtomicBoolean skippedByEmptyFilterPolicy = new AtomicBoolean(false);
+			AtomicLong counter = new AtomicLong(0);
+			Method buildBulkWriteModel = MongodbWriter.class.getDeclaredMethod("buildBulkWriteModel",
+					List.class, TapTable.class, AtomicLong.class, AtomicLong.class, AtomicLong.class, Collection.class, AtomicBoolean.class);
+			buildBulkWriteModel.setAccessible(true);
+
+			try (MockedStatic<MongodbMergeOperate> mockedMerge = mockStatic(MongodbMergeOperate.class)) {
+				mockedMerge.when(() -> MongodbMergeOperate.merge(any(), any(), any(), any()))
+						.thenReturn(Collections.singletonList(emptyFilterModel()));
+				BulkWriteModel bulkWriteModel = (BulkWriteModel) buildBulkWriteModel.invoke(mongodbWriter, events, table,
+						counter, counter, counter, Collections.singletonList("_id"), skippedByEmptyFilterPolicy);
+
+				// the model is dropped by the policy and the flag tells write() that the empty batch is intentional
+				assertTrue(bulkWriteModel.isEmpty());
+				assertTrue(skippedByEmptyFilterPolicy.get());
+			}
+		}
+
+		@Test
+		@DisplayName("WRITE keeps the model of an empty batch, so the flag stays false")
+		void testSkippedFlagIsNotSetWithWritePolicy() throws Exception {
+			mongodbConfig.setMergeIntoArrayEmptyFilterPolicy(MongodbConfig.MERGE_INTO_ARRAY_EMPTY_FILTER_POLICY_WRITE);
+			TapTable table = new TapTable("MDM_EDU_STUDENT");
+			TapUpdateRecordEvent event = TapUpdateRecordEvent.create().init()
+					.before(new Document("_id", 1))
+					.after(new Document("_id", 1).append("a", 2));
+			event.addInfo(MergeInfo.EVENT_INFO_KEY, new MergeInfo());
+			List<TapRecordEvent> events = Collections.singletonList(event);
+			AtomicBoolean skippedByEmptyFilterPolicy = new AtomicBoolean(false);
+			AtomicLong counter = new AtomicLong(0);
+			Method buildBulkWriteModel = MongodbWriter.class.getDeclaredMethod("buildBulkWriteModel",
+					List.class, TapTable.class, AtomicLong.class, AtomicLong.class, AtomicLong.class, Collection.class, AtomicBoolean.class);
+			buildBulkWriteModel.setAccessible(true);
+
+			try (MockedStatic<MongodbMergeOperate> mockedMerge = mockStatic(MongodbMergeOperate.class)) {
+				mockedMerge.when(() -> MongodbMergeOperate.merge(any(), any(), any(), any()))
+						.thenReturn(Collections.singletonList(emptyFilterModel()));
+				BulkWriteModel bulkWriteModel = (BulkWriteModel) buildBulkWriteModel.invoke(mongodbWriter, events, table,
+						counter, counter, counter, Collections.singletonList("_id"), skippedByEmptyFilterPolicy);
+
+				assertFalse(bulkWriteModel.isEmpty());
+				assertFalse(skippedByEmptyFilterPolicy.get());
+			}
 		}
 	}
 }

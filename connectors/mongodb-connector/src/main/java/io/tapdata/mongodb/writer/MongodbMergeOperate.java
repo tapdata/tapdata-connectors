@@ -1134,55 +1134,26 @@ public class MongodbMergeOperate {
 		if (StringUtils.isBlank(arrayPath) || CollectionUtils.isEmpty(joinKeys)) {
 			return empty;      // arrayPath 为空时保持现状
 		}
-		// 用 LinkedHashMap 按 target 归并：arrayFilter()（3 参，`:983`）是在同一个 Document 上逐个 put，
-		// 同一 target 重复出现时后者覆盖前者。这里若改成跨 joinKey 取 AND，就会要求两个取值同时成立，
-		// 反而收窄成「arrayFilters 目标集合」的子集（漏更新）。故保持相同的「后者覆盖」语义。
-		Map<String, Document> blocksByTarget = new LinkedHashMap<>();
+		// 口径必须与 3 参 arrayFilter()（本节下方同名方法）逐字一致：它把每个 joinKey 都写到同一个
+		// Document 的 "element1.<key>" 上，同一个 <key> 重复出现时后者覆盖前者。这里按同一个 <key>
+		// （= getArrayMatchString，已剥离 arrayPath 前缀）归并、同样后者覆盖；若改成跨 joinKey 取 AND，
+		// 就会要求两个取值落在同一个数组元素上，反而收窄成「arrayFilters 目标集合」的子集（漏更新）。
+		// 文档级路径只能是 arrayPath + "." + <key>：它对「target 带前缀」与「target 不带前缀」两种命名
+		// 约定都成立，且是 arrayFilters 命中该文档的必要条件——把 raw target 也当候选只会退化成服务端
+		// 无法走多键索引的 $or，反而可能保留 TAP-12967 的全集合扫描。
+		Document filter = new Document();
 		for (Map<String, String> joinKey : joinKeys) {
-			String target = joinKey.get("target");
-			if (StringUtils.isBlank(target)) {
+			String elementKey = getArrayMatchString(arrayPath, joinKey);
+			if (StringUtils.isBlank(elementKey)) {
 				continue;
 			}
 			Object value = MapUtil.getValueByKey(data, joinKey.get("source"));
 			if (null == value) {
 				continue;      // 有意收紧：{k:null} 会命中大量字段缺失的文档，反而放大扫描
 			}
-			// 与 arrayFilter()/getArrayMatchString() 的剥离口径保持一致（"." 边界，见 P0-4）
-			String arrayElementPath = target.startsWith(arrayPath + ".") ? target : arrayPath + "." + target;
-			List<Document> candidates = new ArrayList<>();
-			addConditionIfAbsent(candidates, target, value);              // 候选 A：target 原样
-			addConditionIfAbsent(candidates, arrayElementPath, value);    // 候选 B：arrayPath + "." + target
-			blocksByTarget.put(target, candidates.size() == 1 ? candidates.get(0) : new Document("$or", candidates));
+			filter.put(arrayPath + "." + elementKey, value);   // 同一 <key> 后者覆盖，与 arrayFilters 语义一致
 		}
-		if (blocksByTarget.isEmpty()) {
-			return empty;
-		}
-		List<Document> blocks = new ArrayList<>(blocksByTarget.values());
-		// 全部单条件且路径互不冲突 → 扁平 Document（多键索引最优）
-		Set<String> paths = new HashSet<>();
-		boolean flattenable = true;
-		for (Document block : blocks) {
-			if (block.size() != 1 || !paths.add(block.keySet().iterator().next()) || block.containsKey("$or")) {
-				flattenable = false;
-				break;
-			}
-		}
-		if (flattenable) {
-			Document flat = new Document();
-			blocks.forEach(flat::putAll);
-			return flat;
-		}
-		return blocks.size() == 1 ? blocks.get(0) : new Document("$and", blocks);
-	}
-
-	private static void addConditionIfAbsent(List<Document> candidates, String path, Object value) {
-		if (StringUtils.isBlank(path)) {
-			return;
-		}
-		Document condition = new Document(path, value);
-		if (!candidates.contains(condition)) {     // Document.equals 为 Map 相等，去重可靠
-			candidates.add(condition);
-		}
+		return filter;
 	}
 
 	protected static void appendAllParentMergeFilters(MergeResult mergeResult, MergeFilter mergeFilter) {

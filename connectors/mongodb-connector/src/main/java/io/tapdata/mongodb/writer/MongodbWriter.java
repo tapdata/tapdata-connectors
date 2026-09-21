@@ -44,6 +44,7 @@ import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -154,9 +155,20 @@ public class MongodbWriter {
 		if (!is_cloud && mongodbConfig.isEnableSaveDeleteData()) {
 			MongodbLookupUtil.lookUpAndSaveDeleteMessage(tapRecordEvents, this.globalStateMap, this.connectionString, pks, collection);
 		}
-		BulkWriteModel bulkWriteModel = buildBulkWriteModel(tapRecordEvents, table, inserted, updated, deleted, pks);
+		AtomicBoolean skippedByEmptyFilterPolicy = new AtomicBoolean(false);
+		BulkWriteModel bulkWriteModel = buildBulkWriteModel(tapRecordEvents, table, inserted, updated, deleted, pks, skippedByEmptyFilterPolicy);
 
 		if (bulkWriteModel.isEmpty()) {
+			if (skippedByEmptyFilterPolicy.get()) {
+				// TAP-12967: every write model of this batch was dropped by mergeIntoArrayEmptyFilterPolicy=SKIP.
+				// SKIP is an explicit opt-in to drop such writes, so do not fail the batch with an empty bulk write.
+				tapLogger.warn("All write models of this batch are dropped by mergeIntoArrayEmptyFilterPolicy=SKIP, collection: {}, received record size: {}", table.getId(), tapRecordEvents.size());
+				writeListResultConsumer.accept(writeListResult
+						.insertedCount(inserted.get())
+						.modifiedCount(updated.get())
+						.removedCount(deleted.get()));
+				return;
+			}
 			throw new RuntimeException("Bulk write data failed, write model list is empty, received record size: " + tapRecordEvents.size());
 		}
 
@@ -495,7 +507,7 @@ public class MongodbWriter {
 		}
 	}
 
-	private BulkWriteModel buildBulkWriteModel(List<TapRecordEvent> tapRecordEvents, TapTable table, AtomicLong inserted, AtomicLong updated, AtomicLong deleted, Collection<String> pks) {
+	private BulkWriteModel buildBulkWriteModel(List<TapRecordEvent> tapRecordEvents, TapTable table, AtomicLong inserted, AtomicLong updated, AtomicLong deleted, Collection<String> pks, AtomicBoolean skippedByEmptyFilterPolicy) {
 		BulkWriteModel bulkWriteModel = new BulkWriteModel(pks.contains("_id"));
 		for (TapRecordEvent recordEvent : tapRecordEvents) {
 			if (!(recordEvent instanceof TapInsertRecordEvent)) {
@@ -510,6 +522,8 @@ public class MongodbWriter {
 					for (WriteModel<Document> mergeWriteModel : mergeWriteModels) {
 						if (checkMergeIntoArrayEmptyFilter(mergeWriteModel, table)) {
 							bulkWriteModel.addAnyOpModel(mergeWriteModel);
+						} else if (null != skippedByEmptyFilterPolicy) {
+							skippedByEmptyFilterPolicy.set(true);
 						}
 					}
 				}
