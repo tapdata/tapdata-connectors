@@ -1,0 +1,11 @@
+{
+  "host": "127.0.0.1",
+  "port": 4000,
+  "database": "test",
+  "user": "root",
+  "password": "",
+  "pdServer": "127.0.0.1:2379",
+  "tiKvAddress": "127.0.0.1",
+  "tiKvPort": 20160,
+  "enableIncrement": true
+}

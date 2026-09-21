@@ -65,12 +65,13 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         if (!containsNull) {
             return "ALTER TABLE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " UPDATE " +
                     after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", ")) + " WHERE " +
-                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND ")) +
+                    " SETTINGS mutations_sync=2";
         } else {
             return "ALTER TABLE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " UPDATE " +
                     after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", ")) + " WHERE " +
                     before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ? IS NULL))")
-                            .collect(Collectors.joining(" AND "));
+                            .collect(Collectors.joining(" AND ")) + " SETTINGS mutations_sync=2";
         }
     }
 
@@ -93,11 +94,12 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
     protected String getDeleteSql(Map<String, Object> before, boolean containsNull) {
         if (!containsNull) {
             return "ALTER TABLE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " DELETE WHERE " +
-                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND ")) +
+                    " SETTINGS mutations_sync=2";
         } else {
             return "ALTER TABLE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " DELETE WHERE " +
                     before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ? IS NULL))")
-                            .collect(Collectors.joining(" AND "));
+                            .collect(Collectors.joining(" AND ")) + " SETTINGS mutations_sync=2";
         }
     }
 

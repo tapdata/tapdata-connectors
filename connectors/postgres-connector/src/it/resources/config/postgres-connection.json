@@ -1,0 +1,10 @@
+{
+  "host": "127.0.0.1",
+  "port": 5432,
+  "database": "postgres",
+  "schema": "public",
+  "user": "postgres",
+  "password": "postgres",
+  "slotName": "tapdata_connector_it",
+  "logPluginName": "pgoutput"
+}

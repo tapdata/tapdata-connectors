@@ -28,6 +28,7 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
+import io.tapdata.entity.event.ddl.index.TapDeleteIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.*;
@@ -424,7 +425,11 @@ public class PostgresConnector extends CommonDbConnector {
 
     private Object getStreamOffsetFromString(TapConnectorContext connectorContext, String offsetString) {
         if (EmptyKit.isBlank(offsetString)) {
-            throw new IllegalArgumentException("Offset string cannot be null or empty");
+            try {
+                return timestampToStreamOffset(connectorContext, null);
+            } catch (Throwable throwable) {
+                throw new RuntimeException("Failed to get current PostgreSQL stream offset", throwable);
+            }
         }
 
         try {
@@ -1518,9 +1523,22 @@ public class PostgresConnector extends CommonDbConnector {
     protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
         DataMap dataMap = postgresJdbcContext.getTableInfo(tableName);
         TableInfo tableInfo = TableInfo.create();
-        tableInfo.setNumOfRows(new BigDecimal(dataMap.getString("rowcount")).longValue());
+        tableInfo.setNumOfRows(Math.max(0L, new BigDecimal(dataMap.getString("rowcount")).longValue()));
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("size")));
         return tableInfo;
+    }
+
+    @Override
+    protected void dropIndexes(TapConnectorContext connectorContext, TapTable table, TapDeleteIndexEvent deleteIndexEvent) throws SQLException {
+        char escapeChar = commonDbConfig.getEscapeChar();
+        List<String> dropIndexesSql = new ArrayList<>();
+        deleteIndexEvent.getIndexNames().forEach(indexName -> dropIndexesSql.add(
+                "drop index " + escapeChar + postgresConfig.getSchema() + escapeChar + "."
+                        + escapeChar + indexName + escapeChar));
+        if (EmptyKit.isNotEmpty(dropIndexesSql)) {
+            tapLogger.info("Drop indexes sql: {}", dropIndexesSql);
+        }
+        jdbcContext.batchExecute(dropIndexesSql);
     }
 
 
