@@ -6,7 +6,6 @@ import com.opencsv.CustomCsvParser;
 import io.tapdata.common.FileConnector;
 import io.tapdata.common.FileOffset;
 import io.tapdata.common.FileSchema;
-import io.tapdata.common.util.MatchUtil;
 import io.tapdata.connector.csv.config.CsvConfig;
 import io.tapdata.connector.csv.writer.DateCsvRecordWriter;
 import io.tapdata.connector.csv.writer.RecordCsvRecordWriter;
@@ -14,11 +13,13 @@ import io.tapdata.connector.csv.writer.UniqueCsvRecordWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.TapDateTimeValue;
 import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
+import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.file.TapFile;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
@@ -31,7 +32,11 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Collections;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +48,8 @@ import java.util.stream.Collectors;
 
 @TapConnectorClass("spec_csv.json")
 public class CsvConnector extends FileConnector {
+
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ISO_LOCAL_TIME;
 
     private OffStandardFilter offStandardFilter;
 
@@ -60,6 +67,8 @@ public class CsvConnector extends FileConnector {
 
     @Override
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
+        codecRegistry.registerToTapValue(LocalDate.class, (value, tapType) -> toTapDateValue(value));
+        codecRegistry.registerToTapValue(LocalTime.class, (value, tapType) -> toTapTimeValue(value));
         codecRegistry.registerFromTapValue(TapRawValue.class, "STRING", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null) return tapRawValue.getValue().toString();
             return "null";
@@ -76,35 +85,86 @@ public class CsvConnector extends FileConnector {
         connectorFunctions.supportWriteRecord(this::writeRecord);
     }
 
+    private static TapDateValue toTapDateValue(Object value) {
+        if (!(value instanceof LocalDate)) {
+            return null;
+        }
+        LocalDate localDate = (LocalDate) value;
+        if (localDate.getYear() < 1000 || localDate.getYear() > 9999) {
+            return null;
+        }
+        try {
+            return new TapDateValue(new DateTime(localDate.atStartOfDay()));
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static TapTimeValue toTapTimeValue(Object value) {
+        if (!(value instanceof LocalTime)) {
+            return null;
+        }
+        try {
+            return new TapTimeValue(DateTime.withTimeStr(((LocalTime) value).format(TIME_FORMATTER)));
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    @Override
+    protected void makeTapTable(TapTable tapTable, Map<String, Object> sample, boolean isJustString) {
+        for (Map.Entry<String, Object> objectEntry : sample.entrySet()) {
+            TapField field = new TapField();
+            field.name(objectEntry.getKey());
+            Object rawValue = objectEntry.getValue();
+            if (isJustString) {
+                String value = rawValue == null ? "" : String.valueOf(rawValue);
+                field.dataType(EmptyKit.isNotEmpty(value) && value.length() > 200 ? "TEXT" : "STRING");
+            } else if (rawValue instanceof Map) {
+                field.dataType("OBJECT");
+            } else if (rawValue instanceof Collection || (rawValue != null && rawValue.getClass().isArray())) {
+                field.dataType("ARRAY");
+            } else {
+                field.dataType(CsvValueConverter.inferDataType(rawValue));
+            }
+            tapTable.add(field);
+        }
+    }
+
     @Override
     public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
-        //as file-connector: nodeConfig is supported, so initConnection can be used
-        initConnection(connectionContext);
-        if (EmptyKit.isBlank(fileConfig.getModelName())) {
-            return;
+        try {
+            //as file-connector: nodeConfig is supported, so initConnection can be used
+            initConnection(connectionContext);
+            if (EmptyKit.isBlank(fileConfig.getModelName())) {
+                return;
+            }
+            TapTable tapTable = table(fileConfig.getModelName());
+            ConcurrentMap<String, TapFile> csvFileMap = getFilteredFiles();
+            FileSchema csvSchema;
+            if (((CsvConfig) fileConfig).getOffStandard()) {
+                csvSchema = new OffStandardCsvSchema((CsvConfig) fileConfig, storage);
+            } else {
+                csvSchema = new CsvSchema((CsvConfig) fileConfig, storage);
+            }
+            Map<String, Object> sample;
+            //csv has column header
+            if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
+                sample = csvSchema.sampleFixedFileData(csvFileMap);
+            } else //analyze every csv file
+            {
+                sample = csvSchema.sampleEveryFileData(csvFileMap);
+            }
+            if (EmptyKit.isEmpty(sample)) {
+                throw new RuntimeException("Load schema from csv files error: no headers and contents!");
+            }
+            makeTapTable(tapTable, sample, fileConfig.getJustString());
+            consumer.accept(Collections.singletonList(tapTable));
+        } finally {
+            if (null != storage) {
+                storage.destroy();
+            }
         }
-        TapTable tapTable = table(fileConfig.getModelName());
-        ConcurrentMap<String, TapFile> csvFileMap = getFilteredFiles();
-        FileSchema csvSchema;
-        if (((CsvConfig) fileConfig).getOffStandard()) {
-            csvSchema = new OffStandardCsvSchema((CsvConfig) fileConfig, storage);
-        } else {
-            csvSchema = new CsvSchema((CsvConfig) fileConfig, storage);
-        }
-        Map<String, Object> sample;
-        //csv has column header
-        if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
-            sample = csvSchema.sampleFixedFileData(csvFileMap);
-        } else //analyze every csv file
-        {
-            sample = csvSchema.sampleEveryFileData(csvFileMap);
-        }
-        if (EmptyKit.isEmpty(sample)) {
-            throw new RuntimeException("Load schema from csv files error: no headers and contents!");
-        }
-        makeTapTable(tapTable, sample, fileConfig.getJustString());
-        consumer.accept(Collections.singletonList(tapTable));
-        storage.destroy();
     }
 
     protected void readOneFile(FileOffset fileOffset,
@@ -244,14 +304,19 @@ public class CsvConnector extends FileConnector {
     }
 
     private void putIntoMap(Map<String, Object> after, String[] headers, String[] data, Map<String, String> dataTypeMap) {
+        boolean justString = Boolean.TRUE.equals(fileConfig.getJustString());
         for (int i = 0; i < headers.length && i < data.length; i++) {
             try {
-                after.put(headers[i], MatchUtil.parse(data[i], dataTypeMap.get(headers[i])));
+                after.put(headers[i], justString ? data[i] : CsvValueConverter.parse(data[i], dataTypeMap.get(headers[i])));
             } catch (Exception e) {
                 throw new RuntimeException(String.format("%s field has invalid value", headers[i]), e);
             }
         }
         for (int i = 0; i < headers.length - data.length; i++) {
+            if (justString) {
+                after.put(headers[i + data.length], null);
+                continue;
+            }
             switch (dataTypeMap.get(headers[i + data.length])) {
                 case "STRING":
                 case "TEXT":
