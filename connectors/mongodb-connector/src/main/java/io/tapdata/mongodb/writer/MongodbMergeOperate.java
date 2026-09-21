@@ -298,7 +298,7 @@ public class MongodbMergeOperate {
 		return mergeResult;
 	}
 
-	private static MergeResult updateWriteUnsetMerge(
+	protected static MergeResult updateWriteUnsetMerge(
 			MergeBundle mergeBundle, MergeTableProperties currentProperty,
 			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
 			MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter, int topLevel,
@@ -342,11 +342,23 @@ public class MongodbMergeOperate {
 				mergeResult.getUpdateOptions().arrayFilters(arrayFilter);
 			}
 			if (EmptyKit.isEmpty(filter)) {
-				return mergeResult;
+				if (isArray) {
+					// TAP-12967: an array node must not produce a write model with an empty document level filter,
+					// the same map as the arrayFilters above is used to keep both conditions consistent.
+					mergeResult.getFilter().putAll(documentFilterForArrayNode(updateJoinKeyBefore, currentProperty));
+				}
+			} else {
+				mergeResult.getFilter().putAll(filter);
 			}
-			mergeResult.getFilter().putAll(filter);
 		}
 		appendAllParentMergeFilters(mergeResult, mergeFilter);
+		if (firstMergeResult && MapUtils.isEmpty(mergeResult.getFilter())) {
+			// TAP-12967: neither the join keys of this node nor the parent conditions provide a filter.
+			// Keep the previous behaviour of the empty filter guard: leave the operation unset so that the
+			// caller (addUnsetMerge) discards this result, instead of emitting an unset which would match
+			// every document of the collection.
+			return mergeResult;
+		}
 
 		if (null == mergeResult.getOperation()) {
 			mergeResult.setOperation(MergeResult.Operation.UPDATE);
@@ -445,6 +457,16 @@ public class MongodbMergeOperate {
 					currentProperty.getJoinKeys(),
 					currentProperty.getArrayPath());
 			mergeResult.getUpdateOptions().arrayFilters(arrayFilter);
+			// TAP-12967: keep the document level conditions consistent with the arrayFilters above.
+			// This mergeResult may carry the conditions of the parent level (the unset result is passed down
+			// through recursiveMerge), so an existing condition is never overwritten, see
+			// appendAllParentMergeFilters below.
+			Document documentFilter = mergeResult.getFilter();
+			for (Map.Entry<String, Object> entry : documentFilterForArrayNode(updateJoinKeyBefore, currentProperty).entrySet()) {
+				if (!documentFilter.containsKey(entry.getKey())) {
+					documentFilter.put(entry.getKey(), entry.getValue());
+				}
+			}
 		} else {
 			Document filter = filter(updateJoinKeyBefore, currentProperty.getJoinKeys());
 			if (null != updateJoinKey.getParentBefore()) {
@@ -701,20 +723,25 @@ public class MongodbMergeOperate {
 		Map<String, Object> filterMap = buildFilterMap(operation, after, before);
 		if (array) {
 			List<Document> arrayFilter;
+			Map<String, Object> documentFilterData;
 			if (operation == MergeBundle.EventOperation.UPDATE) {
+				documentFilterData = overrideArrayKeysFromBefore(filterMap, before, arrayKeys);
 				arrayFilter = arrayFilter(
-						overrideArrayKeysFromBefore(filterMap, before, arrayKeys),
+						documentFilterData,
 						currentProperty.getJoinKeys(),
 						arrayKeys,
 						currentProperty.getArrayPath()
 				);
 			} else {
+				documentFilterData = filterMap;
 				arrayFilter = arrayFilter(
 						filterMap,
 						currentProperty.getJoinKeys(),
 						currentProperty.getArrayPath());
 			}
 			mergeResult.getUpdateOptions().arrayFilters(arrayFilter);
+			// TAP-12967: the document level filter must be derived from the very same map as the arrayFilters above
+			mergeResult.getFilter().putAll(documentFilterForArrayNode(documentFilterData, currentProperty));
 		} else {
 			Document filter = filter(filterMap, currentProperty.getJoinKeys());
 			mergeResult.getFilter().putAll(filter);
@@ -970,7 +997,13 @@ public class MongodbMergeOperate {
 
 	private static String getArrayMatchString(String arrayPath, Map<String, String> joinKey) {
 		String targetStr = joinKey.get("target");
-		if (targetStr.startsWith(arrayPath)) {
+		if (StringUtils.isBlank(targetStr) || StringUtils.isBlank(arrayPath)) {
+			return targetStr;
+		}
+		// TAP-12967: the prefix must end at a "." boundary, otherwise arrayPath="ENROLL" would strip
+		// the unrelated target "ENROLLMENT_X.y"; the boundary check also makes targetStr.equals(arrayPath)
+		// fall through instead of throwing StringIndexOutOfBoundsException on substring(length + 1)
+		if (targetStr.startsWith(arrayPath + ".")) {
 			targetStr = targetStr.substring(arrayPath.length() + 1);
 		}
 		return targetStr;
@@ -1086,8 +1119,74 @@ public class MongodbMergeOperate {
 		}
 	}
 
+	/**
+	 * 为 isArray=true 的嵌套数组节点推导文档级 filter（TAP-12967）。
+	 * 语义约定：返回值一定是「arrayFilters 目标文档集合」的超集，
+	 * 因此 AND 到 UpdateManyModel 的 filter 上只缩小扫描范围，不会漏更新。
+	 */
+	protected static Document documentFilterForArrayNode(Map<String, Object> data, MergeTableProperties currentProperty) {
+		Document empty = new Document();
+		if (null == currentProperty || MapUtils.isEmpty(data)) {
+			return empty;
+		}
+		String arrayPath = currentProperty.getArrayPath();
+		List<Map<String, String>> joinKeys = currentProperty.getJoinKeys();
+		if (StringUtils.isBlank(arrayPath) || CollectionUtils.isEmpty(joinKeys)) {
+			return empty;      // arrayPath 为空时保持现状
+		}
+		// 用 LinkedHashMap 按 target 归并：arrayFilter()（3 参，`:983`）是在同一个 Document 上逐个 put，
+		// 同一 target 重复出现时后者覆盖前者。这里若改成跨 joinKey 取 AND，就会要求两个取值同时成立，
+		// 反而收窄成「arrayFilters 目标集合」的子集（漏更新）。故保持相同的「后者覆盖」语义。
+		Map<String, Document> blocksByTarget = new LinkedHashMap<>();
+		for (Map<String, String> joinKey : joinKeys) {
+			String target = joinKey.get("target");
+			if (StringUtils.isBlank(target)) {
+				continue;
+			}
+			Object value = MapUtil.getValueByKey(data, joinKey.get("source"));
+			if (null == value) {
+				continue;      // 有意收紧：{k:null} 会命中大量字段缺失的文档，反而放大扫描
+			}
+			// 与 arrayFilter()/getArrayMatchString() 的剥离口径保持一致（"." 边界，见 P0-4）
+			String arrayElementPath = target.startsWith(arrayPath + ".") ? target : arrayPath + "." + target;
+			List<Document> candidates = new ArrayList<>();
+			addConditionIfAbsent(candidates, target, value);              // 候选 A：target 原样
+			addConditionIfAbsent(candidates, arrayElementPath, value);    // 候选 B：arrayPath + "." + target
+			blocksByTarget.put(target, candidates.size() == 1 ? candidates.get(0) : new Document("$or", candidates));
+		}
+		if (blocksByTarget.isEmpty()) {
+			return empty;
+		}
+		List<Document> blocks = new ArrayList<>(blocksByTarget.values());
+		// 全部单条件且路径互不冲突 → 扁平 Document（多键索引最优）
+		Set<String> paths = new HashSet<>();
+		boolean flattenable = true;
+		for (Document block : blocks) {
+			if (block.size() != 1 || !paths.add(block.keySet().iterator().next()) || block.containsKey("$or")) {
+				flattenable = false;
+				break;
+			}
+		}
+		if (flattenable) {
+			Document flat = new Document();
+			blocks.forEach(flat::putAll);
+			return flat;
+		}
+		return blocks.size() == 1 ? blocks.get(0) : new Document("$and", blocks);
+	}
+
+	private static void addConditionIfAbsent(List<Document> candidates, String path, Object value) {
+		if (StringUtils.isBlank(path)) {
+			return;
+		}
+		Document condition = new Document(path, value);
+		if (!candidates.contains(condition)) {     // Document.equals 为 Map 相等，去重可靠
+			candidates.add(condition);
+		}
+	}
+
 	protected static void appendAllParentMergeFilters(MergeResult mergeResult, MergeFilter mergeFilter) {
-		if (null == mergeResult || MapUtils.isEmpty(mergeResult.getFilter()) || null == mergeFilter) {
+		if (null == mergeResult || null == mergeFilter) {
 			return;
 		}
 		Document parentFilters = mergeFilter.appendFilters();

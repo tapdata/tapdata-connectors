@@ -73,6 +73,18 @@ class MongodbMergeOperateTest {
 		}
 
 		@Test
+		@DisplayName("TAP-12967 case 9a: an empty child filter can be supplemented by the parent conditions")
+		void testEmptyFilterSupplementedFromParent() {
+			MergeResult mergeResult = new MergeResult();
+			MergeFilter mergeFilter = new MergeFilter(true);
+			mergeFilter.addFilter(new Document("id1", 2));
+			MongodbMergeOperate.appendAllParentMergeFilters(mergeResult, mergeFilter);
+
+			assertEquals(1, mergeResult.getFilter().size());
+			assertEquals(2, mergeResult.getFilter().getInteger("id1"));
+		}
+
+		@Test
 		@DisplayName("Test filter predicate works")
 		void testFilterPredicate() {
 			MergeResult mergeResult = new MergeResult();
@@ -300,6 +312,195 @@ class MongodbMergeOperateTest {
 			assertNotNull(arrayFilter);
 			assertEquals(2, arrayFilter.toBsonDocument().getInt32("element1.id").getValue());
 			assertEquals(22, arrayFilter.toBsonDocument().getInt32("element1.index").getValue());
+		}
+
+		@Test
+		@DisplayName("TAP-12967 case 1: insert into a nested array, isArray: true, arrayPath: 'ENROLLMENT', expect a non empty document level filter and unchanged arrayFilters")
+		void testNestedArrayInsert() {
+			Map<String, Object> after = new Document("enroll_id", 1001)
+					.append("course_id", "C1")
+					.append("name", "math");
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, after);
+			MergeTableProperties mergeTableProperties = arrayNodeProperties("ENROLLMENT",
+					Arrays.asList(joinKey("enroll_id", "ENROLLMENT.enroll_id")));
+			mergeTableProperties.setTargetPath("ENROLLMENT.COURSE");
+			mergeTableProperties.setArrayKeys(new ArrayList<>(Collections.singletonList("enroll_id")));
+			MergeResult mergeResult = new MergeResult();
+
+			MongodbMergeOperate.updateIntoArrayMerge(mergeBundle, mergeTableProperties, mergeResult, new MergeFilter(true));
+
+			Document filter = mergeResult.getFilter();
+			assertFalse(filter.isEmpty());
+			assertTrue(filter.containsKey("ENROLLMENT.enroll_id") || filter.containsKey("$or"));
+			assertEquals(1001, filter.getInteger("ENROLLMENT.enroll_id"));
+
+			// the arrayFilters are byte-for-byte the same as before the fix
+			assertEquals("{\"element1.enroll_id\": 1001}", firstArrayFilterJson(mergeResult));
+
+			Document addToSet = mergeResult.getUpdate().get("$addToSet", Document.class);
+			assertNotNull(addToSet);
+			assertEquals(after, addToSet.get("ENROLLMENT.$[element1].COURSE"));
+		}
+
+		@Test
+		@DisplayName("TAP-12967 case 2: update in a nested array, isArray: true, expect a non empty document level filter and the $[element1].$[element2] path")
+		void testNestedArrayUpdate() {
+			Map<String, Object> before = new Document("enroll_id", 1001).append("course_id", "C1").append("name", "old");
+			Map<String, Object> after = new Document("enroll_id", 1001).append("course_id", "C1").append("name", "new");
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.UPDATE, before, after);
+			MergeTableProperties mergeTableProperties = arrayNodeProperties("ENROLLMENT",
+					Arrays.asList(joinKey("enroll_id", "ENROLLMENT.enroll_id")));
+			mergeTableProperties.setTargetPath("ENROLLMENT.COURSE");
+			mergeTableProperties.setArrayKeys(new ArrayList<>(Collections.singletonList("course_id")));
+			MergeResult mergeResult = new MergeResult();
+
+			MongodbMergeOperate.updateIntoArrayMerge(mergeBundle, mergeTableProperties, mergeResult, new MergeFilter(true));
+
+			assertEquals(1001, mergeResult.getFilter().getInteger("ENROLLMENT.enroll_id"));
+			List<? extends Bson> arrayFilters = mergeResult.getUpdateOptions().getArrayFilters();
+			assertEquals(2, arrayFilters.size());
+			assertEquals(1001, arrayFilters.get(0).toBsonDocument().getInt32("element1.enroll_id").getValue());
+			assertEquals("C1", arrayFilters.get(1).toBsonDocument().getString("element2.course_id").getValue());
+
+			Document setDoc = mergeResult.getUpdate().get("$set", Document.class);
+			assertNotNull(setDoc);
+			assertEquals("new", setDoc.getString("ENROLLMENT.$[element1].COURSE.$[element2].name"));
+		}
+
+		@Test
+		@DisplayName("TAP-12967 case 2b: joinKey.source overlaps arrayKeys and the value changed from before to after, the document level filter must use the before value, like the arrayFilters (review X2)")
+		void testNestedArrayUpdateValueOverride() {
+			Map<String, Object> before = new Document("enroll_id", 1001).append("course_id", "C1");
+			Map<String, Object> after = new Document("enroll_id", 2002).append("course_id", "C1").append("name", "new");
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.UPDATE, before, after);
+			MergeTableProperties mergeTableProperties = arrayNodeProperties("ENROLLMENT",
+					Arrays.asList(joinKey("enroll_id", "ENROLLMENT.enroll_id")));
+			mergeTableProperties.setTargetPath("ENROLLMENT.COURSE");
+			mergeTableProperties.setArrayKeys(new ArrayList<>(Collections.singletonList("enroll_id")));
+			MergeResult mergeResult = new MergeResult();
+
+			MongodbMergeOperate.updateIntoArrayMerge(mergeBundle, mergeTableProperties, mergeResult, new MergeFilter(true));
+
+			List<? extends Bson> arrayFilters = mergeResult.getUpdateOptions().getArrayFilters();
+			assertEquals(2, arrayFilters.size());
+			// the element level conditions use the before value, the document level one must do the same
+			assertEquals(1001, arrayFilters.get(0).toBsonDocument().getInt32("element1.enroll_id").getValue());
+			assertEquals(1001, arrayFilters.get(1).toBsonDocument().getInt32("element2.enroll_id").getValue());
+			assertEquals(1001, mergeResult.getFilter().getInteger("ENROLLMENT.enroll_id"));
+		}
+
+		@Test
+		@DisplayName("TAP-12967 case 3: delete from a nested array, isArray: true, the $pull must not run against an empty document level filter")
+		void testNestedArrayDelete() {
+			Map<String, Object> before = new Document("enroll_id", 1001).append("course_id", "C1");
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.DELETE, before, null);
+			MergeTableProperties mergeTableProperties = arrayNodeProperties("ENROLLMENT",
+					Arrays.asList(joinKey("enroll_id", "ENROLLMENT.enroll_id")));
+			mergeTableProperties.setTargetPath("ENROLLMENT.COURSE");
+			mergeTableProperties.setArrayKeys(new ArrayList<>(Collections.singletonList("enroll_id")));
+			MergeResult mergeResult = new MergeResult();
+
+			MongodbMergeOperate.updateIntoArrayMerge(mergeBundle, mergeTableProperties, mergeResult, new MergeFilter(true));
+
+			assertFalse(mergeResult.getFilter().isEmpty());
+			assertEquals(1001, mergeResult.getFilter().getInteger("ENROLLMENT.enroll_id"));
+			Document pull = mergeResult.getUpdate().get("$pull", Document.class);
+			assertNotNull(pull);
+			assertEquals(new Document("enroll_id", 1001), pull.get("ENROLLMENT.$[element1].COURSE"));
+		}
+
+		@Test
+		@DisplayName("TAP-12967 case 9b: append mode with parent filters, the parent conditions are merged into the array branch filter without overwriting it")
+		void testNestedArrayInsertWithParentFilters() {
+			Map<String, Object> after = new Document("enroll_id", 1001).append("course_id", "C1");
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, after);
+			MergeTableProperties mergeTableProperties = arrayNodeProperties("ENROLLMENT",
+					Arrays.asList(joinKey("enroll_id", "ENROLLMENT.enroll_id")));
+			mergeTableProperties.setTargetPath("ENROLLMENT.COURSE");
+			mergeTableProperties.setArrayKeys(new ArrayList<>(Collections.singletonList("enroll_id")));
+			MergeFilter mergeFilter = new MergeFilter(true);
+			mergeFilter.addFilter(new Document("student_id", 9));
+			mergeFilter.addFilter(new Document("ENROLLMENT.enroll_id", 999));
+			MergeResult mergeResult = new MergeResult();
+
+			MongodbMergeOperate.updateIntoArrayMerge(mergeBundle, mergeTableProperties, mergeResult, mergeFilter);
+
+			assertEquals(2, mergeResult.getFilter().size());
+			assertEquals(9, mergeResult.getFilter().getInteger("student_id"));
+			// the document level condition derived from the row itself wins, the parent one is de-duplicated by key
+			assertEquals(1001, mergeResult.getFilter().getInteger("ENROLLMENT.enroll_id"));
+		}
+	}
+
+	@Nested
+	@DisplayName("Method updateWriteUnsetMerge Test")
+	class updateWriteUnsetMergeTest {
+
+		@Test
+		@DisplayName("TAP-12967 case 10: isArray: true and an empty unset filter, the filter is filled from the row itself and from the parent conditions, and the unset write model is emitted")
+		void testEmptyFilterEarlyReturn() {
+			Map<String, Object> after = new Document("enroll_id", 1001).append("course_id", "C1");
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.UPDATE, new Document("enroll_id", 1001), after);
+			MergeTableProperties currentProperty = new MergeTableProperties();
+			currentProperty.setId("1");
+			currentProperty.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			currentProperty.setIsArray(true);
+			currentProperty.setArrayPath("ENROLLMENT");
+			currentProperty.setTargetPath("ENROLLMENT.COURSE");
+			currentProperty.setJoinKeys(arrayNodeProperties("ENROLLMENT",
+					Arrays.asList(joinKey("enroll_id", "ENROLLMENT.enroll_id"))).getJoinKeys());
+			// the join key target is not a key of the before image, so unsetFilter produces an empty filter
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys = new HashMap<>();
+			updateJoinKeys.put("1", new MergeInfo.UpdateJoinKey(new Document("enroll_id", 1001),
+					new Document("enroll_id", 1002), null));
+			MergeFilter mergeFilter = new MergeFilter(true);
+			mergeFilter.addFilter(new Document("student_id", 9));
+
+			MergeResult result = MongodbMergeOperate.updateWriteUnsetMerge(mergeBundle, currentProperty, updateJoinKeys,
+					null, new HashSet<>(), mergeFilter, 1, 1, new HashSet<>());
+
+			assertNotNull(result);
+			// the arrayFilters must never be written together with a completely empty document level filter
+			assertFalse(result.getFilter().isEmpty());
+			assertEquals(1001, result.getFilter().getInteger("ENROLLMENT.enroll_id"));
+			assertEquals(9, result.getFilter().getInteger("student_id"));
+			List<? extends Bson> arrayFilters = result.getUpdateOptions().getArrayFilters();
+			assertEquals(1, arrayFilters.size());
+			assertEquals(1001, arrayFilters.get(0).toBsonDocument().getInt32("element1.enroll_id").getValue());
+			// TAP-12967: a result whose operation is left unset is discarded by the caller (addUnsetMerge
+			// requires a non null operation), so the unset would silently be lost. It must be a real write.
+			assertEquals(MergeResult.Operation.UPDATE, result.getOperation());
+			assertTrue(result.getUpdate().containsKey(MongodbMergeOperate.UNSET_KEY));
+			assertFalse(result.getUpdate().get(MongodbMergeOperate.UNSET_KEY, Document.class).isEmpty());
+		}
+
+		@Test
+		@DisplayName("TAP-12967 case 10: isArray: true and an empty unset filter without any parent condition, the filter stays empty and the operation stays unset so that the caller discards the result")
+		void testEmptyFilterWithoutParentFilters() {
+			Map<String, Object> after = new Document("course_id", "C1");
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.UPDATE, new Document("course_id", "C1"), after);
+			MergeTableProperties currentProperty = new MergeTableProperties();
+			currentProperty.setId("1");
+			currentProperty.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			currentProperty.setIsArray(true);
+			currentProperty.setArrayPath("ENROLLMENT");
+			currentProperty.setTargetPath("ENROLLMENT.COURSE");
+			currentProperty.setJoinKeys(arrayNodeProperties("ENROLLMENT",
+					Arrays.asList(joinKey("enroll_id", "ENROLLMENT.enroll_id"))).getJoinKeys());
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys = new HashMap<>();
+			updateJoinKeys.put("1", new MergeInfo.UpdateJoinKey(new Document("course_id", "C1"),
+					new Document("course_id", "C2"), null));
+
+			MergeResult result = MongodbMergeOperate.updateWriteUnsetMerge(mergeBundle, currentProperty, updateJoinKeys,
+					null, new HashSet<>(), new MergeFilter(true), 1, 1, new HashSet<>());
+
+			assertNotNull(result);
+			assertTrue(result.getFilter().isEmpty());
+			assertNotNull(result.getUpdateOptions().getArrayFilters());
+			// TAP-12967: no condition can be derived from the row itself nor from the parents, so keep the
+			// previous behaviour of the empty filter guard: the operation stays unset and the caller
+			// (addUnsetMerge) discards the result, instead of emitting an unset matching the whole collection
+			assertNull(result.getOperation());
 		}
 	}
 
@@ -573,6 +774,33 @@ class MongodbMergeOperateTest {
 		}
 
 		@Test
+		@DisplayName("TAP-12967: on an array node the derived document filter never overwrites a condition carried by the parent level")
+		void testArrayNodeFilterDoesNotOverwriteParentCondition() {
+			MergeTableProperties currentProperty = arrayNodeProperties("ENROLLMENT",
+					Arrays.asList(joinKey("enroll_id", "ENROLLMENT.enroll_id")));
+			currentProperty.setId("1");
+			currentProperty.setTargetPath("ENROLLMENT.COURSE");
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys = new HashMap<>();
+			updateJoinKeys.put("1", new MergeInfo.UpdateJoinKey(new Document("enroll_id", 1001),
+					new Document("enroll_id", 1002), new Document("student_id", 9)));
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.UPDATE,
+					new Document("enroll_id", 1001), new Document("enroll_id", 1002));
+			// the parent level has already identified the document to touch
+			MergeResult mergeResult = new MergeResult();
+			mergeResult.getFilter().put("ENROLLMENT.enroll_id", 777);
+
+			MergeResult result = MongodbMergeOperate.updateIntoArrayUnsetMerge(mergeBundle, currentProperty,
+					updateJoinKeys, mergeResult, null, new MergeFilter(true), 1);
+
+			// the condition of the parent level wins, the derived one must not replace it
+			assertEquals(777, result.getFilter().get("ENROLLMENT.enroll_id"));
+			// the element level condition still carries the value of this row
+			List<? extends Bson> arrayFilters = result.getUpdateOptions().getArrayFilters();
+			assertEquals(1, arrayFilters.size());
+			assertEquals(1001, arrayFilters.get(0).toBsonDocument().getInt32("element1.enroll_id").getValue());
+		}
+
+		@Test
 		@DisplayName("test data not exists")
 		void test2() {
 			Map<String, Object> before = new HashMap<>();
@@ -617,6 +845,68 @@ class MongodbMergeOperateTest {
 			MergeResult result = MongodbMergeOperate.updateIntoArrayUnsetMerge(mergeBundle, currentProperty, updateJoinKeys, mergeResult, parentProperties, mergeFilter, 1);
 			assertEquals("{\"id\": 1, \"src\": \"x\"}", result.getFilter().toJson());
 			assertEquals("{\"$pull\": {\"array\": {\"id\": 1, \"src\": \"x\", \"seq\": 1}}}", result.getUpdate().toJson());
+		}
+
+		@Test
+		@DisplayName("TAP-12967 case 4: isArray: true, the array branch must also produce a document level filter")
+		void test3ArrayBranch() {
+			Map<String, Object> before = new HashMap<>();
+			before.put("id", 1);
+			before.put("src", "x");
+			before.put("seq", 1);
+			before.put("name", "test");
+			Map<String, Object> after = new HashMap<>();
+			after.put("id", 1);
+			after.put("src", "y");
+			after.put("seq", 1);
+			after.put("name", "test1");
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.UPDATE, before, after);
+			mergeBundle.setDataExists(true);
+			MergeTableProperties currentProperty = new MergeTableProperties();
+			currentProperty.setId("1");
+			currentProperty.setTargetPath("array");
+			currentProperty.setArrayPath("array");
+			currentProperty.setIsArray(true);
+			currentProperty.setJoinKeys(new ArrayList<Map<String, String>>() {{
+				add(new HashMap<String, String>() {{
+					put("source", "id");
+					put("target", "id");
+				}});
+				add(new HashMap<String, String>() {{
+					put("source", "src");
+					put("target", "src");
+				}});
+			}});
+			currentProperty.setArrayKeys(new ArrayList<String>() {{
+				add("id");
+				add("src");
+				add("seq");
+			}});
+			currentProperty.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys = new HashMap<>();
+			MergeInfo.UpdateJoinKey updateJoinKey = new MergeInfo.UpdateJoinKey(new Document("id", 1).append("src", "x"), new Document("id", 1).append("src", "y"), new Document("id", 1).append("src", "x"));
+			updateJoinKeys.put("1", updateJoinKey);
+			MergeResult mergeResult = new MergeResult();
+			MergeTableProperties parentProperties = new MergeTableProperties();
+			parentProperties.setId("2");
+			parentProperties.setMergeType(MergeTableProperties.MergeType.updateOrInsert);
+			MergeFilter mergeFilter = new MergeFilter(true);
+
+			MergeResult result = MongodbMergeOperate.updateIntoArrayUnsetMerge(mergeBundle, currentProperty, updateJoinKeys, mergeResult, parentProperties, mergeFilter, 1);
+
+			assertNotNull(result);
+			assertFalse(result.getFilter().isEmpty());
+			// data is the same map as the arrayFilters above, both candidates of every join key are kept
+			assertTrue(result.getFilter().containsKey("$and"));
+			List<? extends Bson> arrayFilters = result.getUpdateOptions().getArrayFilters();
+			assertEquals(1, arrayFilters.size());
+			assertEquals(1, arrayFilters.get(0).toBsonDocument().getInt32("element1.id").getValue());
+			assertEquals("x", arrayFilters.get(0).toBsonDocument().getString("element1.src").getValue());
+			// record the current behaviour of the array branch: the whole targetPath is set to an empty array
+			Document setDoc = result.getUpdate().get("$set", Document.class);
+			assertNotNull(setDoc);
+			assertEquals(1, setDoc.size());
+			assertEquals(new ArrayList<>(), setDoc.get("array"));
 		}
 	}
 
@@ -874,5 +1164,148 @@ class MongodbMergeOperateTest {
 
 			assertEquals("txn_array_${txn_id}_1", result);
 		}
+	}
+	@Nested
+	@DisplayName("Method documentFilterForArrayNode Test")
+	class documentFilterForArrayNodeTest {
+
+		@Test
+		@DisplayName("candidates of one join key are OR-ed, different join keys are AND-ed")
+		void testAndOrStructure() {
+			MergeTableProperties properties = arrayNodeProperties("ENROLLMENT",
+					Arrays.asList(joinKey("a", "ENROLLMENT.a"), joinKey("b", "b")));
+			Document filter = MongodbMergeOperate.documentFilterForArrayNode(new Document("a", 1).append("b", 2), properties);
+
+			assertTrue(filter.containsKey("$and"));
+			List<Document> blocks = (List<Document>) filter.get("$and");
+			assertEquals(2, blocks.size());
+			// target already carries the arrayPath prefix, the two candidates collapse into one condition
+			assertEquals(new Document("ENROLLMENT.a", 1), blocks.get(0));
+			List<Document> branches = (List<Document>) blocks.get(1).get("$or");
+			assertEquals(2, branches.size());
+			assertTrue(branches.contains(new Document("b", 2)));
+			assertTrue(branches.contains(new Document("ENROLLMENT.b", 2)));
+		}
+
+		@Test
+		@DisplayName("every join key keeps a single candidate, the result is a flat Document")
+		void testFlatDocument() {
+			MergeTableProperties properties = arrayNodeProperties("ENROLLMENT",
+					Arrays.asList(joinKey("a", "ENROLLMENT.a"), joinKey("c", "ENROLLMENT.c")));
+			Document filter = MongodbMergeOperate.documentFilterForArrayNode(new Document("a", 1).append("c", 3), properties);
+
+			assertFalse(filter.containsKey("$and"));
+			assertFalse(filter.containsKey("$or"));
+			assertEquals(new Document("ENROLLMENT.a", 1).append("ENROLLMENT.c", 3), filter);
+		}
+
+		@Test
+		@DisplayName("missing join key values are dropped, all values missing produces an empty filter")
+		void testMissingValues() {
+			MergeTableProperties properties = arrayNodeProperties("ENROLLMENT",
+					Arrays.asList(joinKey("a", "ENROLLMENT.a"), joinKey("b", "ENROLLMENT.b"), joinKey("c", "ENROLLMENT.c")));
+			Document filter = MongodbMergeOperate.documentFilterForArrayNode(new Document("a", 1).append("b", null), properties);
+
+			assertEquals(new Document("ENROLLMENT.a", 1), filter);
+			assertFalse(filter.containsKey("ENROLLMENT.b"));
+			assertFalse(filter.containsKey("ENROLLMENT.c"));
+
+			assertTrue(MongodbMergeOperate.documentFilterForArrayNode(new HashMap<>(), properties).isEmpty());
+			assertTrue(MongodbMergeOperate.documentFilterForArrayNode(null, properties).isEmpty());
+			assertTrue(MongodbMergeOperate.documentFilterForArrayNode(new Document("a", 1), null).isEmpty());
+		}
+
+		@Test
+		@DisplayName("both target conventions are supported")
+		void testTargetConventions() {
+			Document filter = MongodbMergeOperate.documentFilterForArrayNode(new Document("enroll_id", 1001),
+					arrayNodeProperties("ENROLLMENT", Arrays.asList(joinKey("enroll_id", "enroll_id"))));
+			// target does not carry the arrayPath prefix, both candidates are kept as an $or branch
+			List<Document> branches = (List<Document>) filter.get("$or");
+			assertEquals(2, branches.size());
+			assertTrue(branches.contains(new Document("enroll_id", 1001)));
+			assertTrue(branches.contains(new Document("ENROLLMENT.enroll_id", 1001)));
+
+			Document prefixedFilter = MongodbMergeOperate.documentFilterForArrayNode(new Document("enroll_id", 1001),
+					arrayNodeProperties("ENROLLMENT", Arrays.asList(joinKey("enroll_id", "ENROLLMENT.enroll_id"))));
+			assertFalse(prefixedFilter.containsKey("$or"));
+			assertEquals(new Document("ENROLLMENT.enroll_id", 1001), prefixedFilter);
+		}
+
+		@Test
+		@DisplayName("without arrayPath or join keys the previous behaviour (empty filter) is kept")
+		void testWithoutArrayPathOrJoinKeys() {
+			assertTrue(MongodbMergeOperate.documentFilterForArrayNode(new Document("enroll_id", 1001),
+					arrayNodeProperties(null, Arrays.asList(joinKey("enroll_id", "enroll_id")))).isEmpty());
+			MergeTableProperties properties = new MergeTableProperties();
+			properties.setArrayPath("ENROLLMENT");
+			assertTrue(MongodbMergeOperate.documentFilterForArrayNode(new Document("enroll_id", 1001), properties).isEmpty());
+		}
+
+		@Test
+		@DisplayName("TAP-12967: a duplicated join key target keeps the last value, exactly like arrayFilter does")
+		void testDuplicatedTarget() {
+			// the 3 arg arrayFilter() puts every join key into the same Document, so the last value wins.
+			// Emitting $and:[{p:1},{p:2}] instead would require both values on the same array element, i.e. a
+			// strict subset of the documents arrayFilters can update -> the update would silently be lost.
+			Document filter = MongodbMergeOperate.documentFilterForArrayNode(
+					new Document("a", 1).append("b", 2),
+					arrayNodeProperties("ENROLLMENT",
+							Arrays.asList(joinKey("a", "ENROLLMENT.p"), joinKey("b", "ENROLLMENT.p"))));
+
+			assertFalse(filter.containsKey("$and"));
+			assertEquals(new Document("ENROLLMENT.p", 2), filter);
+		}
+	}
+
+	@Nested
+	@DisplayName("Method getArrayMatchString Test (through updateIntoArrayMerge)")
+	class getArrayMatchStringTest {
+
+		@Test
+		@DisplayName("the arrayPath prefix must end at a '.' boundary and target equals arrayPath must not throw")
+		void testPrefixBoundary() {
+			MergeTableProperties properties = arrayNodeProperties("ENROLL", Arrays.asList(joinKey("v", "ENROLLMENT_X.y")));
+			properties.setTargetPath("ENROLL.COURSE");
+			properties.setArrayKeys(new ArrayList<>(Collections.singletonList("v")));
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, new Document("v", 1));
+			MergeResult mergeResult = new MergeResult();
+
+			MongodbMergeOperate.updateIntoArrayMerge(mergeBundle, properties, mergeResult, new MergeFilter(true));
+			assertFalse(mergeResult.getFilter().isEmpty());
+			assertEquals("{\"element1.ENROLLMENT_X.y\": 1}", firstArrayFilterJson(mergeResult));
+
+			MergeTableProperties samePathProperties = arrayNodeProperties("ENROLL", Arrays.asList(joinKey("v", "ENROLL")));
+			samePathProperties.setTargetPath("ENROLL");
+			samePathProperties.setArrayKeys(new ArrayList<>(Collections.singletonList("v")));
+			MergeResult samePathResult = new MergeResult();
+			assertDoesNotThrow(() -> MongodbMergeOperate.updateIntoArrayMerge(mergeBundle, samePathProperties, samePathResult, new MergeFilter(true)));
+			assertEquals("{\"element1.ENROLL\": 1}", firstArrayFilterJson(samePathResult));
+		}
+	}
+
+	private static Map<String, String> joinKey(String source, String target) {
+		Map<String, String> joinKey = new HashMap<>();
+		joinKey.put("source", source);
+		joinKey.put("target", target);
+		return joinKey;
+	}
+
+	@SafeVarargs
+	private static MergeTableProperties arrayNodeProperties(String arrayPath, List<Map<String, String>>... joinKeys) {
+		MergeTableProperties properties = new MergeTableProperties();
+		properties.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+		properties.setIsArray(true);
+		properties.setArrayPath(arrayPath);
+		List<Map<String, String>> allJoinKeys = new ArrayList<>();
+		for (List<Map<String, String>> joinKey : joinKeys) {
+			allJoinKeys.addAll(joinKey);
+		}
+		properties.setJoinKeys(allJoinKeys);
+		return properties;
+	}
+
+	private static String firstArrayFilterJson(MergeResult mergeResult) {
+		return mergeResult.getUpdateOptions().getArrayFilters().get(0).toBsonDocument().toJson();
 	}
 }
