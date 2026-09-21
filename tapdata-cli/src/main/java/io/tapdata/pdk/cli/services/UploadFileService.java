@@ -55,14 +55,21 @@ public class UploadFileService {
   private static final String RC4_ALGORITHM = "RC4";
   private static final byte[] SALTED_MAGIC = "Salted__".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
 
-  public static void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, boolean latest, String hostAndPort, String username, String password, String ak, String sk, PrintUtil printUtil) {
+  public static void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, boolean latest, String hostAndPort, String accessCode, String username, String password, String ak, String sk, PrintUtil printUtil) {
 
     boolean cloud = StringUtils.isNotBlank(ak);
 
 
     String token = null;
     if (!cloud) {
-      token = login(hostAndPort, username, password);
+      if (StringUtils.isNotBlank(accessCode)) {
+        token = generateToken(hostAndPort, accessCode, printUtil);
+        if (StringUtils.isBlank(token)) {
+          return;
+        }
+      } else {
+        token = login(hostAndPort, username, password);
+      }
     }
 
     Map<String, String> params = new HashMap<>();
@@ -211,6 +218,42 @@ public class UploadFileService {
       printUtil.print(PrintUtil.TYPE.INFO, String.format("* Register Connector: %s Completed", file.getName()));
     }
     printUtil.print(PrintUtil.TYPE.WARN, "result:" + result + ", name:" + file.getName() + ", msg:" + msg + ", response:" + response);
+  }
+
+  /**
+   * Compatibility overload for callers using the administrator-password flow.
+   */
+  public static void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, boolean latest, String hostAndPort, String username, String password, String ak, String sk, PrintUtil printUtil) {
+    upload(inputStreamMap, file, jsons, latest, hostAndPort, null, username, password, ak, sk, printUtil);
+  }
+
+  /**
+   * Compatibility overload for the original accessCode-based registration API.
+   */
+  public static void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, boolean latest, String hostAndPort, String accessCode, String ak, String sk, PrintUtil printUtil) {
+    upload(inputStreamMap, file, jsons, latest, hostAndPort, accessCode, null, null, ak, sk, printUtil);
+  }
+
+  private static String generateToken(String hostAndPort, String accessCode, PrintUtil printUtil) {
+    String tokenUrl = hostAndPort + "/api/users/generatetoken";
+    Map<String, String> param = new HashMap<>();
+    param.put("accesscode", accessCode);
+    String response = OkHttpUtils.postJsonParams(tokenUrl, JSON.toJSONString(param));
+
+    printUtil.print(PrintUtil.TYPE.DEBUG, "generate token " + response);
+    if (StringUtils.isBlank(response)) {
+      printUtil.print(PrintUtil.TYPE.ERROR, "TM server not found or generate token failed");
+      return null;
+    }
+
+    JSONObject result = JSON.parseObject(response);
+    JSONObject data = result.getJSONObject("data");
+    String token = data == null ? null : data.getString("id");
+    if (StringUtils.isBlank(token)) {
+      printUtil.print(PrintUtil.TYPE.ERROR, "TM server not found or generate token failed");
+      return null;
+    }
+    return token;
   }
 
   static String login(String hostAndPort, String username, String password) {
