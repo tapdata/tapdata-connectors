@@ -384,6 +384,25 @@
       "priority": 1,
       "to": "TapNumber"
     },
+    "float($precision)": {
+      "to": "TapCoefficientFloat",
+      "name": "float",
+      "coefficient": {
+        "TapFloat": [
+          1,
+          24
+        ],
+        "TapDouble": [
+          25,
+          53
+        ]
+      },
+      "precision": [
+        1,
+        53
+      ],
+      "fixed": false
+    },
     "real": {
       "bit": 32,
       "priority": 2,
