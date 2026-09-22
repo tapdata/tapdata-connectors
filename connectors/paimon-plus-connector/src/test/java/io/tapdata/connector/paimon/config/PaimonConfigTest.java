@@ -21,6 +21,23 @@ import static org.junit.jupiter.api.Assertions.*;
 class PaimonConfigTest {
 
     @Test
+    void effectiveGlobalNodeAndTableTmpDirsMustBeValidated() {
+        PaimonConfig config = new PaimonConfig();
+        config.setWarehouse("/tmp/paimon");
+        assertDoesNotThrow(config::validate);
+        config.load(Collections.singletonMap("diskTmpDir", "'bucket' = '-1'"));
+        assertThrows(IllegalArgumentException.class, config::validate);
+        config.load(Collections.singletonMap("diskTmpDir", "/tmp"));
+        config.setTableConfig(Collections.singletonMap("orders",
+                DataMap.create().kv("diskTmpDir", "'write-buffer-size' = '128mb'")));
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, config::validate);
+        assertTrue(error.getMessage().contains("orders"));
+        assertTrue(error.getMessage().contains("diskTmpDir"));
+        config.setTableConfig(Collections.singletonMap("orders", DataMap.create().kv("diskTmpDir", "/tmp")));
+        assertDoesNotThrow(config::validate);
+    }
+
+    @Test
     void stopBudgetsMustRejectFractionOverflowNonPositiveAndTableOverrides() {
         for (String key : Arrays.asList("stopTimeoutSeconds", "finalCompactionTimeoutSeconds", "compactionCancelGraceSeconds")) {
             for (Object value : Arrays.asList(0, -1, 1.5, Long.MAX_VALUE, "2147483648", true, "invalid")) {

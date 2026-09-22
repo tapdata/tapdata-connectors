@@ -1,6 +1,7 @@
 package io.tapdata.connector.paimon.config;
 
 import io.tapdata.common.CommonDbConfig;
+import io.tapdata.connector.paimon.util.PaimonSpillDirCleaner;
 import io.tapdata.kit.EmptyKit;
 import org.apache.paimon.table.BucketMode;
 
@@ -532,6 +533,27 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         return loaded;
     }
 
+    /** Validate effective configuration before catalog creation or stale-directory cleanup. */
+    private void validateTmpDirs() {
+        PaimonSpillDirCleaner.resolveTmpDirs(diskTmpDir);
+        if (getTableConfig() != null) {
+            for (String table : getTableConfig().keySet()) {
+                Object value = getTableConfig().get(table) == null
+                        ? null : getTableConfig().get(table).get("diskTmpDir");
+                try {
+                    if (value != null && !(value instanceof String)) {
+                        throw new IllegalArgumentException("diskTmpDir must be a string of absolute local directories");
+                    }
+                    if (value != null) {
+                        PaimonSpillDirCleaner.resolveTmpDirs((String) value);
+                    }
+                } catch (IllegalArgumentException invalid) {
+                    throw new IllegalArgumentException("Table " + table + ": " + invalid.getMessage());
+                }
+            }
+        }
+    }
+
     private void validateExpireMode() {
         PaimonExpireMode.validateProperties("<connection>", tableProperties);
         if (getTableConfig() != null) {
@@ -658,6 +680,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     public void validate() {
         validateExpireMode();
         validateStopBudgets();
+        validateTmpDirs();
         if (warehouse == null || warehouse.trim().isEmpty()) {
             throw new IllegalArgumentException("Warehouse path is required");
         }
