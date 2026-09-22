@@ -2,6 +2,7 @@ package io.tapdata.mongodb;
 
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.AggregateIterable;
+import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
@@ -27,6 +28,48 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 public class MongodbUtilTest {
+	@Test
+	void aggregateCollectionStatsShouldSumShardTotalsAndRecalculateAverage() {
+		MongoCollection<Document> collection = mock(MongoCollection.class);
+		AggregateIterable<Document> iterable = mock(AggregateIterable.class);
+		MongoCursor<Document> cursor = mock(MongoCursor.class);
+		when(collection.aggregate(anyList())).thenReturn(iterable);
+		when(iterable.iterator()).thenReturn(cursor);
+		when(cursor.hasNext()).thenReturn(true, true, false);
+		when(cursor.next()).thenReturn(
+				new Document("ns", "db.collection").append("shard", "shard01").append("storageStats",
+						new Document("count", 2L).append("size", 20L).append("storageSize", 30L).append("totalIndexSize", 4L).append("avgObjSize", 10D)),
+				new Document("ns", "db.collection").append("shard", "shard02").append("storageStats",
+						new Document("count", 3L).append("size", 60L).append("storageSize", 70L).append("totalIndexSize", 6L).append("avgObjSize", 20D)));
+
+		Document result = MongodbUtil.aggregateCollectionStats(collection);
+
+		Assertions.assertEquals(5L, result.get("count"));
+		Assertions.assertEquals(80L, result.get("size"));
+		Assertions.assertEquals(100L, result.get("storageSize"));
+		Assertions.assertEquals(16D, result.get("avgObjSize"));
+		Assertions.assertEquals("db.collection", result.get("ns"));
+		Assertions.assertEquals(true, result.get("sharded"));
+		Assertions.assertEquals(List.of("shard01", "shard02"), result.get("shards"));
+		Assertions.assertEquals(10L, result.get("indexSize"));
+	}
+
+	@Test
+	void countShouldEstimateOnlyWhenFilterIsNull() {
+		MongoClient mongoClient = mock(MongoClient.class);
+		MongoDatabase database = mock(MongoDatabase.class);
+		MongoCollection<Document> collection = mock(MongoCollection.class);
+		when(mongoClient.getDatabase("db")).thenReturn(database);
+		when(database.getCollection("collection")).thenReturn(collection);
+		when(collection.estimatedDocumentCount()).thenReturn(10L);
+		when(collection.countDocuments(any(Document.class))).thenReturn(9L);
+
+		Assertions.assertEquals(10L, MongodbConnector.getCollectionNotAggregateCountByTableName(mongoClient, "db", "collection", null));
+		Assertions.assertEquals(9L, MongodbConnector.getCollectionNotAggregateCountByTableName(mongoClient, "db", "collection", new Document()));
+		verify(collection, times(1)).estimatedDocumentCount();
+		verify(collection, times(1)).countDocuments(any(Document.class));
+	}
+
     @Test
     void convertValueShouldConvertNestedDateTimeToDate() {
         long epochMilli = 1_715_187_045_123L;
