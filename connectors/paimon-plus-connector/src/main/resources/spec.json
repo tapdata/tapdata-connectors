@@ -925,14 +925,14 @@
       "value": [-9223372036854775808, 9223372036854775807]
     },
     "FLOAT": {
-      "to": "TapNumber",
+      "to": "TapFloat",
       "bit": 32,
       "precision": 7,
       "scale": 7,
       "fixed": false
     },
     "DOUBLE": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "bit": 64,
       "precision": 15,
       "scale": 15,

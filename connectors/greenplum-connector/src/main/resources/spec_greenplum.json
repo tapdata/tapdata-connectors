@@ -361,7 +361,7 @@
         6
       ],
       "fixed": false,
-      "to": "TapNumber"
+      "to": "TapFloat"
     },
     "double precision": {
       "priority": 2,
@@ -376,7 +376,7 @@
         17
       ],
       "fixed": false,
-      "to": "TapNumber"
+      "to": "TapDouble"
     },
     "character[($byte)]": {
       "byte": 10485760,

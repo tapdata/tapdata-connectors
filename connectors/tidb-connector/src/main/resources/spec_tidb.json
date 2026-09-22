@@ -527,7 +527,7 @@
       "fixed": true
     },
     "float($precision,$scale)[unsigned]": {
-      "to": "TapNumber",
+      "to": "TapFloat",
       "name": "float",
       "precision": [
         1,
@@ -546,7 +546,7 @@
       "queryOnly": true
     },
     "float": {
-      "to": "TapNumber",
+      "to": "TapFloat",
       "precision": [
         1,
         6
@@ -559,7 +559,7 @@
       "queryOnly": true
     },
     "double": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "precision": [
         1,
         17
@@ -573,7 +573,7 @@
       "fixed": false
     },
     "double[($precision,$scale)][unsigned]": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "precision": [
         1,
         255

@@ -426,7 +426,7 @@
       "preferScale": 8
     },
     "real": {
-      "to": "TapNumber",
+      "to": "TapFloat",
       "bit": 4,
       "defaultPrecision": 24,
       "defaultScale": 8,
@@ -445,7 +445,7 @@
         17
       ],
       "fixed": false,
-      "to": "TapNumber"
+      "to": "TapDouble"
     },
     "money": {
       "to": "TapNumber",
