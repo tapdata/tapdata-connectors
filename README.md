@@ -95,14 +95,18 @@ After compilation, you can find the compiled connector JAR files in the correspo
 ## Register Connector to TapData Platform
 
 ```bash
-java -jar pdk-deploy.jar register -a ${access_code} -t ${tm_url} \
+java -jar pdk-deploy.jar register -u ${admin_email} -p ${admin_password} -t ${tm_url} \
   [-ak ${accessKey} [-sk ${secretKey}]] [-r ${oem_type}] [-f ${filter_type}] [-l] [-h] [-X] \
   /path/to/your-connector.jar
 ```
 
+For older self-hosted deployments, use `-a ${accessCode}` instead of `-u/-p`. This keeps the original access-code token flow.
+
 **Parameter Description**:
 
-- `-a` (`--auth`): The `access_code` in TapData. Log in to the TapData management platform, click your username in the upper right corner, select **Personal Settings** to view it
+- `-u` (`--user`): TM administrator email. Only `admin@admin.com` is supported, and it defaults to `admin@admin.com`
+- `-a` (`--auth`): Legacy TM accessCode. When provided, the original access-code token flow is used and `-p` is not required
+- `-p` (`--password`): TM administrator password for the new login flow. It is sent to TM after RC4 encryption; required when neither `-a` nor `-ak` is supplied
 - `-t` (`--tm`): TapData management platform login address, e.g., `http://localhost:3030`
 - `-f` (`--filter`): Register only connectors of specified authentication types, multiple values separated by commas
 - `-l` (`--latest`): Replace with the latest version
@@ -114,7 +118,8 @@ The `pdk-deploy.jar` tool can be found in your TapData deployment environment's 
 
 ```bash
 java -jar pdk-deploy.jar register \
-  -a 3324***********8d4562f \
+  -u admin@admin.com \
+  -p ******** \
   -t http://127.0.0.1:3030 \
   connectors/starrocks-connector/target/starrocks-connector-1.0-SNAPSHOT.jar
 ```

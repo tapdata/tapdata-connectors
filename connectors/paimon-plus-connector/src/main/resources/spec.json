@@ -435,6 +435,9 @@
         "diskOverflowWrite": {
           "type": "boolean",
           "title": "${diskOverflowWrite}",
+          "x-decorator-props": {
+            "tooltip": "${diskOverflowWriteTip}"
+          },
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "default": false,
@@ -589,7 +592,7 @@
             "max": 16,
             "placeholder": "${asyncCommitConcurrency_placeholder}"
           },
-          "default": 4,
+          "default": 1,
           "x-index": 100,
           "x-reactions": [
             {
@@ -741,7 +744,8 @@
       "tablePropertiesTip": "Table properties, e.g., {key1: value1, key2: value2}",
       "writeBufferSize": "Write Buffer Size (MB)",
       "writeBufferSize_placeholder": "Memory buffer for writes (64-2048 MB, default: 256)",
-      "diskOverflowWrite": "Data disk overflow write",
+      "diskOverflowWrite": "Write-buffer disk spill",
+      "diskOverflowWriteTip": "Maps to Paimon write-buffer-spillable. Applies to new tables and the current writer for existing tables; restart the task to apply. Native forced buffering and other temporary files may still use disk.",
       "diskMaxSize": "Disk overflow capacity (GB)",
       "diskTmpDir": "Disk temporary directory",
       "batchAccumulationSize": "Batch Accumulation Size",
@@ -803,7 +807,8 @@
       "tablePropertiesTip": "表属性，例如：{key1: value1, key2: value2}",
       "writeBufferSize": "写入缓冲区大小（MB）",
       "writeBufferSize_placeholder": "写入内存缓冲区大小（64-2048 MB，默认：256）",
-      "diskOverflowWrite": "数据磁盘溢写",
+      "diskOverflowWrite": "写缓冲磁盘溢写",
+      "diskOverflowWriteTip": "对应 Paimon write-buffer-spillable。对新表和已有表当前写任务生效，重启任务后应用；原生强制缓冲及其他临时文件仍可能使用磁盘。",
       "diskMaxSize": "磁盘溢写容量(GB)",
       "diskTmpDir": "磁盘临时目录",
       "batchAccumulationSize": "批量累积大小",
@@ -865,7 +870,8 @@
       "tablePropertiesTip": "表屬性，例如：{key1: value1, key2: value2}",
       "writeBufferSize": "寫入緩衝區大小（MB）",
       "writeBufferSize_placeholder": "寫入內存緩衝區大小（64-2048 MB，默認：256）",
-      "diskOverflowWrite": "數據磁盤溢寫",
+      "diskOverflowWrite": "寫緩衝磁盤溢寫",
+      "diskOverflowWriteTip": "對應 Paimon write-buffer-spillable。對新表及已有表目前寫入任務生效，重新啟動任務後套用；原生強制緩衝及其他暫存檔案仍可能使用磁碟。",
       "diskMaxSize": "磁盤溢寫容量(GB)",
       "diskTmpDir": "磁盤臨時目錄",
       "batchAccumulationSize": "批量累積大小",

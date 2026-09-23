@@ -84,10 +84,20 @@ public class OceanbaseReaderV2 {
     protected void generateDataTypeMap(KVReadOnlyMap<TapTable> tableMap) {
         for (String table : tableList) {
             TapTable tapTable = tableMap.get(table);
+            if (tapTable == null) {
+                tapTable = tableMap.get(table.toLowerCase(Locale.ROOT));
+            }
+            if (tapTable == null) {
+                tapTable = tableMap.get(table.toUpperCase(Locale.ROOT));
+            }
             if (tapTable != null) {
                 for (Map.Entry<String, TapField> entry : tapTable.getNameFieldMap().entrySet()) {
                     String dataType = entry.getValue().getDataType();
-                    dataTypeMap.put(table + "." + entry.getKey(), StringKit.removeParentheses(dataType));
+                    String column = table + "." + entry.getKey();
+                    String normalizedDataType = StringKit.removeParentheses(dataType).toLowerCase(Locale.ROOT)
+                            .replace(" unsigned", "").replace(" zerofill", "");
+                    dataTypeMap.put(column, normalizedDataType);
+                    dataTypeMap.put(column.toLowerCase(Locale.ROOT), normalizedDataType);
                 }
             }
         }
@@ -162,6 +172,9 @@ public class OceanbaseReaderV2 {
             t.setName("OceanBaseReader-Consumer");
             t.start();
             while (isAlive.get() && payloads.hasNext()) {
+                if (EmptyKit.isNotNull(throwable.get())) {
+                    throw throwable.get();
+                }
                 ReadLogPayload payload = payloads.next();
                 while (ddlStop.get() && isAlive.get()) {
                     TapSimplify.sleep(500);
@@ -256,19 +269,39 @@ public class OceanbaseReaderV2 {
         if (isBefore) {
             for (int i = 0; i < payload.getBeforeCount(); i++) {
                 String columnName = payload.getBefore(i).getColumnName();
-                record.put(columnName, parseValueString(payload.getTbname() + "." + columnName, payload.getBefore(i)));
+                putColumnValue(record, payload.getTbname(), columnName, payload.getBefore(i));
             }
         } else {
             for (int i = 0; i < payload.getAfterCount(); i++) {
                 String columnName = payload.getAfter(i).getColumnName();
-                record.put(columnName, parseValueString(payload.getTbname() + "." + columnName, payload.getAfter(i)));
+                putColumnValue(record, payload.getTbname(), columnName, payload.getAfter(i));
             }
         }
         return record;
     }
 
+    private void putColumnValue(Map<String, Object> record, String tableName, String columnName, Value value) throws UnsupportedEncodingException {
+        String qualifiedColumn = tableName + "." + columnName;
+        if (isInternalColumnWithoutMetadata(qualifiedColumn, columnName)) {
+            return;
+        }
+        record.put(columnName, parseValueString(qualifiedColumn, value));
+    }
+
+    private boolean isInternalColumnWithoutMetadata(String qualifiedColumn, String columnName) {
+        return columnName.startsWith("__")
+                && !dataTypeMap.containsKey(qualifiedColumn)
+                && !dataTypeMap.containsKey(qualifiedColumn.toLowerCase(Locale.ROOT));
+    }
+
     private Object parseValueString(String column, Value value) throws UnsupportedEncodingException {
         String dataType = dataTypeMap.get(column);
+        if (dataType == null) {
+            dataType = dataTypeMap.get(column.toLowerCase(Locale.ROOT));
+        }
+        if (dataType == null) {
+            throw new IllegalStateException("Missing OceanBase data type metadata for " + column);
+        }
         if (value.getIsNull()) {
             return null;
         }
@@ -300,7 +333,7 @@ public class OceanbaseReaderV2 {
                     dataFormat = DateUtil.determineDateFormat(valueString);
                     dataFormatMap.put(column, dataFormat);
                 }
-                return ZonedDateTime.parse(valueString, DateTimeFormatter.ofPattern(dataFormat)).toInstant().atZone(ZoneOffset.UTC);
+                return DateUtil.parseInstantWithHour(valueString, dataFormat, oceanbaseConfig.getZoneOffsetHour());
             }
             case "year":
                 return Integer.parseInt(valueString);

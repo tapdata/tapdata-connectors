@@ -172,6 +172,9 @@ class PaimonServiceTableDdlCacheInvalidationTest {
     void failedWriteContextCreationMustNotPublishFieldCache() throws Exception {
         Fixture fixture = fixture();
         FileStoreTable physicalTable = mock(FileStoreTable.class);
+        // 此夹具只测试失败收尾；真实副本语义由 PaimonSpillOptionsIntegrationTest 覆盖。
+        when(physicalTable.copyWithoutTimeTravel(Collections.singletonMap("write-buffer-spillable", "false")))
+                .thenReturn(physicalTable);
         when(physicalTable.coreOptions()).thenReturn(org.apache.paimon.CoreOptions.fromMap(Collections.emptyMap()));
         when(physicalTable.location()).thenReturn(new org.apache.paimon.fs.Path("file:///tmp/paimon-ddl-lock-order"));
         RowType rowType = mock(RowType.class);

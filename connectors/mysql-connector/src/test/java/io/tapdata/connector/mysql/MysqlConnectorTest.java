@@ -16,6 +16,7 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapNumber;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
@@ -40,6 +41,25 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 public class MysqlConnectorTest {
+    @Test
+    void discoverSchemaMarksInformationSchemaViewAsView() throws SQLException {
+        MysqlConnector connector = new MysqlConnector();
+        JdbcContext jdbcContext = mock(JdbcContext.class);
+        when(jdbcContext.queryAllColumns(anyList())).thenReturn(Collections.emptyList());
+        when(jdbcContext.queryAllIndexes(anyList())).thenReturn(Collections.emptyList());
+        when(jdbcContext.queryAllForeignKeys(anyList())).thenReturn(Collections.emptyList());
+        ReflectionTestUtils.setField(connector, "jdbcContext", jdbcContext);
+        DataMap view = DataMap.create();
+        view.put("tableName", "orders_view");
+        view.put("tableType", "VIEW");
+        List<TapTable> discovered = new ArrayList<>();
+
+        connector.singleThreadDiscoverSchema(Collections.singletonList(view), discovered::addAll);
+
+        Assertions.assertEquals(1, discovered.size());
+        Assertions.assertEquals("view", discovered.get(0).getType());
+    }
+
     @Test
     void testRegisterCapabilitiesQueryTableHash() {
         MysqlConnector postgresConnector = new MysqlConnector();
@@ -312,16 +332,24 @@ public class MysqlConnectorTest {
             UnitTestUtils.injectField(MysqlConnector.class, connector, "mysqlJdbcContext", jdbcContext);
             UnitTestUtils.injectField(CommonDbConnector.class, connector, "commonDbConfig", commonDbConfig);
             UnitTestUtils.injectField(CommonDbConnector.class, connector, "tapLogger", tapLogger);
+            UnitTestUtils.injectField(CommonDbConnector.class, connector, "exceptionCollector", mock(ExceptionCollector.class));
             doCallRealMethod().when(connector).batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
-            doCallRealMethod().when(connector).resolveHashReadOffset(any());
         }
 
         @Test
-        void testApplySplit() {
+        void testApplySplit() throws Throwable {
             int expectedMaxSplit = 5;
             when(commonDbConfig.getHashSplit()).thenReturn(true);
             when(commonDbConfig.getMaxSplit()).thenReturn(expectedMaxSplit);
             when(commonDbConfig.getBatchReadThreadSize()).thenReturn(3);
+            when(connector.isAlive()).thenReturn(true);
+            doReturn(new io.tapdata.common.entity.HashReadOffset(expectedMaxSplit)).when(connector).resolveHashReadOffset(any());
+            doReturn((io.tapdata.common.ResultSetConsumer) resultSet -> { }).when(connector).resultSetConsumer(any(), anyInt(), any(), any());
+            doAnswer(invocation -> {
+                io.tapdata.common.ResultSetConsumer resultSetConsumer = invocation.getArgument(1);
+                resultSetConsumer.accept(mock(ResultSet.class));
+                return null;
+            }).when(mysqlJdbcContextV2).queryWithStream(anyString(), any());
             assertDoesNotThrow(() -> connector.batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer));
             verify(connector, times(expectedMaxSplit)).resultSetConsumer(any(), anyInt(), any(), any());
         }

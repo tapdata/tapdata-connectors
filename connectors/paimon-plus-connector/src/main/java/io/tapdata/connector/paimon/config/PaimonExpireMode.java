@@ -8,13 +8,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
-/** 连接器只支持同步快照维护；校验不得修改已有表的 metadata。 */
-public final class PaimonSyncExpireMode {
+/** 仅使用 Paimon 原生规则校验维护模式，不选择模式或修改表配置。 */
+public final class PaimonExpireMode {
     public static final String KEY = "snapshot.expire.execution-mode";
 
-    private PaimonSyncExpireMode() {}
+    private PaimonExpireMode() {}
 
-    public static void requireSync(String tableKey, Table table) {
+    public static void validate(String tableKey, Table table) {
         if (!(table instanceof FileStoreTable)) {
             throw new IllegalArgumentException("Only FileStoreTable supports connector writes: " + tableKey);
         }
@@ -23,12 +23,12 @@ public final class PaimonSyncExpireMode {
                 () -> fileStoreTable.coreOptions().snapshotExpireExecutionMode());
     }
 
-    public static void requireSync(String tableKey, Map<String, String> options) {
+    public static void validate(String tableKey, Map<String, String> options) {
         validate(tableKey, options.get(KEY),
                 () -> CoreOptions.fromMap(options).snapshotExpireExecutionMode());
     }
 
-    public static void requireSyncProperties(String tableKey, List<? extends Map<String, String>> properties) {
+    public static void validateProperties(String tableKey, List<? extends Map<String, String>> properties) {
         Map<String, String> options = new java.util.HashMap<>();
         if (properties != null) {
             for (Map<String, String> property : properties) {
@@ -42,28 +42,19 @@ public final class PaimonSyncExpireMode {
                 }
             }
         }
-        requireSync(tableKey, options);
+        validate(tableKey, options);
     }
 
     private static void validate(String tableKey, String value,
             Supplier<CoreOptions.ExpireExecutionMode> mode) {
-        // Paimon 1.3.2 CoreOptions 使用原生枚举解析，缺省为 SYNC；TableCommitImpl 在 SYNC
-        // 分支用直接执行器运行 maintenance。只接受这个有效模式，不捕获内部 maintenance executor。
-        // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java#L435
-        // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/table/sink/TableCommitImpl.java#L118
-        CoreOptions.ExpireExecutionMode effective;
-        try {
-            effective = mode.get();
-        } catch (IllegalArgumentException invalid) {
-            throw unsupported(tableKey, value, invalid);
-        }
-        if (effective != CoreOptions.ExpireExecutionMode.SYNC) {
-            throw unsupported(tableKey, value == null ? String.valueOf(effective) : value, null);
-        }
+        // 原生支持 SYNC 和 ASYNC；这里只触发原生解析，不添加连接器模式限制。
+        // https://github.com/apache/paimon/blob/release-1.3.2/paimon-api/src/main/java/org/apache/paimon/CoreOptions.java
+        try { mode.get(); }
+        catch (IllegalArgumentException invalid) { throw unsupported(tableKey, value, invalid); }
     }
 
     private static IllegalArgumentException unsupported(String tableKey, String value, Throwable cause) {
         return new IllegalArgumentException("Paimon table " + tableKey + ": " + KEY + "=" + value
-                + "，此连接器仅支持 SYNC", cause);
+                + "，Paimon 原生合法值为 SYNC 或 ASYNC", cause);
     }
 }

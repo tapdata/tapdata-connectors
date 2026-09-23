@@ -11,11 +11,11 @@ OceanBase 4.0+
 
 ### **3. CDC先决条件**
 
-OceanBase的CDC前置要求与MySQL相同
+OceanBase的CDC前置要求与MySQL相同。启用“原生CDC”时使用连接器内置的 obcdc Runtime，无需安装 ObLogProxy、OceanBase CDC RPM，也无需设置 `OBCDC_HOME` 或 `LD_LIBRARY_PATH`；当前支持 Linux x86_64。未启用原生CDC时需要安装 ObLogProxy。
 - 开启binlog
 - binlog_format：必须设置为 row 或者 ROW 
 - binlog_row_image：必须设置为 full
-- 安装ObLogProxy服务
+- 未启用原生CDC时安装ObLogProxy服务
 
 ### **4. ObLogProxy**
 ```

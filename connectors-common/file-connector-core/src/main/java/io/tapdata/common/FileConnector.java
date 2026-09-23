@@ -5,6 +5,7 @@ import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.util.MatchUtil;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
@@ -290,6 +291,12 @@ public abstract class FileConnector extends ConnectorBase {
                                         int eventBatchSize,
                                         BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer,
                                         AtomicReference<List<TapEvent>> tapEvents) throws Exception;
+
+    protected void addEventInfo(TapRecordEvent recordEvent, long lastModified, FileOffset fileOffset) {
+        recordEvent.addInfo("lastModified", lastModified);
+        recordEvent.addInfo("filePath", fileOffset.getPath());
+        recordEvent.addInfo("fileName", fileOffset.getPath().substring(fileOffset.getPath().lastIndexOf("/") + 1));
+    }
 
     protected Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Exception {
         FileOffset fileOffset = new FileOffset();

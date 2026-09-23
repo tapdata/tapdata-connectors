@@ -16,6 +16,8 @@
         <tapdata.pdk.api.version>2.0.7-SNAPSHOT</tapdata.pdk.api.version>
         <bouncycastle.version>1.84</bouncycastle.version>
         <skipITs>true</skipITs>
+        <it.groups></it.groups>
+        <it.excludedGroups>tpcc,performance,long-transaction</it.excludedGroups>
     </properties>
     <dependencies>
         <dependency>
@@ -155,6 +157,32 @@
         </dependency>
     </dependencies>
 
+    <profiles>
+        <profile>
+            <id>tpcc-only</id>
+            <properties>
+                <skipITs>false</skipITs>
+                <it.groups>tpcc</it.groups>
+                <it.excludedGroups></it.excludedGroups>
+            </properties>
+        </profile>
+        <profile>
+            <id>performance-only</id>
+            <properties>
+                <skipITs>false</skipITs>
+                <it.groups>performance</it.groups>
+                <it.excludedGroups></it.excludedGroups>
+            </properties>
+        </profile>
+        <profile>
+            <id>long-transaction-only</id>
+            <properties>
+                <skipITs>false</skipITs>
+                <it.groups>long-transaction</it.groups>
+                <it.excludedGroups></it.excludedGroups>
+            </properties>
+        </profile>
+    </profiles>
     <build>
         <plugins>
             <plugin>
@@ -329,6 +357,9 @@
                 <version>3.5.6</version>
                 <configuration>
                     <skipITs>${skipITs}</skipITs>
+                    <groups>${it.groups}</groups>
+                    <excludedGroups>${it.excludedGroups}</excludedGroups>
+                    <useModulePath>false</useModulePath>
                     <!-- MongodbWriter 依赖 AppType（引擎启动参数 app_type），fork JVM 需显式设置，
                         否则构造 writer 时抛 "app_type is blank" -->
                     <argLine>

@@ -25,6 +25,7 @@ import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.codec.ToTapValueCodec;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
+import io.tapdata.entity.event.ddl.constraint.TapDropConstraintEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -102,6 +103,20 @@ public class MysqlConnector extends CommonDbConnector {
     protected final AtomicBoolean started = new AtomicBoolean(false);
     public static final String MASTER_NODE_KEY = "MASTER_NODE";
     public java.util.HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave;
+
+    @Override
+    protected void singleThreadDiscoverSchema(List<DataMap> subList, Consumer<List<TapTable>> consumer) throws SQLException {
+        Set<String> viewNames = subList.stream()
+                .filter(table -> "VIEW".equalsIgnoreCase(table.getString("tableType")))
+                .map(table -> table.getString("tableName"))
+                .collect(Collectors.toSet());
+        super.singleThreadDiscoverSchema(subList, tapTables -> {
+            tapTables.stream()
+                    .filter(table -> viewNames.contains(table.getId()))
+                    .forEach(table -> table.setType("view"));
+            consumer.accept(tapTables);
+        });
+    }
 
 
     @Override
@@ -1078,6 +1093,61 @@ public class MysqlConnector extends CommonDbConnector {
                 throw exception;
             }
         }
+    }
+
+    @Override
+    protected String getCreateConstraintSql(TapTable tapTable, TapConstraint tapConstraint) {
+        if (TapConstraint.ConstraintType.UNIQUE != tapConstraint.getType()) {
+            return super.getCreateConstraintSql(tapTable, tapConstraint);
+        }
+        char escapeChar = commonDbConfig.getEscapeChar();
+        String constraintName = tapConstraint.getName();
+        String fields = tapConstraint.getMappingFields().stream()
+                .map(TapConstraintMapping::getForeignKey)
+                .map(field -> escapeChar + StringKit.escape(field, escapeChar) + escapeChar)
+                .collect(Collectors.joining(","));
+        return "alter table " + getSchemaAndTable(tapTable.getId())
+                + " add constraint " + escapeChar + StringKit.escape(constraintName, escapeChar) + escapeChar
+                + " unique (" + fields + ")";
+    }
+
+    @Override
+    protected List<TapConstraint> discoverConstraint(String tableName) {
+        List<TapConstraint> constraints = super.discoverConstraint(tableName);
+        List<DataMap> indexList;
+        try {
+            indexList = jdbcContext.queryAllIndexes(Collections.singletonList(tableName));
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        indexList.stream()
+                .filter(index -> tableName.equals(index.getString("tableName")))
+                .filter(index -> "1".equals(index.getString("isUnique")))
+                .filter(index -> !"1".equals(index.getString("isPk")))
+                .filter(index -> EmptyKit.isNotBlank(index.getString("indexName")))
+                .collect(Collectors.groupingBy(index -> index.getString("indexName"), LinkedHashMap::new, Collectors.toList()))
+                .forEach((name, indexes) -> {
+                    TapConstraint constraint = new TapConstraint(name, TapConstraint.ConstraintType.UNIQUE);
+                    indexes.forEach(index -> constraint.add(new TapConstraintMapping()
+                            .foreignKey(index.getString("columnName"))
+                            .referenceKey(index.getString("columnName"))));
+                    constraints.add(constraint);
+                });
+        return constraints;
+    }
+
+    @Override
+    protected void dropConstraint(TapConnectorContext connectorContext, TapTable table, TapDropConstraintEvent dropConstraintEvent) throws SQLException {
+        char escapeChar = commonDbConfig.getEscapeChar();
+        List<String> dropConstraintsSql = dropConstraintEvent.getConstraintList().stream()
+                .map(constraint -> "alter table " + getSchemaAndTable(table.getId())
+                        + (TapConstraint.ConstraintType.UNIQUE == constraint.getType() ? " drop index " : " drop foreign key ")
+                        + escapeChar + StringKit.escape(constraint.getName(), escapeChar) + escapeChar)
+                .collect(Collectors.toList());
+        if (EmptyKit.isNotEmpty(dropConstraintsSql)) {
+            tapLogger.info("Drop constraints sql: {}", dropConstraintsSql);
+        }
+        jdbcContext.batchExecute(dropConstraintsSql);
     }
 
     protected TapIndex makeTapIndex(String key, List<DataMap> value) {

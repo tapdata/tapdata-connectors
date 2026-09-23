@@ -17,6 +17,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import javax.script.ScriptEngine;
 import javax.script.ScriptException;
+import java.io.Closeable;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -104,8 +105,24 @@ public class CustomSchema {
                 time++;
             }
             if (t.isAlive()) {
-                TapLogger.info(TAG, "Running script timeout(10 seconds), stop javascript engine, cannot load any schema from data");
-                t.stop();
+                TapLogger.info(TAG, "Running script timeout(10 seconds), interrupt javascript engine, cannot load any schema from data");
+                t.interrupt();
+                if (scriptEngine instanceof Closeable) {
+                    try {
+                        ((Closeable) scriptEngine).close();
+                    } catch (Exception ignored) {
+                    }
+                }
+                try {
+                    t.join(2000L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            } else if (scriptEngine instanceof Closeable) {
+                try {
+                    ((Closeable) scriptEngine).close();
+                } catch (Exception ignored) {
+                }
             }
             if (EmptyKit.isEmpty(tapTable.getNameFieldMap())) {
                 TapLogger.info(TAG, "Cannot load schema from script data, Please check that the script is correct。");

@@ -65,6 +65,175 @@ public class PhysicalWalLogMinerTest {
     }
 
     @Test
+    public void testRecoveryStateSurvivesMinerReplacementAndRejectsOldCompletion() {
+        PhysicalWalLogMiner.RecoveryState state = new PhysicalWalLogMiner.RecoveryState();
+        PhysicalWalLogMiner first = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        PhysicalWalLogMiner replacement = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        first.useRecoveryState(state);
+        replacement.useRecoveryState(state);
+        long previousGeneration = state.begin();
+        long currentGeneration = state.begin();
+        assertTrue(first.isTimelineRecoveryInProgress());
+        assertTrue(replacement.isTimelineRecoveryInProgress());
+        assertFalse(state.complete(previousGeneration));
+        assertTrue(state.complete(currentGeneration));
+        assertFalse(replacement.isTimelineRecoveryInProgress());
+    }
+
+    @Test
+    public void testAncestorFailureTriesNextSourceWithoutSkippingOffset() throws Exception {
+        PostgresConfig config = new PostgresConfig();
+        config.setHost("primary");
+        config.setPort(5432);
+        config.setDatabase("postgres");
+        config.setUser("postgres");
+        config.setPassword("postgres");
+        config.setDeploymentMode("master-slave");
+        ArrayList<LinkedHashMap<String, Object>> addresses = new ArrayList<>();
+        addresses.add(node("standby", 5433));
+        config.setMasterSlaveAddress((ArrayList) addresses);
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        ReflectionTestUtils.setField(miner, "postgresConfig", config);
+        ReflectionTestUtils.setField(miner, "timelineChanged", true);
+        ReflectionTestUtils.setField(miner, "savedTimeline", 6);
+        ReflectionTestUtils.setField(miner, "currentTimeline", 7);
+        ReflectionTestUtils.setField(miner, "currentTimelineStartPoint", 16384L);
+        ReflectionTestUtils.setField(miner, "emitFromLsn", 8192L);
+        ReflectionTestUtils.setField(miner, "timelineHistoryChain",
+                PhysicalWalLogMiner.parseTimelineHistoryChain("6\t0/00004000\tpromotion\n"));
+        List<String> attempts = new ArrayList<>();
+        IllegalStateException secondSourceReached = new IllegalStateException("second source reached");
+        PSQLException removed = new PSQLException("requested WAL segment has already been removed", PSQLState.INVALID_CURSOR_STATE);
+        try (MockedStatic<DriverManager> driver = mockStatic(DriverManager.class)) {
+            driver.when(() -> DriverManager.getConnection(anyString(), any(Properties.class))).thenAnswer(invocation -> {
+                String url = invocation.getArgument(0);
+                attempts.add(url);
+                if (url.contains("standby")) {
+                    throw secondSourceReached;
+                }
+                Connection connection = mock(Connection.class);
+                org.postgresql.core.BaseConnection base = mock(org.postgresql.core.BaseConnection.class);
+                org.postgresql.core.QueryExecutor executor = mock(org.postgresql.core.QueryExecutor.class);
+                when(connection.unwrap(org.postgresql.core.BaseConnection.class)).thenReturn(base);
+                when(base.getQueryExecutor()).thenReturn(executor);
+                when(executor.startCopy(anyString(), org.mockito.ArgumentMatchers.eq(true))).thenThrow(removed);
+                return connection;
+            });
+            assertSame(secondSourceReached, assertThrows(IllegalStateException.class,
+                    () -> ReflectionTestUtils.invokeMethod(miner, "openStreamWithWarmRetry",
+                            8192L, 8192L, 16777216L, (java.util.function.Supplier<Boolean>) () -> true)));
+        }
+        assertEquals(2, attempts.size());
+        assertTrue(attempts.get(0).contains("primary"));
+        assertTrue(attempts.get(1).contains("standby"));
+        assertEquals(8192L, ReflectionTestUtils.getField(miner, "emitFromLsn"));
+        assertTrue((Boolean) ReflectionTestUtils.getField(miner, "timelineChanged"));
+    }
+
+    @Test
+    public void testUnsafeResumeIsScopedToRecoveryGeneration() {
+        PhysicalWalLogMiner.RecoveryState state = new PhysicalWalLogMiner.RecoveryState();
+        long generation = state.begin();
+        state.markUnsafe();
+        assertFalse(state.complete(generation));
+        long unsafeGeneration = state.generation();
+        assertFalse(state.complete(unsafeGeneration));
+        assertTrue(state.isRecovering());
+        long cleanGeneration = state.begin();
+        assertFalse(state.complete(unsafeGeneration));
+        assertTrue(state.complete(cleanGeneration));
+        assertFalse(state.isRecovering());
+    }
+
+    @Test
+    public void testRecoveryPrefersCurrentPrimaryOverConfiguredStandby() {
+        PostgresConfig config = new PostgresConfig();
+        config.setHost("standby");
+        config.setPort(5433);
+        config.setDatabase("postgres");
+        config.setUser("postgres");
+        config.setPassword("postgres");
+        config.setDeploymentMode("master-slave");
+        ArrayList<LinkedHashMap<String, Object>> addresses = new ArrayList<>();
+        addresses.add(node("primary", 5432));
+        config.setMasterSlaveAddress((ArrayList) addresses);
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        ReflectionTestUtils.setField(miner, "postgresConfig", config);
+        ReflectionTestUtils.setField(miner, "currentTimeline", 7);
+        try (MockedStatic<DriverManager> driver = mockStatic(DriverManager.class)) {
+            driver.when(() -> DriverManager.getConnection(anyString(), any(Properties.class))).thenAnswer(invocation -> {
+                String url = invocation.getArgument(0);
+                Connection connection = mock(Connection.class);
+                when(connection.prepareStatement(anyString())).thenAnswer(statementInvocation -> {
+                    PreparedStatement statement = mock(PreparedStatement.class);
+                    ResultSet result = mock(ResultSet.class);
+                    when(result.next()).thenReturn(true);
+                    when(result.getBoolean(1)).thenReturn(url.contains("standby"));
+                    when(result.getInt(1)).thenReturn(7);
+                    when(result.getString(1)).thenReturn("0/00004000");
+                    when(statement.executeQuery()).thenReturn(result);
+                    return statement;
+                });
+                return connection;
+            });
+            List<?> sources = ReflectionTestUtils.invokeMethod(miner, "timelineSources");
+            List<?> ordered = ReflectionTestUtils.invokeMethod(miner, "recoverySources", sources,
+                    (java.util.function.Supplier<Boolean>) () -> true);
+            assertEquals("primary", ReflectionTestUtils.getField(ordered.get(0), "host"));
+            assertEquals("standby", ReflectionTestUtils.getField(ordered.get(1), "host"));
+        }
+    }
+
+    @Test
+    public void testRecycledOffsetCannotAdvanceWithoutExplicitOverride() {
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        ReflectionTestUtils.setField(miner, "postgresConfig", new PostgresConfig());
+        ReflectionTestUtils.setField(miner, "emitFromLsn", 8192L);
+        assertEquals(0L, (Long) ReflectionTestUtils.invokeMethod(miner, "tryResumeFromRecycledOffset", new Object[]{null}));
+        assertEquals(8192L, ReflectionTestUtils.getField(miner, "emitFromLsn"));
+    }
+
+    @Test
+    public void testCurrentTimelineAcknowledgementCanCompleteOnStandby() {
+        PostgresConfig config = new PostgresConfig();
+        config.setHost("primary");
+        config.setPort(5432);
+        config.setDatabase("postgres");
+        config.setUser("postgres");
+        config.setPassword("postgres");
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        ReflectionTestUtils.setField(miner, "postgresConfig", config);
+        PhysicalWalLogMiner.RecoveryState state = new PhysicalWalLogMiner.RecoveryState();
+        miner.useRecoveryState(state);
+        ReflectionTestUtils.setField(miner, "recoveryStreamGeneration", state.begin());
+        ReflectionTestUtils.setField(miner, "recoveryStreamStartLsn", 8192L);
+        ReflectionTestUtils.setField(miner, "recoveryStreamTimeline", 7);
+        ReflectionTestUtils.setField(miner, "currentTimeline", 7);
+        List<?> sources = ReflectionTestUtils.invokeMethod(miner, "timelineSources");
+        ReflectionTestUtils.setField(miner, "activeTimelineSource", sources.get(0));
+        assertFalse(miner.requiresConfiguredSourceReconnect());
+        java.util.concurrent.atomic.AtomicBoolean standby = new java.util.concurrent.atomic.AtomicBoolean(true);
+        try (MockedStatic<DriverManager> driver = mockStatic(DriverManager.class)) {
+            driver.when(() -> DriverManager.getConnection(anyString(), any(Properties.class))).thenAnswer(invocation -> {
+                Connection connection = mock(Connection.class);
+                when(connection.prepareStatement(anyString())).thenAnswer(statementInvocation -> {
+                    PreparedStatement statement = mock(PreparedStatement.class);
+                    ResultSet result = mock(ResultSet.class);
+                    when(result.next()).thenReturn(true);
+                    when(result.getBoolean(1)).thenAnswer(ignored -> standby.get());
+                    when(result.getInt(1)).thenReturn(7);
+                    when(result.getString(1)).thenReturn("0/00004000");
+                    when(statement.executeQuery()).thenReturn(result);
+                    return statement;
+                });
+                return connection;
+            });
+            ReflectionTestUtils.invokeMethod(miner, "rememberPersistedStreamOffset", "0/00003000,timeline=7");
+            assertFalse(state.isRecovering());
+        }
+    }
+
+    @Test
     public void testParseSizeCaseAndSpaces() {
         assertEquals(16L * 1024 * 1024, PhysicalWalLogMiner.parseSize("  16mb "));
         assertEquals(2L * 1024 * 1024 * 1024, PhysicalWalLogMiner.parseSize("2Gb"));
@@ -491,7 +660,56 @@ public class PhysicalWalLogMinerTest {
                         "0/B000578,timeline=6"));
 
         assertEquals("TimelineCatchupRetryException", retryable.getCause().getClass().getSimpleName());
-        assertTrue(retryable.getCause().getMessage().contains("current-timeline standby node"));
+        assertTrue(retryable.getCause().getMessage().contains("current-timeline primary node"));
+    }
+
+    @Test
+    public void testUnsafeTimelineResumeDisabledByDefault() {
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        ReflectionTestUtils.setField(miner, "postgresConfig", new PostgresConfig());
+
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(miner, "isUnsafeTimelineResumeEnabled"));
+    }
+
+    @Test
+    public void testUnsafeTimelineResumeEnabledViaConfigFlag() {
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        PostgresConfig config = new PostgresConfig();
+        config.setWalUnsafeTimelineResume(true);
+        ReflectionTestUtils.setField(miner, "postgresConfig", config);
+
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(miner, "isUnsafeTimelineResumeEnabled"));
+    }
+
+    @Test
+    public void testRecoveryCanCompleteOnCurrentTimelineStandby() {
+        PhysicalWalLogMiner.RecoveryState state = new PhysicalWalLogMiner.RecoveryState();
+        long generation = state.begin();
+        assertTrue(state.complete(generation));
+    }
+
+    @Test
+    public void testNewRecoveryGenerationClearsUnsafeLatch() {
+        PhysicalWalLogMiner.RecoveryState state = new PhysicalWalLogMiner.RecoveryState();
+        long generation = state.begin();
+        ReflectionTestUtils.invokeMethod(state, "markUnsafe");
+        assertFalse(state.complete(generation));
+        long nextGeneration = state.begin();
+        assertTrue(state.complete(nextGeneration));
+    }
+
+    @Test
+    public void testAncestorCatchupStalledWrapsCauseWithoutClaimingItWillSkip() {
+        PhysicalWalLogMiner miner = new PhysicalWalLogMiner(mock(PostgresJdbcContext.class), mock(Log.class));
+        ReflectionTestUtils.setField(miner, "restorePrimaryAtLsn",
+                org.postgresql.replication.LogSequenceNumber.valueOf("0/B000578").asLong());
+        RuntimeException cause = new RuntimeException("requested WAL segment has already been removed");
+
+        TapPdkRetryableEx retryable = (TapPdkRetryableEx) ReflectionTestUtils.invokeMethod(
+                miner, "ancestorCatchupStalled", cause);
+
+        assertEquals("AncestorCatchupStalledException", retryable.getCause().getClass().getSimpleName());
+        assertTrue(retryable.getCause().getMessage().contains("could not be consumed on source"));
     }
 
     @Test

@@ -55,6 +55,11 @@ public class MongodbConfig extends CommonDbConfig {
 	private boolean timeSeriesCollection;
 	private String writeConcern = "w1";
 
+	public static final int DEFAULT_DECODE_THREADS = 8;
+	public static final int DEFAULT_DECODE_QUEUE_SIZE = 32;
+	private int decodeThreads = DEFAULT_DECODE_THREADS;
+	private int decodeQueueSize = DEFAULT_DECODE_QUEUE_SIZE;
+
 	public boolean isSyncIndex() {
 		return syncIndex;
 	}
@@ -268,5 +273,21 @@ public class MongodbConfig extends CommonDbConfig {
 
 	public void setWriteConcern(String writeConcern) {
 		this.writeConcern = writeConcern;
+	}
+
+	public int getDecodeThreads() {
+		return decodeThreads > 0 ? decodeThreads : DEFAULT_DECODE_THREADS;
+	}
+
+	public void setDecodeThreads(int decodeThreads) {
+		this.decodeThreads = decodeThreads;
+	}
+
+	public int getDecodeQueueSize() {
+		return decodeQueueSize > 0 ? decodeQueueSize : DEFAULT_DECODE_QUEUE_SIZE;
+	}
+
+	public void setDecodeQueueSize(int decodeQueueSize) {
+		this.decodeQueueSize = decodeQueueSize;
 	}
 }

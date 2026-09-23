@@ -49,4 +49,15 @@ public interface KafkaErrorCodes {
 	)
 	String KAFKA_COMMON_ERROR = "40003";
 
+	@TapExCode(
+			describe = "Kafka Timeout",
+			describeCN = "Kafka连接超时",
+			solution = "Please check whether the Kafka connection information is correct, and check whether the network connection is normal",
+			solutionCN = "请检查kafka连接信息是否正确，并检查网络连接是否正常",
+			dynamicDescription = "The topic currently used: {}",
+			dynamicDescriptionCN = "当前使用的topic：{}",
+			recoverable = true
+	)
+	String TIME_OUT = "40004";
+
 }

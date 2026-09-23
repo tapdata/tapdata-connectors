@@ -28,6 +28,7 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
+import io.tapdata.entity.event.ddl.index.TapDeleteIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.*;
@@ -96,6 +97,7 @@ public class PostgresConnector extends CommonDbConnector {
     protected PostgresPartitionContext postgresPartitionContext;
     private ScheduledExecutorService asyncCheckSlaveExecutor;
     private final AtomicInteger observedTimelineFloor = new AtomicInteger(0);
+    private final PhysicalWalLogMiner.RecoveryState physicalRecoveryState = new PhysicalWalLogMiner.RecoveryState();
     private static final String TIMELINE_FROM_WAL_FILE_SQL =
             "SELECT substring(pg_walfile_name(CASE WHEN pg_is_in_recovery() "
                     + "THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END), 1, 8)";
@@ -318,12 +320,7 @@ public class PostgresConnector extends CommonDbConnector {
     private void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
         if (EmptyKit.isNull(slotName)) {
             slotName = "tapdata_cdc_" + UUID.randomUUID().toString().replaceAll("-", "_");
-            String sql;
-            if ("physical".equals(postgresConfig.getLogPluginName())) {
-                sql = "SELECT pg_create_physical_replication_slot('" + slotName + "')";
-            } else {
-                sql = "SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')";
-            }
+            String sql = buildCreateSlotSql(slotName.toString());
             long begin = System.currentTimeMillis();
             try {
                 postgresJdbcContext.execute(sql, 20);
@@ -334,7 +331,11 @@ public class PostgresConnector extends CommonDbConnector {
                     throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_FAILED, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
                 }
             }
-            tapLogger.info("new logical replication slot created, slotName:{}", slotName);
+            tapLogger.info("new {} replication slot created, slotName:{}, logicalFailover={}",
+                    "physical".equals(postgresConfig.getLogPluginName()) ? "physical" : "logical",
+                    slotName,
+                    Boolean.TRUE.equals(postgresConfig.getLogicalSlotFailover())
+                            && "pgoutput".equals(postgresConfig.getLogPluginName()));
             connectorContext.getStateMap().put("tapdata_pg_slot", slotName);
         } else if (needCheck) {
             AtomicBoolean existSlot = new AtomicBoolean(true);
@@ -347,21 +348,34 @@ public class PostgresConnector extends CommonDbConnector {
                 tapLogger.info("Using an existing logical replication slot, slotName:{}", slotName);
             } else {
                 long begin = System.currentTimeMillis();
-                if ("physical".equals(postgresConfig.getLogPluginName())) {
-                    String sql = "SELECT pg_create_physical_replication_slot('" + slotName + "')";
-                    try {
-                        postgresJdbcContext.execute(sql, 20);
-                    } catch (SQLException e) {
-                        if (System.currentTimeMillis() - begin > 18000) {
-                            throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_TIMEOUT, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
-                        } else {
-                            throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_FAILED, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
-                        }
+                String sql = buildCreateSlotSql(slotName.toString());
+                try {
+                    postgresJdbcContext.execute(sql, 20);
+                } catch (SQLException e) {
+                    if (System.currentTimeMillis() - begin > 18000) {
+                        throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_TIMEOUT, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                    } else {
+                        throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_FAILED, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
                     }
                 }
                 tapLogger.warn("The previous logical replication slot no longer exists. Although it has been rebuilt, there is a possibility of data loss. Please check");
             }
         }
+    }
+
+    private String buildCreateSlotSql(String slotName) {
+        if ("physical".equals(postgresConfig.getLogPluginName())) {
+            return "SELECT pg_create_physical_replication_slot('" + slotName + "')";
+        }
+        if ("pgoutput".equals(postgresConfig.getLogPluginName())
+                && Boolean.TRUE.equals(postgresConfig.getLogicalSlotFailover())
+                && postgresVersion != null
+                && Integer.parseInt(postgresVersion) >= 170000) {
+            return "SELECT pg_create_logical_replication_slot('" + slotName + "','"
+                    + postgresConfig.getLogPluginName() + "',false,false,true)";
+        }
+        return "SELECT pg_create_logical_replication_slot('" + slotName + "','"
+                + postgresConfig.getLogPluginName() + "')";
     }
 
     private static final String PG_REPLICATE_IDENTITY = "select relname, relreplident from pg_class " +
@@ -411,7 +425,11 @@ public class PostgresConnector extends CommonDbConnector {
 
     private Object getStreamOffsetFromString(TapConnectorContext connectorContext, String offsetString) {
         if (EmptyKit.isBlank(offsetString)) {
-            throw new IllegalArgumentException("Offset string cannot be null or empty");
+            try {
+                return timestampToStreamOffset(connectorContext, null);
+            } catch (Throwable throwable) {
+                throw new RuntimeException("Failed to get current PostgreSQL stream offset", throwable);
+            }
         }
 
         try {
@@ -744,8 +762,9 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
+        preparePhysicalRecovery();
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
-            postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
+            selectCdcNode();
             postgresJdbcContext.refresh();
             tapLogger.info("Postgres cdc connected to node: {}:{}", postgresConfig.getHost(), postgresConfig.getPort());
         }
@@ -769,6 +788,7 @@ public class PostgresConnector extends CommonDbConnector {
             buildSlot(nodeContext, true);
             try {
                 PhysicalWalLogMiner miner = new PhysicalWalLogMiner(postgresJdbcContext, tapLogger);
+                miner.useRecoveryState(physicalRecoveryState);
                 miner.useSlot(slotName.toString());
                 miner.watch(new ArrayList<>(tableList), nodeContext.getTableMap());
 
@@ -864,6 +884,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamReadMultiConnection(TapConnectorContext nodeContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offsetState, int batchSize, StreamReadConsumer consumer) throws Throwable {
+        preparePhysicalRecovery();
         Map<String, List<String>> schemaTableMap = new HashMap<>();
         for (ConnectionConfigWithTables withTables : connectionConfigWithTables) {
             if (null == withTables.getConnectionConfig())
@@ -887,7 +908,7 @@ public class PostgresConnector extends CommonDbConnector {
             });
         }
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
-            postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
+            selectCdcNode();
             postgresJdbcContext.refresh();
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
@@ -909,6 +930,7 @@ public class PostgresConnector extends CommonDbConnector {
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
             PhysicalWalLogMiner miner = new PhysicalWalLogMiner(postgresJdbcContext, tapLogger);
+            miner.useRecoveryState(physicalRecoveryState);
             miner.useSlot(slotName.toString());
             miner.watch(schemaTableMap, nodeContext.getTableMap());
 
@@ -975,7 +997,7 @@ public class PostgresConnector extends CommonDbConnector {
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
-            postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
+            selectCdcNode();
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotBlank(postgresConfig.getPgtoHost())) {
@@ -1041,9 +1063,43 @@ public class PostgresConnector extends CommonDbConnector {
         return new PostgresOffset();
     }
 
+    private void preparePhysicalRecovery() {
+        if ("physical".equals(postgresConfig.getLogPluginName())) {
+            if (physicalRecoveryState.isRecovering()) {
+                physicalRecoveryState.begin();
+            }
+            if (asyncCheckSlaveExecutor != null) {
+                asyncCheckSlaveExecutor.shutdownNow();
+            }
+        }
+    }
+
+    private void selectCdcNode() {
+        if ("physical".equals(postgresConfig.getLogPluginName()) && physicalRecoveryState.isRecovering()) {
+            if (!postgresTest.testHostPortForMasterSlave(true)) {
+                throw new TapPdkRetryableEx("postgres", new IllegalStateException(
+                        "No primary available during physical WAL recovery; retry without advancing the offset"));
+            }
+            return;
+        }
+        if ("physical".equals(postgresConfig.getLogPluginName())
+                && !physicalRecoveryState.isRecovering()
+                && Boolean.TRUE.equals(postgresConfig.getCheckCdcSlave())) {
+            SlaveNodeState selected = selectTimelineHealthySlaveNode(observedTimelineFloor.get());
+            if (selected != null) {
+                postgresConfig.setHost(selected.host);
+                postgresConfig.setPort(selected.port);
+                return;
+            }
+        }
+        postgresTest.testHostPortForMasterSlave(true);
+    }
+
     private void checkCdcSlaveConnected(PhysicalWalLogMiner miner) throws SQLException {
         if (Boolean.TRUE.equals(postgresConfig.getCheckCdcSlave())) {
-            ensureCdcConnectedToSlave(miner);
+            if (!physicalRecoveryState.isRecovering()) {
+                ensureCdcConnectedToSlave(miner);
+            }
             if (asyncCheckSlaveExecutor != null) {
                 asyncCheckSlaveExecutor.shutdownNow();
             }
@@ -1054,6 +1110,9 @@ public class PostgresConnector extends CommonDbConnector {
             });
             asyncCheckSlaveExecutor.scheduleAtFixedRate(() -> {
                 try {
+                    if (physicalRecoveryState.isRecovering()) {
+                        return;
+                    }
                     if ("master-slave".equals(postgresConfig.getDeploymentMode())
                             && "physical".equals(postgresConfig.getLogPluginName())) {
                         if (ensureCdcConnectedToSlave(miner)) {
@@ -1096,7 +1155,12 @@ public class PostgresConnector extends CommonDbConnector {
                     && selected.port == postgresConfig.getPort()) {
                 return false;
             }
-            return switchCdcConnectionToTimelineHealthySlave(selected);
+            synchronized (physicalRecoveryState) {
+                if (physicalRecoveryState.isRecovering()) {
+                    return false;
+                }
+                return switchCdcConnectionToTimelineHealthySlave(selected);
+            }
         }
         postgresJdbcContext.queryWithNext("SELECT pg_is_in_recovery()", resultSet -> {
             boolean isInRecovery = resultSet.getBoolean(1);
@@ -1199,6 +1263,10 @@ public class PostgresConnector extends CommonDbConnector {
                                 + "the cluster current timeline {}",
                         state.host, state.port, state.timeline, requiredTimeline);
                 continue;
+            }
+            if (state.host.equals(String.valueOf(postgresConfig.getHost()))
+                    && state.port == postgresConfig.getPort()) {
+                return state;
             }
             if (selected == null
                     || state.readableLsn > selected.readableLsn
@@ -1327,7 +1395,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private TapPdkRetryableEx newSlavePreferredRetryableException() {
-        return newSlavePreferredRetryableException("Master node detected, please switch to slave node for CDC");
+        return newSlavePreferredRetryableException("Postgres CDC reconnect requested to use a timeline-healthy standby node");
     }
 
     private TapPdkRetryableEx newSlavePreferredRetryableException(String message) {
@@ -1455,9 +1523,22 @@ public class PostgresConnector extends CommonDbConnector {
     protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
         DataMap dataMap = postgresJdbcContext.getTableInfo(tableName);
         TableInfo tableInfo = TableInfo.create();
-        tableInfo.setNumOfRows(new BigDecimal(dataMap.getString("rowcount")).longValue());
+        tableInfo.setNumOfRows(Math.max(0L, new BigDecimal(dataMap.getString("rowcount")).longValue()));
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("size")));
         return tableInfo;
+    }
+
+    @Override
+    protected void dropIndexes(TapConnectorContext connectorContext, TapTable table, TapDeleteIndexEvent deleteIndexEvent) throws SQLException {
+        char escapeChar = commonDbConfig.getEscapeChar();
+        List<String> dropIndexesSql = new ArrayList<>();
+        deleteIndexEvent.getIndexNames().forEach(indexName -> dropIndexesSql.add(
+                "drop index " + escapeChar + postgresConfig.getSchema() + escapeChar + "."
+                        + escapeChar + indexName + escapeChar));
+        if (EmptyKit.isNotEmpty(dropIndexesSql)) {
+            tapLogger.info("Drop indexes sql: {}", dropIndexesSql);
+        }
+        jdbcContext.batchExecute(dropIndexesSql);
     }
 
 

@@ -163,7 +163,9 @@ public class CsvConnector extends FileConnector {
                             blankSkip++;
                             continue;
                         }
-                        tapEvents.get().add(insertRecordEvent(after, tapTable.getId()).referenceTime(lastModified));
+                        TapRecordEvent recordEvent = insertRecordEvent(after, tapTable.getId()).referenceTime(lastModified);
+                        addEventInfo(recordEvent, lastModified, fileOffset);
+                        tapEvents.get().add(recordEvent);
                         if (tapEvents.get().size() == eventBatchSize) {
                             fileOffset.setDataLine(fileOffset.getDataLine() + eventBatchSize + blankSkip);
                             blankSkip = 0;
@@ -221,7 +223,9 @@ public class CsvConnector extends FileConnector {
                             blankSkip++;
                             continue;
                         }
-                        tapEvents.get().add(insertRecordEvent(after, tapTable.getId()).referenceTime(lastModified));
+                        TapRecordEvent recordEvent = insertRecordEvent(after, tapTable.getId()).referenceTime(lastModified);
+                        addEventInfo(recordEvent, lastModified, fileOffset);
+                        tapEvents.get().add(recordEvent);
                         if (tapEvents.get().size() == eventBatchSize) {
                             fileOffset.setDataLine(fileOffset.getDataLine() + eventBatchSize + blankSkip);
                             blankSkip = 0;
