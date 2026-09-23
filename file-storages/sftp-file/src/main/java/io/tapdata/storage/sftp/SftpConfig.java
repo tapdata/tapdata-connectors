@@ -13,7 +13,7 @@ public class SftpConfig implements Serializable {
     private String sftpUsername;
     private String sftpPassword;
     private String encoding = "UTF-8";
-    private String sftpStrictHostKeyChecking = "yes";
+    private String sftpStrictHostKeyChecking = "no";
     private String sftpKnownHosts;
     private int sftpConnectionTimeoutMillis = 10000;
 
@@ -103,7 +103,7 @@ public class SftpConfig implements Serializable {
             encoding = "UTF-8";
         }
         if (sftpStrictHostKeyChecking == null || sftpStrictHostKeyChecking.trim().isEmpty()) {
-            sftpStrictHostKeyChecking = "yes";
+            sftpStrictHostKeyChecking = "no";
         }
         if (!"yes".equalsIgnoreCase(sftpStrictHostKeyChecking)
                 && !"no".equalsIgnoreCase(sftpStrictHostKeyChecking)

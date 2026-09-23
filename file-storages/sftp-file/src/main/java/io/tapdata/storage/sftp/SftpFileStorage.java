@@ -43,6 +43,8 @@ public class SftpFileStorage implements TapFileStorage {
             JSch jsch = new JSch();
             if (EmptyKit.isNotBlank(sftpConfig.getSftpKnownHosts())) {
                 jsch.setKnownHosts(sftpConfig.getSftpKnownHosts());
+            } else {
+                sftpConfig.setSftpStrictHostKeyChecking("no");
             }
             Session newSession = jsch.getSession(sftpConfig.getSftpUsername(),
                     sftpConfig.getSftpHost(), sftpConfig.getSftpPort());
