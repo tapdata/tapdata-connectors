@@ -1,5 +1,5 @@
 {
-  "host": "127.0.0.1",
+  "host": "clickhouse.taptest-dbs.svc.cluster.local",
   "port": 8123,
   "database": "default",
   "user": "default",

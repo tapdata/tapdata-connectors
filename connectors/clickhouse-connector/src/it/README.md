@@ -34,6 +34,8 @@ CONNECTOR_IT_DBFORGE_TOKEN="$DBFORGE_TOKEN" \
 mvn -pl connectors/clickhouse-connector -am verify -DskipITs=false
 ```
 
-The client requests `clickhouse/dedicated/single`. The DBForge deployment must advertise that capability; deployments without a ClickHouse driver intentionally return an acquisition error rather than silently falling back to JSON.
+The client requests `clickhouse/dedicated/single`. DBForge must have the ClickHouse runtime
+driver enabled; it provisions `clickhouse/clickhouse-server:23.7` as an isolated temporary
+instance. DBForge failures intentionally fail the test and never silently fall back to JSON.
 
 The default connection file is `src/it/resources/config/clickhouse-connection.json`. Override values with `connector.it.*` system properties or `CONNECTOR_IT_*` environment variables.
