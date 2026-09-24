@@ -1,5 +1,12 @@
 package io.tapdata.mongodb;
 
+import com.mongodb.ConnectionString;
+import com.mongodb.MongoClientSettings;
+import com.mongodb.event.CommandListener;
+import com.mongodb.event.CommandStartedEvent;
+import com.mongodb.event.CommandSucceededEvent;
+import com.mongodb.event.CommandFailedEvent;
+import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
@@ -94,6 +101,68 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
                 "writeRecord", "createIndex", "queryIndexes", "errorHandle",
                 "executeCommand", "getTableInfo", "getReadPartitions", "queryFieldMinMaxValue",
                 "transactionBegin", "transactionCommit", "transactionRollback").collect(Collectors.toSet());
+    }
+
+
+    @Test
+    @DisplayName("TAP-11650 statistics and filtered count contract")
+    @UnderTest(value = "getTableInfo", requiresVerifier = true)
+    @UnderTest(value = "batchCount", requiresVerifier = true)
+    void statistics_contract() throws Throwable {
+        collection().insertMany(Arrays.asList(
+                new Document("_id", "stats-1").append("category", "included").append("value", 10),
+                new Document("_id", "stats-2").append("category", "included").append("value", 20),
+                new Document("_id", "stats-3").append("category", "excluded").append("value", 30)));
+        TapTable table = discoverTable();
+        registerTable(table);
+        long exactCount = collection().countDocuments();
+        assertEquals(3L, exactCount, "isolated fixture should contain exactly three documents");
+
+        TableInfo info = functions().getGetTableInfoFunction().getTableInfo(nodeContext(), table.getId());
+        assertEquals(exactCount, info.getNumOfRows().longValue());
+        assertTrue(info.getStorageSize() > 0L, "nonempty collection should expose data size");
+        assertTrue(info.getAvgObjSize() > 0L, "nonempty collection should expose average object size");
+        assertEquals(exactCount, functions().getBatchCountFunction().count(nodeContext(), table));
+
+        List<String> commands = Collections.synchronizedList(new ArrayList<>());
+        MongoClientSettings settings = MongoClientSettings.builder()
+                .applyConnectionString(new ConnectionString(context.getConfig().getString("uri")))
+                .addCommandListener(new CommandListener() {
+                    @Override
+                    public void commandStarted(CommandStartedEvent event) {
+                        commands.add(event.getCommandName());
+                    }
+
+                    @Override
+                    public void commandSucceeded(CommandSucceededEvent event) {
+                    }
+
+                    @Override
+                    public void commandFailed(CommandFailedEvent event) {
+                    }
+                }).build();
+        try (MongoClient observed = MongoClients.create(settings)) {
+            String database = context.getConfig().getString("database");
+            int majorVersion = MongodbUtil.getVersion(observed, database);
+            commands.clear();
+            Map<String, Object> stats = MongodbUtil.getCollectionStatus(observed, database, table.getId());
+            assertEquals(exactCount, ((Number) stats.get("count")).longValue());
+            assertEquals(info.getStorageSize().longValue(), ((Number) stats.get("size")).longValue());
+            if (majorVersion >= 6) {
+                assertTrue(commands.contains("aggregate"), "MongoDB 6+ must use aggregation statistics");
+                assertFalse(commands.contains("collStats"), "MongoDB 6+ must not issue legacy collStats");
+            } else {
+                assertTrue(commands.contains("collStats"), "MongoDB 4/5 should retain legacy statistics");
+            }
+            assertEquals(exactCount, MongodbConnector.getCollectionNotAggregateCountByTableName(
+                    observed, database, table.getId(), null));
+            Document filter = new Document("category", "included");
+            long filteredCount = collection().countDocuments(filter);
+            assertEquals(2L, filteredCount);
+            assertEquals(filteredCount, MongodbConnector.getCollectionNotAggregateCountByTableName(
+                    observed, database, table.getId(), filter));
+            context.getLog().info("[IT] TAP-11650 statistics contract verified on MongoDB major={}", majorVersion);
+        }
     }
 
     @Test
