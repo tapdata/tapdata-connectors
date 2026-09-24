@@ -846,7 +846,10 @@ class MongodbConnectorTest {
             Double size = 366907867698976.0;
             collStats.put("count",count);
             collStats.put("size",size);
-            when(mongoDatabase.runCommand(new Document("collStats", tableName))).thenReturn(collStats);
+            when(mongoDatabase.runCommand(new org.bson.BsonDocument("buildinfo", new org.bson.BsonString(""))))
+                    .thenReturn(new Document("version", "5.0.0"));
+            when(mongoDatabase.runCommand(new org.bson.BsonDocument("collStats", new org.bson.BsonString(tableName))))
+                    .thenReturn(collStats);
             doCallRealMethod().when(mongodbConnector).getTableInfo(tapConnectorContext,tableName);
             TableInfo actualData = mongodbConnector.getTableInfo(tapConnectorContext, tableName);
             Assertions.assertTrue(actualData.getNumOfRows().longValue() == count);

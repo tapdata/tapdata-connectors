@@ -84,8 +84,7 @@ public class MongodbUtil {
 		Map<String, Object> map = new HashMap<>();
 		if (null == mongoClient || null == database || "".equals(database.trim()) || null == collectionName || "".equals(collectionName.trim())) return map;
 		try {
-			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
-			Document collStats = mongoDatabase.runCommand(new BsonDocument(COLL_STATS, new BsonString(collectionName)));
+			Document collStats = collectionStats(mongoClient, database, collectionName);
 			Set<Map.Entry<String, Object>> entries = collStats.entrySet();
 			if (null != entries && !entries.isEmpty()) {
 				collStats.entrySet()
@@ -99,6 +98,65 @@ public class MongodbUtil {
 			return map;
 		}
 		return map;
+	}
+
+	// Callers that previously propagated command failures must keep that contract.
+	static Document collectionStats(MongoClient mongoClient, String database, String collectionName) {
+		MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
+		return getVersion(mongoClient, database) >= 6
+				? aggregateCollectionStats(mongoDatabase.getCollection(collectionName))
+				: mongoDatabase.runCommand(new BsonDocument(COLL_STATS, new BsonString(collectionName)));
+	}
+
+	static Document aggregateCollectionStats(MongoCollection<Document> collection) {
+		Document result = new Document();
+		long totalCount = 0L;
+		double totalSize = 0D;
+		List<Object> shards = new ArrayList<>();
+		for (Document item : collection.aggregate(Collections.singletonList(
+				new Document("$collStats", new Document("storageStats", new Document()))))) {
+			item.forEach((key, value) -> {
+				if (!"storageStats".equals(key)) result.putIfAbsent(key, value);
+			});
+			if (item.get("shard") != null) shards.add(item.get("shard"));
+			Document storageStats = item.get("storageStats", Document.class);
+			if (storageStats == null) {
+				continue;
+			}
+			totalCount += numberAsLong(storageStats.get("count"));
+			totalSize += numberAsDouble(storageStats.get("size"));
+			for (String key : Arrays.asList("count", "size", "storageSize", "totalIndexSize", "totalSize")) {
+				Object value = storageStats.get(key);
+				if (value instanceof Number) {
+					Number current = (Number) result.get(key);
+					result.put(key, addNumbers(current, (Number) value));
+				}
+			}
+			storageStats.forEach(result::putIfAbsent);
+		}
+		if (totalCount > 0L) result.put("avgObjSize", totalSize / totalCount);
+		if (result.get("totalIndexSize") != null) result.put("indexSize", result.get("totalIndexSize"));
+		if (!shards.isEmpty()) {
+			result.put("sharded", true);
+			result.put("shards", shards);
+		}
+		return result;
+	}
+
+	private static Number addNumbers(Number current, Number value) {
+		if (current == null) return value;
+		if (current instanceof Float || current instanceof Double || value instanceof Float || value instanceof Double) {
+			return current.doubleValue() + value.doubleValue();
+		}
+		return current.longValue() + value.longValue();
+	}
+
+	private static long numberAsLong(Object value) {
+		return value instanceof Number ? ((Number) value).longValue() : 0L;
+	}
+
+	private static double numberAsDouble(Object value) {
+		return value instanceof Number ? ((Number) value).doubleValue() : 0D;
 	}
 
 	public static void getTimeSeriesCollectionStatus(MongoClient mongoClient, String database, String collectionName, TapTable table ){

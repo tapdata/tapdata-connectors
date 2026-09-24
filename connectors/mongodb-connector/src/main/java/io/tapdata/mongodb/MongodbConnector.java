@@ -1390,11 +1390,14 @@ public class MongodbConnector extends ConnectorBase {
 
 	private Boolean isShard(String tableId) {
 		try {
-			Document document = mongoDatabase.runCommand(new Document("collStats", tableId));
-			if (document.containsKey("sharded")) {
-				return (Boolean) document.get("sharded");
+			if (MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase()) < 6) {
+				Document stats = mongoDatabase.runCommand(new Document("collStats", tableId));
+				return stats.getBoolean("sharded", false);
 			}
-		} catch (Exception ignored) {
+			return !MongodbUtil.getCollectionSharkedKeys(mongoClient, mongoConfig.getDatabase(), tableId).isEmpty();
+		} catch (Exception e) {
+			TapLogger.warn(MongodbConnector.class.getSimpleName(), "Unable to determine whether collection {}.{} is sharded: {}",
+					mongoConfig.getDatabase(), tableId, e.getMessage());
 		}
 		return false;
 	}
@@ -1612,28 +1615,8 @@ public class MongodbConnector extends ConnectorBase {
 	}
 
 	public static long getCollectionNotAggregateCountByTableName(MongoClient mongoClient, String db, String collectionName, Bson filter) {
-		long dbCount = 0L;
-		MongoDatabase database = mongoClient.getDatabase(db);
-		Document countDocument = database.runCommand(
-				new Document("count", collectionName)
-						.append("query", filter == null ? new Document() : filter)
-		);
-
-		if (countDocument.containsKey("ok") && countDocument.containsKey("n")) {
-			if (countDocument.get("ok").equals(1d)) {
-//				dbCount = Long.valueOf(countDocument.get("n") + "");
-				Object countObj = countDocument.get("n");
-				String countStr = countObj + "";
-				try {
-					dbCount = Long.parseLong(countStr);
-				} catch (NumberFormatException e) {
-					TapLogger.warn("Count result parsing failure of the collection '{}.{}' and type is {}: {}", db, collectionName, countObj.getClass(), e.getMessage(), e);
-					dbCount = (long) Double.parseDouble(countStr);
-				}
-			}
-		}
-
-		return dbCount;
+		MongoCollection<Document> collection = mongoClient.getDatabase(db).getCollection(collectionName);
+		return filter == null ? collection.estimatedDocumentCount() : collection.countDocuments(filter);
 	}
 
 	/**
@@ -1924,8 +1907,7 @@ public class MongodbConnector extends ConnectorBase {
 		TableInfo tableInfo;
 		try {
 			String database = mongoConfig.getDatabase();
-			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
-			Document collStats = mongoDatabase.runCommand(new Document("collStats", tableName));
+			Document collStats = MongodbUtil.collectionStats(mongoClient, database, tableName);
 			tableInfo = TableInfo.create();
 			tableInfo.setNumOfRows(getLongFromDocument(collStats, "count"));
 			tableInfo.setStorageSize(getLongFromDocument(collStats, "size"));
