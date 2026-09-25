@@ -12,6 +12,7 @@
     <name>kafka-connector</name>
 
     <properties>
+        <tapdata.pdk.runner.version>2.5-SNAPSHOT</tapdata.pdk.runner.version>
         <tapdata.pdk.api.version>2.0.8-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
     <!--<dependencyManagement>-->
@@ -25,6 +26,7 @@
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>tapdata-pdk-runner</artifactId>
+            <version>${tapdata.pdk.runner.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>

@@ -13,7 +13,6 @@
 
     <properties>
         <java.version>8</java.version>
-        <tapdata.pdk.api.version>2.0.7-SNAPSHOT</tapdata.pdk.api.version>
         <bouncycastle.version>1.84</bouncycastle.version>
         <skipITs>true</skipITs>
         <it.groups></it.groups>

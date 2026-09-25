@@ -357,11 +357,11 @@
     },
     "real": {
       "bit": 32,
-      "to": "TapNumber"
+      "to": "TapFloat"
     },
     "double precision": {
       "bit": 64,
-      "to": "TapNumber"
+      "to": "TapDouble"
     },
     "numeric": {
       "precision": [

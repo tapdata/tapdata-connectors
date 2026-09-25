@@ -605,7 +605,7 @@
       "queryOnly": true
     },
     "FLOAT": {
-      "to": "TapNumber",
+      "to": "TapFloat",
       "precision": [
         1,
         6
@@ -617,7 +617,7 @@
       "fixed": false
     },
     "DOUBLE": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "precision": [
         1,
         17
