@@ -14,7 +14,7 @@ public class FtpConfig implements Serializable {
     private String ftpPassword;
     private Boolean ftpSsl = false;
     private String ftpAccount;
-    private String encoding;
+    private String encoding = "UTF-8";
     private Boolean ftpPassiveMode = true;
     private int ftpConnectTimeout = 60;
     private int ftpDataTimeout = 0;
