@@ -591,6 +591,7 @@ public class MongodbConnector extends ConnectorBase {
 		connectorFunctions.supportQueryFieldMinMaxValueFunction(this::queryFieldMinMaxValue);
 //        connectorFunctions.supportStreamOffset((connectorContext, tableList, offsetStartTime, offsetOffsetTimeConsumer) -> streamOffset(connectorContext, tableList, offsetStartTime, offsetOffsetTimeConsumer));
 		connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
+		connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
 		connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
 		connectorFunctions.supportQueryIndexes(this::queryIndexes);
 		connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
@@ -998,6 +999,39 @@ public class MongodbConnector extends ConnectorBase {
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
 			exceptionCollector.collectWritePrivileges(e);
+			throw e;
+		}
+	}
+
+	/**
+	 * Read-only sampling: runs a find on {@code table}. See {@link MongodbRawCommandQuery} for the command format;
+	 * {@code eventBatchSize} is also the upper bound of returned rows.
+	 */
+	protected void runRawCommand(TapConnectorContext connectorContext, String command, TapTable table, int eventBatchSize, Consumer<List<TapEvent>> eventsOffsetConsumer) {
+		if (table == null || StringUtils.isBlank(table.getId())) {
+			throw new IllegalArgumentException("Collection name is required for MongoDB raw command");
+		}
+		MongodbRawCommandQuery query = MongodbRawCommandQuery.parse(command, eventBatchSize);
+		try {
+			FindIterable<Document> iterable = getMongoCollection(table.getId())
+					.find(query.getFilter())
+					.limit(query.getLimit())
+					.batchSize(query.getLimit());
+			if (!query.getSort().isEmpty()) {
+				iterable.sort(query.getSort());
+			}
+			List<TapEvent> events = TapSimplify.list();
+			try (MongoCursor<Document> cursor = iterable.iterator()) {
+				while (isAlive() && cursor.hasNext()) {
+					events.add(TapSimplify.insertRecordEvent(cursor.next(), table.getId()));
+				}
+			}
+			if (!events.isEmpty()) {
+				eventsOffsetConsumer.accept(events);
+			}
+		} catch (Exception e) {
+			exceptionCollector.collectTerminateByServer(e);
+			exceptionCollector.collectReadPrivileges(e);
 			throw e;
 		}
 	}

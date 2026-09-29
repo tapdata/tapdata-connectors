@@ -536,6 +536,96 @@ class MongodbConnectorTest {
         }
     }
     @Nested
+    class runRawCommand {
+        private MongoCollection<Document> collection;
+        private FindIterable<Document> findIterable;
+        private MongoCursor<Document> cursor;
+        private Consumer<List<TapEvent>> consumer;
+
+        @BeforeEach
+        @SuppressWarnings("unchecked")
+        void beforeEach() {
+            collection = mock(MongoCollection.class);
+            findIterable = mock(FindIterable.class);
+            cursor = mock(MongoCursor.class);
+            consumer = mock(Consumer.class);
+            when(mongodbConnector.getMongoCollection("orders")).thenReturn(collection);
+            when(mongodbConnector.isAlive()).thenReturn(true);
+            when(collection.find(any(Bson.class))).thenReturn(findIterable);
+            when(findIterable.limit(anyInt())).thenReturn(findIterable);
+            when(findIterable.batchSize(anyInt())).thenReturn(findIterable);
+            when(findIterable.sort(any(Bson.class))).thenReturn(findIterable);
+            when(findIterable.iterator()).thenReturn(cursor);
+            doCallRealMethod().when(mongodbConnector).runRawCommand(any(), any(), any(), anyInt(), any());
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void testWrappedCommandAppliesFilterSortAndLimit() {
+            when(cursor.hasNext()).thenReturn(true, true, false);
+            when(cursor.next()).thenReturn(new Document("_id", 1), new Document("_id", 2));
+
+            mongodbConnector.runRawCommand(connectorContext,
+                    "{\"filter\":{\"age\":{\"$gt\":18}},\"sort\":{\"age\":-1},\"limit\":2}", new TapTable("orders"), 100, consumer);
+
+            ArgumentCaptor<Bson> filterCaptor = ArgumentCaptor.forClass(Bson.class);
+            verify(collection).find(filterCaptor.capture());
+            assertEquals(new Document("age", new Document("$gt", 18)), filterCaptor.getValue());
+            verify(findIterable).sort(new Document("age", -1));
+            verify(findIterable).limit(2);
+            ArgumentCaptor<List<TapEvent>> eventsCaptor = ArgumentCaptor.forClass(List.class);
+            verify(consumer).accept(eventsCaptor.capture());
+            assertEquals(2, eventsCaptor.getValue().size());
+            assertEquals(new Document("_id", 1), ((io.tapdata.entity.event.dml.TapInsertRecordEvent) eventsCaptor.getValue().get(0)).getAfter());
+            verify(cursor).close();
+        }
+
+        @Test
+        void testRequestedLimitIsCappedByEventBatchSize() {
+            when(cursor.hasNext()).thenReturn(false);
+
+            mongodbConnector.runRawCommand(connectorContext, "{\"limit\":10000}", new TapTable("orders"), 100, consumer);
+
+            verify(findIterable).limit(100);
+            verify(findIterable, never()).sort(any(Bson.class));
+            verify(consumer, never()).accept(any());
+        }
+
+        @Test
+        void testPlainFilter() {
+            when(cursor.hasNext()).thenReturn(false);
+
+            mongodbConnector.runRawCommand(connectorContext, "{\"status\":\"PAID\"}", new TapTable("orders"), 50, consumer);
+
+            verify(collection).find(new Document("status", "PAID"));
+            verify(findIterable).limit(50);
+        }
+
+        @Test
+        void testStopsWhenNotAlive() {
+            when(mongodbConnector.isAlive()).thenReturn(false);
+
+            mongodbConnector.runRawCommand(connectorContext, "{}", new TapTable("orders"), 50, consumer);
+
+            verify(cursor, never()).next();
+            verify(consumer, never()).accept(any());
+        }
+
+        @Test
+        void testMissingCollectionIsRejected() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> mongodbConnector.runRawCommand(connectorContext, "{}", new TapTable(), 50, consumer));
+            verify(collection, never()).find(any(Bson.class));
+        }
+
+        @Test
+        void testInvalidCommandIsRejected() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> mongodbConnector.runRawCommand(connectorContext, "db.orders.find({})", new TapTable("orders"), 50, consumer));
+            verify(collection, never()).find(any(Bson.class));
+        }
+    }
+    @Nested
     class queryFieldMinMaxValue{
         private TapTable table;
         private TapAdvanceFilter partitionFilter;
