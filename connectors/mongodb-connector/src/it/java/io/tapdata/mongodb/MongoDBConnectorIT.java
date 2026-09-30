@@ -92,8 +92,18 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
                 "createTableV2", "dropTable", "batchCount", "batchRead", "streamRead",
                 "timestampToStreamOffset", "queryByAdvanceFilter", "countByPartitionFilter",
                 "writeRecord", "createIndex", "queryIndexes", "errorHandle",
-                "executeCommand", "getTableInfo", "getReadPartitions", "queryFieldMinMaxValue",
+                "executeCommand", "runRawCommand", "getTableInfo", "getReadPartitions", "queryFieldMinMaxValue",
                 "transactionBegin", "transactionCommit", "transactionRollback").collect(Collectors.toSet());
+    }
+
+    @Override
+    protected String rawQueryCommand(String tableName) {
+        return "{}";
+    }
+
+    @Override
+    protected String rawCountCommand(String tableName) {
+        return "{}";
     }
 
     @Test
