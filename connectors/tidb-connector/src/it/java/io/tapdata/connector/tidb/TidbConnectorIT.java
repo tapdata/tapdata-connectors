@@ -24,6 +24,14 @@ public class TidbConnectorIT extends TpccConnectorIT {
     private DataMap dbForgeConnectionConfig;
 
     @Override
+    protected long streamReadTimeoutSeconds() {
+        // A fresh runner must extract the bundled TiCDC executable, start the
+        // server and create a changefeed before streamReadStarted is reported.
+        // Observed cold startup exceeds the base IT suite's 15-second window.
+        return 60L;
+    }
+
+    @Override
     protected PerformanceAdapter createPerformanceAdapter() {
         return new TidbPerformanceAdapter(context.getConfig());
     }
