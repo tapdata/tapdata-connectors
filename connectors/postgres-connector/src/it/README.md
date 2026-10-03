@@ -37,3 +37,5 @@ mvn -pl connectors/postgres-connector -am verify -DskipITs=false
 The requested lease is `postgresql/dedicated/single`. DBForge runs CDC with the connector's physical replication slot mode, so CDC and offset cases remain enabled even when logical WAL is not configured.
 
 The default connection file is `src/it/resources/config/postgres-connection.json`. Override values with `connector.it.*` system properties or `CONNECTOR_IT_*` environment variables. Set `logPluginName` to `physical` to run CDC through a physical replication slot without requiring logical WAL.
+
+The checked-in JSON default targets the shared Kubernetes PostgreSQL instance `edb-postgres-tde128` in namespace `tapdata-db` through `edb-postgres-tde128.tapdata-db.svc.cluster.local:5433`. It uses database `root`, user `root`, and password `tapdata`. This hostname is reachable from the Kubernetes GitHub runner; do not replace it with `127.0.0.1` unless PostgreSQL runs in the same Pod.

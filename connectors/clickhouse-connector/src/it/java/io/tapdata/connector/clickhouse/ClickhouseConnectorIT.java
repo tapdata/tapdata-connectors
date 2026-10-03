@@ -12,6 +12,8 @@ import io.tapdata.it.schema.TestTableSpec;
 import io.tapdata.it.support.TestStateMap;
 import io.tapdata.it.tpcc.TpccAdapter;
 import io.tapdata.it.tpcc.TpccConnectorIT;
+import io.tapdata.it.verifier.ConnectorVerifier;
+import io.tapdata.it.verifier.JdbcVerifier;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.AfterAll;
@@ -66,6 +68,15 @@ public class ClickhouseConnectorIT extends TpccConnectorIT {
     @Override
     protected String rawCountCommand(String tableName) {
         return "select * from `" + tableName.replace("`", "``") + "`";
+    }
+
+    @Override
+    protected ConnectorVerifier createVerifier() {
+        ConnectorVerifier verifier = super.createVerifier();
+        if (!(verifier instanceof JdbcVerifier)) {
+            return verifier;
+        }
+        return new ClickhouseJdbcVerifier(((JdbcVerifier) verifier).jdbcContext());
     }
 
     private synchronized DataMap loadConnectionConfig() throws Exception {
