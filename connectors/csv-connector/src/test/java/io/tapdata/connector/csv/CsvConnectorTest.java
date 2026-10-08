@@ -1,19 +1,26 @@
 package io.tapdata.connector.csv;
 
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.codec.FromTapValueCodec;
 import io.tapdata.entity.codec.ToTapValueCodec;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.value.DateTime;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
+import io.tapdata.entity.schema.value.TapDateValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.connector.csv.config.CsvConfig;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.TimeZone;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -94,10 +101,96 @@ class CsvConnectorTest {
     }
 
     @Test
+    void csvTimeCodecPreservesNanosecondsWhenWriting() {
+        CsvConnector connector = new CsvConnector();
+        TapCodecsRegistry codecRegistry = TapCodecsRegistry.create();
+
+        connector.registerCapabilities(new ConnectorFunctions(), codecRegistry);
+
+        FromTapValueCodec<TapTimeValue> timeCodec = codecRegistry.getCustomFromTapValueCodec(TapTimeValue.class);
+        TapTimeValue timeValue = new TapTimeValue(
+                new DateTime(LocalDateTime.of(1970, 1, 1, 12, 30, 45, 123456789)));
+
+        assertEquals("12:30:45.123456789", timeCodec.fromTapValue(timeValue));
+    }
+
+    @Test
+    void csvTimeCodecKeepsWholeSecondOutputUnchanged() {
+        CsvConnector connector = new CsvConnector();
+        TapCodecsRegistry codecRegistry = TapCodecsRegistry.create();
+
+        connector.registerCapabilities(new ConnectorFunctions(), codecRegistry);
+
+        FromTapValueCodec<TapTimeValue> timeCodec = codecRegistry.getCustomFromTapValueCodec(TapTimeValue.class);
+        TapTimeValue timeValue = new TapTimeValue(
+                new DateTime(LocalDateTime.of(1970, 1, 1, 12, 0, 0)));
+
+        assertEquals("12:00:00", timeCodec.fromTapValue(timeValue));
+    }
+
+    @Test
+    void csvDateTimeCodecPreservesNanosecondsWhenWriting() {
+        CsvConnector connector = new CsvConnector();
+        TapCodecsRegistry codecRegistry = TapCodecsRegistry.create();
+
+        connector.registerCapabilities(new ConnectorFunctions(), codecRegistry);
+
+        FromTapValueCodec<TapDateTimeValue> dateTimeCodec =
+                codecRegistry.getCustomFromTapValueCodec(TapDateTimeValue.class);
+        TapDateTimeValue dateTimeValue = new TapDateTimeValue(
+                new DateTime(LocalDateTime.of(2024, 6, 17, 12, 30, 45, 123456789)));
+
+        assertEquals("2024-06-17 12:30:45.123456789", dateTimeCodec.fromTapValue(dateTimeValue));
+    }
+
+    @Test
+    void csvDateTimeCodecKeepsWholeSecondOutputUnchanged() {
+        CsvConnector connector = new CsvConnector();
+        TapCodecsRegistry codecRegistry = TapCodecsRegistry.create();
+
+        connector.registerCapabilities(new ConnectorFunctions(), codecRegistry);
+
+        FromTapValueCodec<TapDateTimeValue> dateTimeCodec =
+                codecRegistry.getCustomFromTapValueCodec(TapDateTimeValue.class);
+        TapDateTimeValue dateTimeValue = new TapDateTimeValue(
+                new DateTime(LocalDateTime.of(2024, 6, 17, 12, 0, 0)));
+
+        assertEquals("2024-06-17 12:00:00", dateTimeCodec.fromTapValue(dateTimeValue));
+    }
+
+    @Test
+    void csvDateCodecResolvesDateAtSystemDefaultMidnight() {
+        TimeZone originalTimeZone = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+            CsvConnector connector = new CsvConnector();
+            TapCodecsRegistry codecRegistry = TapCodecsRegistry.create();
+
+            connector.registerCapabilities(new ConnectorFunctions(), codecRegistry);
+
+            ToTapValueCodec<?> dateCodec = codecRegistry.getCustomToTapValueCodec(LocalDate.class);
+            TapDateValue tapDateValue = (TapDateValue) dateCodec.toTapValue(LocalDate.of(2024, 6, 17), null);
+
+            assertEquals(Instant.parse("2024-06-16T16:00:00Z"), tapDateValue.getValue().toInstant());
+        } finally {
+            TimeZone.setDefault(originalTimeZone);
+        }
+    }
+
+    @Test
     void parseCsvDateSupportsSingleDigitMonthAndDay() {
         assertEquals(LocalDate.of(2026, 8, 8), CsvValueConverter.parse("2026/8/8", CsvValueConverter.DATE));
         assertNull(CsvValueConverter.parse("2026/2/30", CsvValueConverter.DATE));
         assertNull(CsvValueConverter.parse("not-a-date", CsvValueConverter.DATE));
+    }
+
+    @Test
+    void csvDateInferenceMatchesSpecYearRange() {
+        assertEquals("STRING", CsvValueConverter.inferDataType("0000-01-01"));
+        assertEquals("STRING", CsvValueConverter.inferDataType("0999-12-31"));
+        assertEquals("DATE", CsvValueConverter.inferDataType("1000-01-01"));
+        assertEquals("DATE", CsvValueConverter.inferDataType("9999-12-31"));
+        assertNull(CsvValueConverter.parse("0999-12-31", CsvValueConverter.DATE));
     }
 
     @Test
@@ -111,10 +204,35 @@ class CsvConnectorTest {
     void parseCsvDateTimeSupportsSingleDigitParts() {
         Object parsed = CsvValueConverter.parse("2026/8/8 8:00:1", CsvValueConverter.DATETIME);
 
-        assertEquals(LocalDateTime.of(2026, 8, 8, 8, 0, 1), parsed);
-        assertEquals(LocalDateTime.of(2026, 9, 18, 12, 0, 1),
+        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2026, 8, 8, 8, 0, 1)), parsed);
+        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2026, 9, 18, 12, 0, 1)),
                 CsvValueConverter.parse("2026-09-18 12:00:01", CsvValueConverter.DATETIME));
         assertNull(CsvValueConverter.parse("2026/2/30 8:00:1", CsvValueConverter.DATETIME));
+    }
+
+    @Test
+    void parseDateOnlyValueAsDateTimeUsesStartOfDay() {
+        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2024, 6, 17, 0, 0)),
+                CsvValueConverter.parse("2024-06-17", CsvValueConverter.DATETIME));
+    }
+
+    @Test
+    void parseCsvDateTimeResolvesUnzonedValueInSystemDefaultZone() {
+        TimeZone originalTimeZone = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+
+            assertEquals(Instant.parse("2024-06-17T04:30:45.123Z"),
+                    CsvValueConverter.parse("2024-06-17 12:30:45.123", CsvValueConverter.DATETIME));
+        } finally {
+            TimeZone.setDefault(originalTimeZone);
+        }
+    }
+
+    @Test
+    void parseCsvDateTimePreservesExplicitOffset() {
+        assertEquals(Instant.parse("2024-06-17T04:30:45.123Z"),
+                CsvValueConverter.parse("2024-06-17T12:30:45.123+08", CsvValueConverter.DATETIME));
     }
 
     @Test
@@ -140,6 +258,10 @@ class CsvConnectorTest {
         connector.putIntoMapForTest(after, new String[]{"address", "city"}, new String[]{"柳州"}, dataTypeMap);
 
         assertNull(after.get("city"));
+    }
+
+    private static Instant toSystemDefaultInstant(LocalDateTime value) {
+        return value.atZone(TimeZone.getDefault().toZoneId()).toInstant();
     }
 
     private static class TestCsvConnector extends CsvConnector {

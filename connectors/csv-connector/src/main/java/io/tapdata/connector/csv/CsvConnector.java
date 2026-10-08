@@ -20,6 +20,7 @@ import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.schema.value.DateTime;
+import io.tapdata.exception.DatetimeFormatException;
 import io.tapdata.file.TapFile;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
@@ -33,8 +34,12 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.temporal.ChronoField;
 import java.util.Collections;
 import java.util.Collection;
 import java.util.HashMap;
@@ -50,6 +55,14 @@ import java.util.stream.Collectors;
 public class CsvConnector extends FileConnector {
 
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ISO_LOCAL_TIME;
+    private static final DateTimeFormatter TIME_OUTPUT_FORMATTER = new DateTimeFormatterBuilder()
+            .appendPattern("HH:mm:ss")
+            .appendFraction(ChronoField.NANO_OF_SECOND, 0, 9, true)
+            .toFormatter();
+    private static final DateTimeFormatter DATETIME_OUTPUT_FORMATTER = new DateTimeFormatterBuilder()
+            .appendPattern("yyyy-MM-dd HH:mm:ss")
+            .appendFraction(ChronoField.NANO_OF_SECOND, 0, 9, true)
+            .toFormatter();
 
     private OffStandardFilter offStandardFilter;
 
@@ -73,8 +86,9 @@ public class CsvConnector extends FileConnector {
             if (tapRawValue != null && tapRawValue.getValue() != null) return tapRawValue.getValue().toString();
             return "null";
         });
-        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss"));
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS"));
+        // Keep the fraction optional so whole-second values retain the existing CSV representation.
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> formatCsvDateTime(tapTimeValue.getValue(), TIME_OUTPUT_FORMATTER, "HH:mm:ss[.SSSSSSSSS]"));
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> formatCsvDateTime(tapDateTimeValue.getValue(), DATETIME_OUTPUT_FORMATTER, "yyyy-MM-dd HH:mm:ss[.SSSSSSSSS]"));
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> formatTapDateTime(tapDateValue.getValue(), "yyyy-MM-dd"));
 
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
@@ -94,7 +108,8 @@ public class CsvConnector extends FileConnector {
             return null;
         }
         try {
-            return new TapDateValue(new DateTime(localDate.atStartOfDay()));
+            // DateTime(LocalDateTime) assumes UTC, so resolve the CSV date in the default zone first.
+            return new TapDateValue(new DateTime(localDate.atStartOfDay(ZoneId.systemDefault()).toInstant()));
         } catch (RuntimeException e) {
             return null;
         }
@@ -108,6 +123,19 @@ public class CsvConnector extends FileConnector {
             return new TapTimeValue(DateTime.withTimeStr(((LocalTime) value).format(TIME_FORMATTER)));
         } catch (RuntimeException e) {
             return null;
+        }
+    }
+
+    private static String formatCsvDateTime(DateTime dateTime, DateTimeFormatter formatter, String pattern) {
+        if (dateTime == null) {
+            throw new IllegalArgumentException("Date time value cannot be null");
+        }
+        try {
+            ZoneId zoneId = dateTime.getTimeZone() != null ? dateTime.getTimeZone().toZoneId() : ZoneId.of("GMT");
+            LocalDateTime localDateTime = LocalDateTime.ofInstant(dateTime.toInstant(), zoneId);
+            return formatter.format(localDateTime);
+        } catch (Exception e) {
+            throw new DatetimeFormatException(dateTime, pattern, e);
         }
     }
 
@@ -309,6 +337,15 @@ public class CsvConnector extends FileConnector {
         }
         for (int i = 0; i < headers.length - data.length; i++) {
             if (justString) {
+                /**
+                 * Data. length==0 is required for putIntoMap to fill in all header fields as null.
+                 * But standard OpenCSV typically generates an empty string field for regular blank lines, rather than an array of length 0.
+                 * a、 Blank lines will not trigger the entire line to be discarded.
+                 * For standard CSV, the P2 conclusion can be basically overturned;
+                 * For boundary scenes with offStandard and empty regular matching results,
+                 *  there is a risk that a condition holds,
+                 *  but the original feedback did not specify this key premise and cannot be directly classified as a universal P2 defect.
+                 * */
                 after.put(headers[i + data.length], null);
                 continue;
             }
