@@ -78,6 +78,7 @@ class MongodbConnectorTest {
     @BeforeEach
     void init() {
         mongodbConnector = mock(MongodbConnector.class);
+        ReflectionTestUtils.setField(mongodbConnector, "collectionStatistics", new MongoCollectionStatistics());
         connectorContext = mock(TapConnectorContext.class);
         mongoConfig = mock(MongodbConfig.class);
         ReflectionTestUtils.setField(mongodbConnector, "mongoConfig", mongoConfig);
@@ -833,6 +834,33 @@ class MongodbConnectorTest {
             when(mongoClient.getDatabase("test")).thenThrow(RuntimeException.class);
             doCallRealMethod().when(mongodbConnector).getTableInfo(tapConnectorContext,tableName);
             assertThrows(RuntimeException.class, ()->mongodbConnector.getTableInfo(tapConnectorContext,tableName));
+        }
+
+        @Test
+        @DisplayName("新版本表统计保持行数、逻辑大小与平均值的返回类型")
+        void modernTableInfoKeepsOriginalMapping() throws Throwable {
+            when(mongoConfig.getDatabase()).thenReturn("test");
+            MongoDatabase database = mock(MongoDatabase.class);
+            MongoCollection<Document> collection = mock(MongoCollection.class);
+            AggregateIterable<Document> aggregate = mock(AggregateIterable.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            when(mongoClient.getDatabase("test")).thenReturn(database);
+            when(database.runCommand(new Document("buildInfo", 1)))
+                    .thenReturn(new Document("version", "8.0.32"));
+            when(database.getCollection(tableName)).thenReturn(collection);
+            when(collection.aggregate(anyList())).thenReturn(aggregate);
+            when(aggregate.iterator()).thenReturn(cursor);
+            when(cursor.hasNext()).thenReturn(true, false);
+            when(cursor.next()).thenReturn(new Document("storageStats",
+                    new Document("count", 3L).append("size", 4000000000L)
+                            .append("storageSize", 4096L).append("avgObjSize", 55.8D)));
+            doCallRealMethod().when(mongodbConnector).getTableInfo(tapConnectorContext, tableName);
+            TableInfo result = mongodbConnector.getTableInfo(tapConnectorContext, tableName);
+            assertEquals(3L, result.getNumOfRows().longValue());
+            assertEquals(4000000000L, result.getStorageSize().longValue());
+            assertEquals(55L, result.getAvgObjSize().longValue());
+            verify(cursor).close();
+            verify(database, never()).runCommand(new Document("collStats", tableName));
         }
 
         @Test

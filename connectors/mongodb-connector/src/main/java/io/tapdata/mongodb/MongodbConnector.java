@@ -103,6 +103,7 @@ public class MongodbConnector extends ConnectorBase {
 	private MongodbStreamReader mongodbStreamReader;
 	private MongodbStreamReader opLogStreamReader;
 	private ConcurrentHashMap<String,Set<String>> shardKeyMap = new ConcurrentHashMap<>();
+	private final MongoCollectionStatistics collectionStatistics = new MongoCollectionStatistics();
 	private final Map<String, MongodbWriter> writerMap = new ConcurrentHashMap<>();
 
 	protected Map<String, Integer> stringTypeValueMap;
@@ -1925,7 +1926,7 @@ public class MongodbConnector extends ConnectorBase {
 		try {
 			String database = mongoConfig.getDatabase();
 			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
-			Document collStats = mongoDatabase.runCommand(new Document("collStats", tableName));
+			Document collStats = collectionStatistics.read(mongoDatabase, tableName, mongoClient);
 			tableInfo = TableInfo.create();
 			tableInfo.setNumOfRows(getLongFromDocument(collStats, "count"));
 			tableInfo.setStorageSize(getLongFromDocument(collStats, "size"));
