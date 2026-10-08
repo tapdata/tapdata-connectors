@@ -122,6 +122,7 @@ public class JsonConnector extends FileConnector {
 
     @Override
     public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
+        Throwable failure = null;
         try {
             initConnection(connectionContext);
             if (EmptyKit.isBlank(fileConfig.getModelName())) {
@@ -136,9 +137,12 @@ public class JsonConnector extends FileConnector {
             }
             SCHEMA_PARSER.parse(tapTable, sample);
             consumer.accept(Collections.singletonList(tapTable));
+        } catch (Throwable throwable) {
+            failure = throwable;
         } finally {
-            if (storage != null) {
-                storage.destroy();
+            failure = destroyStorage(failure);
+            if (failure != null) {
+                throw failure;
             }
         }
     }

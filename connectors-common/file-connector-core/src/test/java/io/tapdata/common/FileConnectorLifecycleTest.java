@@ -14,6 +14,7 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Collection;
@@ -30,8 +31,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -59,6 +62,32 @@ class FileConnectorLifecycleTest {
         assertThrows(RuntimeException.class, () -> connector.onStop(null));
 
         assertTrue(storage.destroyCalled);
+    }
+
+    @Test
+    void destroyStoragePreservesPrimaryFailureWhenCleanupFails() throws Exception {
+        TrackingStorage storage = new TrackingStorage(false);
+        IOException cleanupFailure = new IOException("destroy failed");
+        storage.onDestroyFailure(cleanupFailure);
+        TestFileConnector connector = new TestFileConnector(storage, new TrackingWriter(storage, false, false));
+        RuntimeException primaryFailure = new RuntimeException("schema failed");
+
+        Throwable failure = connector.destroyStorageForTest(primaryFailure);
+
+        assertSame(primaryFailure, failure);
+        assertArrayEquals(new Throwable[]{cleanupFailure}, primaryFailure.getSuppressed());
+    }
+
+    @Test
+    void destroyStorageReturnsCleanupFailureWhenNoPrimaryFailure() throws Exception {
+        TrackingStorage storage = new TrackingStorage(false);
+        IOException cleanupFailure = new IOException("destroy failed");
+        storage.onDestroyFailure(cleanupFailure);
+        TestFileConnector connector = new TestFileConnector(storage, new TrackingWriter(storage, false, false));
+
+        Throwable failure = connector.destroyStorageForTest(null);
+
+        assertSame(cleanupFailure, failure);
     }
 
     @Test
@@ -167,6 +196,10 @@ class FileConnectorLifecycleTest {
 
         private void setExecutorService(ExecutorService executorService) {
             this.executorService = executorService;
+        }
+
+        private Throwable destroyStorageForTest(Throwable failure) {
+            return destroyStorage(failure);
         }
 
         @Override
@@ -306,10 +339,13 @@ class FileConnectorLifecycleTest {
         }
 
         @Override
-        public void destroy() {
+        public void destroy() throws IOException {
             destroyCalled = true;
             if (destroyAction != null) {
                 destroyAction.run();
+            }
+            if (destroyFailure != null) {
+                throw destroyFailure;
             }
         }
 
@@ -361,6 +397,10 @@ class FileConnectorLifecycleTest {
             this.destroyAction = action;
         }
 
+        private void onDestroyFailure(IOException failure) {
+            this.destroyFailure = failure;
+        }
+
         @Override
         public void getFilesInDirectory(String directoryPath,
                                         Collection<String> includeRegs,
@@ -381,6 +421,7 @@ class FileConnectorLifecycleTest {
         }
 
         private Runnable destroyAction;
+        private IOException destroyFailure;
 
         private static final class NeverTerminatingExecutor extends AbstractExecutorService {
             @Override

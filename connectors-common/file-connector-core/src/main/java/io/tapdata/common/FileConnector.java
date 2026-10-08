@@ -162,14 +162,18 @@ public abstract class FileConnector extends ConnectorBase {
     }
 
     private Throwable destroyStorage() {
+        return destroyStorage(null);
+    }
+
+    protected Throwable destroyStorage(Throwable failure) {
         try {
             if (EmptyKit.isNotNull(storage)) {
                 storage.destroy();
             }
         } catch (Throwable throwable) {
-            return throwable;
+            failure = appendFailure(failure, throwable);
         }
-        return null;
+        return failure;
     }
 
     private Throwable appendFailure(Throwable failure, Throwable additionalFailure) {
