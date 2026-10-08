@@ -566,7 +566,7 @@ class MongodbConnectorTest {
             when(cursor.next()).thenReturn(new Document("_id", 1), new Document("_id", 2));
 
             mongodbConnector.runRawCommand(connectorContext,
-                    "{\"filter\":{\"age\":{\"$gt\":18}},\"sort\":{\"age\":-1},\"limit\":2}", new TapTable("orders"), 100, consumer);
+                    "{\"$find\":{\"filter\":{\"age\":{\"$gt\":18}},\"sort\":{\"age\":-1},\"limit\":2}}", new TapTable("orders"), 100, consumer);
 
             ArgumentCaptor<Bson> filterCaptor = ArgumentCaptor.forClass(Bson.class);
             verify(collection).find(filterCaptor.capture());
@@ -581,14 +581,22 @@ class MongodbConnectorTest {
         }
 
         @Test
-        void testRequestedLimitIsCappedByEventBatchSize() {
-            when(cursor.hasNext()).thenReturn(false);
+        @SuppressWarnings("unchecked")
+        void testWrappedLimitAboveEventBatchSizeIsStreamedInBatches() {
+            when(cursor.hasNext()).thenReturn(true, true, true, true, true, false);
+            when(cursor.next()).thenReturn(new Document("_id", 1), new Document("_id", 2), new Document("_id", 3),
+                    new Document("_id", 4), new Document("_id", 5));
 
-            mongodbConnector.runRawCommand(connectorContext, "{\"limit\":10000}", new TapTable("orders"), 100, consumer);
+            mongodbConnector.runRawCommand(connectorContext, "{\"$find\":{\"limit\":5}}", new TapTable("orders"), 2, consumer);
 
-            verify(findIterable).limit(100);
-            verify(findIterable, never()).sort(any(Bson.class));
-            verify(consumer, never()).accept(any());
+            verify(findIterable).limit(5);
+            verify(findIterable).batchSize(2);
+            ArgumentCaptor<List<TapEvent>> eventsCaptor = ArgumentCaptor.forClass(List.class);
+            verify(consumer, times(3)).accept(eventsCaptor.capture());
+            List<List<TapEvent>> batches = eventsCaptor.getAllValues();
+            assertEquals(2, batches.get(0).size());
+            assertEquals(2, batches.get(1).size());
+            assertEquals(1, batches.get(2).size());
         }
 
         @Test
@@ -599,6 +607,31 @@ class MongodbConnectorTest {
 
             verify(collection).find(new Document("status", "PAID"));
             verify(findIterable).limit(50);
+            verify(findIterable).batchSize(50);
+            verify(findIterable, never()).sort(any(Bson.class));
+            verify(consumer, never()).accept(any());
+        }
+
+        /**
+         * A field named like one of the wrapped keys must reach MongoDB as a filter instead of being read as sort,
+         * limit or filter options.
+         */
+        @Test
+        void testReservedKeyAloneIsSentAsFilter() {
+            when(cursor.hasNext()).thenReturn(false);
+
+            mongodbConnector.runRawCommand(connectorContext, "{\"limit\":5}", new TapTable("orders"), 50, consumer);
+
+            verify(collection).find(new Document("limit", 5));
+            verify(findIterable).limit(50);
+            verify(findIterable, never()).sort(any(Bson.class));
+        }
+
+        @Test
+        void testServerSideJavaScriptIsRejected() {
+            assertThrows(IllegalArgumentException.class, () -> mongodbConnector.runRawCommand(connectorContext,
+                    "{\"$where\":\"this.a == 1\"}", new TapTable("orders"), 50, consumer));
+            verify(collection, never()).find(any(Bson.class));
         }
 
         @Test

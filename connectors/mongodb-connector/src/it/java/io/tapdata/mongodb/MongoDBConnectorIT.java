@@ -98,7 +98,9 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
 
     @Override
     protected String rawQueryCommand(String tableName) {
-        return "{}";
+        // The wrapped form carries its own row limit, so the whole prepared data set is read back no matter which
+        // batch size the harness passes.
+        return "{\"$find\":{\"filter\":{},\"limit\":1000000}}";
     }
 
     @Override

@@ -1004,26 +1004,35 @@ public class MongodbConnector extends ConnectorBase {
 	}
 
 	/**
-	 * Read-only sampling: runs a find on {@code table}. See {@link MongodbRawCommandQuery} for the command format;
-	 * {@code eventBatchSize} is also the upper bound of returned rows.
+	 * Read-only sampling: runs a find on {@code table}. See {@link MongodbRawCommandQuery} for the command format.
+	 * <p>
+	 * As in the SQL connectors, {@code eventBatchSize} is the size of each batch handed to
+	 * {@code eventsOffsetConsumer}. A find filter carries no row bound of its own the way a SQL statement does, so it
+	 * doubles as the default row limit; a {@code limit} in the command replaces that default and may ask for more
+	 * than one batch.
 	 */
 	protected void runRawCommand(TapConnectorContext connectorContext, String command, TapTable table, int eventBatchSize, Consumer<List<TapEvent>> eventsOffsetConsumer) {
 		if (table == null || StringUtils.isBlank(table.getId())) {
 			throw new IllegalArgumentException("Collection name is required for MongoDB raw command");
 		}
 		MongodbRawCommandQuery query = MongodbRawCommandQuery.parse(command, eventBatchSize);
+		int batchSize = Math.min(eventBatchSize > 0 ? eventBatchSize : MongodbRawCommandQuery.DEFAULT_LIMIT, query.getLimit());
 		try {
 			FindIterable<Document> iterable = getMongoCollection(table.getId())
 					.find(query.getFilter())
 					.limit(query.getLimit())
-					.batchSize(query.getLimit());
+					.batchSize(batchSize);
 			if (!query.getSort().isEmpty()) {
-				iterable.sort(query.getSort());
+				iterable = iterable.sort(query.getSort());
 			}
 			List<TapEvent> events = TapSimplify.list();
 			try (MongoCursor<Document> cursor = iterable.iterator()) {
 				while (isAlive() && cursor.hasNext()) {
 					events.add(TapSimplify.insertRecordEvent(cursor.next(), table.getId()));
+					if (events.size() >= batchSize) {
+						eventsOffsetConsumer.accept(events);
+						events = TapSimplify.list();
+					}
 				}
 			}
 			if (!events.isEmpty()) {
