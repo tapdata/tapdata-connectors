@@ -117,9 +117,9 @@ public class FtpFileStorage implements TapFileStorage {
     @Override
     public void destroy() throws IOException {
         Throwable failure = closeActiveStreams(beginLifecycleClose(), true);
+        failure = appendFailure(failure, closeClient(ftpClient, false));
         TransferableReentrantLock.Permit permit = ioLock.acquireUninterruptibly();
         try {
-            failure = appendFailure(failure, closeClient(ftpClient, false));
             ftpClient = null;
             ftpConfig = null;
         } finally {

@@ -17,11 +17,14 @@ import org.junit.jupiter.api.Test;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -40,10 +43,11 @@ class FileConnectorLifecycleTest {
         TrackingWriter writer = new TrackingWriter(storage, true, false);
         TestFileConnector connector = new TestFileConnector(storage, writer);
 
-        assertThrows(RuntimeException.class, () -> connector.onStop(null));
+        RuntimeException failure = assertThrows(RuntimeException.class, () -> connector.onStop(null));
 
         assertTrue(writer.releaseCalled);
         assertTrue(storage.destroyCalled);
+        assertEquals("merge failed", failure.getMessage());
     }
 
     @Test
@@ -102,6 +106,55 @@ class FileConnectorLifecycleTest {
         assertTrue(storage.destroyCalled);
     }
 
+    @Test
+    void onStopForceDestroysStorageWhenMergeIgnoresInterrupt() throws Exception {
+        TrackingStorage storage = new TrackingStorage(false);
+        TrackingWriter writer = new TrackingWriter(storage, false, false);
+        TestFileConnector connector = new TestFileConnector(storage, writer);
+        CountDownLatch mergeStarted = new CountDownLatch(1);
+        CountDownLatch allowMerge = new CountDownLatch(1);
+        writer.blockMergeIgnoringInterrupt(mergeStarted, allowMerge);
+        storage.onDestroy(allowMerge::countDown);
+        connector.setExecutorService(new TrackingStorage.NeverTerminatingExecutor());
+
+        AtomicReference<Throwable> backgroundFailure = new AtomicReference<>();
+        Thread backgroundMerge = new Thread(() -> {
+            try {
+                connector.mergeCacheFilesForTest();
+            } catch (Throwable throwable) {
+                backgroundFailure.set(throwable);
+            }
+        });
+        backgroundMerge.setDaemon(true);
+        backgroundMerge.start();
+        assertTrue(mergeStarted.await(1, TimeUnit.SECONDS));
+
+        AtomicReference<Throwable> stopFailure = new AtomicReference<>();
+        Thread stopper = new Thread(() -> {
+            try {
+                connector.onStop(null);
+            } catch (Throwable throwable) {
+                stopFailure.set(throwable);
+            }
+        });
+        stopper.setDaemon(true);
+        stopper.start();
+
+        try {
+            stopper.join(2000);
+            assertFalse(stopper.isAlive());
+            assertTrue(storage.destroyCalled);
+            assertTrue(writer.releaseCalled);
+            assertNull(stopFailure.get());
+        } finally {
+            allowMerge.countDown();
+            backgroundMerge.join(1000);
+            stopper.join(1000);
+        }
+        assertFalse(backgroundMerge.isAlive());
+        assertNull(backgroundFailure.get());
+    }
+
     private static final class TestFileConnector extends FileConnector {
         private TestFileConnector(TrackingStorage storage, TrackingWriter writer) {
             this.storage = storage;
@@ -110,6 +163,10 @@ class FileConnectorLifecycleTest {
 
         private void mergeCacheFilesForTest() throws Exception {
             mergeCacheFilesSafely();
+        }
+
+        private void setExecutorService(ExecutorService executorService) {
+            this.executorService = executorService;
         }
 
         @Override
@@ -141,6 +198,7 @@ class FileConnectorLifecycleTest {
         private CountDownLatch mergeStarted;
         private CountDownLatch allowMerge;
         private CountDownLatch concurrentMergeDetected;
+        private boolean ignoreInterrupt;
 
         private TrackingWriter(TapFileStorage storage, boolean mergeFails, boolean releaseFails) throws Exception {
             super(storage, new FileConfig(), new TapTable("table").add(new TapField("id", "STRING")), new EmptyKvMap());
@@ -158,7 +216,20 @@ class FileConnectorLifecycleTest {
             try {
                 if (mergeStarted != null) {
                     mergeStarted.countDown();
-                    if (!allowMerge.await(1, TimeUnit.SECONDS)) {
+                    if (ignoreInterrupt) {
+                        boolean interrupted = false;
+                        while (true) {
+                            try {
+                                allowMerge.await();
+                                break;
+                            } catch (InterruptedException e) {
+                                interrupted = true;
+                            }
+                        }
+                        if (interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
+                    } else if (!allowMerge.await(1, TimeUnit.SECONDS)) {
                         throw new RuntimeException("merge was not released");
                     }
                 }
@@ -179,6 +250,13 @@ class FileConnectorLifecycleTest {
             this.mergeStarted = mergeStarted;
             this.allowMerge = allowMerge;
             this.concurrentMergeDetected = concurrentMergeDetected;
+        }
+
+        private void blockMergeIgnoringInterrupt(CountDownLatch mergeStarted,
+                                                  CountDownLatch allowMerge) {
+            this.mergeStarted = mergeStarted;
+            this.allowMerge = allowMerge;
+            this.ignoreInterrupt = true;
         }
 
         private int maxConcurrentMerges() {
@@ -230,6 +308,9 @@ class FileConnectorLifecycleTest {
         @Override
         public void destroy() {
             destroyCalled = true;
+            if (destroyAction != null) {
+                destroyAction.run();
+            }
         }
 
         @Override
@@ -276,6 +357,10 @@ class FileConnectorLifecycleTest {
             return appendSupported;
         }
 
+        private void onDestroy(Runnable action) {
+            this.destroyAction = action;
+        }
+
         @Override
         public void getFilesInDirectory(String directoryPath,
                                         Collection<String> includeRegs,
@@ -293,6 +378,38 @@ class FileConnectorLifecycleTest {
         @Override
         public String getConnectInfo() {
             return "test";
+        }
+
+        private Runnable destroyAction;
+
+        private static final class NeverTerminatingExecutor extends AbstractExecutorService {
+            @Override
+            public void shutdown() {
+            }
+
+            @Override
+            public List<Runnable> shutdownNow() {
+                return Collections.emptyList();
+            }
+
+            @Override
+            public boolean isShutdown() {
+                return true;
+            }
+
+            @Override
+            public boolean isTerminated() {
+                return false;
+            }
+
+            @Override
+            public boolean awaitTermination(long timeout, TimeUnit unit) {
+                return false;
+            }
+
+            @Override
+            public void execute(Runnable command) {
+            }
         }
     }
 

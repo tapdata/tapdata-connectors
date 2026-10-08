@@ -27,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -39,7 +40,8 @@ public abstract class FileConnector extends ConnectorBase {
     private Map<String, Object> connectionParams;
     protected AbstractFileRecordWriter fileRecordWriter;
     protected ExecutorService executorService;
-    private final Object mergeCacheLock = new Object();
+    private static final long MERGE_CACHE_LOCK_TIMEOUT_SECONDS = 10;
+    private final ReentrantLock mergeCacheLock = new ReentrantLock();
     protected String firstConnectorId;
     private static final String TAG = FileConnector.class.getSimpleName();
     protected Log tapLogger;
@@ -98,20 +100,46 @@ public abstract class FileConnector extends ConnectorBase {
     @Override
     public void onStop(TapConnectionContext connectionContext) throws Throwable {
         Throwable failure = null;
+        boolean storageDestroyed = false;
+        boolean mergeLockAcquired = false;
         try {
-            shutdownMergeCacheExecutor();
+            boolean executorTerminated = shutdownMergeCacheExecutor();
+            if (!executorTerminated) {
+                storageDestroyed = true;
+                failure = appendFailure(failure, destroyStorage());
+            }
         } catch (Throwable throwable) {
             failure = appendFailure(failure, throwable);
+            storageDestroyed = true;
+            failure = appendFailure(failure, destroyStorage());
         }
-        synchronized (mergeCacheLock) {
+        try {
+            mergeLockAcquired = mergeCacheLock.tryLock(MERGE_CACHE_LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            failure = appendFailure(failure, e);
+        }
+        if (!mergeLockAcquired && !storageDestroyed) {
+            storageDestroyed = true;
+            failure = appendFailure(failure, destroyStorage());
+            try {
+                mergeLockAcquired = mergeCacheLock.tryLock(MERGE_CACHE_LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                failure = appendFailure(failure, e);
+            }
+        }
+        if (mergeLockAcquired) {
             try {
                 if (EmptyKit.isNotNull(fileRecordWriter)) {
-                    try {
-                        if (EmptyKit.isNotNull(storage) && !storage.supportAppendData()) {
-                            fileRecordWriter.mergeCacheFiles();
+                    if (!storageDestroyed) {
+                        try {
+                            if (EmptyKit.isNotNull(storage) && !storage.supportAppendData()) {
+                                fileRecordWriter.mergeCacheFiles();
+                            }
+                        } catch (Throwable throwable) {
+                            failure = appendFailure(failure, throwable);
                         }
-                    } catch (Throwable throwable) {
-                        failure = appendFailure(failure, throwable);
                     }
                     try {
                         fileRecordWriter.releaseResource();
@@ -120,21 +148,34 @@ public abstract class FileConnector extends ConnectorBase {
                     }
                 }
             } finally {
-                try {
-                    if (EmptyKit.isNotNull(storage)) {
-                        storage.destroy();
-                    }
-                } catch (Throwable throwable) {
-                    failure = appendFailure(failure, throwable);
-                }
+                mergeCacheLock.unlock();
             }
+        } else {
+            TapLogger.warn(TAG, "Merge cache lock was not released during connector stop; final merge skipped");
+        }
+        if (!storageDestroyed) {
+            failure = appendFailure(failure, destroyStorage());
         }
         if (failure != null) {
             throw failure;
         }
     }
 
+    private Throwable destroyStorage() {
+        try {
+            if (EmptyKit.isNotNull(storage)) {
+                storage.destroy();
+            }
+        } catch (Throwable throwable) {
+            return throwable;
+        }
+        return null;
+    }
+
     private Throwable appendFailure(Throwable failure, Throwable additionalFailure) {
+        if (additionalFailure == null) {
+            return failure;
+        }
         if (failure == null) {
             return additionalFailure;
         }
@@ -144,23 +185,28 @@ public abstract class FileConnector extends ConnectorBase {
         return failure;
     }
 
-    private void shutdownMergeCacheExecutor() throws InterruptedException {
+    private boolean shutdownMergeCacheExecutor() throws InterruptedException {
         ExecutorService executor = executorService;
         executorService = null;
         if (executor == null) {
-            return;
+            return true;
         }
         executor.shutdownNow();
-        if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+        boolean terminated = executor.awaitTermination(10, TimeUnit.SECONDS);
+        if (!terminated) {
             TapLogger.warn(TAG, "Merge cache executor did not terminate within 10 seconds");
         }
+        return terminated;
     }
 
     protected void mergeCacheFilesSafely() throws Exception {
-        synchronized (mergeCacheLock) {
+        mergeCacheLock.lock();
+        try {
             if (EmptyKit.isNotNull(fileRecordWriter)) {
                 fileRecordWriter.mergeCacheFiles();
             }
+        } finally {
+            mergeCacheLock.unlock();
         }
     }
 

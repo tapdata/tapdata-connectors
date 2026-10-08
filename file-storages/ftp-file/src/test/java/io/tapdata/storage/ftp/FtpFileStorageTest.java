@@ -226,6 +226,44 @@ class FtpFileStorageTest {
     }
 
     @Test
+    void destroyDisconnectsBeforeWaitingForAnActiveOperation() throws Exception {
+        client.blockListFiles = true;
+        AtomicReference<Throwable> operationFailure = new AtomicReference<>();
+        Thread operation = new Thread(() -> {
+            try {
+                storage.getFile("/source.txt");
+            } catch (Throwable throwable) {
+                operationFailure.set(throwable);
+            }
+        });
+        operation.setDaemon(true);
+        operation.start();
+        assertTrue(client.listFilesStarted.await(1, TimeUnit.SECONDS));
+
+        Thread destroyer = new Thread(() -> {
+            try {
+                storage.destroy();
+            } catch (IOException ignored) {
+                // The recording client is not connected; completion is the behavior under test.
+            }
+        });
+        destroyer.setDaemon(true);
+        destroyer.start();
+
+        try {
+            destroyer.join(1000);
+            assertFalse(destroyer.isAlive());
+            assertTrue(client.disconnectCalled);
+        } finally {
+            client.allowListFiles.countDown();
+            operation.join(1000);
+            destroyer.join(1000);
+        }
+        assertFalse(operation.isAlive());
+        assertNull(operationFailure.get());
+    }
+
+    @Test
     void streamRegistrationStopsAfterLifecycleCloseBegins() throws Exception {
         setField(storage, "destroying", true);
         Method registerActiveStream = FtpFileStorage.class
@@ -255,6 +293,9 @@ class FtpFileStorageTest {
         private boolean blockCompletePendingCommand;
         private boolean disconnectCalled;
         private final CountDownLatch allowCompletePendingCommand = new CountDownLatch(1);
+        private boolean blockListFiles;
+        private final CountDownLatch listFilesStarted = new CountDownLatch(1);
+        private final CountDownLatch allowListFiles = new CountDownLatch(1);
         private IOException outputStreamCloseFailure;
         private String renamedSource;
         private String renamedTarget;
@@ -262,6 +303,15 @@ class FtpFileStorageTest {
 
         @Override
         public FTPFile[] listFiles(String pathname) {
+            if (blockListFiles) {
+                listFilesStarted.countDown();
+                try {
+                    allowListFiles.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                }
+            }
             if (singleChildDirectory != null && singleChildDirectory.equals(pathname)) {
                 FTPFile child = new FTPFile();
                 child.setType(FTPFile.FILE_TYPE);
@@ -308,6 +358,7 @@ class FtpFileStorageTest {
         @Override
         public void disconnect() {
             disconnectCalled = true;
+            allowListFiles.countDown();
         }
 
         @Override
