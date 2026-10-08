@@ -92,8 +92,20 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
                 "createTableV2", "dropTable", "batchCount", "batchRead", "streamRead",
                 "timestampToStreamOffset", "queryByAdvanceFilter", "countByPartitionFilter",
                 "writeRecord", "createIndex", "queryIndexes", "errorHandle",
-                "executeCommand", "getTableInfo", "getReadPartitions", "queryFieldMinMaxValue",
+                "executeCommand", "runRawCommand", "getTableInfo", "getReadPartitions", "queryFieldMinMaxValue",
                 "transactionBegin", "transactionCommit", "transactionRollback").collect(Collectors.toSet());
+    }
+
+    @Override
+    protected String rawQueryCommand(String tableName) {
+        // The wrapped form carries its own row limit, so the whole prepared data set is read back no matter which
+        // batch size the harness passes.
+        return "{\"$find\":{\"filter\":{},\"limit\":1000000}}";
+    }
+
+    @Override
+    protected String rawCountCommand(String tableName) {
+        return "{}";
     }
 
     @Test
