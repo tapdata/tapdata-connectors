@@ -8,11 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class SftpConfigTest {
 
     @Test
-    void defaultsToSafeHostKeyCheckingAndUtf8() {
+    void defaultsToCompatibilityHostKeyCheckingAndUtf8() {
         SftpConfig config = new SftpConfig();
 
         assertEquals("UTF-8", config.getEncoding());
-        assertEquals("yes", config.getSftpStrictHostKeyChecking());
+        assertEquals("no", config.getSftpStrictHostKeyChecking());
         assertEquals(10000, config.getSftpConnectionTimeoutMillis());
     }
 
@@ -22,6 +22,16 @@ class SftpConfigTest {
         config.setSftpHost("host");
         config.setSftpUsername("user");
         config.setSftpStrictHostKeyChecking("unsafe");
+
+        assertThrows(IllegalArgumentException.class, config::validate);
+    }
+
+    @Test
+    void rejectsStrictCheckingWithoutKnownHosts() {
+        SftpConfig config = new SftpConfig();
+        config.setSftpHost("host");
+        config.setSftpUsername("user");
+        config.setSftpStrictHostKeyChecking("yes");
 
         assertThrows(IllegalArgumentException.class, config::validate);
     }

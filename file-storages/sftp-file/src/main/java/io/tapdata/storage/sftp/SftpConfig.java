@@ -110,6 +110,10 @@ public class SftpConfig implements Serializable {
                 && !"ask".equalsIgnoreCase(sftpStrictHostKeyChecking)) {
             throw new IllegalArgumentException("sftpStrictHostKeyChecking must be yes, no or ask");
         }
+        if ("yes".equalsIgnoreCase(sftpStrictHostKeyChecking)
+                && (sftpKnownHosts == null || sftpKnownHosts.trim().isEmpty())) {
+            throw new IllegalArgumentException("sftpKnownHosts is required when sftpStrictHostKeyChecking is yes");
+        }
         if (sftpConnectionTimeoutMillis <= 0) {
             throw new IllegalArgumentException("sftpConnectionTimeoutMillis must be positive");
         }

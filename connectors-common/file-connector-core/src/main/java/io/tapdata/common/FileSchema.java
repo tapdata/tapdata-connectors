@@ -1,5 +1,6 @@
 package io.tapdata.common;
 
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.file.TapFile;
 import io.tapdata.file.TapFileStorage;
 import io.tapdata.kit.EmptyKit;
@@ -10,6 +11,9 @@ import java.util.Map;
 import java.util.concurrent.*;
 
 public abstract class FileSchema {
+
+    private static final String TAG = FileSchema.class.getSimpleName();
+    private static final long WORKER_SHUTDOWN_TIMEOUT_SECONDS = 10;
 
     protected final FileConfig fileConfig;
     protected final TapFileStorage storage;
@@ -28,11 +32,15 @@ public abstract class FileSchema {
             executorService.submit(() -> {
                 try {
                     TapFile file;
-                    while ((file = getOutFile(fileMap)) != null) {
+                    while (!Thread.currentThread().isInterrupted() && (file = getOutFile(fileMap)) != null) {
                         try {
                             sampleOneFile(sampleResult, file);
                         } catch (Exception e) {
                             exceptionList.add(e);
+                            if (e instanceof InterruptedException) {
+                                Thread.currentThread().interrupt();
+                                break;
+                            }
                         }
                     }
                 } finally {
@@ -40,18 +48,45 @@ public abstract class FileSchema {
                 }
             });
         }
+        boolean samplingInterrupted = false;
         try {
             countDownLatch.await();
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            samplingInterrupted = true;
             throw new RuntimeException("Interrupted while sampling file data", e);
         } finally {
-            executorService.shutdownNow();
+            boolean shutdownInterrupted = shutdownExecutorAndAwaitTermination(executorService, samplingInterrupted);
+            if (samplingInterrupted || shutdownInterrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
         if (EmptyKit.isNotEmpty(exceptionList)) {
             throw new RuntimeException("sample every file error", exceptionList.get(0));
         }
         return sampleResult;
+    }
+
+    private boolean shutdownExecutorAndAwaitTermination(ExecutorService executorService, boolean closeStorage) {
+        executorService.shutdownNow();
+        if (closeStorage) {
+            try {
+                // Closing active streams gives blocking storage reads a chance to finish before the caller's cleanup.
+                storage.destroy();
+            } catch (Throwable e) {
+                TapLogger.warn(TAG, "Failed to close storage after sampling was interrupted", e);
+            }
+        }
+        boolean interrupted = false;
+        try {
+            if (!executorService.awaitTermination(WORKER_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                TapLogger.warn(TAG, "Sampling workers did not terminate within "
+                        + WORKER_SHUTDOWN_TIMEOUT_SECONDS + " seconds");
+            }
+        } catch (InterruptedException e) {
+            interrupted = true;
+            TapLogger.warn(TAG, "Interrupted while waiting for sampling workers to terminate", e);
+        }
+        return interrupted;
     }
 
     public Map<String, Object> sampleFixedFileData(Map<String, TapFile> csvFileMap) throws Exception {

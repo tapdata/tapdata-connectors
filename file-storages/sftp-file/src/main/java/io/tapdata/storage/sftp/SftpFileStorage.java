@@ -10,6 +10,7 @@ import io.tapdata.file.TapFile;
 import io.tapdata.file.TapFileStorage;
 import io.tapdata.storage.kit.EmptyKit;
 import io.tapdata.storage.kit.FileMatchKit;
+import io.tapdata.storage.kit.TransferableReentrantLock;
 
 import java.io.FilterInputStream;
 import java.io.FilterOutputStream;
@@ -18,23 +19,29 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 public class SftpFileStorage implements TapFileStorage {
 
-    private final ReentrantLock operationLock = new ReentrantLock(true);
+    private final TransferableReentrantLock operationLock = new TransferableReentrantLock();
+    private final Object lifecycleMonitor = new Object();
+    private final Set<AutoCloseable> activeStreams = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private volatile boolean destroying;
     private SftpConfig sftpConfig;
     private Session session;
     private ChannelSftp channel;
 
     @Override
     public void init(Map<String, Object> params) throws JSchException, SftpException {
-        operationLock.lock();
+        closeActiveStreams(beginLifecycleClose());
+        TransferableReentrantLock.Permit permit = operationLock.acquireUninterruptibly();
         try {
             destroyUnlocked();
             sftpConfig = new SftpConfig().load(params);
@@ -43,8 +50,6 @@ public class SftpFileStorage implements TapFileStorage {
             JSch jsch = new JSch();
             if (EmptyKit.isNotBlank(sftpConfig.getSftpKnownHosts())) {
                 jsch.setKnownHosts(sftpConfig.getSftpKnownHosts());
-            } else {
-                sftpConfig.setSftpStrictHostKeyChecking("no");
             }
             Session newSession = jsch.getSession(sftpConfig.getSftpUsername(),
                     sftpConfig.getSftpHost(), sftpConfig.getSftpPort());
@@ -69,17 +74,65 @@ public class SftpFileStorage implements TapFileStorage {
                 throw e;
             }
         } finally {
-            operationLock.unlock();
+            permit.release();
+            endLifecycleClose();
         }
     }
 
     @Override
     public void destroy() {
-        operationLock.lock();
+        closeActiveStreams(beginLifecycleClose());
+        TransferableReentrantLock.Permit permit = operationLock.acquireUninterruptibly();
         try {
             destroyUnlocked();
         } finally {
-            operationLock.unlock();
+            permit.release();
+            endLifecycleClose();
+        }
+    }
+
+    private AutoCloseable[] beginLifecycleClose() {
+        synchronized (lifecycleMonitor) {
+            destroying = true;
+            return activeStreams.toArray(new AutoCloseable[0]);
+        }
+    }
+
+    private void endLifecycleClose() {
+        synchronized (lifecycleMonitor) {
+            destroying = false;
+        }
+    }
+
+    private TransferableReentrantLock.Permit acquireOperationLock() {
+        if (destroying) {
+            throw new IllegalStateException("SFTP storage is being destroyed");
+        }
+        TransferableReentrantLock.Permit permit = operationLock.acquireUninterruptibly();
+        if (destroying) {
+            permit.release();
+            throw new IllegalStateException("SFTP storage is being destroyed");
+        }
+        return permit;
+    }
+
+    private void closeActiveStreams(AutoCloseable[] streams) {
+        for (AutoCloseable stream : streams) {
+            try {
+                stream.close();
+            } catch (Exception ignored) {
+                // The connection is being replaced or destroyed; continue closing the remaining streams.
+            }
+        }
+    }
+
+    private boolean registerActiveStream(AutoCloseable stream) {
+        synchronized (lifecycleMonitor) {
+            if (destroying) {
+                return false;
+            }
+            activeStreams.add(stream);
+            return true;
         }
     }
 
@@ -96,7 +149,7 @@ public class SftpFileStorage implements TapFileStorage {
 
     @Override
     public TapFile getFile(String path) throws SftpException {
-        operationLock.lock();
+        TransferableReentrantLock.Permit permit = acquireOperationLock();
         try {
             ensureConnected();
             SftpATTRS attrs;
@@ -108,7 +161,7 @@ public class SftpFileStorage implements TapFileStorage {
             }
             return toTapFile(attrs, path);
         } finally {
-            operationLock.unlock();
+            permit.release();
         }
     }
 
@@ -123,33 +176,40 @@ public class SftpFileStorage implements TapFileStorage {
 
     @Override
     public InputStream readFile(String path) throws Exception {
-        operationLock.lock();
+        TransferableReentrantLock.Permit permit = acquireOperationLock();
+        boolean ownershipTransferred = false;
         try {
             ensureConnected();
             if (!isFileExistUnlocked(path)) {
-                operationLock.unlock();
                 return null;
             }
             try {
-                return new UnlockingInputStream(channel.get(path), operationLock);
+                InputStream inputStream = channel.get(path);
+                UnlockingInputStream managed = new UnlockingInputStream(inputStream, permit);
+                if (!managed.isRegistered()) {
+                    managed.close();
+                    throw new IllegalStateException("SFTP storage is being destroyed");
+                }
+                ownershipTransferred = true;
+                return managed;
             } catch (SftpException e) {
-                operationLock.unlock();
                 throw e;
             }
-        } catch (Exception | Error e) {
-            if (operationLock.isHeldByCurrentThread()) operationLock.unlock();
-            throw e;
+        } finally {
+            if (!ownershipTransferred) {
+                permit.release();
+            }
         }
     }
 
     @Override
     public boolean isFileExist(String path) throws SftpException {
-        operationLock.lock();
+        TransferableReentrantLock.Permit permit = acquireOperationLock();
         try {
             ensureConnected();
             return isFileExistUnlocked(path);
         } finally {
-            operationLock.unlock();
+            permit.release();
         }
     }
 
@@ -169,7 +229,7 @@ public class SftpFileStorage implements TapFileStorage {
 
     @Override
     public boolean delete(String path) throws SftpException {
-        operationLock.lock();
+        TransferableReentrantLock.Permit permit = acquireOperationLock();
         try {
             ensureConnected();
             SftpATTRS attrs;
@@ -189,7 +249,7 @@ public class SftpFileStorage implements TapFileStorage {
             if (isNotFound(e)) return false;
             throw e;
         } finally {
-            operationLock.unlock();
+            permit.release();
         }
     }
 
@@ -210,30 +270,36 @@ public class SftpFileStorage implements TapFileStorage {
 
     @Override
     public TapFile saveFile(String path, InputStream inputStream, boolean canReplace) throws SftpException {
-        operationLock.lock();
+        TransferableReentrantLock.Permit permit = acquireOperationLock();
         try {
             ensureConnected();
             if (isFileExistUnlocked(path) && !canReplace) return getFileUnlocked(path);
             channel.put(inputStream, path, ChannelSftp.OVERWRITE);
             return getFileUnlocked(path);
         } finally {
-            operationLock.unlock();
+            permit.release();
         }
     }
 
     @Override
     public OutputStream openFileOutputStream(String path, boolean append) throws Exception {
-        operationLock.lock();
+        TransferableReentrantLock.Permit permit = acquireOperationLock();
+        boolean ownershipTransferred = false;
         try {
             ensureConnected();
-            return new UnlockingOutputStream(channel.put(path,
-                    append ? ChannelSftp.APPEND : ChannelSftp.OVERWRITE), operationLock);
-        } catch (SftpException e) {
-            operationLock.unlock();
-            throw e;
-        } catch (RuntimeException | Error e) {
-            operationLock.unlock();
-            throw e;
+            OutputStream outputStream = channel.put(path,
+                    append ? ChannelSftp.APPEND : ChannelSftp.OVERWRITE);
+            UnlockingOutputStream managed = new UnlockingOutputStream(outputStream, permit);
+            if (!managed.isRegistered()) {
+                managed.close();
+                throw new IllegalStateException("SFTP storage is being destroyed");
+            }
+            ownershipTransferred = true;
+            return managed;
+        } finally {
+            if (!ownershipTransferred) {
+                permit.release();
+            }
         }
     }
 
@@ -244,7 +310,7 @@ public class SftpFileStorage implements TapFileStorage {
                                     boolean recursive,
                                     int batchSize,
                                     Consumer<List<TapFile>> consumer) throws SftpException {
-        operationLock.lock();
+        TransferableReentrantLock.Permit permit = acquireOperationLock();
         try {
             ensureConnected();
             if (batchSize <= 0) throw new IllegalArgumentException("batchSize must be positive");
@@ -253,7 +319,7 @@ public class SftpFileStorage implements TapFileStorage {
             getFiles(directoryPath, includeRegs, excludeRegs, recursive, batchSize, consumer, batch);
             if (!batch.isEmpty()) consumer.accept(batch);
         } finally {
-            operationLock.unlock();
+            permit.release();
         }
     }
 
@@ -300,12 +366,12 @@ public class SftpFileStorage implements TapFileStorage {
 
     @Override
     public boolean isDirectoryExist(String path) throws SftpException {
-        operationLock.lock();
+        TransferableReentrantLock.Permit permit = acquireOperationLock();
         try {
             ensureConnected();
             return isDirectoryExistUnlocked(path);
         } finally {
-            operationLock.unlock();
+            permit.release();
         }
     }
 
@@ -339,42 +405,56 @@ public class SftpFileStorage implements TapFileStorage {
         return parentPath.endsWith("/") ? parentPath + fileName : parentPath + "/" + fileName;
     }
 
-    private static final class UnlockingInputStream extends FilterInputStream {
-        private final ReentrantLock lock;
+    private final class UnlockingInputStream extends FilterInputStream {
+        private final TransferableReentrantLock.Permit permit;
         private final AtomicBoolean closed = new AtomicBoolean();
+        private final boolean registered;
 
-        private UnlockingInputStream(InputStream delegate, ReentrantLock lock) {
+        private UnlockingInputStream(InputStream delegate, TransferableReentrantLock.Permit permit) {
             super(delegate);
-            this.lock = lock;
+            this.permit = permit;
+            this.registered = registerActiveStream(this);
+        }
+
+        private boolean isRegistered() {
+            return registered;
         }
 
         @Override
         public void close() throws IOException {
             if (!closed.compareAndSet(false, true)) return;
+            activeStreams.remove(this);
             try {
                 super.close();
             } finally {
-                lock.unlock();
+                permit.release();
             }
         }
     }
 
-    private static final class UnlockingOutputStream extends FilterOutputStream {
-        private final ReentrantLock lock;
+    private final class UnlockingOutputStream extends FilterOutputStream {
+        private final TransferableReentrantLock.Permit permit;
         private final AtomicBoolean closed = new AtomicBoolean();
+        private final boolean registered;
 
-        private UnlockingOutputStream(OutputStream delegate, ReentrantLock lock) {
+        private UnlockingOutputStream(OutputStream delegate, TransferableReentrantLock.Permit permit) {
             super(delegate);
-            this.lock = lock;
+            this.permit = permit;
+            this.registered = registerActiveStream(this);
+        }
+
+        private boolean isRegistered() {
+            return registered;
         }
 
         @Override
         public void close() throws IOException {
             if (!closed.compareAndSet(false, true)) return;
+            activeStreams.remove(this);
             try {
                 super.close();
             } finally {
-                lock.unlock();
+                permit.release();
             }
         }
     }

@@ -21,8 +21,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,10 +57,59 @@ class FileConnectorLifecycleTest {
         assertTrue(storage.destroyCalled);
     }
 
+    @Test
+    void onStopSerializesWithActiveMergeBeforeReleasingResources() throws Exception {
+        TrackingStorage storage = new TrackingStorage(false);
+        TrackingWriter writer = new TrackingWriter(storage, false, false);
+        TestFileConnector connector = new TestFileConnector(storage, writer);
+        CountDownLatch mergeStarted = new CountDownLatch(1);
+        CountDownLatch allowMerge = new CountDownLatch(1);
+        CountDownLatch concurrentMergeDetected = new CountDownLatch(1);
+        writer.blockMerge(mergeStarted, allowMerge, concurrentMergeDetected);
+
+        AtomicReference<Throwable> backgroundFailure = new AtomicReference<>();
+        Thread backgroundMerge = new Thread(() -> {
+            try {
+                connector.mergeCacheFilesForTest();
+            } catch (Throwable throwable) {
+                backgroundFailure.set(throwable);
+            }
+        });
+        backgroundMerge.start();
+        assertTrue(mergeStarted.await(1, TimeUnit.SECONDS));
+
+        AtomicReference<Throwable> stopFailure = new AtomicReference<>();
+        Thread stopper = new Thread(() -> {
+            try {
+                connector.onStop(null);
+            } catch (Throwable throwable) {
+                stopFailure.set(throwable);
+            }
+        });
+        stopper.start();
+
+        assertFalse(concurrentMergeDetected.await(200, TimeUnit.MILLISECONDS));
+        allowMerge.countDown();
+
+        backgroundMerge.join(1000);
+        stopper.join(1000);
+
+        assertFalse(backgroundMerge.isAlive());
+        assertFalse(stopper.isAlive());
+        assertNull(backgroundFailure.get());
+        assertNull(stopFailure.get());
+        assertEquals(1, writer.maxConcurrentMerges());
+        assertTrue(storage.destroyCalled);
+    }
+
     private static final class TestFileConnector extends FileConnector {
         private TestFileConnector(TrackingStorage storage, TrackingWriter writer) {
             this.storage = storage;
             this.fileRecordWriter = writer;
+        }
+
+        private void mergeCacheFilesForTest() throws Exception {
+            mergeCacheFilesSafely();
         }
 
         @Override
@@ -80,7 +135,12 @@ class FileConnectorLifecycleTest {
     private static final class TrackingWriter extends AbstractFileRecordWriter {
         private final boolean mergeFails;
         private final boolean releaseFails;
+        private final AtomicInteger activeMerges = new AtomicInteger();
+        private final AtomicInteger maxConcurrentMerges = new AtomicInteger();
         private boolean releaseCalled;
+        private CountDownLatch mergeStarted;
+        private CountDownLatch allowMerge;
+        private CountDownLatch concurrentMergeDetected;
 
         private TrackingWriter(TapFileStorage storage, boolean mergeFails, boolean releaseFails) throws Exception {
             super(storage, new FileConfig(), new TapTable("table").add(new TapField("id", "STRING")), new EmptyKvMap());
@@ -90,9 +150,39 @@ class FileConnectorLifecycleTest {
 
         @Override
         public void mergeCacheFiles() {
-            if (mergeFails) {
-                throw new RuntimeException("merge failed");
+            int currentMerges = activeMerges.incrementAndGet();
+            maxConcurrentMerges.updateAndGet(current -> Math.max(current, currentMerges));
+            if (currentMerges > 1 && concurrentMergeDetected != null) {
+                concurrentMergeDetected.countDown();
             }
+            try {
+                if (mergeStarted != null) {
+                    mergeStarted.countDown();
+                    if (!allowMerge.await(1, TimeUnit.SECONDS)) {
+                        throw new RuntimeException("merge was not released");
+                    }
+                }
+                if (mergeFails) {
+                    throw new RuntimeException("merge failed");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            } finally {
+                activeMerges.decrementAndGet();
+            }
+        }
+
+        private void blockMerge(CountDownLatch mergeStarted,
+                                CountDownLatch allowMerge,
+                                CountDownLatch concurrentMergeDetected) {
+            this.mergeStarted = mergeStarted;
+            this.allowMerge = allowMerge;
+            this.concurrentMergeDetected = concurrentMergeDetected;
+        }
+
+        private int maxConcurrentMerges() {
+            return maxConcurrentMerges.get();
         }
 
         @Override

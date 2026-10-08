@@ -3,6 +3,7 @@ package io.tapdata.storage.ftp;
 import io.tapdata.file.TapFile;
 import io.tapdata.file.TapFileStorage;
 import io.tapdata.storage.kit.FileMatchKit;
+import io.tapdata.storage.kit.TransferableReentrantLock;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPFile;
@@ -17,21 +18,33 @@ import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.Semaphore;
 import java.util.function.Consumer;
 
 public class FtpFileStorage implements TapFileStorage {
 
-    private final Semaphore ioLock = new Semaphore(1, true);
+    private static final int DEFAULT_CONTROL_TIMEOUT_MILLIS = 60_000;
+    private final TransferableReentrantLock ioLock = new TransferableReentrantLock();
+    private final Object lifecycleMonitor = new Object();
+    private final Set<AutoCloseable> activeStreams = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private volatile boolean destroying;
     private FtpConfig ftpConfig;
     private FTPClient ftpClient;
 
+    private interface ForceCloseable {
+        void closeForDestroy() throws IOException;
+    }
+
     @Override
     public void init(Map<String, Object> params) throws IOException {
-        ioLock.acquireUninterruptibly();
+        closeActiveStreams(beginLifecycleClose());
+        TransferableReentrantLock.Permit permit = ioLock.acquireUninterruptibly();
         try {
             FtpConfig config = new FtpConfig().load(params);
             validateConfig(config);
@@ -43,6 +56,8 @@ public class FtpFileStorage implements TapFileStorage {
             try {
                 client.setConnectTimeout(config.getFtpConnectTimeout());
                 client.setDataTimeout(config.getFtpDataTimeout());
+                client.setDefaultTimeout(config.getFtpConnectTimeout() > 0
+                        ? config.getFtpConnectTimeout() : DEFAULT_CONTROL_TIMEOUT_MILLIS);
                 client.setControlEncoding(config.getEncoding());
                 client.connect(config.getFtpHost(), config.getFtpPort());
                 if (!FTPReply.isPositiveCompletion(client.getReplyCode())) {
@@ -78,7 +93,8 @@ public class FtpFileStorage implements TapFileStorage {
                 throw new IOException("initialize ftp storage failed", throwable);
             }
         } finally {
-            ioLock.release();
+            permit.release();
+            endLifecycleClose();
         }
     }
 
@@ -92,47 +108,109 @@ public class FtpFileStorage implements TapFileStorage {
 
     private void validateConfig(FtpConfig config) {
         if (config != null && Boolean.TRUE.equals(config.getFtpSsl())) {
-            throw new UnsupportedOperationException("FTPS is not supported by ftp-file yet");
+            throw new UnsupportedOperationException(
+                    "ftpSsl=true is not supported by ftp-file. Set ftpSsl=false for plain FTP, "
+                            + "or use an FTPS-capable connector for TLS.");
         }
     }
 
     @Override
     public void destroy() throws IOException {
-        ioLock.acquireUninterruptibly();
+        Throwable failure = closeActiveStreams(beginLifecycleClose(), true);
+        TransferableReentrantLock.Permit permit = ioLock.acquireUninterruptibly();
         try {
-            IOException failure = closeClient(ftpClient);
+            failure = appendFailure(failure, closeClient(ftpClient, false));
             ftpClient = null;
             ftpConfig = null;
-            if (failure != null) {
-                throw failure;
-            }
         } finally {
-            ioLock.release();
+            permit.release();
+            endLifecycleClose();
+        }
+        throwFailure(failure);
+    }
+
+    private AutoCloseable[] beginLifecycleClose() {
+        synchronized (lifecycleMonitor) {
+            destroying = true;
+            return activeStreams.toArray(new AutoCloseable[0]);
+        }
+    }
+
+    private void endLifecycleClose() {
+        synchronized (lifecycleMonitor) {
+            destroying = false;
+        }
+    }
+
+    private TransferableReentrantLock.Permit acquireIoLock() throws IOException {
+        if (destroying) {
+            throw new IOException("ftp storage is being destroyed");
+        }
+        TransferableReentrantLock.Permit permit = ioLock.acquireUninterruptibly();
+        if (destroying) {
+            permit.release();
+            throw new IOException("ftp storage is being destroyed");
+        }
+        return permit;
+    }
+
+    private Throwable closeActiveStreams(AutoCloseable[] streams) {
+        return closeActiveStreams(streams, false);
+    }
+
+    private Throwable closeActiveStreams(AutoCloseable[] streams, boolean force) {
+        Throwable failure = null;
+        for (AutoCloseable stream : streams) {
+            try {
+                if (force && stream instanceof ForceCloseable) {
+                    ((ForceCloseable) stream).closeForDestroy();
+                } else {
+                    stream.close();
+                }
+            } catch (Throwable throwable) {
+                failure = appendFailure(failure, throwable);
+            }
+        }
+        return failure;
+    }
+
+    private boolean registerActiveStream(AutoCloseable stream) {
+        synchronized (lifecycleMonitor) {
+            if (destroying) {
+                return false;
+            }
+            activeStreams.add(stream);
+            return true;
         }
     }
 
     private IOException closeClient(FTPClient client) {
+        return closeClient(client, true);
+    }
+
+    private IOException closeClient(FTPClient client, boolean graceful) {
         if (client == null) {
             return null;
         }
         IOException failure = null;
-        try {
-            if (client.isConnected()) {
-                client.logout();
-            }
-        } catch (IOException e) {
-            failure = e;
-        } finally {
+        if (graceful) {
             try {
                 if (client.isConnected()) {
-                    client.disconnect();
+                    client.logout();
                 }
             } catch (IOException e) {
-                if (failure == null) {
-                    failure = e;
-                } else {
-                    failure.addSuppressed(e);
-                }
+                failure = e;
+            }
+        }
+        try {
+            if (client.isConnected()) {
+                client.disconnect();
+            }
+        } catch (IOException e) {
+            if (failure == null) {
+                failure = e;
+            } else {
+                failure.addSuppressed(e);
             }
         }
         return failure;
@@ -140,19 +218,16 @@ public class FtpFileStorage implements TapFileStorage {
 
     @Override
     public TapFile getFile(String path) throws IOException {
-        ioLock.acquireUninterruptibly();
+        TransferableReentrantLock.Permit permit = acquireIoLock();
         try {
             ensureReady();
-            FTPFile file = singleFile(path);
-            if (file != null) {
-                return toTapFile(file, path);
-            }
             if (isDirectoryExistLocked(path)) {
                 return toDirectory(path);
             }
-            return null;
+            FTPFile file = singleFile(path);
+            return file == null ? null : toTapFile(file, path);
         } finally {
-            ioLock.release();
+            permit.release();
         }
     }
 
@@ -179,7 +254,7 @@ public class FtpFileStorage implements TapFileStorage {
 
     @Override
     public void readFile(String path, Consumer<InputStream> consumer) throws IOException {
-        ioLock.acquireUninterruptibly();
+        TransferableReentrantLock.Permit permit = acquireIoLock();
         try {
             ensureReady();
             if (!isFileExistLocked(path)) {
@@ -189,32 +264,32 @@ public class FtpFileStorage implements TapFileStorage {
             if (inputStream == null) {
                 throw new IOException("open ftp input stream failed: " + ftpClient.getReplyString());
             }
+            ManagedInputStream managed = new ManagedInputStream(inputStream, permit);
+            if (!managed.isRegistered()) {
+                managed.close();
+                throw new IOException("ftp storage is being destroyed");
+            }
             Throwable failure = null;
             try {
-                consumer.accept(inputStream);
+                consumer.accept(managed);
             } catch (Throwable throwable) {
                 failure = throwable;
             } finally {
                 try {
-                    inputStream.close();
-                } catch (Throwable throwable) {
-                    failure = appendFailure(failure, throwable);
-                }
-                try {
-                    completePendingCommand();
+                    managed.close();
                 } catch (Throwable throwable) {
                     failure = appendFailure(failure, throwable);
                 }
             }
             throwFailure(failure);
         } finally {
-            ioLock.release();
+            permit.release();
         }
     }
 
     @Override
     public InputStream readFile(String path) throws IOException {
-        ioLock.acquireUninterruptibly();
+        TransferableReentrantLock.Permit permit = acquireIoLock();
         boolean ownershipTransferred = false;
         try {
             ensureReady();
@@ -225,47 +300,73 @@ public class FtpFileStorage implements TapFileStorage {
             if (inputStream == null) {
                 throw new IOException("open ftp input stream failed: " + ftpClient.getReplyString());
             }
+            ManagedInputStream managed = new ManagedInputStream(inputStream, permit);
+            if (!managed.isRegistered()) {
+                managed.close();
+                throw new IOException("ftp storage is being destroyed");
+            }
             ownershipTransferred = true;
-            return new ManagedInputStream(inputStream);
+            return managed;
         } finally {
             if (!ownershipTransferred) {
-                ioLock.release();
+                permit.release();
             }
         }
     }
 
-    private class ManagedInputStream extends FilterInputStream {
-        private boolean closed;
+    private class ManagedInputStream extends FilterInputStream implements ForceCloseable {
+        private final TransferableReentrantLock.Permit permit;
+        private final AtomicBoolean closed = new AtomicBoolean();
+        private final boolean registered;
 
-        private ManagedInputStream(InputStream inputStream) {
+        private ManagedInputStream(InputStream inputStream, TransferableReentrantLock.Permit permit) {
             super(inputStream);
+            this.permit = permit;
+            this.registered = registerActiveStream(this);
+        }
+
+        private boolean isRegistered() {
+            return registered;
         }
 
         @Override
         public void close() throws IOException {
-            if (closed) {
+            close(true);
+        }
+
+        @Override
+        public void closeForDestroy() throws IOException {
+            close(false);
+        }
+
+        private void close(boolean completePendingCommand) throws IOException {
+            if (!closed.compareAndSet(false, true)) {
                 return;
             }
-            closed = true;
+            activeStreams.remove(this);
             Throwable failure = null;
             try {
                 super.close();
             } catch (Throwable throwable) {
                 failure = throwable;
             } finally {
-                try {
-                    completePendingCommand();
-                } catch (Throwable throwable) {
-                    failure = appendFailure(failure, throwable);
-                } finally {
-                    ioLock.release();
+                if (completePendingCommand) {
+                    try {
+                        completePendingCommand();
+                    } catch (Throwable throwable) {
+                        failure = appendFailure(failure, throwable);
+                    }
                 }
+                permit.release();
             }
             throwFailure(failure);
         }
     }
 
     private boolean isFileExistLocked(String path) throws IOException {
+        if (isDirectoryExistLocked(path)) {
+            return false;
+        }
         FTPFile file = singleFile(path);
         return file != null && file.isFile();
     }
@@ -277,40 +378,40 @@ public class FtpFileStorage implements TapFileStorage {
 
     @Override
     public boolean isFileExist(String path) throws IOException {
-        ioLock.acquireUninterruptibly();
+        TransferableReentrantLock.Permit permit = acquireIoLock();
         try {
             ensureReady();
             return isFileExistLocked(path);
         } finally {
-            ioLock.release();
+            permit.release();
         }
     }
 
     @Override
     public boolean move(String sourcePath, String destPath) throws IOException {
-        ioLock.acquireUninterruptibly();
+        TransferableReentrantLock.Permit permit = acquireIoLock();
         try {
             ensureReady();
             return ftpClient.rename(encodeISO(sourcePath), encodeISO(destPath));
         } finally {
-            ioLock.release();
+            permit.release();
         }
     }
 
     @Override
     public boolean delete(String path) throws IOException {
-        ioLock.acquireUninterruptibly();
+        TransferableReentrantLock.Permit permit = acquireIoLock();
         try {
             ensureReady();
             return ftpClient.deleteFile(encodeISO(path));
         } finally {
-            ioLock.release();
+            permit.release();
         }
     }
 
     @Override
     public TapFile saveFile(String path, InputStream inputStream, boolean canReplace) throws IOException {
-        ioLock.acquireUninterruptibly();
+        TransferableReentrantLock.Permit permit = acquireIoLock();
         try {
             ensureReady();
             if (isFileExistLocked(path) && !canReplace) {
@@ -321,7 +422,7 @@ public class FtpFileStorage implements TapFileStorage {
             }
             return getFileLocked(path);
         } finally {
-            ioLock.release();
+            permit.release();
         }
     }
 
@@ -332,7 +433,7 @@ public class FtpFileStorage implements TapFileStorage {
 
     @Override
     public OutputStream openFileOutputStream(String path, boolean append) throws IOException {
-        ioLock.acquireUninterruptibly();
+        TransferableReentrantLock.Permit permit = acquireIoLock();
         boolean ownershipTransferred = false;
         try {
             ensureReady();
@@ -342,41 +443,64 @@ public class FtpFileStorage implements TapFileStorage {
             if (outputStream == null) {
                 throw new IOException("open ftp output stream failed: " + ftpClient.getReplyString());
             }
+            ManagedOutputStream managed = new ManagedOutputStream(outputStream, permit);
+            if (!managed.isRegistered()) {
+                managed.close();
+                throw new IOException("ftp storage is being destroyed");
+            }
             ownershipTransferred = true;
-            return new ManagedOutputStream(outputStream);
+            return managed;
         } finally {
             if (!ownershipTransferred) {
-                ioLock.release();
+                permit.release();
             }
         }
     }
 
-    private class ManagedOutputStream extends FilterOutputStream {
-        private boolean closed;
+    private class ManagedOutputStream extends FilterOutputStream implements ForceCloseable {
+        private final TransferableReentrantLock.Permit permit;
+        private final AtomicBoolean closed = new AtomicBoolean();
+        private final boolean registered;
 
-        private ManagedOutputStream(OutputStream outputStream) {
+        private ManagedOutputStream(OutputStream outputStream, TransferableReentrantLock.Permit permit) {
             super(outputStream);
+            this.permit = permit;
+            this.registered = registerActiveStream(this);
+        }
+
+        private boolean isRegistered() {
+            return registered;
         }
 
         @Override
         public void close() throws IOException {
-            if (closed) {
+            close(true);
+        }
+
+        @Override
+        public void closeForDestroy() throws IOException {
+            close(false);
+        }
+
+        private void close(boolean completePendingCommand) throws IOException {
+            if (!closed.compareAndSet(false, true)) {
                 return;
             }
-            closed = true;
+            activeStreams.remove(this);
             Throwable failure = null;
             try {
                 super.close();
             } catch (Throwable throwable) {
                 failure = throwable;
             } finally {
-                try {
-                    completePendingCommand();
-                } catch (Throwable throwable) {
-                    failure = appendFailure(failure, throwable);
-                } finally {
-                    ioLock.release();
+                if (completePendingCommand) {
+                    try {
+                        completePendingCommand();
+                    } catch (Throwable throwable) {
+                        failure = appendFailure(failure, throwable);
+                    }
                 }
+                permit.release();
             }
             throwFailure(failure);
         }
@@ -395,7 +519,7 @@ public class FtpFileStorage implements TapFileStorage {
                                     boolean recursive,
                                     int batchSize,
                                     Consumer<List<TapFile>> consumer) throws IOException {
-        ioLock.acquireUninterruptibly();
+        TransferableReentrantLock.Permit permit = acquireIoLock();
         try {
             ensureReady();
             int effectiveBatchSize = batchSize > 0 ? batchSize : 1;
@@ -405,7 +529,7 @@ public class FtpFileStorage implements TapFileStorage {
                 consumer.accept(list.get());
             }
         } finally {
-            ioLock.release();
+            permit.release();
         }
     }
 
@@ -437,12 +561,12 @@ public class FtpFileStorage implements TapFileStorage {
 
     @Override
     public boolean isDirectoryExist(String path) throws IOException {
-        ioLock.acquireUninterruptibly();
+        TransferableReentrantLock.Permit permit = acquireIoLock();
         try {
             ensureReady();
             return isDirectoryExistLocked(path);
         } finally {
-            ioLock.release();
+            permit.release();
         }
     }
 
