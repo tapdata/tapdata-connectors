@@ -283,7 +283,7 @@ public abstract class FileConnector extends ConnectorBase {
             needReadFiles.clear();
             needReadFiles.putAll(changedFiles);
             tempFiles.putAll(newFiles);
-            int sleep = 60;
+            int sleep = Math.max(1, fileConfig.getStreamReadInterval());
             try {
                 while (isAlive() && (sleep-- > 0)) {
                     TapSimplify.sleep(1000);

@@ -35,6 +35,9 @@ public class MatchUtil {
         if (EmptyKit.isEmpty(str)) {
             return null;
         }
+        if (EmptyKit.isNull(dataType)) {
+            return str;
+        }
         switch (dataType) {
             case "BOOLEAN":
                 return "true".equalsIgnoreCase(str);

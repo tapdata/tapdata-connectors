@@ -1,0 +1,4 @@
+[
+  {"id": 1, "amount": 12.50, "active": true, "profile": {"city": "Shanghai"}, "tags": ["a", "b"], "nullable": null},
+  {"id": 2, "amount": 0.25, "active": false, "profile": {"city": "Beijing"}, "tags": [], "nullable": "present"}
+]
