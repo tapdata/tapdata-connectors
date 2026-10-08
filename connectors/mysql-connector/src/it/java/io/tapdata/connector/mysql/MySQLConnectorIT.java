@@ -21,12 +21,14 @@ import io.tapdata.it.schema.TestDataType;
 import io.tapdata.it.schema.TestFieldSpec;
 import io.tapdata.it.schema.TestTableSpec;
 import io.tapdata.it.support.TestStateMap;
+import io.tapdata.it.dbforge.DbForgeLeaseProvider;
 import io.tapdata.it.tpcc.TpccAdapter;
 import io.tapdata.it.tpcc.TpccConnectorIT;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -54,6 +56,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class MySQLConnectorIT extends TpccConnectorIT {
+
+    private DbForgeLeaseProvider dbForgeLeaseProvider;
+    private DataMap dbForgeConnectionConfig;
 
     @Override
     protected PerformanceAdapter createPerformanceAdapter() {
@@ -91,6 +96,43 @@ public class MySQLConnectorIT extends TpccConnectorIT {
     @Override
     protected void prepareStreamReadTable() throws Exception {
         Thread.sleep(20000L);
+    }
+
+    @Test
+    @UnderTest(value = "discoverSchema", requiresVerifier = true)
+    @UnderTest(value = "batchRead", requiresVerifier = true)
+    @UnderTest(value = "writeRecord", requiresVerifier = true)
+    void should_discover_and_copy_mysql_view_snapshot() throws Throwable {
+        String tableName = spec.getTableName();
+        String viewName = tableName + "_view";
+        String targetName = tableName + "_target";
+        try {
+            execute("CREATE TABLE " + qualified(tableName) + " (id BIGINT PRIMARY KEY, value VARCHAR(64) NOT NULL)");
+            execute("INSERT INTO " + qualified(tableName) + " VALUES (1, 'from-view')");
+            execute("CREATE VIEW " + qualified(viewName) + " AS SELECT id, value FROM " + qualified(tableName));
+            execute("CREATE TABLE " + qualified(targetName) + " (id BIGINT PRIMARY KEY, value VARCHAR(64) NOT NULL)");
+
+            List<TapTable> discovered = new ArrayList<>();
+            ((MysqlConnector) context.getConnector()).discoverSchema(connectionContext(),
+                    Collections.singletonList(viewName), 100, discovered::addAll);
+            TapTable view = discovered.stream().filter(table -> viewName.equals(table.getId())).findFirst()
+                    .orElseThrow(() -> new AssertionError("MySQL view was not discovered: " + viewName));
+            assertEquals("view", view.getType());
+
+            registerTable(view);
+            List<Map<String, Object>> snapshot = batchReadAll(view);
+            assertEquals("from-view", findRow(snapshot, 1L).get("value"));
+
+            TapTable target = new TapTable(targetName)
+                    .add(new TapField("id", "BIGINT").tapType(TapSimplify.tapNumber().bit(64)).isPrimaryKey(true).primaryKeyPos(1))
+                    .add(new TapField("value", "VARCHAR(64)").tapType(TapSimplify.tapString()));
+            registerTable(target);
+            assertEquals(1L, writeInsertEventsViaEngineCodec(snapshot, target));
+            assertEquals("from-view", findRow(batchReadAll(target), 1L).get("value"));
+        } finally {
+            execute("DROP VIEW IF EXISTS " + qualified(viewName));
+            execute("DROP TABLE IF EXISTS " + qualified(targetName));
+        }
     }
 
     @Test
@@ -515,7 +557,7 @@ public class MySQLConnectorIT extends TpccConnectorIT {
     @Override
     protected ConnectorTestContext createContext() throws Throwable {
         MysqlConnector connector = new MysqlConnector();
-        DataMap config = readConnectionConfig("config/mysql-connection.json");
+        DataMap config = loadConnectionConfig();
         config.put("port", Integer.parseInt(String.valueOf(config.get("port"))));
         TapLog log = new TapLog();
         TapConnectorContext nodeContext = new TapConnectorContext(loadSpecification("mysql-spec.json"), config,
@@ -526,6 +568,43 @@ public class MySQLConnectorIT extends TpccConnectorIT {
         connector.registerCapabilities(functions, codecRegistry);
         return ConnectorTestContext.builder().connector(connector).nodeContext(nodeContext)
                 .connectorFunctions(functions).codecRegistry(codecRegistry).config(config).log(log).build();
+    }
+
+    private DataMap loadConnectionConfig() throws Exception {
+        if (!DbForgeLeaseProvider.isDbForgeSelected()) {
+            return readConnectionConfig("config/mysql-connection.json");
+        }
+        if (dbForgeConnectionConfig == null) {
+            dbForgeLeaseProvider = DbForgeLeaseProvider.fromEnvironment("tapdata-mysql-connector-it");
+            DbForgeLeaseProvider.Connection connection = dbForgeLeaseProvider.acquire("mysql", "dedicated", "single");
+            dbForgeConnectionConfig = DataMap.create();
+            dbForgeConnectionConfig.put("host", connection.required("host"));
+            dbForgeConnectionConfig.put("port", connection.requiredPort());
+            dbForgeConnectionConfig.put("database", connection.required("database"));
+            dbForgeConnectionConfig.put("user", connection.firstRequired("user", "username"));
+            dbForgeConnectionConfig.put("password", connection.required("password"));
+            dbForgeConnectionConfig.put("highPerformance", true);
+            System.out.printf("[IT] DBForge MySQL lease acquired: leaseId=%s, host=%s, port=%s, database=%s, user=%s%n",
+                    dbForgeLeaseProvider.getLeaseId(), dbForgeConnectionConfig.getString("host"),
+                    dbForgeConnectionConfig.getInteger("port"), dbForgeConnectionConfig.getString("database"),
+                    dbForgeConnectionConfig.getString("user"));
+        }
+        DataMap config = DataMap.create();
+        config.putAll(dbForgeConnectionConfig);
+        return config;
+    }
+
+    @AfterAll
+    void releaseDbForgeLease() {
+        if (dbForgeLeaseProvider == null) {
+            return;
+        }
+        try {
+            dbForgeLeaseProvider.release();
+            System.out.println("[IT] DBForge MySQL lease released");
+        } catch (Exception error) {
+            System.err.println("[IT] Failed to release DBForge MySQL lease: " + error.getMessage());
+        }
     }
 
     private static final class Capture {

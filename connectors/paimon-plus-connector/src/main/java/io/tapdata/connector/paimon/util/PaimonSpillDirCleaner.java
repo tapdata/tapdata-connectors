@@ -68,20 +68,36 @@ public final class PaimonSpillDirCleaner {
     }
 
     /**
-     * Resolves the configured temporary-directory list to a non-blank value. When {@code configuredTmpDirs}
-     * is blank, falls back to {@code java.io.tmpdir} and then to the process working directory. The
-     * returned value may be a comma-separated multi-path string; callers that need individual roots
-     * should use {@link #splitTmpDirRoots(String)}.
-     *
-     * <p>The working-directory default (rather than {@code "/tmp"}) is intentional: Paimon spill and
-     * S3A upload buffers are meant to share the same disk, and {@code /tmp} frequently lives on a
-     * separate, smaller partition.
+     * Resolve and validate the complete list before any caller creates directories.
+     * Blank configuration uses the JVM temporary directory, then /tmp; never the working directory.
+     * Absolute local paths are a connector contract: Paimon itself accepts relative roots.
      */
     public static String resolveTmpDirs(String configuredTmpDirs) {
-        if (configuredTmpDirs == null || configuredTmpDirs.trim().isEmpty()) {
-            return System.getProperty("java.io.tmpdir", new File(".").getAbsolutePath());
+        String resolved = configuredTmpDirs;
+        if (resolved == null || resolved.trim().isEmpty()) {
+            resolved = System.getProperty("java.io.tmpdir");
+            if (resolved == null || resolved.trim().isEmpty()) { resolved = "/tmp"; }
         }
-        return configuredTmpDirs;
+        // Match Paimon 1.3.2 separators but preserve empty entries so trailing separators fail too.
+        // Source: https://github.com/apache/paimon/blob/release-1.3.2/paimon-core/src/main/java/org/apache/paimon/disk/IOManagerImpl.java
+        String[] roots = resolved.split(",|" + java.util.regex.Pattern.quote(File.pathSeparator), -1);
+        for (int i = 0; i < roots.length; i++) {
+            String root = roots[i].trim();
+            try {
+                if (root.isEmpty() || !java.nio.file.Paths.get(root).isAbsolute()
+                        || root.chars().anyMatch(Character::isISOControl)) {
+                    throw new IllegalArgumentException("Invalid temporary directory");
+                }
+            } catch (IllegalArgumentException invalid) {
+                // Do not echo the value: an accidentally pasted configuration may contain secrets.
+                throw new IllegalArgumentException("diskTmpDir entry " + (i + 1)
+                        + " must be an absolute local directory, not table properties, a URI or a relative path");
+            }
+            roots[i] = root;
+        }
+        // Hadoop S3A accepts comma-separated roots; use one normalized representation for both users.
+        // Source: https://hadoop.apache.org/docs/r3.3.6/hadoop-aws/tools/hadoop-aws/index.html#Buffering_upload_data_on_disk_fs.s3a.fast.upload.buffer.3Ddisk
+        return String.join(",", roots);
     }
 
     /**

@@ -100,10 +100,13 @@ java -jar pdk-deploy.jar register -u ${admin_email} -p ${admin_password} -t ${tm
   /path/to/your-connector.jar
 ```
 
+For older self-hosted deployments, use `-a ${accessCode}` instead of `-u/-p`. This keeps the original access-code token flow.
+
 **Parameter Description**:
 
 - `-u` (`--user`): TM administrator email. Only `admin@admin.com` is supported, and it defaults to `admin@admin.com`
-- `-p` (`--password`): TM administrator password, required. It is sent to TM after RC4 encryption, and registration is rejected when it is missing
+- `-a` (`--auth`): Legacy TM accessCode. When provided, the original access-code token flow is used and `-p` is not required
+- `-p` (`--password`): TM administrator password for the new login flow. It is sent to TM after RC4 encryption; required when neither `-a` nor `-ak` is supplied
 - `-t` (`--tm`): TapData management platform login address, e.g., `http://localhost:3030`
 - `-f` (`--filter`): Register only connectors of specified authentication types, multiple values separated by commas
 - `-l` (`--latest`): Replace with the latest version

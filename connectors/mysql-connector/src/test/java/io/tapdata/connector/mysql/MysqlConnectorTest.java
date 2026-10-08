@@ -16,6 +16,7 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapNumber;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
@@ -40,6 +41,25 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 public class MysqlConnectorTest {
+    @Test
+    void discoverSchemaMarksInformationSchemaViewAsView() throws SQLException {
+        MysqlConnector connector = new MysqlConnector();
+        JdbcContext jdbcContext = mock(JdbcContext.class);
+        when(jdbcContext.queryAllColumns(anyList())).thenReturn(Collections.emptyList());
+        when(jdbcContext.queryAllIndexes(anyList())).thenReturn(Collections.emptyList());
+        when(jdbcContext.queryAllForeignKeys(anyList())).thenReturn(Collections.emptyList());
+        ReflectionTestUtils.setField(connector, "jdbcContext", jdbcContext);
+        DataMap view = DataMap.create();
+        view.put("tableName", "orders_view");
+        view.put("tableType", "VIEW");
+        List<TapTable> discovered = new ArrayList<>();
+
+        connector.singleThreadDiscoverSchema(Collections.singletonList(view), discovered::addAll);
+
+        Assertions.assertEquals(1, discovered.size());
+        Assertions.assertEquals("view", discovered.get(0).getType());
+    }
+
     @Test
     void testRegisterCapabilitiesQueryTableHash() {
         MysqlConnector postgresConnector = new MysqlConnector();

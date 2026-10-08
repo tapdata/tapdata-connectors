@@ -1,0 +1,10 @@
+{
+  "host": "edb-postgres-tde128.tapdata-db.svc.cluster.local",
+  "port": 5433,
+  "database": "root",
+  "schema": "public",
+  "user": "root",
+  "password": "tapdata",
+  "slotName": "tapdata_connector_it",
+  "logPluginName": "pgoutput"
+}

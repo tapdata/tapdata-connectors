@@ -100,10 +100,13 @@ java -jar pdk-deploy.jar register -u ${admin_email} -p ${admin_password} -t ${tm
   /path/to/your-connector.jar
 ```
 
+对于旧版自托管部署，可改用 `-a ${accessCode}`，不需要提供 `-u/-p`，程序会继续使用原来的 accessCode 换取 token 流程。
+
 **参数说明**：
 
 - `-u`（`--user`）：TM 管理员邮箱，仅支持 `admin@admin.com`，默认即为 `admin@admin.com`。
-- `-p`（`--password`）：TM 管理员密码，必填。密码经 RC4 加密后发送给 TM，缺失时拒绝注册。
+- `-a`（`--auth`）：旧版 TM accessCode。提供该参数后继续使用原来的 accessCode 换取 token 流程，不要求 `-p`。
+- `-p`（`--password`）：新版登录流程使用的 TM 管理员密码。密码经 RC4 加密后发送给 TM；未提供 `-a` 或 `-ak` 时必填。
 - `-t`（`--tm`）：TapData 管理平台登录地址，例如 `http://localhost:3030`。
 - `-f`（`--filter`）：仅注册指定认证类型的连接器，多个值用逗号分隔。
 - `-l`（`--latest`）：替换为最新版本。

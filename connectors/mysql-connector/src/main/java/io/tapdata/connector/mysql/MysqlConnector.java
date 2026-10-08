@@ -104,6 +104,20 @@ public class MysqlConnector extends CommonDbConnector {
     public static final String MASTER_NODE_KEY = "MASTER_NODE";
     public java.util.HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave;
 
+    @Override
+    protected void singleThreadDiscoverSchema(List<DataMap> subList, Consumer<List<TapTable>> consumer) throws SQLException {
+        Set<String> viewNames = subList.stream()
+                .filter(table -> "VIEW".equalsIgnoreCase(table.getString("tableType")))
+                .map(table -> table.getString("tableName"))
+                .collect(Collectors.toSet());
+        super.singleThreadDiscoverSchema(subList, tapTables -> {
+            tapTables.stream()
+                    .filter(table -> viewNames.contains(table.getId()))
+                    .forEach(table -> table.setType("view"));
+            consumer.accept(tapTables);
+        });
+    }
+
 
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {

@@ -206,7 +206,7 @@ public final class ProcessHandler implements Activity {
                 break;
             }
             createChangeFeed(httpUtil, changefeed, minOffset);
-            sleep(10000L);
+            sleep(1000L);
             waitTimes--;
         } while (!httpUtil.queryChangeFeedsList(shellManager.shellConfig.cdcServerIpPort, processInfo.feedId));
     }

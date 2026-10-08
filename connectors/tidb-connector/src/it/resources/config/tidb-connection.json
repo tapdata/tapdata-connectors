@@ -1,0 +1,11 @@
+{
+  "host": "tidb.taptest-dbs.svc.cluster.local",
+  "port": 4000,
+  "database": "test",
+  "user": "root",
+  "password": "Gotapd8!",
+  "pdServer": "tidb.taptest-dbs.svc.cluster.local:2379",
+  "tiKvAddress": "tidb.taptest-dbs.svc.cluster.local",
+  "tiKvPort": 20160,
+  "enableIncrement": true
+}
