@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -324,16 +325,15 @@ class PaimonSpillDirCleanerTest {
     }
 
     @Test
-    void resolveTmpDirsMustFallBackToJavaIoTmpdirThenWorkingDir() {
-        String workingDir = new File(".").getAbsolutePath();
-        String ioTmpdir = System.getProperty("java.io.tmpdir", workingDir);
+    void resolveTmpDirsMustFallBackToJavaIoTmpdir() {
+        String ioTmpdir = System.getProperty("java.io.tmpdir", "/tmp");
 
-        // null / blank configured values fall back to java.io.tmpdir (then working dir).
+        // null / blank configured values fall back to java.io.tmpdir (then /tmp).
         assertEquals(ioTmpdir, PaimonSpillDirCleaner.resolveTmpDirs(null));
         assertEquals(ioTmpdir, PaimonSpillDirCleaner.resolveTmpDirs(""));
         assertEquals(ioTmpdir, PaimonSpillDirCleaner.resolveTmpDirs("   "));
 
-        // Non-blank configured values are returned verbatim (multi-path preserved).
+        // Valid absolute multi-path values are preserved.
         assertEquals("/custom", PaimonSpillDirCleaner.resolveTmpDirs("/custom"));
         assertEquals("/a,/b,/c", PaimonSpillDirCleaner.resolveTmpDirs("/a,/b,/c"));
     }
@@ -351,6 +351,55 @@ class PaimonSpillDirCleanerTest {
 
         // Empty input yields an empty array (splitPaths short-circuits length == 0).
         assertEquals(0, PaimonSpillDirCleaner.splitTmpDirRoots("").length);
+    }
+
+    @Test
+    void malformedDirectoryListMustFailBeforeCreatingAnyDirectory() {
+        Path validRoot = tempDir.resolve("not-created");
+        for (String invalid : new String[] {
+                "'bucket' = '-1', 'write-buffer-size' = '128mb'",
+                ".", "relative", "file:///tmp/spill", "/tmp/spill,", "/tmp/spill,,/tmp/other",
+                validRoot + ", 'write-buffer-spillable' = 'true'"}) {
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                    () -> PaimonSpillDirCleaner.resolveAndCreateIOManager(invalid), invalid);
+            assertTrue(error.getMessage().contains("diskTmpDir"));
+            assertFalse(Files.exists(validRoot));
+        }
+    }
+
+    @Test
+    void normalizedMultipleRootsMustOwnAndReleaseRealSpillDirectories() throws Exception {
+        Path first = tempDir.resolve("first root");
+        Path second = tempDir.resolve("second");
+        String configured = " " + first + " , " + second + " ";
+        assertEquals(first + "," + second, PaimonSpillDirCleaner.resolveTmpDirs(configured));
+        PaimonSpillDirCleaner.IOManagerBuildResult built =
+                PaimonSpillDirCleaner.resolveAndCreateIOManager(configured);
+        try {
+            assertEquals(2, built.spillDirs().size());
+            assertTrue(Files.isDirectory(first));
+            assertTrue(Files.isDirectory(second));
+        } finally {
+            built.ioManager().close();
+            PaimonSpillDirCleaner.releaseAfterClose(built.spillDirs(), true);
+        }
+        for (String directory : built.spillDirs()) {
+            assertFalse(Files.exists(java.nio.file.Paths.get(directory)));
+        }
+    }
+
+    @Test
+    void missingJvmTmpdirMustNotFallBackToWorkingDirectory() {
+        String previous = System.getProperty("java.io.tmpdir");
+        try {
+            System.clearProperty("java.io.tmpdir");
+            assertEquals("/tmp", PaimonSpillDirCleaner.resolveTmpDirs(null));
+            System.setProperty("java.io.tmpdir", ".");
+            assertThrows(IllegalArgumentException.class, () -> PaimonSpillDirCleaner.resolveTmpDirs(null));
+        } finally {
+            if (previous == null) { System.clearProperty("java.io.tmpdir"); }
+            else { System.setProperty("java.io.tmpdir", previous); }
+        }
     }
 
     private static File ownerFile(File spillDir) {

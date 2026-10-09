@@ -29,6 +29,54 @@ class PaimonServiceStaleSpillCleanupTest {
     Path tempDir;
 
     @Test
+    void s3BufferMustUseTheSameNormalizedAbsoluteRoots() throws Exception {
+        Path first = tempDir.resolve("s3 first");
+        Path second = tempDir.resolve("s3 second");
+        PaimonConfig config = new PaimonConfig();
+        config.setStorageType("s3");
+        config.setDiskTmpDir(" " + first + File.pathSeparator + second + " ");
+        Method build = PaimonService.class.getDeclaredMethod("buildHadoopConfiguration");
+        build.setAccessible(true);
+        org.apache.hadoop.conf.Configuration hadoop = (org.apache.hadoop.conf.Configuration)
+                build.invoke(new PaimonService(config, mock(Log.class)));
+        org.junit.jupiter.api.Assertions.assertEquals(first + "," + second, hadoop.get("fs.s3a.buffer.dir"));
+        assertTrue(Files.isDirectory(first));
+        assertTrue(Files.isDirectory(second));
+    }
+
+    @Test
+    void s3BufferMustValidateAllRootsBeforeCreatingAny() throws Exception {
+        Path first = tempDir.resolve("not-created");
+        PaimonConfig config = new PaimonConfig();
+        config.setStorageType("s3");
+        config.setDiskTmpDir(first + ", 'bucket' = '-1'");
+        Method build = PaimonService.class.getDeclaredMethod("buildHadoopConfiguration");
+        build.setAccessible(true);
+        java.lang.reflect.InvocationTargetException failure = org.junit.jupiter.api.Assertions.assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> build.invoke(new PaimonService(config, mock(Log.class))));
+        assertTrue(failure.getCause() instanceof IllegalArgumentException);
+        assertFalse(Files.exists(first));
+    }
+
+    @Test
+    void invalidTableRootMustFailBeforeCatalogOrGlobalRootCreation() {
+        PaimonConfig config = new PaimonConfig();
+        Path warehouse = tempDir.resolve("warehouse-not-created");
+        Path root = tempDir.resolve("spill-not-created");
+        config.setWarehouse(warehouse.toString());
+        config.setDiskTmpDir(root.toString());
+        config.setTableConfig(Collections.singletonMap("orders",
+                DataMap.create().kv("diskTmpDir", "'bucket' = '-1', 'write-buffer-size' = '128mb'")));
+        PaimonService service = new PaimonService(config, mock(Log.class));
+        IllegalArgumentException failure = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class, service::init);
+        assertTrue(failure.getMessage().contains("orders"));
+        assertFalse(Files.exists(warehouse));
+        assertFalse(Files.exists(root));
+    }
+
+    @Test
     void canonicalAliasesMustDeduplicateWithoutFollowingSymlinkRoots() throws Exception {
         PaimonConfig config = new PaimonConfig(); config.setDatabase("default");
         PaimonService service = new PaimonService(config, mock(Log.class));
