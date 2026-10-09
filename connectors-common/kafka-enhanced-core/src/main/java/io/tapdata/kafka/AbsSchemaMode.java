@@ -76,7 +76,7 @@ public abstract class AbsSchemaMode implements AutoCloseable {
                 try {
                     sampleOneSchema(table, sampleTable);
                 } catch (Exception e) {
-                    tapLogger.warn("topic: {} sample failed!");
+                    tapLogger.warn("Topic '{}' schema sample failed: {}", table, e.getMessage(), e);
                 }
                 results.add(sampleTable);
             });

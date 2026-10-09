@@ -56,19 +56,28 @@ public class RegistryProtobufMode extends AbsSchemaMode {
     public void sampleOneSchema(String table, TapTable sampleTable) {
         kafkaService.<String, Object>sampleValue(Collections.singletonList(table), null, record -> {
             if (null != record) {
-                if (record.value() instanceof DynamicMessage) {
-                    DynamicMessage message = (DynamicMessage) record.value();
-                    List<String> primaryKeys = new ArrayList<>();
-                    if (record.key() != null) {
-                        try {
-                            primaryKeys.addAll(((Map<String, Object>) TapSimplify.fromJson(record.key())).keySet());
-                        } catch (Exception e) {
-                            tapLogger.warn("Failed to parse primary keys: {}", record.key(), e);
-                        }
-                    }
-                    dynamicMessageToTapTable(sampleTable, message, primaryKeys);
-                    return false;
+                Object value = record.value();
+                if (!(value instanceof DynamicMessage)) {
+                    tapLogger.warn("Skip Protobuf schema sample because value is not DynamicMessage, topic={}, valueClass={}",
+                            table, value == null ? null : value.getClass().getName());
+                    return true;
                 }
+
+                DynamicMessage message = (DynamicMessage) value;
+                Descriptors.Descriptor descriptor = message.getDescriptorForType();
+                tapLogger.info("Protobuf schema sample, topic={}, messageType={}, declaredFields={}, populatedFields={}",
+                        table, descriptor.getFullName(), descriptor.getFields().size(), message.getAllFields().size());
+
+                List<String> primaryKeys = new ArrayList<>();
+                if (record.key() != null) {
+                    try {
+                        primaryKeys.addAll(((Map<String, Object>) TapSimplify.fromJson(record.key())).keySet());
+                    } catch (Exception e) {
+                        tapLogger.warn("Failed to parse primary keys: {}", record.key(), e);
+                    }
+                }
+                dynamicMessageToTapTable(sampleTable, message, primaryKeys);
+                return false;
             }
             return true;
         });
@@ -76,15 +85,46 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
 
     private void dynamicMessageToTapTable(TapTable sampleTable, DynamicMessage message, List<String> primaryKeys) {
-        message.getAllFields().keySet().forEach(key -> {
-            TapField field = new TapField(key.getName(), toTapType(key.getType().getJavaType().name()));
-            field.setDefaultValue(key.getDefaultValue());
-            if (primaryKeys.contains(key.getName())) {
+        addDescriptorFields(sampleTable, message.getDescriptorForType(), null, primaryKeys, new HashSet<>());
+    }
+
+    private void addDescriptorFields(TapTable sampleTable,
+                                     Descriptors.Descriptor descriptor,
+                                     String parentPath,
+                                     List<String> primaryKeys,
+                                     Set<Descriptors.Descriptor> descriptorPath) {
+        if (!descriptorPath.add(descriptor)) {
+            tapLogger.warn("Skip recursive Protobuf descriptor while loading schema, messageType={}, parentPath={}",
+                    descriptor.getFullName(), parentPath);
+            return;
+        }
+
+        for (Descriptors.FieldDescriptor protobufField : descriptor.getFields()) {
+            String fieldName = StringUtils.isBlank(parentPath)
+                    ? protobufField.getName()
+                    : parentPath + "." + protobufField.getName();
+            String tapType = protobufPrimaryTypeName(protobufField);
+            tapLogger.info("Protobuf schema field, name={}, protobufType={}, javaType={}, repeated={}, mapField={}, tapType={}",
+                    fieldName, protobufField.getType(), protobufField.getJavaType(), protobufField.isRepeated(),
+                    protobufField.isMapField(), tapType);
+
+            TapField field = new TapField(fieldName, tapType);
+            field.setNullable(!protobufField.isRequired());
+            if (protobufField.hasDefaultValue()) {
+                field.setDefaultValue(protobufField.getDefaultValue());
+            }
+            if (StringUtils.isBlank(parentPath) && primaryKeys.contains(protobufField.getName())) {
                 field.setPrimaryKey(true);
-                field.setPrimaryKeyPos(primaryKeys.indexOf(key.getName()) + 1);
+                field.setPrimaryKeyPos(primaryKeys.indexOf(protobufField.getName()) + 1);
             }
             sampleTable.add(field);
-        });
+
+            if (protobufField.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE
+                    && !protobufField.isMapField()) {
+                addDescriptorFields(sampleTable, protobufField.getMessageType(), fieldName, primaryKeys, descriptorPath);
+            }
+        }
+        descriptorPath.remove(descriptor);
     }
 
     @Override
@@ -815,7 +855,32 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         if (f == null) {
             return "STRING";
         }
-        return toTapType(f.getJavaType().name());
+        if (f.isMapField()) {
+            return "MAP";
+        }
+        if (f.isRepeated()) {
+            return "ARRAY";
+        }
+        switch (f.getJavaType()) {
+            case INT:
+                return "INTEGER";
+            case LONG:
+                return "LONG";
+            case FLOAT:
+                return "FLOAT";
+            case DOUBLE:
+                return "DOUBLE";
+            case BOOLEAN:
+                return "BOOLEAN";
+            case BYTE_STRING:
+                return "BINARY";
+            case MESSAGE:
+                return "OBJECT";
+            case ENUM:
+            case STRING:
+            default:
+                return "STRING";
+        }
     }
 
 
