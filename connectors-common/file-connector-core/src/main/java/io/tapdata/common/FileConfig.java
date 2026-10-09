@@ -37,6 +37,7 @@ public class FileConfig implements Serializable {
     private String writeFilePath;
     private String fileNameExpression;
     private int streamReadReconnectInterval = 120;
+    private int streamReadInterval = 60;
 
     public FileConfig load(Map<String, Object> map) {
         assert beanUtils != null;
@@ -219,5 +220,13 @@ public class FileConfig implements Serializable {
 
     public void setStreamReadReconnectInterval(int streamReadReconnectInterval) {
         this.streamReadReconnectInterval = streamReadReconnectInterval;
+    }
+
+    public int getStreamReadInterval() {
+        return streamReadInterval;
+    }
+
+    public void setStreamReadInterval(int streamReadInterval) {
+        this.streamReadInterval = streamReadInterval;
     }
 }

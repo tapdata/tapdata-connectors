@@ -168,14 +168,14 @@ public class SmbFileStorage implements TapFileStorage {
         if (!isFileExist(path) || canReplace) {
             File file = share.openFile(path, new HashSet<>(Collections.singletonList(AccessMask.GENERIC_ALL)), null,
                     SMB2ShareAccess.ALL, SMB2CreateDisposition.FILE_OVERWRITE_IF, null);
-            OutputStream os = file.getOutputStream();
-            int bytesRead;
-            byte[] buffer = new byte[8192];
-            while ((bytesRead = is.read(buffer, 0, 8192)) != -1) {
-                os.write(buffer, 0, bytesRead);
+            try (OutputStream os = file.getOutputStream()) {
+                int bytesRead;
+                byte[] buffer = new byte[8192];
+                while ((bytesRead = is.read(buffer, 0, 8192)) != -1) {
+                    os.write(buffer, 0, bytesRead);
+                }
+                os.flush();
             }
-            os.flush();
-            os.close();
         }
         return getFile(path);
     }

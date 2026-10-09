@@ -49,16 +49,17 @@ public class S3fsFileStorage implements TapFileStorage {
     }
 
     @Override
-    public TapFile getFile(String path) {
+    public TapFile getFile(String path) throws IOException {
         try {
-            S3Object s3Object = amazonS3Client.getObject(s3fsConfig.getBucket(), path);
-            TapFile tapFile = new TapFile();
-            tapFile.type(TapFile.TYPE_FILE)
-                    .name(path.substring(path.lastIndexOf("/") + 1))
-                    .path(path)
-                    .length(s3Object.getObjectMetadata().getInstanceLength())
-                    .lastModified(s3Object.getObjectMetadata().getLastModified().getTime());
-            return tapFile;
+            try (S3Object s3Object = amazonS3Client.getObject(s3fsConfig.getBucket(), path)) {
+                TapFile tapFile = new TapFile();
+                tapFile.type(TapFile.TYPE_FILE)
+                        .name(path.substring(path.lastIndexOf("/") + 1))
+                        .path(path)
+                        .length(s3Object.getObjectMetadata().getInstanceLength())
+                        .lastModified(s3Object.getObjectMetadata().getLastModified().getTime());
+                return tapFile;
+            }
         } catch (AmazonS3Exception e) {
             if (isDirectoryExist(path)) {
                 TapFile tapFile = new TapFile();
@@ -108,8 +109,7 @@ public class S3fsFileStorage implements TapFileStorage {
     @Override
     public boolean isFileExist(String path) {
         try {
-            amazonS3Client.getObject(s3fsConfig.getBucket(), path);
-            return true;
+            return amazonS3Client.doesObjectExist(s3fsConfig.getBucket(), path);
         } catch (AmazonS3Exception e) {
             return false;
         }
@@ -142,7 +142,6 @@ public class S3fsFileStorage implements TapFileStorage {
     public TapFile saveFile(String path, InputStream is, boolean canReplace) throws IOException {
         if (!isFileExist(path) || canReplace) {
             ObjectMetadata objectMetadata = new ObjectMetadata();
-            objectMetadata.setContentLength(is.available());
             amazonS3Client.putObject(s3fsConfig.getBucket(), path, is, objectMetadata);
         }
         return getFile(path);

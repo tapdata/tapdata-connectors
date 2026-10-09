@@ -53,14 +53,15 @@ public class OssFileStorage implements TapFileStorage {
     @Override
     public TapFile getFile(String path) throws Exception {
         try {
-            OSSObject ossObject = ossClient.getObject(ossConfig.getBucket(), path);
-            TapFile tapFile = new TapFile();
-            tapFile.type(TapFile.TYPE_FILE)
-                    .name(path.substring(path.lastIndexOf("/") + 1))
-                    .path(path)
-                    .length(ossObject.getObjectMetadata().getContentLength())
-                    .lastModified(ossObject.getObjectMetadata().getLastModified().getTime());
-            return tapFile;
+            try (OSSObject ossObject = ossClient.getObject(ossConfig.getBucket(), path)) {
+                TapFile tapFile = new TapFile();
+                tapFile.type(TapFile.TYPE_FILE)
+                        .name(path.substring(path.lastIndexOf("/") + 1))
+                        .path(path)
+                        .length(ossObject.getObjectMetadata().getContentLength())
+                        .lastModified(ossObject.getObjectMetadata().getLastModified().getTime());
+                return tapFile;
+            }
         } catch (OSSException e) {
             if (isDirectoryExist(path)) {
                 TapFile tapFile = new TapFile();
@@ -99,8 +100,7 @@ public class OssFileStorage implements TapFileStorage {
     @Override
     public boolean isFileExist(String path) {
         try {
-            ossClient.doesObjectExist(ossConfig.getBucket(), path);
-            return true;
+            return ossClient.doesObjectExist(ossConfig.getBucket(), path);
         } catch (OSSException e) {
             return false;
         }
@@ -137,7 +137,6 @@ public class OssFileStorage implements TapFileStorage {
     public TapFile saveFile(String path, InputStream is, boolean canReplace) throws Exception {
         if (!isFileExist(path) || canReplace) {
             ObjectMetadata objectMetadata = new ObjectMetadata();
-            objectMetadata.setContentLength(is.available());
             ossClient.putObject(ossConfig.getBucket(), path, is, objectMetadata);
         }
         return getFile(path);
