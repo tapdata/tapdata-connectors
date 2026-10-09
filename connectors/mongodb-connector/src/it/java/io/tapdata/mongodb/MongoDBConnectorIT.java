@@ -71,6 +71,46 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
     private DbForgeLeaseProvider dbForgeLeaseProvider;
     private DataMap dbForgeConnectionConfig;
 
+    @Test
+    @DisplayName("真实MongoDB统计：普通、空、capped及不存在集合保持原字段契约")
+    void statisticsMatchLegacyCommand() {
+        try (MongoClient client = client()) {
+            com.mongodb.client.MongoDatabase database = client.getDatabase(context.getConfig().getString("database"));
+            for (String collection : Arrays.asList("ao_stats_regular", "ao_stats_empty", "ao_stats_capped", "ao_stats_missing")) {
+                database.getCollection(collection).drop();
+            }
+            try {
+                database.createCollection("ao_stats_empty");
+                database.createCollection("ao_stats_capped", new com.mongodb.client.model.CreateCollectionOptions()
+                        .capped(true).sizeInBytes(1048576).maxDocuments(100));
+                database.getCollection("ao_stats_regular").insertMany(Arrays.asList(
+                        new Document("_id", 1).append("value", "one"),
+                        new Document("_id", 2).append("value", "two")));
+                database.getCollection("ao_stats_capped").insertOne(new Document("_id", 1));
+                MongoCollectionStatistics reader = new MongoCollectionStatistics();
+                for (String collection : Arrays.asList("ao_stats_regular", "ao_stats_empty", "ao_stats_capped", "ao_stats_missing")) {
+                    Document before = database.runCommand(new Document("collStats", collection));
+                    Document after = reader.read(database, collection);
+                    for (String field : Arrays.asList("count", "size", "storageSize", "avgObjSize", "maxSize", "max")) {
+                        Number expected = (Number) before.get(field);
+                        Number actual = (Number) after.get(field);
+                        if (expected == null) assertNull(actual, collection + ":" + field);
+                        else {
+                            assertNotNull(actual, collection + ":" + field);
+                            assertEquals(expected.doubleValue(), actual.doubleValue(), 0.000001,
+                                    collection + ":" + field);
+                        }
+                    }
+                    assertEquals(before.get("capped"), after.get("capped"), collection);
+                }
+            } finally {
+                for (String collection : Arrays.asList("ao_stats_regular", "ao_stats_empty", "ao_stats_capped", "ao_stats_missing")) {
+                    database.getCollection(collection).drop();
+                }
+            }
+        }
+    }
+
     @Override
     protected PerformanceAdapter createPerformanceAdapter() {
         return new MongoPerformanceAdapter(context.getConfig());
