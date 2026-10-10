@@ -140,11 +140,11 @@ public class ExcelConnector extends FileConnector {
                         }
                     }
                 } catch (IOException e) {
-                    tapLogger.warn(TAG, String.format("Reading file %s occurs error, skip it", fileOffset.getPath()), e);
+                    tapLogger.warn("Reading file {} occurs error: {}, skip it", fileOffset.getPath(), e.getMessage());
                 }
             });
         } catch (Exception e) {
-            tapLogger.warn(String.format("Reading Excel source occurs error, table: %s, path: %s, skip it", tapTable.getId(), filePath), e);
+            tapLogger.warn(String.format("Reading Excel source occurs error, table: %s, path: %s", tapTable.getId(), filePath));
             throw e;
         }
     }
