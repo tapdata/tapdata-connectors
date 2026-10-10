@@ -23,7 +23,6 @@
 
     <properties>
         <java.version>17</java.version>
-        <tapdata.pdk.api.version>2.0.8-SNAPSHOT</tapdata.pdk.api.version>
         <skipITs>true</skipITs>
         <it.groups></it.groups>
         <it.excludedGroups>tpcc,performance,long-transaction</it.excludedGroups>

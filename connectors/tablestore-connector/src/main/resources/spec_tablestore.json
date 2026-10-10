@@ -112,7 +112,7 @@
       ],
       "preferScale": 4,
       "fixed": false,
-      "to": "TapNumber"
+      "to": "TapDouble"
     },
     "BOOLEAN": {
       "to": "TapBoolean"

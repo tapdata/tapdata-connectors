@@ -740,7 +740,7 @@
 	},
 	"dataTypes": {
 		"DOUBLE": {
-			"to": "TapNumber",
+			"to": "TapDouble",
 			"precision": [
 				1,
 				255

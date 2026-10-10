@@ -457,7 +457,7 @@
       "unsigned": "unsigned"
     },
     "float": {
-      "to": "TapNumber",
+      "to": "TapFloat",
       "name": "float",
       "precision": [
         1,
@@ -474,7 +474,7 @@
       "fixed": false
     },
     "double": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "name": "double",
       "precision": [
         1,

@@ -347,13 +347,13 @@
       ]
     },
     "float": {
-      "to": "TapNumber",
+      "to": "TapFloat",
       "name": "float",
       "bit": 32,
       "fixed": false
     },
     "double": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "bit": 64,
       "fixed": false
     },

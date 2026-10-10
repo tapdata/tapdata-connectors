@@ -15,12 +15,15 @@
 
     <properties>
         <java.version>8</java.version>
+        <tapdata.pdk.runner.version>2.5-SNAPSHOT</tapdata.pdk.runner.version>
+        <tapdata.pdk.api.version>2.0.5-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>tapdata-pdk-runner</artifactId>
+            <version>${tapdata.pdk.runner.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -48,6 +51,7 @@
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>tapdata-pdk-api</artifactId>
+            <version>${tapdata.pdk.api.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>

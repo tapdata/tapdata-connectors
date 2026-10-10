@@ -131,7 +131,7 @@
       "to": "TapString"
     },
     "double[($precision)]": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "precision": [
         1,
         8
@@ -143,7 +143,7 @@
       "fixed": false
     },
     "float[($precision)]": {
-      "to": "TapNumber",
+      "to": "TapFloat",
       "name": "float",
       "precision": [
         1,

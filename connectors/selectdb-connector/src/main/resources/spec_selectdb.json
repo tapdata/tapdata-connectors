@@ -220,10 +220,10 @@
     },
     "double": {
       "bit": 64,
-      "to": "TapNumber"
+      "to": "TapDouble"
     },
     "float": {
-      "to": "TapNumber",
+      "to": "TapFloat",
       "precision": [
         1,
         6

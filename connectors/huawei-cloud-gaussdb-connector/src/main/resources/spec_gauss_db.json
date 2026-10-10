@@ -425,8 +425,27 @@
       "preferPrecision": 20,
       "preferScale": 8
     },
+    "float($precision)": {
+      "to": "TapCoefficientFloat",
+      "name": "float",
+      "coefficient": {
+        "TapFloat": [
+          1,
+          24
+        ],
+        "TapDouble": [
+          25,
+          53
+        ]
+      },
+      "precision": [
+        1,
+        53
+      ],
+      "fixed": false
+    },
     "real": {
-      "to": "TapNumber",
+      "to": "TapFloat",
       "bit": 4,
       "defaultPrecision": 24,
       "defaultScale": 8,
@@ -445,7 +464,7 @@
         17
       ],
       "fixed": false,
-      "to": "TapNumber"
+      "to": "TapDouble"
     },
     "money": {
       "to": "TapNumber",

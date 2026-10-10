@@ -540,19 +540,19 @@
     "Text": {"to": "TapString","byte": 255},
     "Number": {"to": "TapNumber","value": [0,999999999]},
     "Percent": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "precision": [ 1, 5],
       "value": [0.0,99999.0],
       "scale": [ 0, 2]
     },
     "Decimal": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "precision": [ 1, 16],
       "value": [0.0,99999.0],
       "scale": [ 0, 9]
     },
     "Currency": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "precision": [ 1, 16],
       "value": [0.0,99999.0],
       "scale": [ 0, 9]

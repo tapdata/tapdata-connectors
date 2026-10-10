@@ -122,7 +122,7 @@
   },
   "dataTypes": {
     "DOUBLE": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "value": [
         "-1.7976931348623157E+308",
         "1.7976931348623157E+308"
@@ -134,7 +134,7 @@
       "fixed": true
     },
     "FLOAT": {
-      "to": "TapNumber",
+      "to": "TapFloat",
       "value": [
         "-3.4E38",
         "3.4E38"

@@ -17,7 +17,6 @@
         <sql.core.version>1.0-SNAPSHOT</sql.core.version>
         <commons-lang3.version>3.12.0</commons-lang3.version>
         <guava.version>31.0.1-jre</guava.version>
-        <tapdata.pdk.api.version>2.0.6-SNAPSHOT</tapdata.pdk.api.version>
         <origin.driver.class>ru.yandex.clickhouse.ClickHouseDriver</origin.driver.class>
         <skipITs>true</skipITs>
         <it.groups></it.groups>
