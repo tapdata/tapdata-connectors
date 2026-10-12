@@ -98,12 +98,10 @@ public class MySQLConnectorIT extends TpccConnectorIT {
         Thread.sleep(20000L);
     }
 
-    @Override
     protected boolean supportsSourceDdlCapture() {
         return true;
     }
 
-    @Override
     protected List<String> sourceDdlStatements(String table) {
         return List.of(
                 "ALTER TABLE " + table + " ADD COLUMN c_ddl_probe varchar(64)",
