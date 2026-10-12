@@ -109,8 +109,8 @@ public class MySQLConnectorIT extends TpccConnectorIT {
                 "ALTER TABLE " + table + " ADD COLUMN c_ddl_probe varchar(64)",
                 // TAP-13061 回归场景：多空格 ADD CONSTRAINT（旧版正则会误判为加列）
                 "ALTER TABLE " + table + "  ADD  CONSTRAINT  chk_ddl_probe CHECK (c_ddl_probe IS NULL OR length(c_ddl_probe) < 100)",
-                "ALTER TABLE " + table + " CHANGE COLUMN c_ddl_probe c_ddl_probe_new varchar(64)",
                 "ALTER TABLE " + table + " DROP CONSTRAINT chk_ddl_probe",
+                "ALTER TABLE " + table + " CHANGE COLUMN c_ddl_probe c_ddl_probe_new varchar(64)",
                 "ALTER TABLE " + table + " DROP COLUMN c_ddl_probe_new");
     }
 
