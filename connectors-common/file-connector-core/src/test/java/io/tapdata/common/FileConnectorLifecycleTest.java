@@ -136,14 +136,13 @@ class FileConnectorLifecycleTest {
     }
 
     @Test
-    void onStopForceDestroysStorageWhenMergeIgnoresInterrupt() throws Exception {
+    void onStopDoesNotDestroyStorageWhileMergeIgnoresInterrupt() throws Exception {
         TrackingStorage storage = new TrackingStorage(false);
         TrackingWriter writer = new TrackingWriter(storage, false, false);
         TestFileConnector connector = new TestFileConnector(storage, writer);
         CountDownLatch mergeStarted = new CountDownLatch(1);
         CountDownLatch allowMerge = new CountDownLatch(1);
         writer.blockMergeIgnoringInterrupt(mergeStarted, allowMerge);
-        storage.onDestroy(allowMerge::countDown);
         connector.setExecutorService(new TrackingStorage.NeverTerminatingExecutor());
 
         AtomicReference<Throwable> backgroundFailure = new AtomicReference<>();
@@ -170,18 +169,21 @@ class FileConnectorLifecycleTest {
         stopper.start();
 
         try {
-            stopper.join(2000);
-            assertFalse(stopper.isAlive());
-            assertTrue(storage.destroyCalled);
-            assertTrue(writer.releaseCalled);
-            assertNull(stopFailure.get());
+            stopper.join(200);
+            assertTrue(stopper.isAlive());
+            assertFalse(storage.destroyCalled);
+            assertFalse(writer.releaseCalled);
         } finally {
             allowMerge.countDown();
             backgroundMerge.join(1000);
             stopper.join(1000);
         }
         assertFalse(backgroundMerge.isAlive());
+        assertFalse(stopper.isAlive());
+        assertTrue(storage.destroyCalled);
+        assertTrue(writer.releaseCalled);
         assertNull(backgroundFailure.get());
+        assertNull(stopFailure.get());
     }
 
     private static final class TestFileConnector extends FileConnector {
@@ -341,9 +343,6 @@ class FileConnectorLifecycleTest {
         @Override
         public void destroy() throws IOException {
             destroyCalled = true;
-            if (destroyAction != null) {
-                destroyAction.run();
-            }
             if (destroyFailure != null) {
                 throw destroyFailure;
             }
@@ -393,10 +392,6 @@ class FileConnectorLifecycleTest {
             return appendSupported;
         }
 
-        private void onDestroy(Runnable action) {
-            this.destroyAction = action;
-        }
-
         private void onDestroyFailure(IOException failure) {
             this.destroyFailure = failure;
         }
@@ -420,7 +415,6 @@ class FileConnectorLifecycleTest {
             return "test";
         }
 
-        private Runnable destroyAction;
         private IOException destroyFailure;
 
         private static final class NeverTerminatingExecutor extends AbstractExecutorService {

@@ -40,7 +40,6 @@ public abstract class FileConnector extends ConnectorBase {
     private Map<String, Object> connectionParams;
     protected AbstractFileRecordWriter fileRecordWriter;
     protected ExecutorService executorService;
-    private static final long MERGE_CACHE_LOCK_TIMEOUT_SECONDS = 10;
     private final ReentrantLock mergeCacheLock = new ReentrantLock();
     protected String firstConnectorId;
     private static final String TAG = FileConnector.class.getSimpleName();
@@ -100,61 +99,37 @@ public abstract class FileConnector extends ConnectorBase {
     @Override
     public void onStop(TapConnectionContext connectionContext) throws Throwable {
         Throwable failure = null;
-        boolean storageDestroyed = false;
-        boolean mergeLockAcquired = false;
         try {
-            boolean executorTerminated = shutdownMergeCacheExecutor();
-            if (!executorTerminated) {
-                storageDestroyed = true;
-                failure = appendFailure(failure, destroyStorage());
-            }
-        } catch (Throwable throwable) {
-            failure = appendFailure(failure, throwable);
-            storageDestroyed = true;
-            failure = appendFailure(failure, destroyStorage());
-        }
-        try {
-            mergeLockAcquired = mergeCacheLock.tryLock(MERGE_CACHE_LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            shutdownMergeCacheExecutor();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             failure = appendFailure(failure, e);
+        } catch (Throwable throwable) {
+            failure = appendFailure(failure, throwable);
         }
-        if (!mergeLockAcquired && !storageDestroyed) {
-            storageDestroyed = true;
-            failure = appendFailure(failure, destroyStorage());
-            try {
-                mergeLockAcquired = mergeCacheLock.tryLock(MERGE_CACHE_LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                failure = appendFailure(failure, e);
-            }
-        }
-        if (mergeLockAcquired) {
-            try {
-                if (EmptyKit.isNotNull(fileRecordWriter)) {
-                    if (!storageDestroyed) {
-                        try {
-                            if (EmptyKit.isNotNull(storage) && !storage.supportAppendData()) {
-                                fileRecordWriter.mergeCacheFiles();
-                            }
-                        } catch (Throwable throwable) {
-                            failure = appendFailure(failure, throwable);
-                        }
+
+        // The merge worker may still be running when shutdownNow() times out.  Keep the
+        // storage alive until the same lock is acquired so destroy() cannot race with a
+        // remote read/write performed by mergeCacheFiles().
+        mergeCacheLock.lock();
+        try {
+            if (EmptyKit.isNotNull(fileRecordWriter)) {
+                try {
+                    if (EmptyKit.isNotNull(storage) && !storage.supportAppendData()) {
+                        fileRecordWriter.mergeCacheFiles();
                     }
-                    try {
-                        fileRecordWriter.releaseResource();
-                    } catch (Throwable throwable) {
-                        failure = appendFailure(failure, throwable);
-                    }
+                } catch (Throwable throwable) {
+                    failure = appendFailure(failure, throwable);
                 }
-            } finally {
-                mergeCacheLock.unlock();
+                try {
+                    fileRecordWriter.releaseResource();
+                } catch (Throwable throwable) {
+                    failure = appendFailure(failure, throwable);
+                }
             }
-        } else {
-            TapLogger.warn(TAG, "Merge cache lock was not released during connector stop; final merge skipped");
-        }
-        if (!storageDestroyed) {
             failure = appendFailure(failure, destroyStorage());
+        } finally {
+            mergeCacheLock.unlock();
         }
         if (failure != null) {
             throw failure;
