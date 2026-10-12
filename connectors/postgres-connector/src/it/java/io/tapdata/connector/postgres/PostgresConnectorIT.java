@@ -88,12 +88,10 @@ public class PostgresConnectorIT extends TpccConnectorIT {
         return rawQueryCommand(tableName);
     }
 
-    @Override
     protected boolean supportsSourceDdlCapture() {
         return true;
     }
 
-    @Override
     protected List<String> sourceDdlStatements(String table) {
         // PostgreSQL 需要 schema.table 格式的完整表名
         String qualifiedTable = "\"public\".\"" + table.replace("\"", "\"\"") + "\"";
