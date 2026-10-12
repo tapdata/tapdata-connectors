@@ -159,7 +159,7 @@ class CsvConnectorTest {
     }
 
     @Test
-    void csvDateCodecResolvesDateAtSystemDefaultMidnight() {
+    void csvDateCodecRoundTripsDateInSystemDefaultTimezone() {
         TimeZone originalTimeZone = TimeZone.getDefault();
         try {
             TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
@@ -171,7 +171,9 @@ class CsvConnectorTest {
             ToTapValueCodec<?> dateCodec = codecRegistry.getCustomToTapValueCodec(LocalDate.class);
             TapDateValue tapDateValue = (TapDateValue) dateCodec.toTapValue(LocalDate.of(2024, 6, 17), null);
 
-            assertEquals(Instant.parse("2024-06-16T16:00:00Z"), tapDateValue.getValue().toInstant());
+            FromTapValueCodec<TapDateValue> fromDateCodec =
+                    codecRegistry.getCustomFromTapValueCodec(TapDateValue.class);
+            assertEquals("2024-06-17", fromDateCodec.fromTapValue(tapDateValue));
         } finally {
             TimeZone.setDefault(originalTimeZone);
         }

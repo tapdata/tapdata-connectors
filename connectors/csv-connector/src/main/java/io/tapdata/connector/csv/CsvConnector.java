@@ -111,8 +111,8 @@ public class CsvConnector extends FileConnector {
             return null;
         }
         try {
-            // DateTime(LocalDateTime) assumes UTC, so resolve the CSV date in the default zone first.
-            return new TapDateValue(new DateTime(localDate.atStartOfDay(ZoneId.systemDefault()).toInstant()));
+            // Represent DATE values at UTC midnight so GMT-based formatters preserve the original date.
+            return new TapDateValue(new DateTime(localDate.atStartOfDay()));
         } catch (RuntimeException e) {
             TapLogger.debug(TAG, "Date replacement failed: {}, default null value processing, error: {}", value, e.getMessage());
             return null;
