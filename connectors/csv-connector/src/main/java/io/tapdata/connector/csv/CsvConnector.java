@@ -13,6 +13,7 @@ import io.tapdata.connector.csv.writer.UniqueCsvRecordWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.TapDateTimeValue;
@@ -53,7 +54,7 @@ import java.util.stream.Collectors;
 
 @TapConnectorClass("spec_csv.json")
 public class CsvConnector extends FileConnector {
-
+    private static final String TAG = CsvConnector.class.getSimpleName();
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ISO_LOCAL_TIME;
     private static final DateTimeFormatter TIME_OUTPUT_FORMATTER = new DateTimeFormatterBuilder()
             .appendPattern("HH:mm:ss")
@@ -101,27 +102,32 @@ public class CsvConnector extends FileConnector {
 
     private static TapDateValue toTapDateValue(Object value) {
         if (!(value instanceof LocalDate)) {
+            TapLogger.debug(TAG, "Cannot convert a non date(LocalDate) type value to a date: {}, default null value processing", value);
             return null;
         }
         LocalDate localDate = (LocalDate) value;
         if (localDate.getYear() < 1000 || localDate.getYear() > 9999) {
+            TapLogger.debug(TAG, "Not supported for dates and years not between 1000 and 9999: {}, default null value processing", value);
             return null;
         }
         try {
             // DateTime(LocalDateTime) assumes UTC, so resolve the CSV date in the default zone first.
             return new TapDateValue(new DateTime(localDate.atStartOfDay(ZoneId.systemDefault()).toInstant()));
         } catch (RuntimeException e) {
+            TapLogger.debug(TAG, "Date replacement failed: {}, default null value processing, error: {}", value, e.getMessage());
             return null;
         }
     }
 
     private static TapTimeValue toTapTimeValue(Object value) {
         if (!(value instanceof LocalTime)) {
+            TapLogger.debug(TAG, "Cannot convert a non time(LocalTime) type value to a time: {}, default null value processing", value);
             return null;
         }
         try {
             return new TapTimeValue(DateTime.withTimeStr(((LocalTime) value).format(TIME_FORMATTER)));
         } catch (RuntimeException e) {
+            TapLogger.debug(TAG, "Time replacement failed: {}, default null value processing, error: {}", value, e.getMessage());
             return null;
         }
     }

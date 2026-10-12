@@ -1,6 +1,7 @@
 package io.tapdata.connector.csv;
 
 import io.tapdata.common.util.MatchUtil;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.util.DateUtil;
 
 import java.math.BigDecimal;
@@ -22,6 +23,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class CsvValueConverter {
+    private static final String TAG = CsvValueConverter.class.getSimpleName();
     static final String DATE = "DATE";
     static final String TIME = "TIME";
     static final String DATETIME = "DATETIME";
@@ -78,6 +80,7 @@ final class CsvValueConverter {
                 try {
                     return parseDate(value);
                 } catch (RuntimeException e) {
+                    TapLogger.debug(TAG, "Read illegal date that cannot be resolved: {}, default null value processing, error: {} ", value, e.getMessage());
                     //非法日期触发“日期/时间解析失败”会被静默转换为 null是预期结果，非法日期不能变成字符串输出，按字符串原样会导致字段类型和结果不一致。
                     return null;
                 }
@@ -85,12 +88,14 @@ final class CsvValueConverter {
                 try {
                     return parseTime(value);
                 } catch (RuntimeException e) {
+                    TapLogger.debug(TAG, "Read illegal time that cannot be resolved: {}, default null value processing, error: {}", value, e.getMessage());
                     return null;
                 }
             case DATETIME:
                 try {
                     return parseDateTime(value);
                 } catch (RuntimeException e) {
+                    TapLogger.debug(TAG, "Read illegal datetime that cannot be resolved: {}, default null value processing, error: {}", value, e.getMessage());
                     return null;
                 }
             case "BOOLEAN":
