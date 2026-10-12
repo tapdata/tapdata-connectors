@@ -103,6 +103,7 @@ public class MongodbConnector extends ConnectorBase {
 	private MongodbStreamReader mongodbStreamReader;
 	private MongodbStreamReader opLogStreamReader;
 	private ConcurrentHashMap<String,Set<String>> shardKeyMap = new ConcurrentHashMap<>();
+	private final MongoCollectionStatistics collectionStatistics = new MongoCollectionStatistics();
 	private final Map<String, MongodbWriter> writerMap = new ConcurrentHashMap<>();
 
 	protected Map<String, Integer> stringTypeValueMap;
@@ -591,6 +592,7 @@ public class MongodbConnector extends ConnectorBase {
 		connectorFunctions.supportQueryFieldMinMaxValueFunction(this::queryFieldMinMaxValue);
 //        connectorFunctions.supportStreamOffset((connectorContext, tableList, offsetStartTime, offsetOffsetTimeConsumer) -> streamOffset(connectorContext, tableList, offsetStartTime, offsetOffsetTimeConsumer));
 		connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
+		connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
 		connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
 		connectorFunctions.supportQueryIndexes(this::queryIndexes);
 		connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
@@ -998,6 +1000,48 @@ public class MongodbConnector extends ConnectorBase {
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
 			exceptionCollector.collectWritePrivileges(e);
+			throw e;
+		}
+	}
+
+	/**
+	 * Read-only sampling: runs a find on {@code table}. See {@link MongodbRawCommandQuery} for the command format.
+	 * <p>
+	 * As in the SQL connectors, {@code eventBatchSize} is the size of each batch handed to
+	 * {@code eventsOffsetConsumer}. A find filter carries no row bound of its own the way a SQL statement does, so it
+	 * doubles as the default row limit; a {@code limit} in the command replaces that default and may ask for more
+	 * than one batch.
+	 */
+	protected void runRawCommand(TapConnectorContext connectorContext, String command, TapTable table, int eventBatchSize, Consumer<List<TapEvent>> eventsOffsetConsumer) {
+		if (table == null || StringUtils.isBlank(table.getId())) {
+			throw new IllegalArgumentException("Collection name is required for MongoDB raw command");
+		}
+		MongodbRawCommandQuery query = MongodbRawCommandQuery.parse(command, eventBatchSize);
+		int batchSize = Math.min(eventBatchSize > 0 ? eventBatchSize : MongodbRawCommandQuery.DEFAULT_LIMIT, query.getLimit());
+		try {
+			FindIterable<Document> iterable = getMongoCollection(table.getId())
+					.find(query.getFilter())
+					.limit(query.getLimit())
+					.batchSize(batchSize);
+			if (!query.getSort().isEmpty()) {
+				iterable = iterable.sort(query.getSort());
+			}
+			List<TapEvent> events = TapSimplify.list();
+			try (MongoCursor<Document> cursor = iterable.iterator()) {
+				while (isAlive() && cursor.hasNext()) {
+					events.add(TapSimplify.insertRecordEvent(cursor.next(), table.getId()));
+					if (events.size() >= batchSize) {
+						eventsOffsetConsumer.accept(events);
+						events = TapSimplify.list();
+					}
+				}
+			}
+			if (!events.isEmpty()) {
+				eventsOffsetConsumer.accept(events);
+			}
+		} catch (Exception e) {
+			exceptionCollector.collectTerminateByServer(e);
+			exceptionCollector.collectReadPrivileges(e);
 			throw e;
 		}
 	}
@@ -1925,7 +1969,7 @@ public class MongodbConnector extends ConnectorBase {
 		try {
 			String database = mongoConfig.getDatabase();
 			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
-			Document collStats = mongoDatabase.runCommand(new Document("collStats", tableName));
+			Document collStats = collectionStatistics.read(mongoDatabase, tableName, mongoClient);
 			tableInfo = TableInfo.create();
 			tableInfo.setNumOfRows(getLongFromDocument(collStats, "count"));
 			tableInfo.setStorageSize(getLongFromDocument(collStats, "size"));

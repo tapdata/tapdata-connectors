@@ -1,0 +1,37 @@
+name: Sync CI source mirrors
+
+on:
+  workflow_call:
+    inputs:
+      tapdata-connectors:
+        type: string
+        required: true
+      gitee-token-user:
+        type: string
+        required: false
+    secrets:
+      TAPDATA_ENT_CICD_TOKEN:
+        required: true
+      GITEE_TOKEN:
+        required: true
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Preserve the old reusable workflow's default mirrors, including docs/application.
+    strategy:
+      fail-fast: false
+      matrix:
+        repository: [tapdata-connectors, docs, tapdata-application]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Mirror source to Gitee
+        env:
+          MIRROR_REPOSITORY: ${{ matrix.repository }}
+          SOURCE_GITHUB_TOKEN: ${{ secrets.TAPDATA_ENT_CICD_TOKEN }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_TOKEN_USER: ${{ inputs.gitee-token-user || vars.GITEE_TOKEN_USER }}
+        run: bash .github/scripts/sync-code-to-gitee.sh

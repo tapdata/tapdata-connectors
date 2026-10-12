@@ -28,6 +28,7 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
+import io.tapdata.entity.event.ddl.index.TapDeleteIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.*;
@@ -424,7 +425,11 @@ public class PostgresConnector extends CommonDbConnector {
 
     private Object getStreamOffsetFromString(TapConnectorContext connectorContext, String offsetString) {
         if (EmptyKit.isBlank(offsetString)) {
-            throw new IllegalArgumentException("Offset string cannot be null or empty");
+            try {
+                return timestampToStreamOffset(connectorContext, null);
+            } catch (Throwable throwable) {
+                throw new RuntimeException("Failed to get current PostgreSQL stream offset", throwable);
+            }
         }
 
         try {
@@ -794,10 +799,16 @@ public class PostgresConnector extends CommonDbConnector {
                     // Configure time-based filtering
                     miner.setFilterStartTime(startTimeMs);
 
-                    // Optimize: Use binary search to find the WAL file closest to the target time
-                    String startLsn = approximateWalLsnByTime(startTimeMs);
+                    // Prefer the slot restart position.  EDB TDE encrypts pg_wal at rest,
+                    // so scanning pg_wal files cannot produce a valid WAL LSN there.
+                    String startLsn = querySlotRestartLsn(slotName.toString());
                     if (EmptyKit.isNotBlank(startLsn)) {
-                        tapLogger.info("Starting from approximated WAL LSN: {}, will filter events by commit time >= {}",
+                        tapLogger.info("Using physical replication slot restart LSN {} for time-based CDC", startLsn);
+                    } else {
+                        startLsn = approximateWalLsnByTime(startTimeMs);
+                    }
+                    if (EmptyKit.isNotBlank(startLsn)) {
+                        tapLogger.info("Starting physical CDC from WAL LSN: {}, will filter events by commit time >= {}",
                                 startLsn, new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(startTimeMs)));
                         miner.offset(startLsn);
                     } else {
@@ -935,10 +946,16 @@ public class PostgresConnector extends CommonDbConnector {
                 tapLogger.info("Physical CDC multi-connection time-based start: timestamp={}", startTimeMs);
                 miner.setFilterStartTime(startTimeMs);
 
-                // Optimize: Use binary search to find the WAL file closest to the target time
-                String startLsn = approximateWalLsnByTime(startTimeMs);
+                // Prefer the slot restart position.  EDB TDE encrypts pg_wal at rest,
+                // so scanning pg_wal files cannot produce a valid WAL LSN there.
+                String startLsn = querySlotRestartLsn(slotName.toString());
                 if (EmptyKit.isNotBlank(startLsn)) {
-                    tapLogger.info("Starting from approximated WAL LSN: {}, will filter events by commit time >= {}",
+                    tapLogger.info("Using physical replication slot restart LSN {} for multi-connection time-based CDC", startLsn);
+                } else {
+                    startLsn = approximateWalLsnByTime(startTimeMs);
+                }
+                if (EmptyKit.isNotBlank(startLsn)) {
+                    tapLogger.info("Starting physical CDC from WAL LSN: {}, will filter events by commit time >= {}",
                             startLsn, new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(startTimeMs)));
                     miner.offset(startLsn);
                 } else {
@@ -962,6 +979,10 @@ public class PostgresConnector extends CommonDbConnector {
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
             Map<String, List<String>> watchMap = new HashMap<>(schemaTableMap);
+            List<String> watchedTables = watchMap.values().stream()
+                    .flatMap(List::stream)
+                    .distinct()
+                    .collect(Collectors.toList());
             // If DDL trigger is enabled, add the audit table to Debezium's watch list
             if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
                 String ddlSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
@@ -977,6 +998,7 @@ public class PostgresConnector extends CommonDbConnector {
             if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
                 cdcRunner.setupDdlTrigger(postgresConfig.getSchema());
             }
+            beforeCdc(watchedTables, nodeContext.getTableMap());
             cdcRunner.startCdcRunner();
             if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
                 Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
@@ -1030,6 +1052,27 @@ public class PostgresConnector extends CommonDbConnector {
             return lsn.get();
         }
         if (EmptyKit.isNotNull(offsetStartTime)) {
+            // The multi-connection IT starts the reader asynchronously and writes
+            // immediately afterwards. Ensure the logical slot/publication exists
+            // before returning the timestamp offset, otherwise the reader can
+            // create the slot after the test write and lose that change event.
+            if (Boolean.TRUE.equals(postgresTest.testStreamRead())) {
+                testReplicateIdentity(connectorContext.getTableMap());
+                buildSlot(connectorContext, false);
+                if ("pgoutput".equals(postgresConfig.getLogPluginName())
+                        && Integer.parseInt(postgresVersion) > 100000) {
+                    if (!postgresConfig.getPartPublication()) {
+                        createAllPublicationIfNotExist();
+                    } else if (EmptyKit.isBlank(postgresConfig.getCustomPublicationName())) {
+                        List<String> tableList = new ArrayList<>();
+                        Iterator<Entry<TapTable>> iterator = connectorContext.getTableMap().iterator();
+                        while (iterator.hasNext()) {
+                            tableList.add(iterator.next().getKey());
+                        }
+                        createCustomPublicationIfNotExist(tableList);
+                    }
+                }
+            }
             Integer keepWalHours = postgresConfig.getKeepWalHours();
             if (keepWalHours != null && keepWalHours > 0) {
                 return offsetStartTime;
@@ -1518,9 +1561,22 @@ public class PostgresConnector extends CommonDbConnector {
     protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
         DataMap dataMap = postgresJdbcContext.getTableInfo(tableName);
         TableInfo tableInfo = TableInfo.create();
-        tableInfo.setNumOfRows(new BigDecimal(dataMap.getString("rowcount")).longValue());
+        tableInfo.setNumOfRows(Math.max(0L, new BigDecimal(dataMap.getString("rowcount")).longValue()));
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("size")));
         return tableInfo;
+    }
+
+    @Override
+    protected void dropIndexes(TapConnectorContext connectorContext, TapTable table, TapDeleteIndexEvent deleteIndexEvent) throws SQLException {
+        char escapeChar = commonDbConfig.getEscapeChar();
+        List<String> dropIndexesSql = new ArrayList<>();
+        deleteIndexEvent.getIndexNames().forEach(indexName -> dropIndexesSql.add(
+                "drop index " + escapeChar + postgresConfig.getSchema() + escapeChar + "."
+                        + escapeChar + indexName + escapeChar));
+        if (EmptyKit.isNotEmpty(dropIndexesSql)) {
+            tapLogger.info("Drop indexes sql: {}", dropIndexesSql);
+        }
+        jdbcContext.batchExecute(dropIndexesSql);
     }
 
 

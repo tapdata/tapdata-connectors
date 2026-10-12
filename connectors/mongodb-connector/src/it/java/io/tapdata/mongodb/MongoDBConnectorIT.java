@@ -14,6 +14,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.it.ConnectorTestContext;
 import io.tapdata.it.UnderTest;
+import io.tapdata.it.dbforge.DbForgeLeaseProvider;
 import io.tapdata.it.performance.PerformanceAdapter;
 import io.tapdata.it.support.TestStateMap;
 import io.tapdata.it.tpcc.TpccAdapter;
@@ -30,6 +31,7 @@ import org.bson.types.Decimal128;
 import org.bson.types.ObjectId;
 import org.bson.types.Symbol;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -66,6 +68,48 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class MongoDBConnectorIT extends TpccConnectorIT {
 
     private MongoClient directClient;
+    private DbForgeLeaseProvider dbForgeLeaseProvider;
+    private DataMap dbForgeConnectionConfig;
+
+    @Test
+    @DisplayName("真实MongoDB统计：普通、空、capped及不存在集合保持原字段契约")
+    void statisticsMatchLegacyCommand() {
+        try (MongoClient client = client()) {
+            com.mongodb.client.MongoDatabase database = client.getDatabase(context.getConfig().getString("database"));
+            for (String collection : Arrays.asList("ao_stats_regular", "ao_stats_empty", "ao_stats_capped", "ao_stats_missing")) {
+                database.getCollection(collection).drop();
+            }
+            try {
+                database.createCollection("ao_stats_empty");
+                database.createCollection("ao_stats_capped", new com.mongodb.client.model.CreateCollectionOptions()
+                        .capped(true).sizeInBytes(1048576).maxDocuments(100));
+                database.getCollection("ao_stats_regular").insertMany(Arrays.asList(
+                        new Document("_id", 1).append("value", "one"),
+                        new Document("_id", 2).append("value", "two")));
+                database.getCollection("ao_stats_capped").insertOne(new Document("_id", 1));
+                MongoCollectionStatistics reader = new MongoCollectionStatistics();
+                for (String collection : Arrays.asList("ao_stats_regular", "ao_stats_empty", "ao_stats_capped", "ao_stats_missing")) {
+                    Document before = database.runCommand(new Document("collStats", collection));
+                    Document after = reader.read(database, collection);
+                    for (String field : Arrays.asList("count", "size", "storageSize", "avgObjSize", "maxSize", "max")) {
+                        Number expected = (Number) before.get(field);
+                        Number actual = (Number) after.get(field);
+                        if (expected == null) assertNull(actual, collection + ":" + field);
+                        else {
+                            assertNotNull(actual, collection + ":" + field);
+                            assertEquals(expected.doubleValue(), actual.doubleValue(), 0.000001,
+                                    collection + ":" + field);
+                        }
+                    }
+                    assertEquals(before.get("capped"), after.get("capped"), collection);
+                }
+            } finally {
+                for (String collection : Arrays.asList("ao_stats_regular", "ao_stats_empty", "ao_stats_capped", "ao_stats_missing")) {
+                    database.getCollection(collection).drop();
+                }
+            }
+        }
+    }
 
     @Override
     protected PerformanceAdapter createPerformanceAdapter() {
@@ -88,8 +132,20 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
                 "createTableV2", "dropTable", "batchCount", "batchRead", "streamRead",
                 "timestampToStreamOffset", "queryByAdvanceFilter", "countByPartitionFilter",
                 "writeRecord", "createIndex", "queryIndexes", "errorHandle",
-                "executeCommand", "getTableInfo", "getReadPartitions", "queryFieldMinMaxValue",
+                "executeCommand", "runRawCommand", "getTableInfo", "getReadPartitions", "queryFieldMinMaxValue",
                 "transactionBegin", "transactionCommit", "transactionRollback").collect(Collectors.toSet());
+    }
+
+    @Override
+    protected String rawQueryCommand(String tableName) {
+        // The wrapped form carries its own row limit, so the whole prepared data set is read back no matter which
+        // batch size the harness passes.
+        return "{\"$find\":{\"filter\":{},\"limit\":1000000}}";
+    }
+
+    @Override
+    protected String rawCountCommand(String tableName) {
+        return "{}";
     }
 
     @Test
@@ -241,7 +297,7 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
     @Override
     protected ConnectorTestContext createContext() throws Throwable {
         MongodbConnector connector = new MongodbConnector();
-        DataMap config = readConnectionConfig("config/mongodb-connection.json");
+        DataMap config = loadConnectionConfig();
         TapLog log = new TapLog();
         TapConnectorContext nodeContext = new TapConnectorContext(
                 loadSpecification("spec.json"), config, DataMap.create(), log);
@@ -267,6 +323,36 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
         testContext.getLog().info("[IT] MongoDB connection: uri={}, database={}",
                 config.getString("uri"), config.getString("database"));
         return testContext;
+    }
+
+    private synchronized DataMap loadConnectionConfig() throws Exception {
+        if (!DbForgeLeaseProvider.isDbForgeSelected()) {
+            return readConnectionConfig("config/mongodb-connection.json");
+        }
+        if (dbForgeConnectionConfig == null) {
+            dbForgeLeaseProvider = DbForgeLeaseProvider.fromEnvironment("tapdata-mongodb-connector-it");
+            DbForgeLeaseProvider.Connection connection = dbForgeLeaseProvider.acquire("mongodb", "dedicated", "replicaset");
+            dbForgeConnectionConfig = DataMap.create();
+            dbForgeConnectionConfig.put("uri", connection.required("uri"));
+            dbForgeConnectionConfig.put("database", connection.required("database"));
+            System.out.printf("[IT] DBForge MongoDB lease acquired: leaseId=%s, database=%s%n",
+                    dbForgeLeaseProvider.getLeaseId(), dbForgeConnectionConfig.getString("database"));
+        }
+        DataMap config = DataMap.create();
+        config.putAll(dbForgeConnectionConfig);
+        return config;
+    }
+
+    @AfterAll
+    void releaseDbForgeLease() {
+        if (dbForgeLeaseProvider == null) {
+            return;
+        }
+        try {
+            dbForgeLeaseProvider.release();
+        } catch (Exception error) {
+            throw new RuntimeException("Failed to release DBForge MongoDB lease", error);
+        }
     }
 
     @Override

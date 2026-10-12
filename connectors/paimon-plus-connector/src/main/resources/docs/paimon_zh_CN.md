@@ -132,6 +132,16 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 J
 - 为工作负载使用适当的存储后端
 - 考虑启用 Paimon 的压缩功能
 
+### 磁盘临时目录
+
+`diskTmpDir` 必须填写本机绝对路径，例如 `/data/tapdata/paimon-tmp`。
+多个目录可用逗号分隔；目录项两侧的空白会被去除，空目录项会被拒绝。
+禁止填写相对路径、URI 或 Paimon 表属性（例如 `'write-buffer-size' = '128mb'`）。
+连接、任务节点及表级覆盖配置均需检查；表级配置可覆盖全局目录。
+非法配置会在创建 Catalog 和执行临时目录清理之前报错，不会自动回退到工作目录。
+默认值仍为 `/tmp`；显式置空时使用 `java.io.tmpdir`，该系统属性缺失或为空时使用 `/tmp`。
+已有的相对路径配置需要改成绝对路径。该修复不会自动搬迁或删除历史错误目录。
+
 ## 参考资料
 
 - [Apache Paimon 文档](https://paimon.apache.org/)

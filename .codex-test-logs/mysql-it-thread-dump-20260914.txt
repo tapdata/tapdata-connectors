@@ -1,0 +1,644 @@
+1010223:
+2026-09-14 14:09:03
+Full thread dump OpenJDK 64-Bit Server VM (17.0.19+10 mixed mode, sharing):
+
+Threads class SMR info:
+_java_thread_list=0x00007f45500014b0, length=32, elements={
+0x00007f45e8029ed0, 0x00007f45e81abe40, 0x00007f45e81ad2f0, 0x00007f45e81b2df0,
+0x00007f45e81b4200, 0x00007f45e81b5710, 0x00007f45e81b72a0, 0x00007f45e81b8930,
+0x00007f45e81b9ec0, 0x00007f45e81ee800, 0x00007f45e81f05e0, 0x00007f45e87ab320,
+0x00007f45e87b9d60, 0x00007f45e8ea3610, 0x00007f4528278400, 0x00007f4528175410,
+0x00007f4528175980, 0x00007f45280556d0, 0x00007f45283d1610, 0x00007f4528675de0,
+0x00007f452867f210, 0x00007f452867ffe0, 0x00007f443c002d90, 0x00007f443c007370,
+0x00007f443c0078e0, 0x00007f443c008140, 0x00007f443c008c80, 0x00007f443c5586a0,
+0x00007f443c558d90, 0x00007f443c5598f0, 0x00007f45e8ad54e0, 0x00007f4550000a90
+}
+
+"main" #1 prio=5 os_prio=0 cpu=349696.61ms elapsed=1113.36s tid=0x00007f45e8029ed0 nid=0xf6a30 runnable  [0x00007f45f20e7000]
+   java.lang.Thread.State: RUNNABLE
+	at sun.nio.ch.Net.poll(java.base@17.0.19/Native Method)
+	at sun.nio.ch.NioSocketImpl.park(java.base@17.0.19/NioSocketImpl.java:186)
+	at sun.nio.ch.NioSocketImpl.park(java.base@17.0.19/NioSocketImpl.java:195)
+	at sun.nio.ch.NioSocketImpl.implRead(java.base@17.0.19/NioSocketImpl.java:319)
+	at sun.nio.ch.NioSocketImpl.read(java.base@17.0.19/NioSocketImpl.java:355)
+	at sun.nio.ch.NioSocketImpl$1.read(java.base@17.0.19/NioSocketImpl.java:808)
+	at java.net.Socket$SocketInputStream.read(java.base@17.0.19/Socket.java:966)
+	at sun.security.ssl.SSLSocketInputRecord.read(java.base@17.0.19/SSLSocketInputRecord.java:484)
+	at sun.security.ssl.SSLSocketInputRecord.readHeader(java.base@17.0.19/SSLSocketInputRecord.java:478)
+	at sun.security.ssl.SSLSocketInputRecord.bytesInCompletePacket(java.base@17.0.19/SSLSocketInputRecord.java:70)
+	at sun.security.ssl.SSLSocketImpl.readApplicationRecord(java.base@17.0.19/SSLSocketImpl.java:1464)
+	at sun.security.ssl.SSLSocketImpl$AppInputStream.read(java.base@17.0.19/SSLSocketImpl.java:1069)
+	at java.io.FilterInputStream.read(java.base@17.0.19/FilterInputStream.java:132)
+	at com.mysql.cj.protocol.FullReadInputStream.readFully(FullReadInputStream.java:64)
+	at com.mysql.cj.protocol.a.SimplePacketReader.readHeaderLocal(SimplePacketReader.java:81)
+	at com.mysql.cj.protocol.a.SimplePacketReader.readHeader(SimplePacketReader.java:63)
+	at com.mysql.cj.protocol.a.SimplePacketReader.readHeader(SimplePacketReader.java:45)
+	at com.mysql.cj.protocol.a.TimeTrackingPacketReader.readHeader(TimeTrackingPacketReader.java:52)
+	at com.mysql.cj.protocol.a.TimeTrackingPacketReader.readHeader(TimeTrackingPacketReader.java:41)
+	at com.mysql.cj.protocol.a.MultiPacketReader.readHeader(MultiPacketReader.java:54)
+	at com.mysql.cj.protocol.a.MultiPacketReader.readHeader(MultiPacketReader.java:44)
+	at com.mysql.cj.protocol.a.NativeProtocol.readMessage(NativeProtocol.java:576)
+	at com.mysql.cj.protocol.a.NativeProtocol.checkErrorMessage(NativeProtocol.java:762)
+	at com.mysql.cj.protocol.a.NativeProtocol.sendCommand(NativeProtocol.java:701)
+	at com.mysql.cj.protocol.a.NativeProtocol.sendQueryPacket(NativeProtocol.java:1052)
+	at com.mysql.cj.NativeSession.execSQL(NativeSession.java:657)
+	at com.mysql.cj.jdbc.ClientPreparedStatement.executeInternal(ClientPreparedStatement.java:893)
+	- locked <0x0000000623c13418> (a com.mysql.cj.jdbc.ConnectionImpl)
+	at com.mysql.cj.jdbc.ClientPreparedStatement.executeUpdateInternal(ClientPreparedStatement.java:1061)
+	- locked <0x0000000623c13418> (a com.mysql.cj.jdbc.ConnectionImpl)
+	at com.mysql.cj.jdbc.ClientPreparedStatement.executeBatchSerially(ClientPreparedStatement.java:795)
+	- locked <0x0000000623c13418> (a com.mysql.cj.jdbc.ConnectionImpl)
+	at com.mysql.cj.jdbc.ClientPreparedStatement.executeBatchInternal(ClientPreparedStatement.java:418)
+	- locked <0x0000000623c13418> (a com.mysql.cj.jdbc.ConnectionImpl)
+	at com.mysql.cj.jdbc.StatementImpl.executeBatch(StatementImpl.java:795)
+	at io.tapdata.connector.mysql.MySQLPerformanceAdapter.executeRows(MySQLPerformanceAdapter.java:146)
+	at io.tapdata.connector.mysql.MySQLPerformanceAdapter.insertRows(MySQLPerformanceAdapter.java:71)
+	at io.tapdata.it.performance.PerformanceAdapter.insertRows(PerformanceAdapter.java:24)
+	at io.tapdata.it.performance.PerformanceConnectorIT.should_measure_batch_read_performance(PerformanceConnectorIT.java:58)
+	at jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(java.base@17.0.19/Native Method)
+	at jdk.internal.reflect.NativeMethodAccessorImpl.invoke(java.base@17.0.19/NativeMethodAccessorImpl.java:77)
+	at jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(java.base@17.0.19/DelegatingMethodAccessorImpl.java:43)
+	at java.lang.reflect.Method.invoke(java.base@17.0.19/Method.java:569)
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:725)
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:60)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:131)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:149)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:140)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:84)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor$$Lambda$172/0x00007f4560098600.apply(Unknown Source)
+	at org.junit.jupiter.engine.execution.ExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(ExecutableInvoker.java:115)
+	at org.junit.jupiter.engine.execution.ExecutableInvoker$ReflectiveInterceptorCall$$Lambda$173/0x00007f4560098a20.apply(Unknown Source)
+	at org.junit.jupiter.engine.execution.ExecutableInvoker.lambda$invoke$0(ExecutableInvoker.java:105)
+	at org.junit.jupiter.engine.execution.ExecutableInvoker$$Lambda$334/0x00007f45600c1c48.apply(Unknown Source)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:106)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:64)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:45)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:37)
+	at org.junit.jupiter.engine.execution.ExecutableInvoker.invoke(ExecutableInvoker.java:104)
+	at org.junit.jupiter.engine.execution.ExecutableInvoker.invoke(ExecutableInvoker.java:98)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$7(TestMethodTestDescriptor.java:214)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor$$Lambda$626/0x00007f456027c670.execute(Unknown Source)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:210)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:135)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:66)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:151)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask$$Lambda$275/0x00007f45600b5718.execute(Unknown Source)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:141)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask$$Lambda$274/0x00007f45600b54f0.invoke(Unknown Source)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:139)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask$$Lambda$273/0x00007f45600b50c8.execute(Unknown Source)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:138)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:95)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService$$Lambda$279/0x00007f45600b6230.accept(Unknown Source)
+	at java.util.ArrayList.forEach(java.base@17.0.19/ArrayList.java:1511)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:155)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask$$Lambda$275/0x00007f45600b5718.execute(Unknown Source)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:141)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask$$Lambda$274/0x00007f45600b54f0.invoke(Unknown Source)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:139)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask$$Lambda$273/0x00007f45600b50c8.execute(Unknown Source)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:138)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:95)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService$$Lambda$279/0x00007f45600b6230.accept(Unknown Source)
+	at java.util.ArrayList.forEach(java.base@17.0.19/ArrayList.java:1511)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:155)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask$$Lambda$275/0x00007f45600b5718.execute(Unknown Source)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:141)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask$$Lambda$274/0x00007f45600b54f0.invoke(Unknown Source)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:139)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask$$Lambda$273/0x00007f45600b50c8.execute(Unknown Source)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:138)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:95)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:35)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:57)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:54)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:107)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:88)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:54)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator$$Lambda$231/0x00007f45600a2470.accept(Unknown Source)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:67)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:52)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:114)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:86)
+	at org.junit.platform.launcher.core.DefaultLauncherSession$DelegatingLauncher.execute(DefaultLauncherSession.java:86)
+	at org.apache.maven.surefire.junitplatform.LauncherAdapter.executeWithoutCancellationToken(LauncherAdapter.java:60)
+	at org.apache.maven.surefire.junitplatform.LauncherAdapter.execute(LauncherAdapter.java:52)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:203)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:168)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:136)
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+
+"Reference Handler" #2 daemon prio=10 os_prio=0 cpu=7.42ms elapsed=1113.32s tid=0x00007f45e81abe40 nid=0xf6a37 waiting on condition  [0x00007f45ada08000]
+   java.lang.Thread.State: RUNNABLE
+	at java.lang.ref.Reference.waitForReferencePendingList(java.base@17.0.19/Native Method)
+	at java.lang.ref.Reference.processPendingReferences(java.base@17.0.19/Reference.java:253)
+	at java.lang.ref.Reference$ReferenceHandler.run(java.base@17.0.19/Reference.java:215)
+
+"Finalizer" #3 daemon prio=8 os_prio=0 cpu=3.38ms elapsed=1113.32s tid=0x00007f45e81ad2f0 nid=0xf6a38 in Object.wait()  [0x00007f45ad907000]
+   java.lang.Thread.State: WAITING (on object monitor)
+	at java.lang.Object.wait(java.base@17.0.19/Native Method)
+	- waiting on <no object reference available>
+	at java.lang.ref.ReferenceQueue.remove(java.base@17.0.19/ReferenceQueue.java:155)
+	- locked <0x0000000600684318> (a java.lang.ref.ReferenceQueue$Lock)
+	at java.lang.ref.ReferenceQueue.remove(java.base@17.0.19/ReferenceQueue.java:176)
+	at java.lang.ref.Finalizer$FinalizerThread.run(java.base@17.0.19/Finalizer.java:172)
+
+"Signal Dispatcher" #4 daemon prio=9 os_prio=0 cpu=0.64ms elapsed=1113.32s tid=0x00007f45e81b2df0 nid=0xf6a39 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"Service Thread" #5 daemon prio=9 os_prio=0 cpu=9.42ms elapsed=1113.32s tid=0x00007f45e81b4200 nid=0xf6a3a runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"Monitor Deflation Thread" #6 daemon prio=9 os_prio=0 cpu=81.38ms elapsed=1113.32s tid=0x00007f45e81b5710 nid=0xf6a3b runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"C2 CompilerThread0" #7 daemon prio=9 os_prio=0 cpu=19799.01ms elapsed=1113.32s tid=0x00007f45e81b72a0 nid=0xf6a3c waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+   No compile task
+
+"C1 CompilerThread0" #19 daemon prio=9 os_prio=0 cpu=2064.15ms elapsed=1113.32s tid=0x00007f45e81b8930 nid=0xf6a3d waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+   No compile task
+
+"Sweeper thread" #25 daemon prio=9 os_prio=0 cpu=129.46ms elapsed=1113.32s tid=0x00007f45e81b9ec0 nid=0xf6a3e runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"Common-Cleaner" #26 daemon prio=8 os_prio=0 cpu=4.31ms elapsed=1113.29s tid=0x00007f45e81ee800 nid=0xf6a40 in Object.wait()  [0x00007f45acf76000]
+   java.lang.Thread.State: TIMED_WAITING (on object monitor)
+	at java.lang.Object.wait(java.base@17.0.19/Native Method)
+	- waiting on <no object reference available>
+	at java.lang.ref.ReferenceQueue.remove(java.base@17.0.19/ReferenceQueue.java:155)
+	- locked <0x000000060068bd10> (a java.lang.ref.ReferenceQueue$Lock)
+	at jdk.internal.ref.CleanerImpl.run(java.base@17.0.19/CleanerImpl.java:140)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+	at jdk.internal.misc.InnocuousThread.run(java.base@17.0.19/InnocuousThread.java:162)
+
+"Notification Thread" #27 daemon prio=9 os_prio=0 cpu=0.17ms elapsed=1113.28s tid=0x00007f45e81f05e0 nid=0xf6a41 runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"surefire-forkedjvm-stream-flusher" #28 daemon prio=5 os_prio=0 cpu=619.26ms elapsed=1113.00s tid=0x00007f45e87ab320 nid=0xf6a44 waiting on condition  [0x00007f45acb72000]
+   java.lang.Thread.State: TIMED_WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x000000060067caf0> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.parkNanos(java.base@17.0.19/LockSupport.java:252)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(java.base@17.0.19/AbstractQueuedSynchronizer.java:1679)
+	at java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(java.base@17.0.19/ScheduledThreadPoolExecutor.java:1182)
+	at java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(java.base@17.0.19/ScheduledThreadPoolExecutor.java:899)
+	at java.util.concurrent.ThreadPoolExecutor.getTask(java.base@17.0.19/ThreadPoolExecutor.java:1062)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1122)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"surefire-forkedjvm-command-thread" #30 daemon prio=5 os_prio=0 cpu=27.85ms elapsed=1112.98s tid=0x00007f45e87b9d60 nid=0xf6a45 runnable  [0x00007f45aca71000]
+   java.lang.Thread.State: RUNNABLE
+	at java.io.FileInputStream.readBytes(java.base@17.0.19/Native Method)
+	at java.io.FileInputStream.read(java.base@17.0.19/FileInputStream.java:276)
+	at java.io.BufferedInputStream.read1(java.base@17.0.19/BufferedInputStream.java:282)
+	at java.io.BufferedInputStream.read(java.base@17.0.19/BufferedInputStream.java:343)
+	- locked <0x000000060069b0c8> (a java.io.BufferedInputStream)
+	at java.io.BufferedInputStream.fill(java.base@17.0.19/BufferedInputStream.java:244)
+	at java.io.BufferedInputStream.read1(java.base@17.0.19/BufferedInputStream.java:284)
+	at java.io.BufferedInputStream.read(java.base@17.0.19/BufferedInputStream.java:343)
+	- locked <0x000000060069b0f0> (a java.io.BufferedInputStream)
+	at org.apache.maven.surefire.api.util.internal.Channels$3.readImpl(Channels.java:169)
+	at org.apache.maven.surefire.api.util.internal.AbstractNoninterruptibleReadableChannel.read(AbstractNoninterruptibleReadableChannel.java:50)
+	at org.apache.maven.surefire.api.stream.AbstractStreamDecoder.read(AbstractStreamDecoder.java:446)
+	at org.apache.maven.surefire.api.stream.AbstractStreamDecoder.read(AbstractStreamDecoder.java:435)
+	at org.apache.maven.surefire.api.stream.AbstractStreamDecoder.readMessageType(AbstractStreamDecoder.java:120)
+	at org.apache.maven.surefire.booter.stream.CommandDecoder.decode(CommandDecoder.java:74)
+	at org.apache.maven.surefire.booter.spi.CommandChannelDecoder.decode(CommandChannelDecoder.java:60)
+	at org.apache.maven.surefire.booter.CommandReader$CommandRunnable.run(CommandReader.java:290)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"mysql-cj-abandoned-connection-cleanup" #39 daemon prio=5 os_prio=0 cpu=45.55ms elapsed=1109.45s tid=0x00007f45e8ea3610 nid=0xf6a61 in Object.wait()  [0x00007f45ac970000]
+   java.lang.Thread.State: TIMED_WAITING (on object monitor)
+	at java.lang.Object.wait(java.base@17.0.19/Native Method)
+	- waiting on <no object reference available>
+	at java.lang.ref.ReferenceQueue.remove(java.base@17.0.19/ReferenceQueue.java:155)
+	- locked <0x0000000600d4fc80> (a java.lang.ref.ReferenceQueue$Lock)
+	at com.mysql.cj.jdbc.AbandonedConnectionCleanupThread.run(AbandonedConnectionCleanupThread.java:91)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-0" #89 daemon prio=5 os_prio=0 cpu=2.41ms elapsed=1104.40s tid=0x00007f4528278400 nid=0xf6ab0 waiting on condition  [0x00007f45591e0000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x00000006015b8100> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-1" #90 daemon prio=5 os_prio=0 cpu=1.22ms elapsed=1104.40s tid=0x00007f4528175410 nid=0xf6ab1 waiting on condition  [0x00007f4558ad9000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x00000006015b8910> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-2" #91 daemon prio=5 os_prio=0 cpu=2.54ms elapsed=1104.40s tid=0x00007f4528175980 nid=0xf6ab2 waiting on condition  [0x00007f45588d7000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x00000006015b9290> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-3" #92 daemon prio=5 os_prio=0 cpu=1.22ms elapsed=1104.39s tid=0x00007f45280556d0 nid=0xf6ab3 waiting on condition  [0x00007f45587d6000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x00000006015b8cf8> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-4" #93 daemon prio=5 os_prio=0 cpu=3.20ms elapsed=1104.39s tid=0x00007f45283d1610 nid=0xf6ab4 waiting on condition  [0x00007f45586d5000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x00000006015b84d8> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-5" #94 daemon prio=5 os_prio=0 cpu=1.17ms elapsed=1104.39s tid=0x00007f4528675de0 nid=0xf6ab5 waiting on condition  [0x00007f45585d4000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x00000006015b9510> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-6" #95 daemon prio=5 os_prio=0 cpu=1.74ms elapsed=1104.39s tid=0x00007f452867f210 nid=0xf6ab6 waiting on condition  [0x00007f45584d3000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x00000006015b8758> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-7" #96 daemon prio=5 os_prio=0 cpu=1.33ms elapsed=1104.39s tid=0x00007f452867ffe0 nid=0xf6ab7 waiting on condition  [0x00007f45583d2000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x00000006015b8868> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-0" #191 daemon prio=5 os_prio=0 cpu=2.04ms elapsed=1077.48s tid=0x00007f443c002d90 nid=0xf6b1f waiting on condition  [0x00007f45acc73000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x0000000601612b20> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-1" #192 daemon prio=5 os_prio=0 cpu=2.32ms elapsed=1077.48s tid=0x00007f443c007370 nid=0xf6b20 waiting on condition  [0x00007f45595e4000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x0000000601612310> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-2" #193 daemon prio=5 os_prio=0 cpu=2.30ms elapsed=1077.48s tid=0x00007f443c0078e0 nid=0xf6b21 waiting on condition  [0x00007f4559eed000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x00000006016134a0> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-3" #194 daemon prio=5 os_prio=0 cpu=2.63ms elapsed=1077.48s tid=0x00007f443c008140 nid=0xf6b22 waiting on condition  [0x00007f45590df000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x0000000601612e28> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-4" #195 daemon prio=5 os_prio=0 cpu=3.75ms elapsed=1077.48s tid=0x00007f443c008c80 nid=0xf6b23 waiting on condition  [0x00007f45594e3000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x0000000601612590> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-5" #196 daemon prio=5 os_prio=0 cpu=3.19ms elapsed=1077.48s tid=0x00007f443c5586a0 nid=0xf6b24 waiting on condition  [0x00007f455a5f4000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x0000000601613720> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-6" #197 daemon prio=5 os_prio=0 cpu=2.00ms elapsed=1077.48s tid=0x00007f443c558d90 nid=0xf6b25 waiting on condition  [0x00007f45581d0000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x0000000601612810> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"SimpleConcurrentProcessorImpl-consumer-thread-MysqlReader-Processor-7" #198 daemon prio=5 os_prio=0 cpu=2.15ms elapsed=1077.48s tid=0x00007f443c5598f0 nid=0xf6b26 waiting on condition  [0x00007f443bdfc000]
+   java.lang.Thread.State: WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x00000006016130a8> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.park(java.base@17.0.19/LockSupport.java:341)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(java.base@17.0.19/AbstractQueuedSynchronizer.java:506)
+	at java.util.concurrent.ForkJoinPool.unmanagedBlock(java.base@17.0.19/ForkJoinPool.java:3465)
+	at java.util.concurrent.ForkJoinPool.managedBlock(java.base@17.0.19/ForkJoinPool.java:3436)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@17.0.19/AbstractQueuedSynchronizer.java:1630)
+	at java.util.concurrent.ArrayBlockingQueue.take(java.base@17.0.19/ArrayBlockingQueue.java:420)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor.lambda$start$1(BaseConcurrentProcessor.java:73)
+	at io.tapdata.common.concurrent.BaseConcurrentProcessor$$Lambda$791/0x00007f4560351800.accept(Unknown Source)
+	at java.util.concurrent.CompletableFuture$UniAccept.tryFire(java.base@17.0.19/CompletableFuture.java:718)
+	at java.util.concurrent.CompletableFuture$Completion.run(java.base@17.0.19/CompletableFuture.java:482)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1136)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"HikariPool-76 housekeeper" #255 daemon prio=5 os_prio=0 cpu=16.73ms elapsed=1035.85s tid=0x00007f45e8ad54e0 nid=0xf6b65 waiting on condition  [0x00007f455aefd000]
+   java.lang.Thread.State: TIMED_WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@17.0.19/Native Method)
+	- parking to wait for  <0x0000000601613980> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.parkNanos(java.base@17.0.19/LockSupport.java:252)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(java.base@17.0.19/AbstractQueuedSynchronizer.java:1679)
+	at java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(java.base@17.0.19/ScheduledThreadPoolExecutor.java:1182)
+	at java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(java.base@17.0.19/ScheduledThreadPoolExecutor.java:899)
+	at java.util.concurrent.ThreadPoolExecutor.getTask(java.base@17.0.19/ThreadPoolExecutor.java:1062)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(java.base@17.0.19/ThreadPoolExecutor.java:1122)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(java.base@17.0.19/ThreadPoolExecutor.java:635)
+	at java.lang.Thread.run(java.base@17.0.19/Thread.java:840)
+
+"Attach Listener" #258 daemon prio=9 os_prio=0 cpu=0.74ms elapsed=0.10s tid=0x00007f4550000a90 nid=0xf6bf2 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"GC Thread#33" os_prio=0 cpu=2583.35ms elapsed=967.59s tid=0x00007f45a4177990 nid=0xf6b8c runnable  
+
+"GC Thread#32" os_prio=0 cpu=2526.15ms elapsed=967.59s tid=0x00007f45a4176e20 nid=0xf6b8b runnable  
+
+"GC Thread#31" os_prio=0 cpu=2585.91ms elapsed=967.59s tid=0x00007f45a41762b0 nid=0xf6b8a runnable  
+
+"GC Thread#30" os_prio=0 cpu=2608.79ms elapsed=967.59s tid=0x00007f45a4175740 nid=0xf6b89 runnable  
+
+"GC Thread#29" os_prio=0 cpu=2586.10ms elapsed=967.59s tid=0x00007f45a4174bd0 nid=0xf6b88 runnable  
+
+"GC Thread#28" os_prio=0 cpu=2583.68ms elapsed=967.59s tid=0x00007f45a4174060 nid=0xf6b87 runnable  
+
+"GC Thread#27" os_prio=0 cpu=2563.06ms elapsed=967.59s tid=0x00007f45a41734f0 nid=0xf6b86 runnable  
+
+"GC Thread#26" os_prio=0 cpu=2571.60ms elapsed=967.59s tid=0x00007f45a4172980 nid=0xf6b85 runnable  
+
+"GC Thread#25" os_prio=0 cpu=2534.73ms elapsed=967.59s tid=0x00007f45a4171e10 nid=0xf6b84 runnable  
+
+"GC Thread#24" os_prio=0 cpu=2587.03ms elapsed=967.59s tid=0x00007f45a41712a0 nid=0xf6b83 runnable  
+
+"GC Thread#23" os_prio=0 cpu=2493.41ms elapsed=967.59s tid=0x00007f45a4170730 nid=0xf6b82 runnable  
+
+"GC Thread#22" os_prio=0 cpu=2523.82ms elapsed=967.59s tid=0x00007f45a41700a0 nid=0xf6b81 runnable  
+
+"GC Thread#21" os_prio=0 cpu=2530.86ms elapsed=967.59s tid=0x00007f45a416fa10 nid=0xf6b80 runnable  
+
+"GC Thread#20" os_prio=0 cpu=2578.82ms elapsed=967.59s tid=0x00007f45a416f380 nid=0xf6b7f runnable  
+
+"GC Thread#19" os_prio=0 cpu=2591.32ms elapsed=967.59s tid=0x00007f45a416ed90 nid=0xf6b7e runnable  
+
+"GC Thread#18" os_prio=0 cpu=2578.63ms elapsed=967.60s tid=0x00007f45a416e930 nid=0xf6b7d runnable  
+
+"GC Thread#17" os_prio=0 cpu=2928.96ms elapsed=1079.65s tid=0x00007f45a401b310 nid=0xf6b10 runnable  
+
+"GC Thread#16" os_prio=0 cpu=2956.56ms elapsed=1103.55s tid=0x00007f45a40134b0 nid=0xf6ad5 runnable  
+
+"GC Thread#15" os_prio=0 cpu=2857.92ms elapsed=1107.05s tid=0x00007f45a401d470 nid=0xf6a9d runnable  
+
+"GC Thread#14" os_prio=0 cpu=2938.22ms elapsed=1107.05s tid=0x00007f45a401ca00 nid=0xf6a9c runnable  
+
+"GC Thread#13" os_prio=0 cpu=2929.75ms elapsed=1107.05s tid=0x00007f45a4017870 nid=0xf6a9b runnable  
+
+"GC Thread#12" os_prio=0 cpu=2913.11ms elapsed=1107.05s tid=0x00007f45a4016d10 nid=0xf6a9a runnable  
+
+"G1 Conc#10" os_prio=0 cpu=61.71ms elapsed=1108.85s tid=0x00007f45b0006c30 nid=0xf6a74 runnable  
+
+"G1 Conc#9" os_prio=0 cpu=58.21ms elapsed=1108.85s tid=0x00007f45b0006090 nid=0xf6a73 runnable  
+
+"G1 Conc#8" os_prio=0 cpu=58.04ms elapsed=1108.85s tid=0x00007f45b00054f0 nid=0xf6a72 runnable  
+
+"G1 Conc#7" os_prio=0 cpu=63.66ms elapsed=1108.85s tid=0x00007f45b0004950 nid=0xf6a71 runnable  
+
+"G1 Conc#6" os_prio=0 cpu=58.00ms elapsed=1108.85s tid=0x00007f45b0003db0 nid=0xf6a70 runnable  
+
+"G1 Conc#5" os_prio=0 cpu=61.76ms elapsed=1108.85s tid=0x00007f45b0003210 nid=0xf6a6f runnable  
+
+"G1 Conc#4" os_prio=0 cpu=60.32ms elapsed=1108.85s tid=0x00007f45b0002670 nid=0xf6a6e runnable  
+
+"G1 Conc#3" os_prio=0 cpu=67.44ms elapsed=1108.85s tid=0x00007f45b0001c90 nid=0xf6a6d runnable  
+
+"G1 Conc#2" os_prio=0 cpu=68.48ms elapsed=1108.85s tid=0x00007f45b0001600 nid=0xf6a6c runnable  
+
+"G1 Conc#1" os_prio=0 cpu=60.55ms elapsed=1108.86s tid=0x00007f45b0000a90 nid=0xf6a6a runnable  
+
+"GC Thread#11" os_prio=0 cpu=2961.81ms elapsed=1109.08s tid=0x00007f45a4019db0 nid=0xf6a68 runnable  
+
+"GC Thread#10" os_prio=0 cpu=2960.68ms elapsed=1109.08s tid=0x00007f45a40193d0 nid=0xf6a67 runnable  
+
+"GC Thread#9" os_prio=0 cpu=2949.60ms elapsed=1109.08s tid=0x00007f45a4018d40 nid=0xf6a66 runnable  
+
+"GC Thread#8" os_prio=0 cpu=2906.71ms elapsed=1109.08s tid=0x00007f45a40186b0 nid=0xf6a65 runnable  
+
+"GC Thread#7" os_prio=0 cpu=2947.30ms elapsed=1109.08s tid=0x00007f45a4018040 nid=0xf6a64 runnable  
+
+"GC Thread#6" os_prio=0 cpu=2933.89ms elapsed=1109.08s tid=0x00007f45a4012950 nid=0xf6a63 runnable  
+
+"GC Thread#5" os_prio=0 cpu=2942.15ms elapsed=1112.77s tid=0x00007f45a400ffa0 nid=0xf6a4b runnable  
+
+"GC Thread#4" os_prio=0 cpu=2930.28ms elapsed=1112.77s tid=0x00007f45a400f050 nid=0xf6a4a runnable  
+
+"GC Thread#3" os_prio=0 cpu=3006.78ms elapsed=1112.77s tid=0x00007f45a400e100 nid=0xf6a49 runnable  
+
+"GC Thread#2" os_prio=0 cpu=2837.32ms elapsed=1112.77s tid=0x00007f45a400d5a0 nid=0xf6a48 runnable  
+
+"GC Thread#1" os_prio=0 cpu=2968.45ms elapsed=1112.77s tid=0x00007f45a400ca40 nid=0xf6a47 runnable  
+
+"VM Periodic Task Thread" os_prio=0 cpu=464.57ms elapsed=1113.28s tid=0x00007f45e81f1ff0 nid=0xf6a42 waiting on condition  
+
+"VM Thread" os_prio=0 cpu=363.64ms elapsed=1113.33s tid=0x00007f45e81a7cc0 nid=0xf6a36 runnable  
+
+"G1 Service" os_prio=0 cpu=312.29ms elapsed=1113.36s tid=0x00007f45e8175d80 nid=0xf6a35 runnable  
+
+"G1 Refine#0" os_prio=0 cpu=0.16ms elapsed=1113.36s tid=0x00007f45e8174d60 nid=0xf6a34 runnable  
+
+"G1 Conc#0" os_prio=0 cpu=65.04ms elapsed=1113.36s tid=0x00007f45e8070d40 nid=0xf6a33 runnable  
+
+"G1 Main Marker" os_prio=0 cpu=3.65ms elapsed=1113.36s tid=0x00007f45e806fc70 nid=0xf6a32 runnable  
+
+"GC Thread#0" os_prio=0 cpu=2964.42ms elapsed=1113.36s tid=0x00007f45e805e430 nid=0xf6a31 runnable  
+
+JNI global refs: 30, weak refs: 0
+

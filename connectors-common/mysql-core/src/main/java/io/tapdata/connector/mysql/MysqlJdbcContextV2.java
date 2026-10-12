@@ -252,12 +252,13 @@ public class MysqlJdbcContextV2 extends JdbcContext {
             "SELECT\n" +
                     "\tTABLE_NAME `tableName`,\n" +
                     "\tTABLE_COMMENT `tableComment`,\n" +
-                    "\tTABLE_COLLATION `tableCollation`\n" +
+                    "\tTABLE_COLLATION `tableCollation`,\n" +
+                    "\tTABLE_TYPE `tableType`\n" +
                     "FROM\n" +
                     "\tINFORMATION_SCHEMA.TABLES\n" +
                     "WHERE\n" +
                     "\tTABLE_SCHEMA = '%s' %s\n" +
-                    "\tAND TABLE_TYPE = 'BASE TABLE'";
+                    "\tAND TABLE_TYPE IN ('BASE TABLE', 'VIEW')";
 
     private static final String MYSQL_ALL_COLUMN =
             "SELECT TABLE_NAME `tableName`,\n" +

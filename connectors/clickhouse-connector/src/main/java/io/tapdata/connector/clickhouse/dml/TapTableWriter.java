@@ -315,6 +315,7 @@ public class TapTableWriter implements IWriter<TapRecordEvent, WriteListResult<T
                     sql.append(" ").append(sqlQuota(field)).append("=? AND");
                 }
                 sql.setLength(sql.length() - 4);
+                sql.append(" SETTINGS mutations_sync=2");
 
 //                TapLogger.info(connectorTag, "update sql: " + sql);
                 return connection.prepareStatement(sql.toString());
@@ -335,6 +336,7 @@ public class TapTableWriter implements IWriter<TapRecordEvent, WriteListResult<T
                     sql.append(" ").append(sqlQuota(field)).append("=? AND");
                 }
                 sql.setLength(sql.length() - 4);
+                sql.append(" SETTINGS mutations_sync=2");
 //                TapLogger.info(connectorTag, "delete sql: " + sql);
                 return connection.prepareStatement(sql.toString());
             } catch (SQLException e) {

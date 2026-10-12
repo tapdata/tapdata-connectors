@@ -73,8 +73,11 @@ jobs:
           echo "::set-output name=TAG_NAME::${TAG_NAME}"
 
   Sync-Code-to-Office:
-    needs: Get-Stable-Branch
-    uses: tapdata/tapdata-application/.github/workflows/sync-code-to-office.yaml@main
+    needs:
+      - Get-Current-Branch
+      - Get-Stable-Branch
+    # Public callers cannot load reusable workflows from the private application repository.
+    uses: ./.github/workflows/sync-code-to-office.yaml
     secrets: inherit
     with:
       tapdata-connectors: ${{ needs.Get-Current-Branch.outputs.branch }}
@@ -115,4 +118,3 @@ jobs:
           cd tapdata-application/build/ && bash check_sonarqube.sh --project-key=tapdata-connectors --branch=${{ needs.Get-Stable-Branch.outputs.CONNECTORS_BRANCH }} \
             --sonar-token=${{ secrets.SONAR_TOKEN }} --github-token=${{ secrets.TAPDATA_ENT_CICD_TOKEN }} \
             --repo=tapdata-connectors --pr-number=${{ github.event.pull_request.number }}
-

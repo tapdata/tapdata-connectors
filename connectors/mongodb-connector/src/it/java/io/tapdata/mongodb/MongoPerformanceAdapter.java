@@ -79,10 +79,9 @@ final class MongoPerformanceAdapter implements PerformanceAdapter {
 
     private TapTable createTapTable() {
         TapTable tapTable = TapSimplify.table(collectionName);
-        TapField id = TapSimplify.field("_id", "STRING").tapType(TapSimplify.tapString());
+        TapField id = TapSimplify.field("ID", "STRING").tapType(TapSimplify.tapString());
         id.isPrimaryKey(true).primaryKeyPos(1).nullable(false);
         tapTable.add(id);
-        tapTable.add(TapSimplify.field("ID", "STRING").tapType(TapSimplify.tapString()).nullable(false));
         tapTable.add(TapSimplify.field("EVENT_TIME", "DATE_TIME").tapType(TapSimplify.tapDateTime()).nullable(false));
         for (int index = 1; index <= NUMERIC_FIELDS; index++) {
             tapTable.add(TapSimplify.field(fieldName("N", index), "LONG").tapType(TapSimplify.tapNumber().bit(64)).nullable(false));
