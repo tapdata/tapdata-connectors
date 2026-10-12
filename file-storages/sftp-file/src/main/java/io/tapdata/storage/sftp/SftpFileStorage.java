@@ -82,10 +82,13 @@ public class SftpFileStorage implements TapFileStorage {
     @Override
     public void destroy() {
         closeActiveStreams(beginLifecycleClose());
-        destroyUnlocked();
         TransferableReentrantLock.Permit permit = operationLock.acquireUninterruptibly();
-        permit.release();
-        endLifecycleClose();
+        try {
+            destroyUnlocked();
+        } finally {
+            permit.release();
+            endLifecycleClose();
+        }
     }
 
     private AutoCloseable[] beginLifecycleClose() {

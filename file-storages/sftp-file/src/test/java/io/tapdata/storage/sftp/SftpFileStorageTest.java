@@ -27,7 +27,7 @@ class SftpFileStorageTest {
     }
 
     @Test
-    void destroyDisconnectsBeforeWaitingForAnActiveOperation() throws Exception {
+    void destroyWaitsForActiveOperationBeforeDisconnecting() throws Exception {
         SftpFileStorage storage = new SftpFileStorage();
         AtomicReference<TransferableReentrantLock.Permit> activePermit = new AtomicReference<>();
         CountDownLatch disconnected = new CountDownLatch(1);
@@ -35,7 +35,6 @@ class SftpFileStorageTest {
             @Override
             public void disconnect() {
                 disconnected.countDown();
-                activePermit.get().release();
             }
         };
         setField(storage, "channel", channel);
@@ -49,13 +48,15 @@ class SftpFileStorageTest {
         destroyer.start();
 
         try {
-            destroyer.join(1000);
-            assertFalse(destroyer.isAlive());
-            assertTrue(disconnected.await(1, TimeUnit.SECONDS));
+            destroyer.join(200);
+            assertTrue(destroyer.isAlive());
+            assertFalse(disconnected.await(200, TimeUnit.MILLISECONDS));
         } finally {
             activePermit.get().release();
             destroyer.join(1000);
         }
+        assertFalse(destroyer.isAlive());
+        assertTrue(disconnected.await(1, TimeUnit.SECONDS));
     }
 
     private static void setField(Object target, String name, Object value) throws Exception {

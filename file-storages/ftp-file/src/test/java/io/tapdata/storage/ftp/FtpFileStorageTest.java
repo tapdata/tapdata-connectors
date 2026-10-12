@@ -226,7 +226,7 @@ class FtpFileStorageTest {
     }
 
     @Test
-    void destroyDisconnectsBeforeWaitingForAnActiveOperation() throws Exception {
+    void destroyWaitsForActiveOperationBeforeDisconnecting() throws Exception {
         client.blockListFiles = true;
         AtomicReference<Throwable> operationFailure = new AtomicReference<>();
         Thread operation = new Thread(() -> {
@@ -251,15 +251,17 @@ class FtpFileStorageTest {
         destroyer.start();
 
         try {
-            destroyer.join(1000);
-            assertFalse(destroyer.isAlive());
-            assertTrue(client.disconnectCalled);
+            destroyer.join(200);
+            assertTrue(destroyer.isAlive());
+            assertFalse(client.disconnectCalled);
         } finally {
             client.allowListFiles.countDown();
             operation.join(1000);
             destroyer.join(1000);
         }
         assertFalse(operation.isAlive());
+        assertFalse(destroyer.isAlive());
+        assertTrue(client.disconnectCalled);
         assertNull(operationFailure.get());
     }
 
