@@ -3,8 +3,10 @@ package io.tapdata.kafka.schema_mode;
 import com.google.protobuf.DescriptorProtos;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.DynamicMessage;
+import com.google.protobuf.Struct;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
@@ -110,6 +112,73 @@ class RegistryProtobufModeTest {
     }
 
     @Test
+    void nestedObjectIsSerializedAsItsCustomMessageType() throws Exception {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("address", "OBJECT"));
+        table.add(new TapField("address.street", "STRING"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor address = descriptor.findFieldByName("address");
+
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("street", "Main Street");
+        Object converted = invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class}, source, address);
+        DynamicMessage message = DynamicMessage.newBuilder(descriptor).setField(address, converted).build();
+
+        DynamicMessage nested = (DynamicMessage) message.getField(address);
+        assertEquals("Main Street", nested.getField(nested.getDescriptorForType().findFieldByName("street")));
+    }
+
+    @Test
+    void dottedKeysAreNormalizedIntoNestedObjectsBeforeSerialization() throws Exception {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("address", "OBJECT"));
+        table.add(new TapField("address.street", "STRING"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("address.street", "Main Street");
+        Map<String, Object> normalized = invoke("normalizeDataForDescriptor",
+                new Class[]{Map.class, Descriptors.Descriptor.class}, source, descriptor);
+
+        assertEquals(Collections.singletonMap("street", "Main Street"), normalized.get("address"));
+    }
+
+    @Test
+    void repeatedNestedObjectsAreSerializedAsTheirCustomMessageType() throws Exception {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("items", "ARRAY"));
+        table.add(new TapField("items.id", "INTEGER"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor items = descriptor.findFieldByName("items");
+
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id", 7);
+        Object converted = invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                Collections.singletonList(item), items);
+        DynamicMessage message = DynamicMessage.newBuilder(descriptor).setField(items, converted).build();
+
+        List<?> nestedItems = (List<?>) message.getField(items);
+        assertEquals(1, nestedItems.size());
+        assertTrue(nestedItems.get(0) instanceof DynamicMessage);
+        DynamicMessage nested = (DynamicMessage) nestedItems.get(0);
+        assertEquals(7, nested.getField(nested.getDescriptorForType().findFieldByName("id")));
+    }
+
+    @Test
+    void wellKnownMessagesRemainLeafFieldsDuringDiscovery() throws Exception {
+        Descriptors.Descriptor root = messageWithDependency("Root", Struct.getDescriptor().getFile(),
+                field("payload", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        ".google.protobuf.Struct"));
+        TapTable table = new TapTable("topic");
+
+        invoke("dynamicMessageToTapTable", new Class[]{TapTable.class, DynamicMessage.class, java.util.List.class},
+                table, DynamicMessage.newBuilder(root).build(), Collections.emptyList());
+
+        assertNotNull(table.getNameFieldMap().get("payload"));
+        assertNull(table.getNameFieldMap().get("payload.fields"));
+    }
+
+    @Test
     void dottedTapFieldsBuildNestedProtobufDescriptor() throws Exception {
         TapTable table = new TapTable("topic");
         table.add(new TapField("address", "OBJECT"));
@@ -185,6 +254,26 @@ class RegistryProtobufModeTest {
         assertEquals("address.city", ((TapNewFieldEvent) events.get(0)).getNewFields().get(0).getName());
     }
 
+    @Test
+    void restartBaselineRecognizesSingleNestedFieldRename() throws Exception {
+        DescriptorProtos.DescriptorProto address = nestedMessage("Address",
+                field("city", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING));
+        Descriptors.Descriptor root = message("Root",
+                field("address", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".Root.Address"), address);
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("address", "OBJECT"));
+        table.add(new TapField("address.street", "STRING"));
+
+        List<TapEvent> events = invoke("detectSchemaChangesFromTableFlat",
+                new Class[]{String.class, TapTable.class, Descriptors.Descriptor.class, long.class},
+                "topic", table, root, 1L);
+
+        assertEquals(1, events.size());
+        assertTrue(events.get(0) instanceof TapAlterFieldNameEvent);
+        assertEquals("address.street", ((TapAlterFieldNameEvent) events.get(0)).getNameChange().getBefore());
+        assertEquals("address.city", ((TapAlterFieldNameEvent) events.get(0)).getNameChange().getAfter());
+    }
+
     @SuppressWarnings("unchecked")
     private <T> T invoke(String name, Class<?>[] parameterTypes, Object... args) throws Exception {
         Method method = RegistryProtobufMode.class.getDeclaredMethod(name, parameterTypes);
@@ -229,6 +318,23 @@ class RegistryProtobufModeTest {
                         .setSyntax("proto3")
                         .addMessageType(builder.build())
                         .build(), new Descriptors.FileDescriptor[0]);
+        return file.findMessageTypeByName(name);
+    }
+
+    private static Descriptors.Descriptor messageWithDependency(String name,
+                                                                Descriptors.FileDescriptor dependency,
+                                                                DescriptorProtos.FieldDescriptorProto field) throws Exception {
+        DescriptorProtos.DescriptorProto root = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName(name)
+                .addField(field)
+                .build();
+        Descriptors.FileDescriptor file = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName(name + ".proto")
+                        .setSyntax("proto3")
+                        .addDependency(dependency.getName())
+                        .addMessageType(root)
+                        .build(), new Descriptors.FileDescriptor[]{dependency});
         return file.findMessageTypeByName(name);
     }
 
