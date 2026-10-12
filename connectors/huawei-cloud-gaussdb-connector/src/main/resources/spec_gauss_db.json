@@ -446,7 +446,7 @@
     },
     "real": {
       "to": "TapFloat",
-      "bit": 4,
+      "bit": 32,
       "defaultPrecision": 24,
       "defaultScale": 8,
       "fixed": false

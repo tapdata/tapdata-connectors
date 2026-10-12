@@ -617,12 +617,12 @@
       "scale": [ 0, 2]
     },
     "price": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "value": [ 0.00 , 10000000.00],
       "scale": [ 0, 2]
     },
     "Float": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "precision": [ 1, 30],
       "value": [ -3.402823466E+38, 3.402823466E+38],
       "scale": [ 0, 30],
