@@ -209,6 +209,34 @@ final class CsvValueConverter {
     }
 
     private static LocalDate parseDate(String value) {
+        if (DATE_ONLY.matcher(value).matches()) {
+            return parseDateOnly(value);
+        }
+
+        Matcher flexibleDateTimeMatcher = FLEXIBLE_DATETIME.matcher(value);
+        if (flexibleDateTimeMatcher.matches()) {
+            // Validate the complete value before discarding its time component.
+            parseFlexibleDateTime(value);
+            String dateValue = flexibleDateTimeMatcher.group(1) + flexibleDateTimeMatcher.group(2)
+                    + flexibleDateTimeMatcher.group(3) + flexibleDateTimeMatcher.group(2)
+                    + flexibleDateTimeMatcher.group(4);
+            return parseDateOnly(dateValue);
+        }
+
+        String dateFormat = DateUtil.determineDateFormat(value);
+        if (dateFormat == null || !dateFormat.contains("H")
+                || (!dateFormat.contains("y") && !dateFormat.contains("M") && !dateFormat.contains("d"))) {
+            throw new DateTimeParseException("Unsupported CSV date format", value, 0);
+        }
+        TemporalAccessor parsed = DateTimeFormatter.ofPattern(dateFormat).parse(value);
+        LocalDate date = LocalDate.from(parsed);
+        if (!isSupportedYear(date.getYear())) {
+            throw new DateTimeParseException("CSV date year is outside the supported range", value, 0);
+        }
+        return date;
+    }
+
+    private static LocalDate parseDateOnly(String value) {
         String separator = value.indexOf('/') >= 0 ? "/" : "-";
         String[] parts = value.split(separator);
         if (parts.length != 3) {

@@ -187,6 +187,13 @@ class CsvConnectorTest {
     }
 
     @Test
+    void parseDateColumnKeepsDatePartWhenValueContainsTime() {
+        assertEquals(LocalDate.of(2024, 5, 17),
+                CsvValueConverter.parse("2024-05-17 12:30:45", CsvValueConverter.DATE));
+        assertNull(CsvValueConverter.parse("2024-02-30 12:30:45", CsvValueConverter.DATE));
+    }
+
+    @Test
     void csvDateInferenceMatchesSpecYearRange() {
         assertEquals("STRING", CsvValueConverter.inferDataType("0000-01-01"));
         assertEquals("STRING", CsvValueConverter.inferDataType("0999-12-31"));
