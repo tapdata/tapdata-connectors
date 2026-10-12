@@ -76,7 +76,8 @@ jobs:
     needs:
       - Get-Current-Branch
       - Get-Stable-Branch
-    uses: tapdata/tapdata-application/.github/workflows/sync-code-to-office.yaml@main
+    # Public callers cannot load reusable workflows from the private application repository.
+    uses: ./.github/workflows/sync-code-to-office.yaml
     secrets: inherit
     with:
       tapdata-connectors: ${{ needs.Get-Current-Branch.outputs.branch }}
