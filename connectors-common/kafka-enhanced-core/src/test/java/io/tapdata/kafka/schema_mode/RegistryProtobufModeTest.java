@@ -221,6 +221,51 @@ class RegistryProtobufModeTest {
     }
 
     @Test
+    void repeatedScalarElementTypesArePreservedWhenRebuildingDescriptor() throws Exception {
+        DescriptorProtos.DescriptorProto rootProto = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Root")
+                .addField(field("tags", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING,
+                        DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED, null))
+                .addField(field("ids", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT32,
+                        DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED, null))
+                .build();
+        Descriptors.FileDescriptor rootFile = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName("RootRepeated.proto")
+                        .setSyntax("proto3")
+                        .addMessageType(rootProto)
+                        .build(), new Descriptors.FileDescriptor[0]);
+        Descriptors.Descriptor root = rootFile.findMessageTypeByName("Root");
+        TapTable table = new TapTable("topic");
+        invoke("dynamicMessageToTapTable", new Class[]{TapTable.class, DynamicMessage.class, java.util.List.class},
+                table, DynamicMessage.newBuilder(root).build(), Collections.emptyList());
+
+        Descriptors.Descriptor rebuilt = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        assertEquals(Descriptors.FieldDescriptor.Type.STRING, rebuilt.findFieldByName("tags").getType());
+        assertEquals(Descriptors.FieldDescriptor.Type.INT32, rebuilt.findFieldByName("ids").getType());
+        assertTrue(rebuilt.findFieldByName("tags").isRepeated());
+        assertTrue(rebuilt.findFieldByName("ids").isRepeated());
+    }
+
+    @Test
+    void nullInsideStructRemainsNullAfterDynamicRoundTrip() throws Exception {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("payload", "OBJECT"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor payload = descriptor.findFieldByName("payload");
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("value", null);
+
+        DynamicMessage message = DynamicMessage.newBuilder(descriptor)
+                .setField(payload, invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                        source, payload))
+                .build();
+        Map<String, Object> decoded = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
+        assertTrue(decoded.get("payload") instanceof Map);
+        assertNull(((Map<?, ?>) decoded.get("payload")).get("value"));
+    }
+
+    @Test
     void dottedTapFieldsBuildNestedProtobufDescriptor() throws Exception {
         TapTable table = new TapTable("topic");
         table.add(new TapField("address", "OBJECT"));

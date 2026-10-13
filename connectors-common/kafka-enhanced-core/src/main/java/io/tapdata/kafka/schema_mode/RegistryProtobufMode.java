@@ -59,6 +59,9 @@ import static io.tapdata.constant.DMLType.*;
  */
 public class RegistryProtobufMode extends AbsSchemaMode {
 
+    private static final String REPEATED_SCALAR_PREFIX = "__protobuf_repeated_scalar__:";
+    private static final String REPEATED_ENUM_PREFIX = "__protobuf_repeated_enum__:";
+
     // 缓存表的 Protobuf Descriptor，避免重复构建
     private final Map<String, Descriptors.Descriptor> descriptorCache = new ConcurrentHashMap<>();
     // 每个 topic 最近一次见到的 Protobuf Descriptor 引用；命中时（==）走快速路径，跳过任何 schema diff 计算
@@ -398,8 +401,17 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                         .setLabel(labelForTapType(dataType))
                         .setType(mapTapTypeToProtobufType(dataType));
                 String normalizedType = normalizeTapType(dataType);
+                String repeatedScalarType = repeatedScalarType(tapField);
+                String repeatedEnumType = repeatedEnumType(tapField);
                 String explicitMessageType = protobufMessageType(tapField);
-                if (explicitMessageType != null && isWellKnownMessageName(explicitMessageType)) {
+                if (repeatedScalarType != null) {
+                    fieldBuilder.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
+                            .setType(protobufTypeFromName(repeatedScalarType));
+                } else if (repeatedEnumType != null) {
+                    fieldBuilder.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
+                            .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_ENUM)
+                            .setTypeName("." + repeatedEnumType);
+                } else if (explicitMessageType != null && isWellKnownMessageName(explicitMessageType)) {
                     fieldBuilder.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
                             .setTypeName("." + explicitMessageType)
                             .setLabel(isRepeatedProtobufMessage(tapField)
@@ -506,6 +518,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                     .setNumber(fieldNumber++)
                     .setLabel(labelForTapType(normalizedType));
 
+            String repeatedScalarType = repeatedScalarType(tapField);
+            String repeatedEnumType = repeatedEnumType(tapField);
             String explicitMessageType = protobufMessageType(tapField);
             if (!child.children.isEmpty() && ("OBJECT".equals(normalizedType) || "ARRAY".equals(normalizedType))) {
                 String nestedName = sanitizeMessageName(child.name + "Message");
@@ -513,6 +527,13 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                 message.addNestedType(buildNestedMessageProto(child, nestedName, nestedFullName));
                 field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
                         .setTypeName("." + nestedFullName);
+            } else if (repeatedScalarType != null) {
+                field.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
+                        .setType(protobufTypeFromName(repeatedScalarType));
+            } else if (repeatedEnumType != null) {
+                field.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
+                        .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_ENUM)
+                        .setTypeName("." + repeatedEnumType);
             } else if (explicitMessageType != null && isWellKnownMessageName(explicitMessageType)) {
                 field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
                         .setTypeName("." + explicitMessageType)
@@ -613,11 +634,36 @@ public class RegistryProtobufMode extends AbsSchemaMode {
     }
 
     private void setProtobufMessageType(TapField tapField, Descriptors.FieldDescriptor field) {
-        if (field.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE
+        if (field.isRepeated() && !field.isMapField()) {
+            if (field.getJavaType() == Descriptors.FieldDescriptor.JavaType.ENUM) {
+                tapField.setPureDataType(REPEATED_ENUM_PREFIX + field.getEnumType().getFullName());
+            } else if (field.getJavaType() != Descriptors.FieldDescriptor.JavaType.MESSAGE) {
+                tapField.setPureDataType(REPEATED_SCALAR_PREFIX + field.getType().name());
+            } else if (isWellKnownMessage(field.getMessageType())) {
+                tapField.setPureDataType(field.getMessageType().getFullName() + "[]");
+            }
+        } else if (field.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE
                 && isWellKnownMessage(field.getMessageType())) {
             tapField.setPureDataType(field.getMessageType().getFullName()
                     + (field.isRepeated() ? "[]" : ""));
         }
+    }
+
+    private String repeatedScalarType(TapField tapField) {
+        String pureType = tapField == null ? null : tapField.getPureDataType();
+        return pureType != null && pureType.startsWith(REPEATED_SCALAR_PREFIX)
+                ? pureType.substring(REPEATED_SCALAR_PREFIX.length()) : null;
+    }
+
+    private String repeatedEnumType(TapField tapField) {
+        String pureType = tapField == null ? null : tapField.getPureDataType();
+        return pureType != null && pureType.startsWith(REPEATED_ENUM_PREFIX)
+                ? pureType.substring(REPEATED_ENUM_PREFIX.length()) : null;
+    }
+
+    private DescriptorProtos.FieldDescriptorProto.Type protobufTypeFromName(String typeName) {
+        String enumName = typeName.startsWith("TYPE_") ? typeName : "TYPE_" + typeName;
+        return DescriptorProtos.FieldDescriptorProto.Type.valueOf(enumName);
     }
 
     private String protobufMessageType(TapField tapField) {
@@ -811,6 +857,9 @@ public class RegistryProtobufMode extends AbsSchemaMode {
     }
 
     private Object convertRepeatedValue(Object value, Descriptors.FieldDescriptor fieldDescriptor) {
+        if (fieldDescriptor.getJavaType() != Descriptors.FieldDescriptor.JavaType.MESSAGE) {
+            return convertRepeatedScalarValue(value, fieldDescriptor);
+        }
         if (fieldDescriptor.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE
                 && !isWellKnownMessage(fieldDescriptor.getMessageType())) {
             DynamicMessage nested = toDynamicMessage(value, fieldDescriptor.getMessageType());
@@ -835,6 +884,49 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                     + fieldDescriptor.getFullName());
         }
         return nested;
+    }
+
+    private Object convertRepeatedScalarValue(Object value, Descriptors.FieldDescriptor fieldDescriptor) {
+        switch (fieldDescriptor.getType()) {
+            case BOOL:
+                return value instanceof Boolean ? value : Boolean.parseBoolean(value.toString());
+            case INT32:
+            case SINT32:
+            case SFIXED32:
+            case UINT32:
+            case FIXED32:
+                return value instanceof Integer ? value : Integer.parseInt(value.toString());
+            case INT64:
+            case SINT64:
+            case SFIXED64:
+            case UINT64:
+            case FIXED64:
+                return value instanceof Long ? value : Long.parseLong(value.toString());
+            case FLOAT:
+                return value instanceof Float ? value : Float.parseFloat(value.toString());
+            case DOUBLE:
+                return value instanceof Double ? value : Double.parseDouble(value.toString());
+            case STRING:
+                return value.toString();
+            case BYTES:
+                return value instanceof byte[]
+                        ? com.google.protobuf.ByteString.copyFrom((byte[]) value)
+                        : com.google.protobuf.ByteString.copyFromUtf8(value.toString());
+            case ENUM:
+                if (value instanceof Descriptors.EnumValueDescriptor) {
+                    return value;
+                }
+                Descriptors.EnumValueDescriptor enumValue = fieldDescriptor.getEnumType()
+                        .findValueByName(value.toString());
+                if (enumValue == null) {
+                    throw new IllegalArgumentException("Unknown enum value " + value
+                            + " for " + fieldDescriptor.getFullName());
+                }
+                return enumValue;
+            default:
+                throw new IllegalArgumentException("Unsupported repeated protobuf field type "
+                        + fieldDescriptor.getType() + " for " + fieldDescriptor.getFullName());
+        }
     }
 
     private DynamicMessage toDynamicMessage(Object value, Descriptors.Descriptor descriptor) {
@@ -1162,8 +1254,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             return null;
         }
         Map.Entry<Descriptors.FieldDescriptor, Object> field = fields.entrySet().iterator().next();
-        if (field.getKey().getType() == Descriptors.FieldDescriptor.Type.MESSAGE) {
-            return convertSingleProtobufValue(field.getValue(), field.getKey());
+        if ("null_value".equals(field.getKey().getName())) {
+            return null;
         }
         return convertSingleProtobufValue(field.getValue(), field.getKey());
     }
