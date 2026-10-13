@@ -44,6 +44,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -61,6 +62,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
     private static final String REPEATED_SCALAR_PREFIX = "__protobuf_repeated_scalar__:";
     private static final String REPEATED_ENUM_PREFIX = "__protobuf_repeated_enum__:";
+    private static final BigDecimal MAX_EXACT_PROTOBUF_VALUE_NUMBER = new BigDecimal("9007199254740991");
 
     // 缓存表的 Protobuf Descriptor，避免重复构建
     private final Map<String, Descriptors.Descriptor> descriptorCache = new ConcurrentHashMap<>();
@@ -231,6 +233,10 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         } else {
             events = detectSchemaChangesFlat(topic, lastDescriptor, currentDescriptor, consumerRecord.timestamp());
         }
+        // A schema change invalidates the descriptor used by fromTapEvent. The
+        // next write must rebuild it from the updated TapTable instead of silently
+        // dropping newly discovered fields.
+        descriptorCache.remove(topic);
         lastDescriptorPerTopic.put(topic, currentDescriptor);
         TapEvent dml = toTapEvent(consumerRecord);
         if (dml != null) {
@@ -408,9 +414,10 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                     fieldBuilder.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
                             .setType(protobufTypeFromName(repeatedScalarType));
                 } else if (repeatedEnumType != null) {
+                    // The enum declaration is not persisted with TapField; downgrade
+                    // repeated enums to strings instead of emitting a dangling typeName.
                     fieldBuilder.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
-                            .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_ENUM)
-                            .setTypeName("." + repeatedEnumType);
+                            .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING);
                 } else if (explicitMessageType != null && isWellKnownMessageName(explicitMessageType)) {
                     fieldBuilder.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
                             .setTypeName("." + explicitMessageType)
@@ -531,9 +538,10 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                 field.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
                         .setType(protobufTypeFromName(repeatedScalarType));
             } else if (repeatedEnumType != null) {
+                // The enum declaration is not persisted with TapField; downgrade
+                // repeated enums to strings instead of emitting a dangling typeName.
                 field.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
-                        .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_ENUM)
-                        .setTypeName("." + repeatedEnumType);
+                        .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING);
             } else if (explicitMessageType != null && isWellKnownMessageName(explicitMessageType)) {
                 field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
                         .setTypeName("." + explicitMessageType)
@@ -973,6 +981,15 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                 continue;
             }
             String sanitizedKey = sanitizeFieldName(key);
+            if (key.contains(".")) {
+                String rootKey = key.substring(0, key.indexOf('.'));
+                if (descriptor.findFieldByName(sanitizeFieldName(rootKey)) != null
+                        && data.containsKey(rootKey)) {
+                    // The nested root value is authoritative; dotted aliases are
+                    // read-side compatibility keys and must not replace arrays/maps.
+                    continue;
+                }
+            }
             if (descriptor.findFieldByName(sanitizedKey) != null || !key.contains(".")) {
                 normalized.put(key, entry.getValue());
             } else {
@@ -1060,6 +1077,12 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             return builder.setBoolValue((Boolean) value).build();
         }
         if (value instanceof Number) {
+            BigDecimal number = new BigDecimal(value.toString());
+            if (number.abs().compareTo(MAX_EXACT_PROTOBUF_VALUE_NUMBER) > 0) {
+                // google.protobuf.Value stores numbers as double; use a string rather
+                // than silently changing a large integer or decimal.
+                return builder.setStringValue(value.toString()).build();
+            }
             return builder.setNumberValue(((Number) value).doubleValue()).build();
         }
         if (value instanceof Map) {
@@ -1124,9 +1147,52 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             Object convertedValue = convertProtobufValueToJava(value, fieldDescriptor);
 
             result.put(fieldName, convertedValue);
+            addDottedAliases(result, fieldName, convertedValue);
         }
 
         return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void addDottedAliases(Map<String, Object> target, String prefix, Object value) {
+        if (value instanceof Map) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                String path = prefix + "." + entry.getKey();
+                Object child = entry.getValue();
+                target.putIfAbsent(path, child);
+                addDottedAliases(target, path, child);
+            }
+        } else if (value instanceof Collection) {
+            Map<String, List<Object>> children = new LinkedHashMap<>();
+            for (Object item : flattenCollection(value)) {
+                if (item instanceof Map) {
+                    for (Map.Entry<?, ?> entry : ((Map<?, ?>) item).entrySet()) {
+                        children.computeIfAbsent(String.valueOf(entry.getKey()), key -> new ArrayList<>())
+                                .add(entry.getValue());
+                    }
+                }
+            }
+            for (Map.Entry<String, List<Object>> entry : children.entrySet()) {
+                String path = prefix + "." + entry.getKey();
+                target.putIfAbsent(path, entry.getValue());
+                addDottedAliases(target, path, entry.getValue());
+            }
+        }
+    }
+
+    private List<Object> flattenCollection(Object value) {
+        List<Object> flattened = new ArrayList<>();
+        if (!(value instanceof Collection)) {
+            return flattened;
+        }
+        for (Object item : (Collection<?>) value) {
+            if (item instanceof Collection) {
+                flattened.addAll(flattenCollection(item));
+            } else {
+                flattened.add(item);
+            }
+        }
+        return flattened;
     }
 
     /**

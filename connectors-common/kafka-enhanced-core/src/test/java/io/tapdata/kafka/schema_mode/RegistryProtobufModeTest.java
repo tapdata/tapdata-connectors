@@ -131,6 +131,25 @@ class RegistryProtobufModeTest {
     }
 
     @Test
+    void nestedReadKeepsDocumentShapeAndProvidesDottedCompatibilityKeys() throws Exception {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("address", "OBJECT"));
+        table.add(new TapField("address.street", "STRING"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor address = descriptor.findFieldByName("address");
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("street", "Main Street");
+        DynamicMessage message = DynamicMessage.newBuilder(descriptor)
+                .setField(address, invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                        source, address))
+                .build();
+
+        Map<String, Object> decoded = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
+        assertEquals("Main Street", ((Map<?, ?>) decoded.get("address")).get("street"));
+        assertEquals("Main Street", decoded.get("address.street"));
+    }
+
+    @Test
     void dottedKeysAreNormalizedIntoNestedObjectsBeforeSerialization() throws Exception {
         TapTable table = new TapTable("topic");
         table.add(new TapField("address", "OBJECT"));
@@ -263,6 +282,51 @@ class RegistryProtobufModeTest {
         Map<String, Object> decoded = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
         assertTrue(decoded.get("payload") instanceof Map);
         assertNull(((Map<?, ?>) decoded.get("payload")).get("value"));
+    }
+
+    @Test
+    void repeatedEnumsDowngradeToStringsInsteadOfDanglingDescriptors() throws Exception {
+        DescriptorProtos.EnumDescriptorProto status = DescriptorProtos.EnumDescriptorProto.newBuilder()
+                .setName("Status")
+                .addValue(DescriptorProtos.EnumValueDescriptorProto.newBuilder().setName("UNKNOWN").setNumber(0))
+                .addValue(DescriptorProtos.EnumValueDescriptorProto.newBuilder().setName("READY").setNumber(1))
+                .build();
+        DescriptorProtos.DescriptorProto rootProto = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Root")
+                .addEnumType(status)
+                .addField(field("statuses", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_ENUM,
+                        DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED, ".Root.Status"))
+                .build();
+        Descriptors.FileDescriptor file = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName("RootEnum.proto")
+                        .setSyntax("proto3")
+                        .addMessageType(rootProto)
+                        .build(), new Descriptors.FileDescriptor[0]);
+        TapTable table = new TapTable("topic");
+        invoke("dynamicMessageToTapTable", new Class[]{TapTable.class, DynamicMessage.class, java.util.List.class},
+                table, DynamicMessage.newBuilder(file.findMessageTypeByName("Root")).build(), Collections.emptyList());
+
+        Descriptors.Descriptor rebuilt = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        assertEquals(Descriptors.FieldDescriptor.Type.STRING, rebuilt.findFieldByName("statuses").getType());
+        assertTrue(rebuilt.findFieldByName("statuses").isRepeated());
+    }
+
+    @Test
+    void largeNestedNumbersFallBackToStringsBeforeDoubleConversion() throws Exception {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("payload", "OBJECT"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("id", 9007199254740993L);
+        Descriptors.FieldDescriptor field = descriptor.findFieldByName("payload");
+        DynamicMessage message = DynamicMessage.newBuilder(descriptor)
+                .setField(field, invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                        payload, field))
+                .build();
+
+        Map<String, Object> decoded = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
+        assertEquals("9007199254740993", ((Map<?, ?>) decoded.get("payload")).get("id"));
     }
 
     @Test
