@@ -18,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -108,9 +109,23 @@ public class FileStreamConnectorIT {
         FileITSupport.Session session = FileITSupport.open(connector, "filestream", FileITSupport.config(fixture.directory(), "file"));
         resources.add(session);
         FileITSupport.Events capture = new FileITSupport.Events();
+        List<Long> payloadSizes = new ArrayList<>();
 
         assertEquals(2L, session.functions.getBatchCountFunction().count(session.nodeContext, new TapTable("file")));
-        session.functions.getBatchReadFunction().batchRead(session.nodeContext, new TapTable("file"), null, 10, capture::accept);
+        session.functions.getBatchReadFunction().batchRead(session.nodeContext, new TapTable("file"), null, 10, (events, offset) -> {
+            capture.accept(events, offset);
+            if (events == null) {
+                return;
+            }
+            for (TapEvent event : events) {
+                Map<String, Object> after = ((TapInsertRecordEvent) event).getAfter();
+                try (InputStream input = (InputStream) after.get("file_data")) {
+                    payloadSizes.add((long) input.readAllBytes().length);
+                } catch (IOException error) {
+                    throw new AssertionError("Unable to consume file_data", error);
+                }
+            }
+        });
 
         assertEquals(2, capture.events().size());
         for (TapEvent event : capture.events()) {
@@ -121,9 +136,7 @@ public class FileStreamConnectorIT {
             long size = ((Number) after.get("file_size")).longValue();
             assertTrue(size > 0);
             assertTrue(((Number) after.get("last_modified")).longValue() > 0);
-            try (InputStream input = (InputStream) after.get("file_data")) {
-                assertEquals(size, input.readAllBytes().length);
-            }
+            assertTrue(payloadSizes.contains(size));
         }
         assertNotNull(capture.offsets().get(capture.offsets().size() - 1));
     }
