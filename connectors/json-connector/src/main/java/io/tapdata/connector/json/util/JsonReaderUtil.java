@@ -20,6 +20,7 @@ public class JsonReaderUtil {
             case NUMBER:
                 return new BigDecimal(jsonReader.nextString());
             case NULL:
+                jsonReader.nextNull();
                 return null;
             case BEGIN_ARRAY:
                 return traverseArray(jsonReader);

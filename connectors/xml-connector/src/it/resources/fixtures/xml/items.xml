@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss>
+  <channel>
+    <item>
+      <info>first item <!-- comment should be skipped --> <![CDATA[content]]> <?processing should be skipped?></info>
+    </item>
+    <item>
+      <info>second item <!-- another comment --> <![CDATA[content]]> <?processing ignored?></info>
+    </item>
+  </channel>
+</rss>
