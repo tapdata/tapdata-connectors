@@ -91,6 +91,27 @@ class RegistryProtobufModeTest {
     }
 
     @Test
+    void mapKeyAndValueTypesArePreservedWhenRebuildingDescriptor() throws Exception {
+        TapTable table = new TapTable("topic");
+        TapField attributes = new TapField("attributes", "MAP");
+        attributes.setPureDataType("__protobuf_map__:SCALAR:INT64|SCALAR:STRING");
+        table.add(attributes);
+
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor mapField = descriptor.findFieldByName("attributes");
+        Descriptors.Descriptor entry = mapField.getMessageType();
+        assertEquals(Descriptors.FieldDescriptor.Type.INT64, entry.findFieldByName("key").getType());
+        assertEquals(Descriptors.FieldDescriptor.Type.STRING, entry.findFieldByName("value").getType());
+
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("42", "answer");
+        Object converted = invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class}, source, mapField);
+        DynamicMessage message = DynamicMessage.newBuilder(descriptor).setField(mapField, converted).build();
+        Map<String, Object> decoded = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
+        assertEquals("answer", ((Map<?, ?>) decoded.get("attributes")).get("42"));
+    }
+
+    @Test
     void arrayAndObjectValuesRoundTripThroughDynamicMessage() throws Exception {
         TapTable table = new TapTable("topic");
         table.add(new TapField("items", "ARRAY"));
