@@ -372,19 +372,9 @@
       "defaultScale": 0,
       "fixed": true
     },
-    "float($precision)": {
-      "to": "TapCoefficientFloat",
+    "float($precision,$scale)": {
+      "to": "TapFloat",
       "name": "float",
-      "coefficient": {
-        "TapFloat": [
-          1,
-          24
-        ],
-        "TapDouble": [
-          25,
-          53
-        ]
-      },
       "precision": [
         1,
         30
@@ -399,9 +389,19 @@
       ],
       "fixed": false
     },
-    "float($precision,$scale)": {
-      "to": "TapFloat",
+    "float($precision)": {
+      "to": "TapCoefficientFloat",
       "name": "float",
+      "coefficient": {
+        "TapFloat": [
+          1,
+          24
+        ],
+        "TapDouble": [
+          25,
+          53
+        ]
+      },
       "precision": [
         1,
         30
