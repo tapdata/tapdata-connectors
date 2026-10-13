@@ -6,5 +6,6 @@
   "user": "root",
   "password": "tapdata",
   "slotName": "tapdata_connector_it",
-  "logPluginName": "pgoutput"
+  "logPluginName": "pgoutput",
+  "ddlTriggerEnable": true
 }

@@ -25,7 +25,9 @@ import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -38,6 +40,7 @@ public abstract class FileConnector extends ConnectorBase {
     private Map<String, Object> connectionParams;
     protected AbstractFileRecordWriter fileRecordWriter;
     protected ExecutorService executorService;
+    private final ReentrantLock mergeCacheLock = new ReentrantLock();
     protected String firstConnectorId;
     private static final String TAG = FileConnector.class.getSimpleName();
     protected Log tapLogger;
@@ -95,14 +98,94 @@ public abstract class FileConnector extends ConnectorBase {
 
     @Override
     public void onStop(TapConnectionContext connectionContext) throws Throwable {
-        if (EmptyKit.isNotNull(fileRecordWriter)) {
-            if (!storage.supportAppendData()) {
+        Throwable failure = null;
+        try {
+            shutdownMergeCacheExecutor();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            failure = appendFailure(failure, e);
+        } catch (Throwable throwable) {
+            failure = appendFailure(failure, throwable);
+        }
+
+        // The merge worker may still be running when shutdownNow() times out.  Keep the
+        // storage alive until the same lock is acquired so destroy() cannot race with a
+        // remote read/write performed by mergeCacheFiles().
+        mergeCacheLock.lock();
+        try {
+            if (EmptyKit.isNotNull(fileRecordWriter)) {
+                try {
+                    if (EmptyKit.isNotNull(storage) && !storage.supportAppendData()) {
+                        fileRecordWriter.mergeCacheFiles();
+                    }
+                } catch (Throwable throwable) {
+                    failure = appendFailure(failure, throwable);
+                }
+                try {
+                    fileRecordWriter.releaseResource();
+                } catch (Throwable throwable) {
+                    failure = appendFailure(failure, throwable);
+                }
+            }
+            failure = appendFailure(failure, destroyStorage());
+        } finally {
+            mergeCacheLock.unlock();
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    private Throwable destroyStorage() {
+        return destroyStorage(null);
+    }
+
+    protected Throwable destroyStorage(Throwable failure) {
+        try {
+            if (EmptyKit.isNotNull(storage)) {
+                storage.destroy();
+            }
+        } catch (Throwable throwable) {
+            failure = appendFailure(failure, throwable);
+        }
+        return failure;
+    }
+
+    private Throwable appendFailure(Throwable failure, Throwable additionalFailure) {
+        if (additionalFailure == null) {
+            return failure;
+        }
+        if (failure == null) {
+            return additionalFailure;
+        }
+        if (failure != additionalFailure) {
+            failure.addSuppressed(additionalFailure);
+        }
+        return failure;
+    }
+
+    private boolean shutdownMergeCacheExecutor() throws InterruptedException {
+        ExecutorService executor = executorService;
+        executorService = null;
+        if (executor == null) {
+            return true;
+        }
+        executor.shutdownNow();
+        boolean terminated = executor.awaitTermination(10, TimeUnit.SECONDS);
+        if (!terminated) {
+            TapLogger.warn(TAG, "Merge cache executor did not terminate within 10 seconds");
+        }
+        return terminated;
+    }
+
+    protected void mergeCacheFilesSafely() throws Exception {
+        mergeCacheLock.lock();
+        try {
+            if (EmptyKit.isNotNull(fileRecordWriter)) {
                 fileRecordWriter.mergeCacheFiles();
             }
-            fileRecordWriter.releaseResource();
-        }
-        if (EmptyKit.isNotNull(storage)) {
-            storage.destroy();
+        } finally {
+            mergeCacheLock.unlock();
         }
     }
 
@@ -225,7 +308,7 @@ public abstract class FileConnector extends ConnectorBase {
             needReadFiles.clear();
             needReadFiles.putAll(changedFiles);
             tempFiles.putAll(newFiles);
-            int sleep = 60;
+            int sleep = Math.max(1, fileConfig.getStreamReadInterval());
             try {
                 while (isAlive() && (sleep-- > 0)) {
                     TapSimplify.sleep(1000);
@@ -310,16 +393,25 @@ public abstract class FileConnector extends ConnectorBase {
         executorService = Executors.newFixedThreadPool(1);
         executorService.submit(() -> {
             int count = 0;
-            while (isAlive()) {
+            while (isAlive() && !Thread.currentThread().isInterrupted()) {
                 if (EmptyKit.isNotNull(fileRecordWriter)) {
                     count++;
                 }
-                TapSimplify.sleep(1000 * 60);
+                try {
+                    Thread.sleep(1000 * 60);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
                 if (count >= 5) {
                     try {
-                        fileRecordWriter.mergeCacheFiles();
+                        mergeCacheFilesSafely();
                     } catch (Exception e) {
-                        throw new RuntimeException(e);
+                        if (tapLogger != null) {
+                            tapLogger.warn(TAG, "Merge cache files failed: {}", e.getMessage());
+                        } else {
+                            TapLogger.warn(TAG, "Merge cache files failed: " + e.getMessage(), e);
+                        }
                     }
                     count = 0;
                 }

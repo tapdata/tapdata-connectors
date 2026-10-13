@@ -1,0 +1,12 @@
+name: CI mirror regression
+on:
+  push:
+    paths: ['.github/workflows/**', '.github/scripts/sync-code-to-gitee.sh', 'tests/ci/**']
+  pull_request:
+    paths: ['.github/workflows/**', '.github/scripts/sync-code-to-gitee.sh', 'tests/ci/**']
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ruby tests/ci/mirror_workflow_test.rb

@@ -66,5 +66,11 @@
             <artifactId>oss-file</artifactId>
             <version>1.0-SNAPSHOT</version>
         </dependency>
+        <dependency>
+            <groupId>io.tapdata</groupId>
+            <artifactId>tapdata-pdk-runner</artifactId>
+            <version>2.0-SNAPSHOT</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

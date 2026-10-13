@@ -1,0 +1,4 @@
+{
+  "first": {"id": 1, "name": "Alice", "active": true},
+  "second": {"id": 2, "name": "Bob", "active": false}
+}
