@@ -372,12 +372,7 @@ public class KafkaService implements IKafkaService {
     @Override
     public void streamRead(List<String> tables, Object offset, int batchSize, BiConsumer<List<TapEvent>, Object> consumer) {
         try {
-            KafkaOffset streamOffset = Optional.ofNullable(offset).map(o -> {
-                if (offset instanceof KafkaOffset) {
-                    return (KafkaOffset) o;
-                }
-                throw new TapPdkConfigEx("streamOffset must be of type KafkaOffset: " + o.getClass().getName(), "kafka_enhanced");
-            }).orElseThrow(() -> new TapPdkConfigEx("streamRead offset is null", "kafka_enhanced"));
+            KafkaOffset streamOffset = normalizeStreamOffset(offset);
 
             // 补全分区信息（如：全量过程为主题添加了分区）
             KafkaOffsetUtils.fillPartitions(this, tables, streamOffset, true);
@@ -394,6 +389,53 @@ public class KafkaService implements IKafkaService {
         } catch (Exception e) {
             throw new TapPdkTerminateByServerEx("kafka_enhanced", e);
         }
+    }
+
+    static KafkaOffset normalizeStreamOffset(Object offset) {
+        if (offset == null) {
+            throw new TapPdkConfigEx("streamRead offset is null", "kafka_enhanced");
+        }
+        if (offset instanceof KafkaOffset) {
+            return (KafkaOffset) offset;
+        }
+        if (!(offset instanceof Map)) {
+            throw invalidStreamOffset("streamOffset must be of type KafkaOffset or Map: " + offset.getClass().getName());
+        }
+
+        KafkaOffset streamOffset = new KafkaOffset();
+        Map<?, ?> topicOffsets = (Map<?, ?>) offset;
+        for (Map.Entry<?, ?> topicEntry : topicOffsets.entrySet()) {
+            if (!(topicEntry.getKey() instanceof String) || StringUtils.isBlank((String) topicEntry.getKey())) {
+                throw invalidStreamOffset("streamOffset contains an invalid topic: " + topicEntry.getKey());
+            }
+            if (!(topicEntry.getValue() instanceof Map)) {
+                throw invalidStreamOffset("streamOffset for topic '" + topicEntry.getKey() + "' must be a Map");
+            }
+
+            String topic = (String) topicEntry.getKey();
+            Map<?, ?> partitionOffsets = (Map<?, ?>) topicEntry.getValue();
+            for (Map.Entry<?, ?> partitionEntry : partitionOffsets.entrySet()) {
+                Integer partition = parseStreamOffsetNumber(partitionEntry.getKey(), Integer::valueOf, "partition", topic);
+                Long position = parseStreamOffsetNumber(partitionEntry.getValue(), Long::valueOf, "offset", topic);
+                streamOffset.setOffset(topic, partition, position);
+            }
+        }
+        return streamOffset;
+    }
+
+    private static <T extends Number> T parseStreamOffsetNumber(Object value, Function<String, T> parser, String field, String topic) {
+        if (value == null) {
+            throw invalidStreamOffset("streamOffset contains a null " + field + " for topic '" + topic + "'");
+        }
+        try {
+            return parser.apply(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            throw invalidStreamOffset("streamOffset contains an invalid " + field + " '" + value + "' for topic '" + topic + "'");
+        }
+    }
+
+    private static TapPdkConfigEx invalidStreamOffset(String message) {
+        return new TapPdkConfigEx(message, "kafka_enhanced");
     }
 
     @Override
