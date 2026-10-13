@@ -1,16 +1,21 @@
 package io.tapdata.pdk.cli.support;
 
+import io.tapdata.entity.mapping.type.TapCoefficientFloatMapping;
 import io.tapdata.entity.mapping.type.TapMapping;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.type.TapDouble;
+import io.tapdata.entity.schema.type.TapFloat;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DataTypesHandlerTest {
     @Test
@@ -37,7 +42,7 @@ class DataTypesHandlerTest {
         handler.fillTestFields(table, "float($precision)", mapping(info));
 
         assertFalse(table.getNameFieldMap().keySet().stream()
-                .noneMatch(name -> name.contains("float(23)")));
+                .noneMatch(name -> name.contains("float(24)")));
         assertFalse(table.getNameFieldMap().keySet().stream()
                 .noneMatch(name -> name.contains("float(53)")));
     }
@@ -51,6 +56,17 @@ class DataTypesHandlerTest {
             assertNotNull(handler.dataNameClassHandlers().handle(tapMapping, expression(info)),
                     "Expected a data type name for " + info.get("to"));
         }
+    }
+
+    @Test
+    void coefficientMappingUsesMySqlFloatDoubleBoundary() {
+        TapCoefficientFloatMapping coefficientMapping =
+                (TapCoefficientFloatMapping) mapping(coefficientMapping());
+
+        assertTrue(coefficientMapping.toTapType(
+                "float($precision)", Collections.singletonMap("precision", "24")) instanceof TapFloat);
+        assertTrue(coefficientMapping.toTapType(
+                "float($precision)", Collections.singletonMap("precision", "25")) instanceof TapDouble);
     }
 
     @Test
@@ -112,8 +128,8 @@ class DataTypesHandlerTest {
     private Map<String, Object> coefficientMapping() {
         Map<String, Object> info = mappingInfo("TapCoefficientFloat", "float($precision)");
         Map<String, Object> coefficient = new LinkedHashMap<>();
-        coefficient.put("TapFloat", Arrays.asList(1, 23));
-        coefficient.put("TapDouble", Arrays.asList(24, 53));
+        coefficient.put("TapFloat", Arrays.asList(1, 24));
+        coefficient.put("TapDouble", Arrays.asList(25, 53));
         info.put("coefficient", coefficient);
         info.put("precision", Arrays.asList(1, 53));
         return info;
