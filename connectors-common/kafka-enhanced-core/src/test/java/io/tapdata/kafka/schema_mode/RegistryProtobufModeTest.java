@@ -3,6 +3,8 @@ package io.tapdata.kafka.schema_mode;
 import com.google.protobuf.DescriptorProtos;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.DynamicMessage;
+import com.google.protobuf.Any;
+import com.google.protobuf.Duration;
 import com.google.protobuf.Struct;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.event.TapEvent;
@@ -176,6 +178,46 @@ class RegistryProtobufModeTest {
 
         assertNotNull(table.getNameFieldMap().get("payload"));
         assertNull(table.getNameFieldMap().get("payload.fields"));
+    }
+
+    @Test
+    void additionalWellKnownTypesKeepDependenciesAndRepeatedWireTypes() throws Exception {
+        DescriptorProtos.DescriptorProto rootProto = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Root")
+                .addField(field("durations", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED,
+                        ".google.protobuf.Duration"))
+                .addField(field("event", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        ".google.protobuf.Any"))
+                .build();
+        Descriptors.FileDescriptor anyFile = Any.getDescriptor().getFile();
+        Descriptors.FileDescriptor durationFile = Duration.getDescriptor().getFile();
+        Descriptors.FileDescriptor file = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName("RootAdditionalWkt.proto")
+                        .setSyntax("proto3")
+                        .addDependency(anyFile.getName())
+                        .addDependency(durationFile.getName())
+                        .addMessageType(rootProto)
+                        .build(), new Descriptors.FileDescriptor[]{anyFile, durationFile});
+        TapTable table = new TapTable("topic");
+        invoke("dynamicMessageToTapTable", new Class[]{TapTable.class, DynamicMessage.class, java.util.List.class},
+                table, DynamicMessage.newBuilder(file.findMessageTypeByName("Root")).build(), Collections.emptyList());
+
+        Descriptors.Descriptor rebuilt = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor durations = rebuilt.findFieldByName("durations");
+        assertEquals("google.protobuf.Duration", durations.getMessageType().getFullName());
+        assertTrue(durations.isRepeated());
+
+        Map<String, Object> duration = new LinkedHashMap<>();
+        duration.put("seconds", 1L);
+        duration.put("nanos", 2);
+        Object converted = invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                Collections.singletonList(duration), durations);
+        DynamicMessage message = DynamicMessage.newBuilder(rebuilt).setField(durations, converted).build();
+        assertEquals("google.protobuf.Duration",
+                ((DynamicMessage) ((List<?>) message.getField(durations)).get(0))
+                        .getDescriptorForType().getFullName());
     }
 
     @Test
