@@ -62,7 +62,6 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
     private static final String REPEATED_SCALAR_PREFIX = "__protobuf_repeated_scalar__:";
     private static final String REPEATED_ENUM_PREFIX = "__protobuf_repeated_enum__:";
-    private static final BigDecimal MAX_EXACT_PROTOBUF_VALUE_NUMBER = new BigDecimal("9007199254740991");
 
     // 缓存表的 Protobuf Descriptor，避免重复构建
     private final Map<String, Descriptors.Descriptor> descriptorCache = new ConcurrentHashMap<>();
@@ -1077,13 +1076,24 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             return builder.setBoolValue((Boolean) value).build();
         }
         if (value instanceof Number) {
+            Number numberValue = (Number) value;
+            if (value instanceof Double || value instanceof Float) {
+                double numericValue = numberValue.doubleValue();
+                if (!Double.isFinite(numericValue)) {
+                    return builder.setStringValue(value.toString()).build();
+                }
+                return builder.setNumberValue(numericValue).build();
+            }
             BigDecimal number = new BigDecimal(value.toString());
-            if (number.abs().compareTo(MAX_EXACT_PROTOBUF_VALUE_NUMBER) > 0) {
+            double numericValue = numberValue.doubleValue();
+            boolean exactlyRepresented = Double.isFinite(numericValue)
+                    && BigDecimal.valueOf(numericValue).compareTo(number) == 0;
+            if (!exactlyRepresented) {
                 // google.protobuf.Value stores numbers as double; use a string rather
-                // than silently changing a large integer or decimal.
+                // than silently changing a high-precision integer or decimal.
                 return builder.setStringValue(value.toString()).build();
             }
-            return builder.setNumberValue(((Number) value).doubleValue()).build();
+            return builder.setNumberValue(numericValue).build();
         }
         if (value instanceof Map) {
             return builder.setStructValue(toStruct(value)).build();

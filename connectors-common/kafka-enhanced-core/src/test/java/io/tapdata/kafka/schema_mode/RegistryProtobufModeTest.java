@@ -18,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -327,6 +328,28 @@ class RegistryProtobufModeTest {
 
         Map<String, Object> decoded = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
         assertEquals("9007199254740993", ((Map<?, ?>) decoded.get("payload")).get("id"));
+    }
+
+    @Test
+    void highPrecisionAndNonFiniteNestedNumbersUseStringValues() throws Exception {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("payload", "OBJECT"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("precise", new BigDecimal("0.10000000000000001"));
+        payload.put("nan", Double.NaN);
+        payload.put("infinity", Double.POSITIVE_INFINITY);
+        Descriptors.FieldDescriptor field = descriptor.findFieldByName("payload");
+        DynamicMessage message = DynamicMessage.newBuilder(descriptor)
+                .setField(field, invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                        payload, field))
+                .build();
+
+        Map<String, Object> decoded = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
+        Map<?, ?> result = (Map<?, ?>) decoded.get("payload");
+        assertEquals("0.10000000000000001", result.get("precise"));
+        assertEquals("NaN", result.get("nan"));
+        assertEquals("Infinity", result.get("infinity"));
     }
 
     @Test
