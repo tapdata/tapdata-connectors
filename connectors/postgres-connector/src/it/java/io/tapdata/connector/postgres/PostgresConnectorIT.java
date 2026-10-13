@@ -19,6 +19,8 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.TestInstance;
 
+import java.util.List;
+
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class PostgresConnectorIT extends TpccConnectorIT {
 
@@ -84,6 +86,22 @@ public class PostgresConnectorIT extends TpccConnectorIT {
     @Override
     protected String rawCountCommand(String tableName) {
         return rawQueryCommand(tableName);
+    }
+
+    protected boolean supportsSourceDdlCapture() {
+        return true;
+    }
+
+    protected List<String> sourceDdlStatements(String table) {
+        // PostgreSQL 需要 schema.table 格式的完整表名
+        String qualifiedTable = "\"public\".\"" + table.replace("\"", "\"\"") + "\"";
+        return List.of(
+                "ALTER TABLE " + qualifiedTable + " ADD COLUMN c_ddl_probe varchar(64)",
+                // TAP-13061 回归场景：多空格 ADD CONSTRAINT（旧版正则会误判为加列）
+                "ALTER TABLE " + qualifiedTable + "  ADD  CONSTRAINT  chk_ddl_probe CHECK (c_ddl_probe IS NULL OR length(c_ddl_probe) < 100)",
+                "ALTER TABLE " + qualifiedTable + " DROP CONSTRAINT chk_ddl_probe",
+                "ALTER TABLE " + qualifiedTable + " RENAME COLUMN c_ddl_probe TO c_ddl_probe_new",
+                "ALTER TABLE " + qualifiedTable + " DROP COLUMN c_ddl_probe_new");
     }
 
     private synchronized DataMap loadConnectionConfig() throws Exception {
