@@ -725,19 +725,9 @@
       "unsigned": "unsigned",
       "fixed": true
     },
-    "float($precision)[unsigned]": {
-      "to": "TapCoefficientFloat",
+    "float($precision,$scale)[unsigned]": {
+      "to": "TapFloat",
       "name": "float",
-      "coefficient": {
-        "TapFloat": [
-          1,
-          24
-        ],
-        "TapDouble": [
-          25,
-          53
-        ]
-      },
       "precision": [
         1,
         30
@@ -753,9 +743,19 @@
       "unsigned": "unsigned",
       "fixed": false
     },
-    "float($precision,$scale)[unsigned]": {
-      "to": "TapFloat",
+    "float($precision)[unsigned]": {
+      "to": "TapCoefficientFloat",
       "name": "float",
+      "coefficient": {
+        "TapFloat": [
+          1,
+          24
+        ],
+        "TapDouble": [
+          25,
+          53
+        ]
+      },
       "precision": [
         1,
         30
