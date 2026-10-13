@@ -87,7 +87,6 @@ public class CsvConnector extends FileConnector {
             if (tapRawValue != null && tapRawValue.getValue() != null) return tapRawValue.getValue().toString();
             return "null";
         });
-        // Keep the fraction optional so whole-second values retain the existing CSV representation.
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> formatCsvDateTime(tapTimeValue.getValue(), TIME_OUTPUT_FORMATTER, "HH:mm:ss[.SSSSSSSSS]"));
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> formatCsvDateTime(tapDateTimeValue.getValue(), DATETIME_OUTPUT_FORMATTER, "yyyy-MM-dd HH:mm:ss[.SSSSSSSSS]"));
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> formatTapDateTime(tapDateValue.getValue(), "yyyy-MM-dd"));
