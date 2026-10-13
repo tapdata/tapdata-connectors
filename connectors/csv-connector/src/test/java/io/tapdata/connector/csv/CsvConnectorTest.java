@@ -1,87 +1,320 @@
 package io.tapdata.connector.csv;
 
+import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.codec.FromTapValueCodec;
+import io.tapdata.entity.codec.ToTapValueCodec;
+import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.value.DateTime;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
+import io.tapdata.entity.schema.value.TapDateValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.connector.csv.config.CsvConfig;
-import io.tapdata.file.TapFile;
-import io.tapdata.pdk.apis.context.TapConnectionContext;
+import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
-import java.util.Collections;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.lang.reflect.Method;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.TimeZone;
 
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class CsvConnectorTest {
 
     @Test
-    void discoverSchemaPropagatesSchemaFailureAfterCleanup() {
-        RuntimeException schemaFailure = new RuntimeException("schema failed");
-        IOException cleanupFailure = new IOException("destroy failed");
-        TestCsvConnector connector = new TestCsvConnector("table", schemaFailure, cleanupFailure);
+    void makeTapTableAcceptsSingleDigitSlashDate() {
+        TestCsvConnector connector = new TestCsvConnector();
+        TapTable table = new TapTable("csv");
+        Map<String, Object> sample = new LinkedHashMap<>();
+        sample.put("date_col", "2026/8/8");
 
-        RuntimeException failure = assertThrows(RuntimeException.class, () -> connector.discoverSchema(
-                null, Collections.emptyList(), 0, ignored -> {
-                }));
+        connector.makeTapTableForTest(table, sample, false);
 
-        assertSame(schemaFailure, failure);
-        assertSame(cleanupFailure, failure.getSuppressed()[0]);
-        assertTrue(connector.destroyCalled.get());
+        assertEquals("DATE", table.getNameFieldMap().get("date_col").getDataType());
     }
 
     @Test
-    void discoverSchemaPropagatesCleanupFailureWhenModelNameIsBlank() {
-        IOException cleanupFailure = new IOException("destroy failed");
-        TestCsvConnector connector = new TestCsvConnector("", null, cleanupFailure);
+    void makeTapTableKeepsCsvDateTimeKinds() {
+        TestCsvConnector connector = new TestCsvConnector();
+        TapTable table = new TapTable("csv");
+        Map<String, Object> sample = new LinkedHashMap<>();
+        sample.put("date_col", "2024-05-17");
+        sample.put("time_col", "12:30:45");
+        sample.put("datetime_col", "2024-05-17 12:30:45.123456");
 
-        IOException failure = assertThrows(IOException.class, () -> connector.discoverSchema(
-                null, Collections.emptyList(), 0, ignored -> {
-                }));
+        connector.makeTapTableForTest(table, sample, false);
 
-        assertSame(cleanupFailure, failure);
-        assertTrue(connector.destroyCalled.get());
+        assertEquals("DATE", table.getNameFieldMap().get("date_col").getDataType());
+        assertEquals("TIME", table.getNameFieldMap().get("time_col").getDataType());
+        assertEquals("DATETIME", table.getNameFieldMap().get("datetime_col").getDataType());
     }
 
-    private static final class TestCsvConnector extends CsvConnector {
-        private final String modelName;
-        private final RuntimeException schemaFailure;
-        private final Throwable cleanupFailure;
-        private final AtomicBoolean destroyCalled = new AtomicBoolean();
+    @Test
+    void makeTapTableAcceptsLooseTimeValues() {
+        TestCsvConnector connector = new TestCsvConnector();
+        TapTable table = new TapTable("csv");
+        Map<String, Object> sample = new LinkedHashMap<>();
+        sample.put("hour_col", "8:00:01");
+        sample.put("second_col", "08:00:1");
+        sample.put("all_parts_col", "8:0:1");
 
-        private TestCsvConnector(String modelName, RuntimeException schemaFailure, Throwable cleanupFailure) {
-            this.modelName = modelName;
-            this.schemaFailure = schemaFailure;
-            this.cleanupFailure = cleanupFailure;
+        connector.makeTapTableForTest(table, sample, false);
+
+        assertEquals("TIME", table.getNameFieldMap().get("hour_col").getDataType());
+        assertEquals("TIME", table.getNameFieldMap().get("second_col").getDataType());
+        assertEquals("TIME", table.getNameFieldMap().get("all_parts_col").getDataType());
+    }
+
+    @Test
+    void makeTapTableAcceptsLooseDateTimeValues() {
+        TestCsvConnector connector = new TestCsvConnector();
+        TapTable table = new TapTable("csv");
+        Map<String, Object> sample = new LinkedHashMap<>();
+        sample.put("slash_col", "2026/8/8 8:00:1");
+        sample.put("dash_col", "2026-8-8 08:00:01");
+
+        connector.makeTapTableForTest(table, sample, false);
+
+        assertEquals("DATETIME", table.getNameFieldMap().get("slash_col").getDataType());
+        assertEquals("DATETIME", table.getNameFieldMap().get("dash_col").getDataType());
+    }
+
+    @Test
+    void registerCapabilitiesProvidesCsvDateCodec() {
+        CsvConnector connector = new CsvConnector();
+        TapCodecsRegistry codecRegistry = TapCodecsRegistry.create();
+
+        connector.registerCapabilities(new ConnectorFunctions(), codecRegistry);
+
+        ToTapValueCodec<?> dateCodec = codecRegistry.getCustomToTapValueCodec(LocalDate.class);
+        assertNotNull(dateCodec);
+        assertNotNull(dateCodec.toTapValue(LocalDate.of(2026, 8, 8), null));
+        assertNull(dateCodec.toTapValue(LocalDate.of(999, 12, 31), null));
+        assertNull(dateCodec.toTapValue(null, null));
+    }
+
+    @Test
+    void csvTimeCodecPreservesNanosecondsWhenWriting() {
+        CsvConnector connector = new CsvConnector();
+        TapCodecsRegistry codecRegistry = TapCodecsRegistry.create();
+
+        connector.registerCapabilities(new ConnectorFunctions(), codecRegistry);
+
+        FromTapValueCodec<TapTimeValue> timeCodec = codecRegistry.getCustomFromTapValueCodec(TapTimeValue.class);
+        TapTimeValue timeValue = new TapTimeValue(
+                new DateTime(LocalDateTime.of(1970, 1, 1, 12, 30, 45, 123456789)));
+
+        assertEquals("12:30:45.123456789", timeCodec.fromTapValue(timeValue));
+    }
+
+    @Test
+    void csvTimeCodecKeepsWholeSecondOutputUnchanged() {
+        CsvConnector connector = new CsvConnector();
+        TapCodecsRegistry codecRegistry = TapCodecsRegistry.create();
+
+        connector.registerCapabilities(new ConnectorFunctions(), codecRegistry);
+
+        FromTapValueCodec<TapTimeValue> timeCodec = codecRegistry.getCustomFromTapValueCodec(TapTimeValue.class);
+        TapTimeValue timeValue = new TapTimeValue(
+                new DateTime(LocalDateTime.of(1970, 1, 1, 12, 0, 0)));
+
+        assertEquals("12:00:00", timeCodec.fromTapValue(timeValue));
+    }
+
+    @Test
+    void csvDateTimeCodecPreservesNanosecondsWhenWriting() {
+        CsvConnector connector = new CsvConnector();
+        TapCodecsRegistry codecRegistry = TapCodecsRegistry.create();
+
+        connector.registerCapabilities(new ConnectorFunctions(), codecRegistry);
+
+        FromTapValueCodec<TapDateTimeValue> dateTimeCodec =
+                codecRegistry.getCustomFromTapValueCodec(TapDateTimeValue.class);
+        TapDateTimeValue dateTimeValue = new TapDateTimeValue(
+                new DateTime(LocalDateTime.of(2024, 6, 17, 12, 30, 45, 123456789)));
+
+        assertEquals("2024-06-17 12:30:45.123456789", dateTimeCodec.fromTapValue(dateTimeValue));
+    }
+
+    @Test
+    void csvDateTimeCodecKeepsWholeSecondOutputUnchanged() {
+        CsvConnector connector = new CsvConnector();
+        TapCodecsRegistry codecRegistry = TapCodecsRegistry.create();
+
+        connector.registerCapabilities(new ConnectorFunctions(), codecRegistry);
+
+        FromTapValueCodec<TapDateTimeValue> dateTimeCodec =
+                codecRegistry.getCustomFromTapValueCodec(TapDateTimeValue.class);
+        TapDateTimeValue dateTimeValue = new TapDateTimeValue(
+                new DateTime(LocalDateTime.of(2024, 6, 17, 12, 0, 0)));
+
+        assertEquals("2024-06-17 12:00:00", dateTimeCodec.fromTapValue(dateTimeValue));
+    }
+
+    @Test
+    void csvDateCodecRoundTripsDateInSystemDefaultTimezone() {
+        TimeZone originalTimeZone = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+            CsvConnector connector = new CsvConnector();
+            TapCodecsRegistry codecRegistry = TapCodecsRegistry.create();
+
+            connector.registerCapabilities(new ConnectorFunctions(), codecRegistry);
+
+            ToTapValueCodec<?> dateCodec = codecRegistry.getCustomToTapValueCodec(LocalDate.class);
+            TapDateValue tapDateValue = (TapDateValue) dateCodec.toTapValue(LocalDate.of(2024, 6, 17), null);
+
+            FromTapValueCodec<TapDateValue> fromDateCodec =
+                    codecRegistry.getCustomFromTapValueCodec(TapDateValue.class);
+            assertEquals("2024-06-17", fromDateCodec.fromTapValue(tapDateValue));
+        } finally {
+            TimeZone.setDefault(originalTimeZone);
+        }
+    }
+
+    @Test
+    void parseCsvDateSupportsSingleDigitMonthAndDay() {
+        assertEquals(LocalDate.of(2026, 8, 8), CsvValueConverter.parse("2026/8/8", CsvValueConverter.DATE));
+        assertNull(CsvValueConverter.parse("2026/2/30", CsvValueConverter.DATE));
+        assertNull(CsvValueConverter.parse("not-a-date", CsvValueConverter.DATE));
+    }
+
+    @Test
+    void parseDateColumnKeepsDatePartWhenValueContainsTime() {
+        assertEquals(LocalDate.of(2024, 5, 17),
+                CsvValueConverter.parse("2024-05-17 12:30:45", CsvValueConverter.DATE));
+        assertNull(CsvValueConverter.parse("2024-02-30 12:30:45", CsvValueConverter.DATE));
+    }
+
+    @Test
+    void parseDateAndDateTimeRejectInvalidFallbackFormats() {
+        assertNull(CsvValueConverter.parse("31-02-2024 12:30:45", CsvValueConverter.DATE));
+        assertNull(CsvValueConverter.parse("31-04-2024 12:00:00", CsvValueConverter.DATE));
+        assertNull(CsvValueConverter.parse("2024-02-30 12:30", CsvValueConverter.DATE));
+
+        assertNull(CsvValueConverter.parse("31-02-2024 12:30:45", CsvValueConverter.DATETIME));
+        assertNull(CsvValueConverter.parse("31-04-2024 12:00:00", CsvValueConverter.DATETIME));
+        assertNull(CsvValueConverter.parse("2024-02-30 12:30", CsvValueConverter.DATETIME));
+    }
+
+    @Test
+    void parseValidFallbackDateTimeFormats() {
+        assertEquals(LocalDate.of(2024, 5, 17),
+                CsvValueConverter.parse("17-05-2024 12:30:45", CsvValueConverter.DATE));
+        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2024, 5, 17, 12, 30, 45)),
+                CsvValueConverter.parse("17-05-2024 12:30:45", CsvValueConverter.DATETIME));
+    }
+
+    @Test
+    void inferDataTypeRejectsInvalidFallbackDateTimes() {
+        assertEquals("STRING", CsvValueConverter.inferDataType("31-02-2024 12:30:45"));
+        assertEquals("STRING", CsvValueConverter.inferDataType("31-04-2024 12:00:00"));
+        assertEquals("STRING", CsvValueConverter.inferDataType("2024-02-30 12:30"));
+    }
+
+    @Test
+    void csvDateInferenceMatchesSpecYearRange() {
+        assertEquals("STRING", CsvValueConverter.inferDataType("0000-01-01"));
+        assertEquals("STRING", CsvValueConverter.inferDataType("0999-12-31"));
+        assertEquals("DATE", CsvValueConverter.inferDataType("1000-01-01"));
+        assertEquals("DATE", CsvValueConverter.inferDataType("9999-12-31"));
+        assertNull(CsvValueConverter.parse("0999-12-31", CsvValueConverter.DATE));
+    }
+
+    @Test
+    void parseCsvTimeSupportsSingleDigitParts() {
+        assertEquals(LocalTime.of(8, 0, 1), CsvValueConverter.parse("8:00:01", CsvValueConverter.TIME));
+        assertEquals(LocalTime.of(8, 0, 1), CsvValueConverter.parse("08:00:1", CsvValueConverter.TIME));
+        assertEquals(LocalTime.of(8, 0, 1), CsvValueConverter.parse("8:0:1", CsvValueConverter.TIME));
+    }
+
+    @Test
+    void parseCsvDateTimeSupportsSingleDigitParts() {
+        Object parsed = CsvValueConverter.parse("2026/8/8 8:00:1", CsvValueConverter.DATETIME);
+
+        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2026, 8, 8, 8, 0, 1)), parsed);
+        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2026, 9, 18, 12, 0, 1)),
+                CsvValueConverter.parse("2026-09-18 12:00:01", CsvValueConverter.DATETIME));
+        assertNull(CsvValueConverter.parse("2026/2/30 8:00:1", CsvValueConverter.DATETIME));
+    }
+
+    @Test
+    void parseDateOnlyValueAsDateTimeUsesStartOfDay() {
+        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2024, 6, 17, 0, 0)),
+                CsvValueConverter.parse("2024-06-17", CsvValueConverter.DATETIME));
+    }
+
+    @Test
+    void parseCsvDateTimeResolvesUnzonedValueInSystemDefaultZone() {
+        TimeZone originalTimeZone = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
+
+            assertEquals(Instant.parse("2024-06-17T04:30:45.123Z"),
+                    CsvValueConverter.parse("2024-06-17 12:30:45.123", CsvValueConverter.DATETIME));
+        } finally {
+            TimeZone.setDefault(originalTimeZone);
+        }
+    }
+
+    @Test
+    void parseCsvDateTimePreservesExplicitOffset() {
+        assertEquals(Instant.parse("2024-06-17T04:30:45.123Z"),
+                CsvValueConverter.parse("2024-06-17T12:30:45.123+08", CsvValueConverter.DATETIME));
+    }
+
+    @Test
+    void justStringKeepsChineseValueWhenExistingSchemaIsInteger() throws Exception {
+        TestCsvConnector connector = new TestCsvConnector();
+        connector.setJustStringForTest(true);
+        Map<String, Object> after = new HashMap<>();
+        Map<String, String> dataTypeMap = new HashMap<>();
+        dataTypeMap.put("address", "INTEGER");
+
+        connector.putIntoMapForTest(after, new String[]{"address"}, new String[]{"柳州"}, dataTypeMap);
+
+        assertEquals("柳州", after.get("address"));
+    }
+
+    @Test
+    void justStringUsesNullForMissingValue() throws Exception {
+        TestCsvConnector connector = new TestCsvConnector();
+        connector.setJustStringForTest(true);
+        Map<String, Object> after = new HashMap<>();
+        Map<String, String> dataTypeMap = new HashMap<>();
+
+        connector.putIntoMapForTest(after, new String[]{"address", "city"}, new String[]{"柳州"}, dataTypeMap);
+
+        assertNull(after.get("city"));
+    }
+
+    private static Instant toSystemDefaultInstant(LocalDateTime value) {
+        return value.atZone(TimeZone.getDefault().toZoneId()).toInstant();
+    }
+
+    private static class TestCsvConnector extends CsvConnector {
+        private void makeTapTableForTest(TapTable table, Map<String, Object> sample, boolean justString) {
+            makeTapTable(table, sample, justString);
         }
 
-        @Override
-        protected void initConnection(TapConnectionContext connectorContext) {
+        private void setJustStringForTest(boolean justString) {
             fileConfig = new CsvConfig();
-            fileConfig.setModelName(modelName);
+            fileConfig.setJustString(justString);
         }
 
-        @Override
-        protected ConcurrentMap<String, TapFile> getFilteredFiles() throws Exception {
-            if (schemaFailure != null) {
-                throw schemaFailure;
-            }
-            return new ConcurrentHashMap<>();
-        }
-
-        @Override
-        protected Throwable destroyStorage(Throwable failure) {
-            destroyCalled.set(true);
-            if (cleanupFailure == null) {
-                return failure;
-            }
-            if (failure == null) {
-                return cleanupFailure;
-            }
-            failure.addSuppressed(cleanupFailure);
-            return failure;
+        private void putIntoMapForTest(Map<String, Object> after, String[] headers, String[] data,
+                                       Map<String, String> dataTypeMap) throws Exception {
+            Method method = CsvConnector.class.getDeclaredMethod("putIntoMap", Map.class, String[].class,
+                    String[].class, Map.class);
+            method.setAccessible(true);
+            method.invoke(this, after, headers, data, dataTypeMap);
         }
     }
 }
