@@ -54,6 +54,7 @@ import java.util.stream.Collectors;
 
 @TapConnectorClass("spec_csv.json")
 public class CsvConnector extends FileConnector {
+    private static final String STRING = "STRING";
     private static final String TAG = CsvConnector.class.getSimpleName();
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ISO_LOCAL_TIME;
     private static final DateTimeFormatter TIME_OUTPUT_FORMATTER = new DateTimeFormatterBuilder()
@@ -83,7 +84,7 @@ public class CsvConnector extends FileConnector {
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
         codecRegistry.registerToTapValue(LocalDate.class, (value, tapType) -> toTapDateValue(value));
         codecRegistry.registerToTapValue(LocalTime.class, (value, tapType) -> toTapTimeValue(value));
-        codecRegistry.registerFromTapValue(TapRawValue.class, "STRING", tapRawValue -> {
+        codecRegistry.registerFromTapValue(TapRawValue.class, STRING, tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null) return tapRawValue.getValue().toString();
             return "null";
         });
@@ -152,7 +153,7 @@ public class CsvConnector extends FileConnector {
             Object rawValue = objectEntry.getValue();
             if (isJustString) {
                 String value = rawValue == null ? "" : String.valueOf(rawValue);
-                field.dataType(EmptyKit.isNotEmpty(value) && value.length() > 200 ? "TEXT" : "STRING");
+                field.dataType(EmptyKit.isNotEmpty(value) && value.length() > 200 ? "TEXT" : STRING);
             } else if (rawValue instanceof Map) {
                 field.dataType("OBJECT");
             } else if (rawValue instanceof Collection || (rawValue != null && rawValue.getClass().isArray())) {
@@ -193,7 +194,7 @@ public class CsvConnector extends FileConnector {
                 makeTapTable(tapTable, sample, fileConfig.getJustString());
                 consumer.accept(Collections.singletonList(tapTable));
             }
-        } catch (Throwable throwable) {
+        } catch (Exception throwable) {
             failure = throwable;
         }
         failure = destroyStorage(failure);
@@ -362,7 +363,7 @@ public class CsvConnector extends FileConnector {
                 continue;
             }
             switch (dataTypeMap.get(headers[i + data.length])) {
-                case "STRING":
+                case STRING:
                 case "TEXT":
                     after.put(headers[i + data.length], "");
                     break;
