@@ -82,37 +82,35 @@ public class CsvConnector extends FileConnector {
         Throwable failure = null;
         try {
             initConnection(connectionContext);
-            if (EmptyKit.isBlank(fileConfig.getModelName())) {
-                return;
+            if (EmptyKit.isNotBlank(fileConfig.getModelName())) {
+                TapTable tapTable = table(fileConfig.getModelName());
+                ConcurrentMap<String, TapFile> csvFileMap = getFilteredFiles();
+                FileSchema csvSchema;
+                if (((CsvConfig) fileConfig).getOffStandard()) {
+                    csvSchema = new OffStandardCsvSchema((CsvConfig) fileConfig, storage);
+                } else {
+                    csvSchema = new CsvSchema((CsvConfig) fileConfig, storage);
+                }
+                Map<String, Object> sample;
+                //csv has column header
+                if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
+                    sample = csvSchema.sampleFixedFileData(csvFileMap);
+                } else //analyze every csv file
+                {
+                    sample = csvSchema.sampleEveryFileData(csvFileMap);
+                }
+                if (EmptyKit.isEmpty(sample)) {
+                    throw new RuntimeException("Load schema from csv files error: no headers and contents!");
+                }
+                makeTapTable(tapTable, sample, fileConfig.getJustString());
+                consumer.accept(Collections.singletonList(tapTable));
             }
-            TapTable tapTable = table(fileConfig.getModelName());
-            ConcurrentMap<String, TapFile> csvFileMap = getFilteredFiles();
-            FileSchema csvSchema;
-            if (((CsvConfig) fileConfig).getOffStandard()) {
-                csvSchema = new OffStandardCsvSchema((CsvConfig) fileConfig, storage);
-            } else {
-                csvSchema = new CsvSchema((CsvConfig) fileConfig, storage);
-            }
-            Map<String, Object> sample;
-            //csv has column header
-            if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
-                sample = csvSchema.sampleFixedFileData(csvFileMap);
-            } else //analyze every csv file
-            {
-                sample = csvSchema.sampleEveryFileData(csvFileMap);
-            }
-            if (EmptyKit.isEmpty(sample)) {
-                throw new RuntimeException("Load schema from csv files error: no headers and contents!");
-            }
-            makeTapTable(tapTable, sample, fileConfig.getJustString());
-            consumer.accept(Collections.singletonList(tapTable));
         } catch (Throwable throwable) {
             failure = throwable;
-        } finally {
-            failure = destroyStorage(failure);
-            if (failure != null) {
-                throw failure;
-            }
+        }
+        failure = destroyStorage(failure);
+        if (failure != null) {
+            throw failure;
         }
     }
 
