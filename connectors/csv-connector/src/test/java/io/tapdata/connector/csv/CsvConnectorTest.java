@@ -194,6 +194,32 @@ class CsvConnectorTest {
     }
 
     @Test
+    void parseDateAndDateTimeRejectInvalidFallbackFormats() {
+        assertNull(CsvValueConverter.parse("31-02-2024 12:30:45", CsvValueConverter.DATE));
+        assertNull(CsvValueConverter.parse("31-04-2024 12:00:00", CsvValueConverter.DATE));
+        assertNull(CsvValueConverter.parse("2024-02-30 12:30", CsvValueConverter.DATE));
+
+        assertNull(CsvValueConverter.parse("31-02-2024 12:30:45", CsvValueConverter.DATETIME));
+        assertNull(CsvValueConverter.parse("31-04-2024 12:00:00", CsvValueConverter.DATETIME));
+        assertNull(CsvValueConverter.parse("2024-02-30 12:30", CsvValueConverter.DATETIME));
+    }
+
+    @Test
+    void parseValidFallbackDateTimeFormats() {
+        assertEquals(LocalDate.of(2024, 5, 17),
+                CsvValueConverter.parse("17-05-2024 12:30:45", CsvValueConverter.DATE));
+        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2024, 5, 17, 12, 30, 45)),
+                CsvValueConverter.parse("17-05-2024 12:30:45", CsvValueConverter.DATETIME));
+    }
+
+    @Test
+    void inferDataTypeRejectsInvalidFallbackDateTimes() {
+        assertEquals("STRING", CsvValueConverter.inferDataType("31-02-2024 12:30:45"));
+        assertEquals("STRING", CsvValueConverter.inferDataType("31-04-2024 12:00:00"));
+        assertEquals("STRING", CsvValueConverter.inferDataType("2024-02-30 12:30"));
+    }
+
+    @Test
     void csvDateInferenceMatchesSpecYearRange() {
         assertEquals("STRING", CsvValueConverter.inferDataType("0000-01-01"));
         assertEquals("STRING", CsvValueConverter.inferDataType("0999-12-31"));

@@ -12,8 +12,11 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.chrono.IsoEra;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.DateTimeParseException;
+import java.time.format.ResolverStyle;
 import java.time.temporal.ChronoField;
 import java.time.temporal.TemporalAccessor;
 import java.util.Locale;
@@ -148,7 +151,7 @@ final class CsvValueConverter {
             return false;
         }
         try {
-            DateUtil.parseInstant(value);
+            parseDateTime(value);
             return true;
         } catch (RuntimeException e) {
             return false;
@@ -163,7 +166,7 @@ final class CsvValueConverter {
         if (dateFormat == null) {
             throw new DateTimeParseException("Unsupported CSV datetime format", value, 0);
         }
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(dateFormat);
+        DateTimeFormatter formatter = strictDateTimeFormatter(dateFormat);
         TemporalAccessor parsed = formatter.parse(value);
         // Preserve an explicit offset instead of reducing the value to a LocalDateTime.
         if (parsed.isSupported(ChronoField.INSTANT_SECONDS)) {
@@ -228,12 +231,20 @@ final class CsvValueConverter {
                 || (!dateFormat.contains("y") && !dateFormat.contains("M") && !dateFormat.contains("d"))) {
             throw new DateTimeParseException("Unsupported CSV date format", value, 0);
         }
-        TemporalAccessor parsed = DateTimeFormatter.ofPattern(dateFormat).parse(value);
+        TemporalAccessor parsed = strictDateTimeFormatter(dateFormat).parse(value);
         LocalDate date = LocalDate.from(parsed);
         if (!isSupportedYear(date.getYear())) {
             throw new DateTimeParseException("CSV date year is outside the supported range", value, 0);
         }
         return date;
+    }
+
+    private static DateTimeFormatter strictDateTimeFormatter(String dateFormat) {
+        return new DateTimeFormatterBuilder()
+                .appendPattern(dateFormat)
+                .parseDefaulting(ChronoField.ERA, IsoEra.CE.getValue())
+                .toFormatter(Locale.ROOT)
+                .withResolverStyle(ResolverStyle.STRICT);
     }
 
     private static LocalDate parseDateOnly(String value) {
