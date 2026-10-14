@@ -9,6 +9,8 @@ import io.tapdata.entity.schema.value.TapDateTimeValue;
 import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.connector.csv.config.CsvConfig;
+import io.tapdata.file.TapFile;
+import io.tapdata.file.TapFileStorage;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.Test;
 
@@ -21,10 +23,15 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.TimeZone;
+import java.util.concurrent.ConcurrentMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class CsvConnectorTest {
 
@@ -98,6 +105,20 @@ class CsvConnectorTest {
         assertNotNull(dateCodec.toTapValue(LocalDate.of(2026, 8, 8), null));
         assertNull(dateCodec.toTapValue(LocalDate.of(999, 12, 31), null));
         assertNull(dateCodec.toTapValue(null, null));
+    }
+
+    @Test
+    void discoverSchemaDestroysStorageWhenErrorIsThrown() throws Exception {
+        TapFileStorage storage = mock(TapFileStorage.class);
+        Error failure = new AssertionError("schema discovery failed");
+        CsvConnector connector = new ErrorCsvConnector(storage, failure);
+
+        Error thrown = assertThrows(Error.class,
+                () -> connector.discoverSchema(null, null, 0, tables -> {
+                }));
+
+        assertSame(failure, thrown);
+        verify(storage).destroy();
     }
 
     @Test
@@ -315,6 +336,26 @@ class CsvConnectorTest {
                     String[].class, Map.class);
             method.setAccessible(true);
             method.invoke(this, after, headers, data, dataTypeMap);
+        }
+    }
+
+    private static class ErrorCsvConnector extends CsvConnector {
+        private final Error failure;
+
+        private ErrorCsvConnector(TapFileStorage storage, Error failure) {
+            this.storage = storage;
+            this.failure = failure;
+        }
+
+        @Override
+        protected void initConnection(io.tapdata.pdk.apis.context.TapConnectionContext connectorContext) {
+            fileConfig = new CsvConfig();
+            fileConfig.setModelName("csv");
+        }
+
+        @Override
+        protected ConcurrentMap<String, TapFile> getFilteredFiles() {
+            throw failure;
         }
     }
 }

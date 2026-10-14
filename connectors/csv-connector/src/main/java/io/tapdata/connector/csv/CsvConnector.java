@@ -196,8 +196,9 @@ public class CsvConnector extends FileConnector {
             }
         } catch (Exception throwable) {
             failure = throwable;
+        } finally {
+            failure = destroyStorage(failure);
         }
-        failure = destroyStorage(failure);
         if (failure != null) {
             throw failure;
         }
