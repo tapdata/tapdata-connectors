@@ -341,6 +341,13 @@ public class MySqlConnectorRegressionIT extends AbstractConnectorTest {
                 assertThat(c5Time.toNanos()).isEqualTo(-3020398999999000L);
                 assertTrue(c5Time.isNegative());
                 assertThat(c5Time).isEqualTo(Duration.ofHours(-838).minusMinutes(59).minusSeconds(58).minusNanos(999999000));
+
+                // '-00:00:00.000001'
+                long c6 = after.getInt64("c6");
+                Duration c6Time = Duration.ofNanos(c6 * 1_000);
+                assertThat(c6).isEqualTo(-1L);
+                assertThat(c6Time).isEqualTo(Duration.ofNanos(-1_000));
+                assertTrue(c6Time.isNegative());
             }
         });
 
@@ -811,6 +818,13 @@ public class MySqlConnectorRegressionIT extends AbstractConnectorTest {
                 assertThat(c5Time.toNanos()).isEqualTo(-3020398999999000L);
                 assertTrue(c5Time.isNegative());
                 assertThat(c5Time).isEqualTo(Duration.ofHours(-838).minusMinutes(59).minusSeconds(58).minusNanos(999999000));
+
+                // '-00:00:00.000001'
+                long c6 = after.getInt64("c6");
+                Duration c6Time = Duration.ofNanos(c6 * 1_000);
+                assertThat(c6).isEqualTo(-1L);
+                assertThat(c6Time).isEqualTo(Duration.ofNanos(-1_000));
+                assertTrue(c6Time.isNegative());
             }
         });
 

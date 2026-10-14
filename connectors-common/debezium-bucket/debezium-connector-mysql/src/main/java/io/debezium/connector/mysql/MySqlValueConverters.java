@@ -803,7 +803,9 @@ public class MySqlValueConverters extends JdbcValueConverters {
             throw new RuntimeException("Unexpected format for TIME column: " + timeString);
         }
 
-        long hours = Long.parseLong(matcher.group(1));
+        String hoursString = matcher.group(1);
+        boolean negative = hoursString.startsWith("-");
+        long hours = Long.parseLong(negative ? hoursString.substring(1) : hoursString);
         long minutes = Long.parseLong(matcher.group(2));
         long seconds = Long.parseLong(matcher.group(3));
         long nanoSeconds = 0;
@@ -812,18 +814,11 @@ public class MySqlValueConverters extends JdbcValueConverters {
             nanoSeconds = Long.parseLong(Strings.justifyLeft(microSecondsString, 9, '0'));
         }
 
-        if (hours >= 0) {
-            return Duration.ofHours(hours)
-                    .plusMinutes(minutes)
-                    .plusSeconds(seconds)
-                    .plusNanos(nanoSeconds);
-        }
-        else {
-            return Duration.ofHours(hours)
-                    .minusMinutes(minutes)
-                    .minusSeconds(seconds)
-                    .minusNanos(nanoSeconds);
-        }
+        Duration duration = Duration.ofHours(hours)
+                .plusMinutes(minutes)
+                .plusSeconds(seconds)
+                .plusNanos(nanoSeconds);
+        return negative ? duration.negated() : duration;
     }
 
     public static LocalDate stringToLocalDate(String dateString, Column column, Table table) {
