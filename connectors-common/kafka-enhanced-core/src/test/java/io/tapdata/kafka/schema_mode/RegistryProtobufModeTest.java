@@ -9,6 +9,7 @@ import com.google.protobuf.Struct;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
@@ -332,6 +333,36 @@ class RegistryProtobufModeTest {
         Descriptors.Descriptor rebuilt = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
         assertEquals(Descriptors.FieldDescriptor.Type.STRING, rebuilt.findFieldByName("statuses").getType());
         assertTrue(rebuilt.findFieldByName("statuses").isRepeated());
+    }
+
+    @Test
+    void repeatedElementTypeChangeProducesAttributeEvent() throws Exception {
+        Descriptors.FileDescriptor oldFile = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName("OldRepeated.proto")
+                        .setSyntax("proto3")
+                        .addMessageType(DescriptorProtos.DescriptorProto.newBuilder()
+                                .setName("Root")
+                                .addField(field("tags", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING,
+                                        DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED, null))
+                                .build())
+                        .build(), new Descriptors.FileDescriptor[0]);
+        Descriptors.FileDescriptor newFile = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName("NewRepeated.proto")
+                        .setSyntax("proto3")
+                        .addMessageType(DescriptorProtos.DescriptorProto.newBuilder()
+                                .setName("Root")
+                                .addField(field("tags", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT32,
+                                        DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED, null))
+                                .build())
+                        .build(), new Descriptors.FileDescriptor[0]);
+
+        List<TapEvent> events = invoke("detectSchemaChangesFlat",
+                new Class[]{String.class, Descriptors.Descriptor.class, Descriptors.Descriptor.class, long.class},
+                "topic", oldFile.findMessageTypeByName("Root"), newFile.findMessageTypeByName("Root"), 1L);
+        assertEquals(1, events.size());
+        assertTrue(events.get(0) instanceof TapAlterFieldAttributesEvent);
     }
 
     @Test

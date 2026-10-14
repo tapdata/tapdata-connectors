@@ -694,11 +694,21 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         if (token.startsWith("SCALAR:")) {
             field.setType(protobufTypeFromName(token.substring("SCALAR:".length())));
         } else if (token.startsWith("ENUM:")) {
-            field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_ENUM)
-                    .setTypeName("." + token.substring("ENUM:".length()));
-        } else if (token.startsWith("MESSAGE:")) {
+            // Enum declarations are not persisted in TapField; downgrade unknown
+            // enum values to google.protobuf.Value instead of emitting a dangling type.
             field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                    .setTypeName("." + token.substring("MESSAGE:".length()));
+                    .setTypeName(".google.protobuf.Value");
+        } else if (token.startsWith("MESSAGE:")) {
+            String messageType = token.substring("MESSAGE:".length());
+            if (isWellKnownMessageName(messageType) && wellKnownDependency(messageType) != null) {
+                field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
+                        .setTypeName("." + messageType);
+            } else {
+                // Custom message declarations are unavailable when rebuilding from
+                // TapField alone; use the generic Value representation explicitly.
+                field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
+                        .setTypeName(".google.protobuf.Value");
+            }
         } else {
             throw new IllegalArgumentException("Unsupported map entry type " + token);
         }
@@ -1617,8 +1627,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                                                              Descriptors.FieldDescriptor oldField,
                                                              Descriptors.FieldDescriptor newField,
                                                              long referenceTime) {
-        String oldType = protobufPrimaryTypeName(oldField);
-        String newType = protobufPrimaryTypeName(newField);
+        String oldType = protobufFieldSignature(oldField);
+        String newType = protobufFieldSignature(newField);
         boolean oldNullable = !oldField.isRequired();
         boolean newNullable = !newField.isRequired();
         Object oldDefault = oldField.hasDefaultValue() ? oldField.getDefaultValue() : null;
@@ -1651,8 +1661,14 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                                                                          TapField oldField,
                                                                          Descriptors.FieldDescriptor newField,
                                                                          long referenceTime) {
-        String oldType = oldField.getDataType() == null ? null : StringKit.removeParentheses(oldField.getDataType());
-        String newType = protobufPrimaryTypeName(newField);
+        String oldType = tapFieldSignature(oldField);
+        String newType = protobufFieldSignature(newField);
+        if (StringUtils.isBlank(oldField.getPureDataType())
+                && (newType.startsWith(REPEATED_SCALAR_PREFIX)
+                || newType.startsWith(REPEATED_ENUM_PREFIX)
+                || newType.startsWith(MAP_TYPE_PREFIX))) {
+            newType = protobufPrimaryTypeName(newField);
+        }
         boolean oldNullable = !Boolean.FALSE.equals(oldField.getNullable());
         boolean newNullable = !newField.isRequired();
         Object oldDefault = oldField.getDefaultValue();
@@ -1678,6 +1694,41 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             attr.defaultChange(ValueChange.create(oldDefault, newDefault));
         }
         return attr;
+    }
+
+    private String tapFieldSignature(TapField field) {
+        if (field == null) {
+            return null;
+        }
+        return StringUtils.isNotBlank(field.getPureDataType())
+                ? field.getPureDataType()
+                : StringKit.removeParentheses(StringUtils.defaultString(field.getDataType()));
+    }
+
+    private String protobufFieldSignature(Descriptors.FieldDescriptor field) {
+        if (field == null) {
+            return null;
+        }
+        if (field.isMapField()) {
+            Descriptors.Descriptor entry = field.getMessageType();
+            return MAP_TYPE_PREFIX + mapTypeToken(entry.findFieldByName("key")) + "|"
+                    + mapTypeToken(entry.findFieldByName("value"));
+        }
+        if (field.isRepeated()) {
+            if (field.getJavaType() == Descriptors.FieldDescriptor.JavaType.ENUM) {
+                return REPEATED_ENUM_PREFIX + field.getEnumType().getFullName();
+            }
+            if (field.getJavaType() != Descriptors.FieldDescriptor.JavaType.MESSAGE) {
+                return REPEATED_SCALAR_PREFIX + field.getType().name();
+            }
+            return field.getMessageType().getFullName() + "[]";
+        }
+        if (field.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE) {
+            return isWellKnownMessageName(field.getMessageType().getFullName())
+                    ? field.getMessageType().getFullName()
+                    : protobufPrimaryTypeName(field);
+        }
+        return field.getType().name();
     }
 
     private TapField protobufFieldToTapField(Descriptors.FieldDescriptor f) {
