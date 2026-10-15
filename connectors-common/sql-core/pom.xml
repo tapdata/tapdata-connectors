@@ -16,7 +16,7 @@
         <java.version>8</java.version>
         <hikari.version>4.0.3</hikari.version>
         <jsqlparser.version>4.4</jsqlparser.version>
-        <pdk-error-code.version>1.0-SNAPSHOT</pdk-error-code.version>
+        <pdk-error-code.version>2.0-SNAPSHOT</pdk-error-code.version>
     </properties>
 
     <dependencies>

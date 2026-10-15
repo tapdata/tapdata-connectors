@@ -21,7 +21,7 @@
         <sql.core.version>1.0-SNAPSHOT</sql.core.version>
         <kafka.core.version>1.0-SNAPSHOT</kafka.core.version>
         <kafka.version>3.1.0</kafka.version>
-        <pdk-error-code.version>1.0-SNAPSHOT</pdk-error-code.version>
+        <pdk-error-code.version>2.0-SNAPSHOT</pdk-error-code.version>
     </properties>
     <dependencyManagement>
         <dependencies>
