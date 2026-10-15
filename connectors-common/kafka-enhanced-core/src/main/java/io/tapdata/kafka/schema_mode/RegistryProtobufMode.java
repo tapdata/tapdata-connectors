@@ -997,8 +997,10 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             return registered;
         }
         DescriptorProtos.FileDescriptorProto.Builder fileBuilder = registered.getFile().toProto().toBuilder();
+        Map<String, Descriptors.Descriptor> dependencyMessages = new HashMap<>();
+        collectDependencyMessages(registered.getFile(), dependencyMessages, new HashSet<>());
         mergeMessageAtFullName(fileBuilder, registered.getFullName(), descriptorTree(tapTable), subject, "",
-                new HashMap<>(), new HashMap<>());
+                new HashMap<>(), new HashMap<>(), dependencyMessages);
 
         Map<String, Descriptors.FileDescriptor> dependenciesByName = new LinkedHashMap<>();
         for (Descriptors.FileDescriptor dependency : registered.getFile().getDependencies()) {
@@ -1032,6 +1034,65 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         return evolved;
     }
 
+    private void collectDependencyMessages(Descriptors.FileDescriptor file,
+                                           Map<String, Descriptors.Descriptor> messages,
+                                           Set<String> visitedFiles) {
+        for (Descriptors.FileDescriptor dependency : file.getDependencies()) {
+            if (!visitedFiles.add(dependency.getName())) continue;
+            collectFileMessages(dependency, messages);
+            collectDependencyMessages(dependency, messages, visitedFiles);
+        }
+    }
+
+    private void collectFileMessages(Descriptors.FileDescriptor file,
+                                     Map<String, Descriptors.Descriptor> messages) {
+        for (Descriptors.Descriptor message : file.getMessageTypes()) {
+            collectMessageAndNestedTypes(message, messages);
+        }
+    }
+
+    private void collectMessageAndNestedTypes(Descriptors.Descriptor descriptor,
+                                              Map<String, Descriptors.Descriptor> messages) {
+        messages.put(descriptor.getFullName(), descriptor);
+        for (Descriptors.Descriptor nested : descriptor.getNestedTypes()) {
+            collectMessageAndNestedTypes(nested, messages);
+        }
+    }
+
+    /**
+     * Imported files are part of the registered schema identity but are not rebuilt during root-file evolution.
+     * Confirm that the TapTable does not ask to change them; otherwise fail explicitly instead of dropping fields.
+     */
+    private void validateDependencyMessageUnchanged(Descriptors.Descriptor descriptor,
+                                                    DescriptorTreeNode node,
+                                                    String scopePath,
+                                                    Map<String, Descriptors.Descriptor> dependencyMessages) {
+        List<DescriptorTreeNode> children = new ArrayList<>(node.children.values());
+        children.sort(Comparator.comparing(child -> child.name));
+        for (DescriptorTreeNode child : children) {
+            String fieldName = sanitizeFieldName(child.name);
+            String fieldPath = scopePath.isEmpty() ? fieldName : scopePath + "." + fieldName;
+            Descriptors.FieldDescriptor field = descriptor.findFieldByName(fieldName);
+            if (field == null) {
+                throw new IllegalArgumentException("Cannot add field '" + fieldPath
+                        + "' to imported Protobuf message '" + descriptor.getFullName()
+                        + "'; evolve the source dependency schema first");
+            }
+            if (!child.children.isEmpty()) {
+                if (field.getJavaType() != Descriptors.FieldDescriptor.JavaType.MESSAGE) {
+                    throw new IllegalArgumentException("Cannot add nested fields under non-message Protobuf field '"
+                            + fieldPath + "'");
+                }
+                Descriptors.Descriptor nested = dependencyMessages.get(field.getMessageType().getFullName());
+                if (nested == null) {
+                    throw new IllegalArgumentException("Cannot resolve imported Protobuf message type '"
+                            + field.getMessageType().getFullName() + "' while validating '" + fieldPath + "'");
+                }
+                validateDependencyMessageUnchanged(nested, child, fieldPath, dependencyMessages);
+            }
+        }
+    }
+
     /**
      * 在既有 message proto 上合并 TapTable 的字段。已存在于注册 schema 的字段原样保留（连同其字段号、
      * 类型名与 oneof 归属），只有新字段才按现有规则追加。若某个既有 message 字段在 TapTable 里带有子字段，
@@ -1043,11 +1104,17 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                                         String subject,
                                         String scopePath,
                                         Map<String, DescriptorProtos.DescriptorProto.Builder> activeMessages,
-                                        Map<String, String> activeScopes) {
+                                        Map<String, String> activeScopes,
+                                        Map<String, Descriptors.Descriptor> dependencyMessages) {
+        Descriptors.Descriptor dependencyMessage = dependencyMessages.get(fullName);
+        if (dependencyMessage != null) {
+            validateDependencyMessageUnchanged(dependencyMessage, node, scopePath, dependencyMessages);
+            return;
+        }
         DescriptorProtos.DescriptorProto.Builder activeMessage = activeMessages.get(fullName);
         if (activeMessage != null) {
             mergeMessageFields(fileBuilder, activeMessage, node, fullName, subject,
-                    activeScopes.get(fullName), activeMessages, activeScopes);
+                    activeScopes.get(fullName), activeMessages, activeScopes, dependencyMessages);
             return;
         }
         String packagePrefix = fileBuilder.getPackage().isEmpty() ? "" : fileBuilder.getPackage() + ".";
@@ -1069,7 +1136,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             int activePathLength = activeRelativeName.split("\\.").length;
             String[] nestedPath = Arrays.copyOfRange(path, activePathLength, path.length);
             mergeAtNestedMessagePath(fileBuilder, activeMessages.get(activeAncestorName), nestedPath, 0,
-                    node, fullName, subject, scopePath, activeMessages, activeScopes);
+                    node, fullName, subject, scopePath, activeMessages, activeScopes, dependencyMessages);
             return;
         }
         for (int i = 0; i < fileBuilder.getMessageTypeCount(); i++) {
@@ -1080,7 +1147,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                 activeScopes.put(fullName, scopePath);
                 try {
                     mergeAtNestedMessagePath(fileBuilder, messageBuilder, path, 1, node, fullName, subject,
-                            scopePath, activeMessages, activeScopes);
+                            scopePath, activeMessages, activeScopes, dependencyMessages);
                 } finally {
                     activeMessages.remove(fullName);
                     activeScopes.remove(fullName);
@@ -1102,7 +1169,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                                           String subject,
                                           String scopePath,
                                           Map<String, DescriptorProtos.DescriptorProto.Builder> activeMessages,
-                                          Map<String, String> activeScopes) {
+                                          Map<String, String> activeScopes,
+                                          Map<String, Descriptors.Descriptor> dependencyMessages) {
         if (pathIndex == path.length) {
             boolean alreadyActive = activeMessages.containsKey(fullName);
             if (!alreadyActive) {
@@ -1110,7 +1178,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                 activeScopes.put(fullName, scopePath);
             }
             mergeMessageFields(fileBuilder, messageBuilder, node, fullName, subject, scopePath,
-                    activeMessages, activeScopes);
+                    activeMessages, activeScopes, dependencyMessages);
             if (!alreadyActive) {
                 activeMessages.remove(fullName);
                 activeScopes.remove(fullName);
@@ -1132,7 +1200,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                 }
                 try {
                     mergeAtNestedMessagePath(fileBuilder, nestedBuilder, path, pathIndex + 1,
-                            node, fullName, subject, scopePath, activeMessages, activeScopes);
+                            node, fullName, subject, scopePath, activeMessages, activeScopes, dependencyMessages);
                 } finally {
                     if (!alreadyActive) {
                         activeMessages.remove(nestedFullName);
@@ -1154,7 +1222,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                                     String subject,
                                     String scopePath,
                                     Map<String, DescriptorProtos.DescriptorProto.Builder> activeMessages,
-                                    Map<String, String> activeScopes) {
+                                    Map<String, String> activeScopes,
+                                    Map<String, Descriptors.Descriptor> dependencyMessages) {
         Map<String, Integer> existingFieldIndexes = new HashMap<>();
         for (int i = 0; i < messageBuilder.getFieldCount(); i++) {
             existingFieldIndexes.put(messageBuilder.getField(i).getName(), i);
@@ -1183,7 +1252,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                                 + nestedFullName + "' while evolving nested fields under '" + fieldPath + "'");
                     }
                     mergeMessageAtFullName(fileBuilder, nestedFullName, child, subject, fieldPath,
-                            activeMessages, activeScopes);
+                            activeMessages, activeScopes, dependencyMessages);
                 }
                 continue;
             }
@@ -1225,7 +1294,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             DescriptorProtos.DescriptorProto.Builder nested =
                     DescriptorProtos.DescriptorProto.newBuilder().setName(nestedName);
             mergeMessageFields(null, nested, child, nestedFullName, subject, fieldPath,
-                    activeMessages, activeScopes);
+                    activeMessages, activeScopes, Collections.emptyMap());
             messageBuilder.addNestedType(nested.build());
             field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
                     .setTypeName("." + nestedFullName);

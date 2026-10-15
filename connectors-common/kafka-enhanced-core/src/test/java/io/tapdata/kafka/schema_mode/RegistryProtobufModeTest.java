@@ -248,6 +248,102 @@ class RegistryProtobufModeTest {
     }
 
     @Test
+    void importedMessageIsPreservedWhenRegistryBaselineHasNoChanges() throws Exception {
+        Descriptors.Descriptor registered = orderWithImportedAddress();
+        configureRegistry(registered);
+        TapTable table = importedAddressTable(false);
+
+        Descriptors.Descriptor evolved = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        assertEquals("sales.Order", evolved.getFullName());
+        assertEquals("common.Address", evolved.findFieldByName("address").getMessageType().getFullName());
+        assertEquals("common.Geo", evolved.findFieldByName("address").getMessageType()
+                .findFieldByName("geo").getMessageType().getFullName());
+        Object converted = invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                Collections.singletonMap("geo", Collections.singletonMap("city", "Main")),
+                evolved.findFieldByName("address"));
+        DynamicMessage message = DynamicMessage.newBuilder(evolved)
+                .setField(evolved.findFieldByName("address"), converted).build();
+        DynamicMessage address = (DynamicMessage) message.getField(evolved.findFieldByName("address"));
+        DynamicMessage geo = (DynamicMessage) address.getField(address.getDescriptorForType().findFieldByName("geo"));
+        assertEquals("Main", geo.getField(geo.getDescriptorForType().findFieldByName("city")));
+    }
+
+    @Test
+    void addingFieldUnderImportedMessageFailsWithClearError() throws Exception {
+        configureRegistry(orderWithImportedAddress());
+        TapTable table = importedAddressTable(true);
+
+        java.lang.reflect.InvocationTargetException error = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> invoke("getOrCreateDescriptor", new Class[]{TapTable.class, String.class}, table, "topic"));
+
+        assertInstanceOf(IllegalArgumentException.class, error.getCause());
+        assertTrue(error.getCause().getMessage().contains("Cannot add field 'address.zip'"));
+        assertTrue(error.getCause().getMessage().contains("imported Protobuf message 'common.Address'"));
+    }
+
+    @Test
+    void restoredDescriptorWithImportedMessageCanStillBuildAndWrite() throws Exception {
+        when(kafkaService.getSchemaRegistryClient()).thenReturn(mock(SchemaRegistryClient.class));
+        TapTable sampled = importedAddressTable(false);
+        Descriptors.Descriptor source = orderWithImportedAddress();
+        invoke("persistDescriptor", new Class[]{TapTable.class, Descriptors.Descriptor.class}, sampled, source);
+
+        TapTable restoredTable = importedAddressTable(false);
+        restoredTable.setTableAttr(new java.util.HashMap<>(sampled.getTableAttr()));
+        mode = new RegistryProtobufMode(kafkaService);
+        Descriptors.Descriptor restored = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, restoredTable, "topic");
+
+        assertEquals("sales.Order", restored.getFullName());
+        assertEquals("common.Address", restored.findFieldByName("address").getMessageType().getFullName());
+        Object converted = invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                Collections.singletonMap("geo", Collections.singletonMap("city", "Main")),
+                restored.findFieldByName("address"));
+        assertNotNull(DynamicMessage.newBuilder(restored)
+                .setField(restored.findFieldByName("address"), converted).build());
+    }
+
+    private TapTable importedAddressTable(boolean includeNewField) {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("address", "OBJECT"));
+        table.add(new TapField("address.geo", "OBJECT"));
+        table.add(new TapField("address.geo.city", "STRING"));
+        if (includeNewField) table.add(new TapField("address.zip", "STRING"));
+        return table;
+    }
+
+    private Descriptors.Descriptor orderWithImportedAddress() throws Exception {
+        DescriptorProtos.FileDescriptorProto geoProto = DescriptorProtos.FileDescriptorProto.newBuilder()
+                .setName("common/geo.proto").setPackage("common").setSyntax("proto3")
+                .addMessageType(DescriptorProtos.DescriptorProto.newBuilder().setName("Geo")
+                        .addField(field("city", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)))
+                .build();
+        Descriptors.FileDescriptor geoFile = Descriptors.FileDescriptor.buildFrom(
+                geoProto, new Descriptors.FileDescriptor[0]);
+        DescriptorProtos.FileDescriptorProto addressProto = DescriptorProtos.FileDescriptorProto.newBuilder()
+                .setName("common/address.proto").setPackage("common").setSyntax("proto3")
+                .addDependency("common/geo.proto")
+                .addMessageType(DescriptorProtos.DescriptorProto.newBuilder().setName("Address")
+                        .addField(field("geo", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                                ".common.Geo")))
+                .build();
+        Descriptors.FileDescriptor addressFile = Descriptors.FileDescriptor.buildFrom(
+                addressProto, new Descriptors.FileDescriptor[]{geoFile});
+        DescriptorProtos.FileDescriptorProto orderProto = DescriptorProtos.FileDescriptorProto.newBuilder()
+                .setName("sales/order.proto").setPackage("sales").setSyntax("proto3")
+                .addDependency("common/address.proto")
+                .addMessageType(DescriptorProtos.DescriptorProto.newBuilder().setName("Order")
+                        .addField(field("address", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                                ".common.Address")))
+                .build();
+        return Descriptors.FileDescriptor.buildFrom(orderProto, new Descriptors.FileDescriptor[]{addressFile})
+                .findMessageTypeByName("Order");
+    }
+
+    @Test
     void recursiveRegisteredTypeRemainsRecursiveAfterEvolution() throws Exception {
         DescriptorProtos.DescriptorProto root = DescriptorProtos.DescriptorProto.newBuilder()
                 .setName("Node")
