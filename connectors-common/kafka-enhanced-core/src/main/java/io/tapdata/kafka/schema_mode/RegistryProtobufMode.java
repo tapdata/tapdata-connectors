@@ -3,20 +3,7 @@ package io.tapdata.kafka.schema_mode;
 import com.google.protobuf.DescriptorProtos;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.DynamicMessage;
-import com.google.protobuf.Any;
-import com.google.protobuf.Api;
-import com.google.protobuf.Duration;
-import com.google.protobuf.Empty;
-import com.google.protobuf.FieldMask;
-import com.google.protobuf.ListValue;
-import com.google.protobuf.Method;
-import com.google.protobuf.Mixin;
-import com.google.protobuf.Message;
-import com.google.protobuf.NullValue;
-import com.google.protobuf.Option;
-import com.google.protobuf.SourceContext;
 import com.google.protobuf.Struct;
-import com.google.protobuf.Type;
 import com.google.protobuf.Value;
 import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.TapEvent;
@@ -44,7 +31,6 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
-import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -66,7 +52,6 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
     // 缓存表的 Protobuf Descriptor，避免重复构建
     private final Map<String, Descriptors.Descriptor> descriptorCache = new ConcurrentHashMap<>();
-    private final Map<String, String> descriptorSchemaKeys = new ConcurrentHashMap<>();
     // 每个 topic 最近一次见到的 Protobuf Descriptor 引用；命中时（==）走快速路径，跳过任何 schema diff 计算
     private final Map<String, Descriptors.Descriptor> lastDescriptorPerTopic = new ConcurrentHashMap<>();
 
@@ -327,12 +312,9 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             // 构建 DynamicMessage
             DynamicMessage.Builder messageBuilder = DynamicMessage.newBuilder(descriptor);
 
-            // 将 dotted key 归并为嵌套对象，兼容 TapTable 使用 address.street 形式的字段。
-            Map<String, Object> normalizedData = normalizeDataForDescriptor(data, descriptor);
-
             // 填充字段数据
-            for (Map.Entry<String, Object> entry : normalizedData.entrySet()) {
-                String fieldName = sanitizeFieldName(entry.getKey());
+            for (Map.Entry<String, Object> entry : data.entrySet()) {
+                String fieldName = entry.getKey();
                 Object value = entry.getValue();
 
                 Descriptors.FieldDescriptor fieldDescriptor = descriptor.findFieldByName(fieldName);
@@ -365,35 +347,13 @@ public class RegistryProtobufMode extends AbsSchemaMode {
      */
     private Descriptors.Descriptor getOrCreateDescriptor(TapTable tapTable) throws Descriptors.DescriptorValidationException {
         String tableId = tapTable.getId();
-        String schemaKey = descriptorSchemaKey(tapTable);
-        synchronized (descriptorCache) {
-            Descriptors.Descriptor cached = descriptorCache.get(tableId);
-            if (cached != null && schemaKey.equals(descriptorSchemaKeys.get(tableId))) {
-                return cached;
-            }
+        return descriptorCache.computeIfAbsent(tableId, k -> {
             try {
-                Descriptors.Descriptor rebuilt = buildProtobufDescriptor(tapTable);
-                descriptorCache.put(tableId, rebuilt);
-                descriptorSchemaKeys.put(tableId, schemaKey);
-                return rebuilt;
+                return buildProtobufDescriptor(tapTable);
             } catch (Descriptors.DescriptorValidationException e) {
                 throw new RuntimeException("Failed to build Protobuf descriptor for table: " + tableId, e);
             }
-        }
-    }
-
-    private String descriptorSchemaKey(TapTable tapTable) {
-        StringBuilder key = new StringBuilder();
-        if (tapTable != null && tapTable.getNameFieldMap() != null) {
-            for (Map.Entry<String, TapField> entry : tapTable.getNameFieldMap().entrySet()) {
-                TapField field = entry.getValue();
-                key.append(entry.getKey()).append('|')
-                        .append(field == null ? null : field.getDataType()).append('|')
-                        .append(field == null ? null : field.getPureDataType()).append('|')
-                        .append(field == null ? null : field.getDefaultValue()).append(';');
-            }
-        }
-        return key.toString();
+        });
     }
 
     /**
@@ -406,13 +366,10 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                 .setName(messageName);
 
         Map<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
-        if (nameFieldMap != null && nameFieldMap.keySet().stream().anyMatch(name -> name.contains("."))) {
-            return buildNestedProtobufDescriptor(tapTable, messageName);
-        }
         if (nameFieldMap != null && !nameFieldMap.isEmpty()) {
             int fieldNumber = 1;
             for (Map.Entry<String, TapField> entry : nameFieldMap.entrySet()) {
-                String fieldName = sanitizeFieldName(entry.getKey());
+                String fieldName = entry.getKey();
                 TapField tapField = entry.getValue();
                 String dataType = tapField.getDataType();
 
@@ -423,38 +380,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                 DescriptorProtos.FieldDescriptorProto.Builder fieldBuilder = DescriptorProtos.FieldDescriptorProto.newBuilder()
                         .setName(fieldName)
                         .setNumber(fieldNumber++)
-                        .setLabel(labelForTapType(dataType))
-                        .setType(mapTapTypeToProtobufType(dataType));
-                String normalizedType = normalizeTapType(dataType);
-                String repeatedScalarType = repeatedScalarType(tapField);
-                String repeatedEnumType = repeatedEnumType(tapField);
-                String explicitMessageType = protobufMessageType(tapField);
-                if (repeatedScalarType != null) {
-                    fieldBuilder.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
-                            .setType(protobufTypeFromName(repeatedScalarType));
-                } else if (repeatedEnumType != null) {
-                    // The enum declaration is not persisted with TapField; downgrade
-                    // repeated enums to strings instead of emitting a dangling typeName.
-                    fieldBuilder.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
-                            .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING);
-                } else if (explicitMessageType != null && isWellKnownMessageName(explicitMessageType)) {
-                    fieldBuilder.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                            .setTypeName("." + explicitMessageType)
-                            .setLabel(isRepeatedProtobufMessage(tapField)
-                                    ? DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED
-                                    : DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL);
-                } else if ("OBJECT".equals(normalizedType)) {
-                    fieldBuilder.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                            .setTypeName(".google.protobuf.Struct");
-                } else if ("ARRAY".equals(normalizedType)) {
-                    fieldBuilder.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                            .setTypeName(".google.protobuf.Value");
-                } else if ("MAP".equals(normalizedType)) {
-                    String entryName = sanitizeMessageName(fieldName + "Entry");
-                    messageBuilder.addNestedType(buildMapEntryDescriptor(entryName, tapField));
-                    fieldBuilder.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                            .setTypeName("." + messageName + "." + entryName);
-                }
+                        .setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)
+                        .setType(mapTapTypeToProtobufType(StringKit.removeParentheses(dataType)));
                 if (EmptyKit.isNotNull(tapField.getDefaultValue()) && applyDefault) {
                     fieldBuilder.setDefaultValue(String.valueOf(tapField.getDefaultValue()));
                 }
@@ -463,131 +390,25 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         }
 
         // 构建 FileDescriptor
-        List<Descriptors.FileDescriptor> dependencies = protobufDependencyFiles(tapTable);
         DescriptorProtos.FileDescriptorProto.Builder fileBuilder = DescriptorProtos.FileDescriptorProto.newBuilder()
                 .setName(messageName + ".proto")
                 .setSyntax("proto3")
-                .setOptions(DescriptorProtos.FileOptions.newBuilder().setJavaMultipleFiles(true).build());
-        for (Descriptors.FileDescriptor dependency : dependencies) {
-            fileBuilder.addDependency(dependency.getName());
-        }
-        fileBuilder.addMessageType(messageBuilder.build());
+                .setOptions(DescriptorProtos.FileOptions.newBuilder().setJavaMultipleFiles(true).build())
+                .addMessageType(messageBuilder.build());
 
         Descriptors.FileDescriptor fileDescriptor = Descriptors.FileDescriptor.buildFrom(
                 fileBuilder.build(),
-                dependencies.toArray(new Descriptors.FileDescriptor[0])
+                new Descriptors.FileDescriptor[0]
         );
 
         return fileDescriptor.findMessageTypeByName(messageName);
-    }
-
-    private Descriptors.Descriptor buildNestedProtobufDescriptor(TapTable tapTable, String messageName)
-            throws Descriptors.DescriptorValidationException {
-        DescriptorTreeNode root = descriptorTree(tapTable);
-        DescriptorProtos.DescriptorProto rootProto = buildNestedMessageProto(root, messageName, messageName);
-        List<Descriptors.FileDescriptor> dependencies = protobufDependencyFiles(tapTable);
-        DescriptorProtos.FileDescriptorProto.Builder fileBuilder = DescriptorProtos.FileDescriptorProto.newBuilder()
-                .setName(messageName + ".proto")
-                .setSyntax("proto3")
-                .setOptions(DescriptorProtos.FileOptions.newBuilder().setJavaMultipleFiles(true).build());
-        for (Descriptors.FileDescriptor dependency : dependencies) {
-            fileBuilder.addDependency(dependency.getName());
-        }
-        fileBuilder.addMessageType(rootProto);
-        Descriptors.FileDescriptor fileDescriptor = Descriptors.FileDescriptor.buildFrom(
-                fileBuilder.build(), dependencies.toArray(new Descriptors.FileDescriptor[0]));
-        return fileDescriptor.findMessageTypeByName(messageName);
-    }
-
-    private DescriptorTreeNode descriptorTree(TapTable tapTable) {
-        DescriptorTreeNode root = new DescriptorTreeNode("", null);
-        for (Map.Entry<String, TapField> entry : tapTable.getNameFieldMap().entrySet()) {
-            DescriptorTreeNode current = root;
-            String[] segments = entry.getKey().split("\\.");
-            for (String segment : segments) {
-                current = current.children.computeIfAbsent(segment, key -> new DescriptorTreeNode(key, null));
-            }
-            current.field = entry.getValue();
-        }
-        return root;
-    }
-
-    private DescriptorProtos.DescriptorProto buildNestedMessageProto(DescriptorTreeNode node,
-                                                                     String messageName,
-                                                                     String fullName) {
-        DescriptorProtos.DescriptorProto.Builder message = DescriptorProtos.DescriptorProto.newBuilder()
-                .setName(messageName);
-        int fieldNumber = 1;
-        for (DescriptorTreeNode child : node.children.values()) {
-            TapField tapField = child.field;
-            String normalizedType = tapField == null ? "OBJECT" : normalizeTapType(tapField.getDataType());
-            String fieldName = sanitizeFieldName(child.name);
-            DescriptorProtos.FieldDescriptorProto.Builder field = DescriptorProtos.FieldDescriptorProto.newBuilder()
-                    .setName(fieldName)
-                    .setNumber(fieldNumber++)
-                    .setLabel(labelForTapType(normalizedType));
-
-            String repeatedScalarType = repeatedScalarType(tapField);
-            String repeatedEnumType = repeatedEnumType(tapField);
-            String explicitMessageType = protobufMessageType(tapField);
-            if (!child.children.isEmpty() && ("OBJECT".equals(normalizedType) || "ARRAY".equals(normalizedType))) {
-                String nestedName = sanitizeMessageName(child.name + "Message");
-                String nestedFullName = fullName + "." + nestedName;
-                message.addNestedType(buildNestedMessageProto(child, nestedName, nestedFullName));
-                field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                        .setTypeName("." + nestedFullName);
-            } else if (repeatedScalarType != null) {
-                field.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
-                        .setType(protobufTypeFromName(repeatedScalarType));
-            } else if (repeatedEnumType != null) {
-                // The enum declaration is not persisted with TapField; downgrade
-                // repeated enums to strings instead of emitting a dangling typeName.
-                field.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
-                        .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING);
-            } else if (explicitMessageType != null && isWellKnownMessageName(explicitMessageType)) {
-                field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                        .setTypeName("." + explicitMessageType)
-                        .setLabel(isRepeatedProtobufMessage(tapField)
-                                ? DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED
-                                : DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL);
-            } else if ("OBJECT".equals(normalizedType)) {
-                field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                        .setTypeName(".google.protobuf.Struct");
-            } else if ("ARRAY".equals(normalizedType)) {
-                field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                        .setTypeName(".google.protobuf.Value");
-            } else if ("MAP".equals(normalizedType)) {
-                String entryName = sanitizeMessageName(child.name + "Entry");
-                message.addNestedType(buildMapEntryDescriptor(entryName, tapField));
-                field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                        .setTypeName("." + fullName + "." + entryName);
-            } else {
-                field.setType(mapTapTypeToProtobufType(normalizedType));
-            }
-            if (tapField != null && EmptyKit.isNotNull(tapField.getDefaultValue()) && applyDefault) {
-                field.setDefaultValue(String.valueOf(tapField.getDefaultValue()));
-            }
-            message.addField(field.build());
-        }
-        return message.build();
-    }
-
-    private static final class DescriptorTreeNode {
-        private final String name;
-        private TapField field;
-        private final Map<String, DescriptorTreeNode> children = new LinkedHashMap<>();
-
-        private DescriptorTreeNode(String name, TapField field) {
-            this.name = name;
-            this.field = field;
-        }
     }
 
     /**
      * 将 TapData 类型映射为 Protobuf 类型
      */
     private DescriptorProtos.FieldDescriptorProto.Type mapTapTypeToProtobufType(String tapType) {
-        switch (normalizeTapType(tapType)) {
+        switch (tapType.toUpperCase()) {
             case "BOOLEAN":
                 return DescriptorProtos.FieldDescriptorProto.Type.TYPE_BOOL;
             case "INTEGER":
@@ -610,25 +431,90 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             case "TIME":
             case "DATETIME":
             case "TIMESTAMP":
-                return DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING;
             case "ARRAY":
             case "MAP":
             case "OBJECT":
-                return DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE;
             default:
                 return DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING;
         }
     }
 
-    private DescriptorProtos.FieldDescriptorProto.Label labelForTapType(String tapType) {
-        String normalizedType = normalizeTapType(tapType);
-        return "ARRAY".equals(normalizedType) || "MAP".equals(normalizedType)
-                ? DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED
-                : DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL;
+    /**
+     * 转换值为 Protobuf 兼容的类型
+     */
+    private Object convertValue(Object value, Descriptors.FieldDescriptor fieldDescriptor) {
+        if (value == null) {
+            return null;
+        }
+
+        try {
+            switch (fieldDescriptor.getType()) {
+                case BOOL:
+                    if (value instanceof Boolean) {
+                        return value;
+                    }
+                    return Boolean.parseBoolean(value.toString());
+
+                case INT32:
+                case SINT32:
+                case SFIXED32:
+                    if (value instanceof Integer) {
+                        return value;
+                    }
+                    return Integer.parseInt(value.toString());
+
+                case INT64:
+                case SINT64:
+                case SFIXED64:
+                    if (value instanceof Long) {
+                        return value;
+                    }
+                    return Long.parseLong(value.toString());
+
+                case FLOAT:
+                    if (value instanceof Float) {
+                        return value;
+                    }
+                    return Float.parseFloat(value.toString());
+
+                case DOUBLE:
+                    if (value instanceof Double) {
+                        return value;
+                    }
+                    return Double.parseDouble(value.toString());
+
+                case STRING:
+                    return value.toString();
+
+                case BYTES:
+                    if (value instanceof byte[]) {
+                        return com.google.protobuf.ByteString.copyFrom((byte[]) value);
+                    }
+                    return com.google.protobuf.ByteString.copyFromUtf8(value.toString());
+
+                default:
+                    return value.toString();
+            }
+        } catch (Exception e) {
+            // 转换失败时返回字符串形式
+            return value.toString();
+        }
     }
 
-    private String normalizeTapType(String tapType) {
-        return StringKit.removeParentheses(StringUtils.defaultString(tapType)).trim().toUpperCase(Locale.ROOT);
+    /**
+     * 清理消息名称，确保符合 Protobuf 命名规范
+     */
+    private String sanitizeMessageName(String name) {
+        if (name == null || name.isEmpty()) {
+            return "Message";
+        }
+        // 替换非字母数字字符为下划线
+        String sanitized = name.replaceAll("[^a-zA-Z0-9_]", "_");
+        // 确保以字母开头
+        if (!Character.isLetter(sanitized.charAt(0))) {
+            sanitized = "M_" + sanitized;
+        }
+        return sanitized;
     }
 
     private void setProtobufMessageType(TapField tapField, Descriptors.FieldDescriptor field) {
@@ -662,92 +548,6 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         return "SCALAR:" + field.getType().name();
     }
 
-    private String mapTypeToken(TapField tapField, int index) {
-        String pureType = tapField == null ? null : tapField.getPureDataType();
-        if (pureType == null || !pureType.startsWith(MAP_TYPE_PREFIX)) {
-            return null;
-        }
-        String[] types = pureType.substring(MAP_TYPE_PREFIX.length()).split("\\|", -1);
-        return types.length > index ? types[index] : null;
-    }
-
-    private DescriptorProtos.DescriptorProto buildMapEntryDescriptor(String entryName, TapField tapField) {
-        String keyType = mapTypeToken(tapField, 0);
-        String valueType = mapTypeToken(tapField, 1);
-        if (keyType == null) {
-            keyType = "SCALAR:STRING";
-        }
-        if (valueType == null) {
-            valueType = "MESSAGE:google.protobuf.Value";
-        }
-        return DescriptorProtos.DescriptorProto.newBuilder()
-                .setName(entryName)
-                .setOptions(DescriptorProtos.MessageOptions.newBuilder().setMapEntry(true).build())
-                .addField(mapEntryField("key", 1, keyType))
-                .addField(mapEntryField("value", 2, valueType))
-                .build();
-    }
-
-    private DescriptorProtos.FieldDescriptorProto mapEntryField(String name, int number, String token) {
-        DescriptorProtos.FieldDescriptorProto.Builder field = DescriptorProtos.FieldDescriptorProto.newBuilder()
-                .setName(name)
-                .setNumber(number)
-                .setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL);
-        if (token.startsWith("SCALAR:")) {
-            field.setType(protobufTypeFromName(token.substring("SCALAR:".length())));
-        } else if (token.startsWith("ENUM:")) {
-            // Enum declarations are not persisted in TapField; downgrade unknown
-            // enum values to google.protobuf.Value instead of emitting a dangling type.
-            tapLogger.warn("Downgrade unsupported protobuf map enum value type {} to google.protobuf.Value", token);
-            field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                    .setTypeName(".google.protobuf.Value");
-        } else if (token.startsWith("MESSAGE:")) {
-            String messageType = token.substring("MESSAGE:".length());
-            if (isWellKnownMessageName(messageType) && wellKnownDependency(messageType) != null) {
-                field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                        .setTypeName("." + messageType);
-            } else {
-                // Custom message declarations are unavailable when rebuilding from
-                // TapField alone; use the generic Value representation explicitly.
-                tapLogger.warn("Downgrade unsupported protobuf map message value type {} to google.protobuf.Value", token);
-                field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                        .setTypeName(".google.protobuf.Value");
-            }
-        } else {
-            throw new IllegalArgumentException("Unsupported map entry type " + token);
-        }
-        return field.build();
-    }
-
-    private String repeatedScalarType(TapField tapField) {
-        String pureType = tapField == null ? null : tapField.getPureDataType();
-        return pureType != null && pureType.startsWith(REPEATED_SCALAR_PREFIX)
-                ? pureType.substring(REPEATED_SCALAR_PREFIX.length()) : null;
-    }
-
-    private String repeatedEnumType(TapField tapField) {
-        String pureType = tapField == null ? null : tapField.getPureDataType();
-        return pureType != null && pureType.startsWith(REPEATED_ENUM_PREFIX)
-                ? pureType.substring(REPEATED_ENUM_PREFIX.length()) : null;
-    }
-
-    private DescriptorProtos.FieldDescriptorProto.Type protobufTypeFromName(String typeName) {
-        String enumName = typeName.startsWith("TYPE_") ? typeName : "TYPE_" + typeName;
-        return DescriptorProtos.FieldDescriptorProto.Type.valueOf(enumName);
-    }
-
-    private String protobufMessageType(TapField tapField) {
-        if (tapField == null || StringUtils.isBlank(tapField.getPureDataType())) {
-            return null;
-        }
-        String type = tapField.getPureDataType().trim();
-        return type.endsWith("[]") ? type.substring(0, type.length() - 2) : type;
-    }
-
-    private boolean isRepeatedProtobufMessage(TapField tapField) {
-        return tapField != null && StringUtils.defaultString(tapField.getPureDataType()).trim().endsWith("[]");
-    }
-
     private boolean isWellKnownMessageName(String messageType) {
         if (messageType == null) {
             return false;
@@ -775,507 +575,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         }
     }
 
-    private List<Descriptors.FileDescriptor> protobufDependencyFiles(TapTable tapTable) {
-        Map<String, Descriptors.FileDescriptor> dependencies = new LinkedHashMap<>();
-        addDependency(dependencies, Struct.getDescriptor().getFile());
-        if (tapTable != null && tapTable.getNameFieldMap() != null) {
-            for (TapField field : tapTable.getNameFieldMap().values()) {
-                Descriptors.FileDescriptor dependency = wellKnownDependency(protobufMessageType(field));
-                if (dependency != null) {
-                    addDependency(dependencies, dependency);
-                }
-                String mapValueType = mapTypeToken(field, 1);
-                if (mapValueType != null && mapValueType.startsWith("MESSAGE:")) {
-                    dependency = wellKnownDependency(mapValueType.substring("MESSAGE:".length()));
-                    if (dependency != null) {
-                        addDependency(dependencies, dependency);
-                    }
-                }
-            }
-        }
-        return new ArrayList<>(dependencies.values());
-    }
-
-    private void addDependency(Map<String, Descriptors.FileDescriptor> dependencies,
-                               Descriptors.FileDescriptor dependency) {
-        if (dependency != null) {
-            dependencies.put(dependency.getName(), dependency);
-        }
-    }
-
-    private Descriptors.FileDescriptor wellKnownDependency(String messageType) {
-        if (messageType == null) {
-            return null;
-        }
-        switch (messageType) {
-            case "google.protobuf.Any":
-                return Any.getDescriptor().getFile();
-            case "google.protobuf.Api":
-            case "google.protobuf.Method":
-            case "google.protobuf.Mixin":
-            case "google.protobuf.Option":
-            case "google.protobuf.Type":
-                return Type.getDescriptor().getFile();
-            case "google.protobuf.DescriptorProto":
-            case "google.protobuf.Enum":
-            case "google.protobuf.EnumValue":
-                return DescriptorProtos.getDescriptor();
-            case "google.protobuf.Duration":
-                return Duration.getDescriptor().getFile();
-            case "google.protobuf.Empty":
-                return Empty.getDescriptor().getFile();
-            case "google.protobuf.FieldMask":
-                return FieldMask.getDescriptor().getFile();
-            case "google.protobuf.SourceContext":
-                return SourceContext.getDescriptor().getFile();
-            case "google.protobuf.Struct":
-            case "google.protobuf.ListValue":
-            case "google.protobuf.Value":
-                return Struct.getDescriptor().getFile();
-            default:
-                return null;
-        }
-    }
-
-    /**
-     * 转换值为 Protobuf 兼容的类型
-     */
-    private Object convertValue(Object value, Descriptors.FieldDescriptor fieldDescriptor) {
-        if (value == null) {
-            return null;
-        }
-
-        try {
-            if (fieldDescriptor.isMapField()) {
-                return convertMapValue(value, fieldDescriptor);
-            }
-            if (fieldDescriptor.isRepeated()) {
-                Collection<?> values = value instanceof Collection
-                        ? (Collection<?>) value
-                        : Collections.singletonList(value);
-                List<Object> converted = new ArrayList<>(values.size());
-                for (Object item : values) {
-                    converted.add(convertRepeatedValue(item, fieldDescriptor));
-                }
-                return converted;
-            }
-            switch (fieldDescriptor.getType()) {
-                case BOOL:
-                    if (value instanceof Boolean) {
-                        return value;
-                    }
-                    return Boolean.parseBoolean(value.toString());
-
-                case INT32:
-                case SINT32:
-                case SFIXED32:
-                    if (value instanceof Integer) {
-                        return value;
-                    }
-                    return Integer.parseInt(value.toString());
-
-                case UINT32:
-                case FIXED32:
-                    if (value instanceof Integer) {
-                        return value;
-                    }
-                    return Integer.parseUnsignedInt(value.toString());
-
-                case INT64:
-                case SINT64:
-                case SFIXED64:
-                    if (value instanceof Long) {
-                        return value;
-                    }
-                    return Long.parseLong(value.toString());
-
-                case UINT64:
-                case FIXED64:
-                    if (value instanceof Long) {
-                        return value;
-                    }
-                    return Long.parseUnsignedLong(value.toString());
-
-                case FLOAT:
-                    if (value instanceof Float) {
-                        return value;
-                    }
-                    return Float.parseFloat(value.toString());
-
-                case DOUBLE:
-                    if (value instanceof Double) {
-                        return value;
-                    }
-                    return Double.parseDouble(value.toString());
-
-                case STRING:
-                    return value.toString();
-
-                case BYTES:
-                    if (value instanceof byte[]) {
-                        return com.google.protobuf.ByteString.copyFrom((byte[]) value);
-                    }
-                    return com.google.protobuf.ByteString.copyFromUtf8(value.toString());
-
-                case MESSAGE:
-                    if ("google.protobuf.Struct".equals(fieldDescriptor.getMessageType().getFullName())) {
-                        return toStruct(value);
-                    }
-                    if ("google.protobuf.Value".equals(fieldDescriptor.getMessageType().getFullName())) {
-                        return toProtobufValue(value);
-                    }
-                    if ("google.protobuf.ListValue".equals(fieldDescriptor.getMessageType().getFullName())) {
-                        return toListValue(value);
-                    }
-                    if (value instanceof Message) {
-                        Message message = (Message) value;
-                        if (!fieldDescriptor.getMessageType().equals(message.getDescriptorForType())) {
-                            throw new IllegalArgumentException("Message descriptor "
-                                    + message.getDescriptorForType().getFullName()
-                                    + " does not match field " + fieldDescriptor.getFullName()
-                                    + " descriptor " + fieldDescriptor.getMessageType().getFullName());
-                        }
-                        return DynamicMessage.newBuilder(fieldDescriptor.getMessageType())
-                                .mergeFrom(message)
-                                .build();
-                    }
-                    DynamicMessage nested = toDynamicMessage(value, fieldDescriptor.getMessageType());
-                    if (nested == null) {
-                        throw new IllegalArgumentException("Expected a map or protobuf message for "
-                                + fieldDescriptor.getFullName());
-                    }
-                    return nested;
-
-                default:
-                    throw new IllegalArgumentException("Unsupported protobuf field type "
-                            + fieldDescriptor.getType() + " for " + fieldDescriptor.getFullName());
-            }
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Failed to convert value to protobuf field "
-                    + fieldDescriptor.getFullName() + ", valueClass=" + value.getClass().getName(), e);
-        }
-    }
-
-    private Object convertRepeatedValue(Object value, Descriptors.FieldDescriptor fieldDescriptor) {
-        if (fieldDescriptor.getJavaType() != Descriptors.FieldDescriptor.JavaType.MESSAGE) {
-            return convertRepeatedScalarValue(value, fieldDescriptor);
-        }
-        if (fieldDescriptor.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE
-                && !isWellKnownMessage(fieldDescriptor.getMessageType())) {
-            DynamicMessage nested = toDynamicMessage(value, fieldDescriptor.getMessageType());
-            if (nested == null) {
-                throw new IllegalArgumentException("Expected a map or protobuf message for repeated field "
-                        + fieldDescriptor.getFullName());
-            }
-            return nested;
-        }
-        if ("google.protobuf.Struct".equals(fieldDescriptor.getMessageType().getFullName())) {
-            return toStruct(value);
-        }
-        if ("google.protobuf.ListValue".equals(fieldDescriptor.getMessageType().getFullName())) {
-            return toListValue(value);
-        }
-        if ("google.protobuf.Value".equals(fieldDescriptor.getMessageType().getFullName())) {
-            return toProtobufValue(value);
-        }
-        DynamicMessage nested = toDynamicMessage(value, fieldDescriptor.getMessageType());
-        if (nested == null) {
-            throw new IllegalArgumentException("Expected a map or protobuf message for repeated field "
-                    + fieldDescriptor.getFullName());
-        }
-        return nested;
-    }
-
-    private Object convertRepeatedScalarValue(Object value, Descriptors.FieldDescriptor fieldDescriptor) {
-        switch (fieldDescriptor.getType()) {
-            case BOOL:
-                return value instanceof Boolean ? value : Boolean.parseBoolean(value.toString());
-            case INT32:
-            case SINT32:
-            case SFIXED32:
-                return value instanceof Integer ? value : Integer.parseInt(value.toString());
-            case UINT32:
-            case FIXED32:
-                return value instanceof Integer ? value : Integer.parseUnsignedInt(value.toString());
-            case INT64:
-            case SINT64:
-            case SFIXED64:
-                return value instanceof Long ? value : Long.parseLong(value.toString());
-            case UINT64:
-            case FIXED64:
-                return value instanceof Long ? value : Long.parseUnsignedLong(value.toString());
-            case FLOAT:
-                return value instanceof Float ? value : Float.parseFloat(value.toString());
-            case DOUBLE:
-                return value instanceof Double ? value : Double.parseDouble(value.toString());
-            case STRING:
-                return value.toString();
-            case BYTES:
-                return value instanceof byte[]
-                        ? com.google.protobuf.ByteString.copyFrom((byte[]) value)
-                        : com.google.protobuf.ByteString.copyFromUtf8(value.toString());
-            case ENUM:
-                if (value instanceof Descriptors.EnumValueDescriptor) {
-                    return value;
-                }
-                Descriptors.EnumValueDescriptor enumValue = fieldDescriptor.getEnumType()
-                        .findValueByName(value.toString());
-                if (enumValue == null) {
-                    throw new IllegalArgumentException("Unknown enum value " + value
-                            + " for " + fieldDescriptor.getFullName());
-                }
-                return enumValue;
-            default:
-                throw new IllegalArgumentException("Unsupported repeated protobuf field type "
-                        + fieldDescriptor.getType() + " for " + fieldDescriptor.getFullName());
-        }
-    }
-
-    private DynamicMessage toDynamicMessage(Object value, Descriptors.Descriptor descriptor) {
-        if (value instanceof DynamicMessage) {
-            DynamicMessage message = (DynamicMessage) value;
-            if (descriptor.equals(message.getDescriptorForType())) {
-                return message;
-            }
-        }
-        if (value instanceof Message) {
-            Message message = (Message) value;
-            if (descriptor.equals(message.getDescriptorForType())) {
-                return DynamicMessage.newBuilder(descriptor).mergeFrom(message).build();
-            }
-        }
-        if (!(value instanceof Map)) {
-            return null;
-        }
-
-        DynamicMessage.Builder builder = DynamicMessage.newBuilder(descriptor);
-        Map<String, Object> fields = normalizeDataForDescriptor((Map<String, Object>) value, descriptor);
-        for (Map.Entry<String, Object> entry : fields.entrySet()) {
-            Descriptors.FieldDescriptor nestedField = descriptor.findFieldByName(sanitizeFieldName(entry.getKey()));
-            if (nestedField == null || entry.getValue() == null) {
-                continue;
-            }
-            Object converted = convertValue(entry.getValue(), nestedField);
-            if (converted != null) {
-                builder.setField(nestedField, converted);
-            }
-        }
-        return builder.build();
-    }
-
-    private Map<String, Object> normalizeDataForDescriptor(Map<String, Object> data,
-                                                           Descriptors.Descriptor descriptor) {
-        Map<String, Object> normalized = new LinkedHashMap<>();
-        if (data == null) {
-            return normalized;
-        }
-        for (Map.Entry<String, Object> entry : data.entrySet()) {
-            String key = entry.getKey();
-            if (key == null) {
-                continue;
-            }
-            String sanitizedKey = sanitizeFieldName(key);
-            if (key.contains(".")) {
-                String rootKey = key.substring(0, key.indexOf('.'));
-                Descriptors.FieldDescriptor rootField = descriptor.findFieldByName(sanitizeFieldName(rootKey));
-                if (rootField != null
-                        && data.containsKey(rootKey)) {
-                    // The nested root value is authoritative; dotted aliases are
-                    // read-side compatibility keys and must not replace arrays/maps.
-                    continue;
-                }
-                if (rootField != null && rootField.isRepeated()
-                        && rootField.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE) {
-                    putRepeatedDottedValue(normalized, key, entry.getValue());
-                    continue;
-                }
-            }
-            if (descriptor.findFieldByName(sanitizedKey) != null || !key.contains(".")) {
-                normalized.put(key, entry.getValue());
-            } else {
-                putDottedValue(normalized, key, entry.getValue());
-            }
-        }
-        return normalized;
-    }
-
-    @SuppressWarnings("unchecked")
-    private void putRepeatedDottedValue(Map<String, Object> target, String path, Object value) {
-        String[] parts = path.split("\\.");
-        String root = parts[0];
-        String relativePath = String.join(".", Arrays.copyOfRange(parts, 1, parts.length));
-        List<Object> values = value instanceof Collection
-                ? new ArrayList<>((Collection<?>) value)
-                : Collections.singletonList(value);
-        Object existing = target.get(root);
-        List<Map<String, Object>> rows;
-        if (existing instanceof List) {
-            rows = (List<Map<String, Object>>) existing;
-        } else {
-            rows = new ArrayList<>();
-            target.put(root, rows);
-        }
-        while (rows.size() < values.size()) {
-            rows.add(new LinkedHashMap<>());
-        }
-        for (int i = 0; i < values.size(); i++) {
-            putDottedValue(rows.get(i), relativePath, values.get(i));
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private void putDottedValue(Map<String, Object> target, String path, Object value) {
-        String[] parts = path.split("\\.");
-        Map<String, Object> current = target;
-        for (int i = 0; i < parts.length - 1; i++) {
-            Object existing = current.get(parts[i]);
-            if (!(existing instanceof Map)) {
-                existing = new LinkedHashMap<String, Object>();
-                current.put(parts[i], existing);
-            }
-            current = (Map<String, Object>) existing;
-        }
-        String leaf = parts[parts.length - 1];
-        Object existing = current.get(leaf);
-        if (existing instanceof Map && value instanceof Map) {
-            ((Map<String, Object>) existing).putAll((Map<String, Object>) value);
-        } else {
-            current.put(leaf, value);
-        }
-    }
-
-    private List<DynamicMessage> convertMapValue(Object value, Descriptors.FieldDescriptor fieldDescriptor) {
-        if (!(value instanceof Map)) {
-            throw new IllegalArgumentException("Expected a map for " + fieldDescriptor.getFullName());
-        }
-        Descriptors.Descriptor entryDescriptor = fieldDescriptor.getMessageType();
-        Descriptors.FieldDescriptor keyField = entryDescriptor.findFieldByName("key");
-        Descriptors.FieldDescriptor valueField = entryDescriptor.findFieldByName("value");
-        List<DynamicMessage> entries = new ArrayList<>();
-        for (Map.Entry<?, ?> item : ((Map<?, ?>) value).entrySet()) {
-            DynamicMessage.Builder entry = DynamicMessage.newBuilder(entryDescriptor);
-            entry.setField(keyField, convertMapEntryValue(item.getKey(), keyField));
-            Object convertedValue = convertMapEntryValue(item.getValue(), valueField);
-            if (convertedValue != null) {
-                entry.setField(valueField, convertedValue);
-            }
-            entries.add(entry.build());
-        }
-        return entries;
-    }
-
-    private Object convertMapEntryValue(Object value, Descriptors.FieldDescriptor fieldDescriptor) {
-        if (value == null) {
-            if (fieldDescriptor.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE
-                    && "google.protobuf.Value".equals(fieldDescriptor.getMessageType().getFullName())) {
-                return toProtobufValue(null);
-            }
-            throw new IllegalArgumentException("Null is not representable for map field "
-                    + fieldDescriptor.getFullName());
-        }
-        if (fieldDescriptor.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE) {
-            return convertValue(value, fieldDescriptor);
-        }
-        return convertRepeatedScalarValue(value, fieldDescriptor);
-    }
-
-    private Struct toStruct(Object value) {
-        if (value instanceof Struct) {
-            return (Struct) value;
-        }
-        if (!(value instanceof Map)) {
-            throw new IllegalArgumentException("Expected a map for google.protobuf.Struct");
-        }
-        Struct.Builder builder = Struct.newBuilder();
-        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
-            builder.putFields(String.valueOf(entry.getKey()), toProtobufValue(entry.getValue()));
-        }
-        return builder.build();
-    }
-
-    private ListValue toListValue(Object value) {
-        if (value instanceof ListValue) {
-            return (ListValue) value;
-        }
-        if (!(value instanceof Collection)) {
-            throw new IllegalArgumentException("Expected a collection for google.protobuf.ListValue");
-        }
-        ListValue.Builder builder = ListValue.newBuilder();
-        for (Object item : (Collection<?>) value) {
-            builder.addValues(toProtobufValue(item));
-        }
-        return builder.build();
-    }
-
-    private Value toProtobufValue(Object value) {
-        if (value == null) {
-            return Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build();
-        }
-        if (value instanceof Value) {
-            return (Value) value;
-        }
-        Value.Builder builder = Value.newBuilder();
-        if (value instanceof Boolean) {
-            return builder.setBoolValue((Boolean) value).build();
-        }
-        if (value instanceof Number) {
-            Number numberValue = (Number) value;
-            if (value instanceof Double || value instanceof Float) {
-                double numericValue = numberValue.doubleValue();
-                if (!Double.isFinite(numericValue)) {
-                    return builder.setStringValue(value.toString()).build();
-                }
-                return builder.setNumberValue(numericValue).build();
-            }
-            BigDecimal number = new BigDecimal(value.toString());
-            double numericValue = numberValue.doubleValue();
-            boolean exactlyRepresented = Double.isFinite(numericValue)
-                    && BigDecimal.valueOf(numericValue).compareTo(number) == 0;
-            if (!exactlyRepresented) {
-                // google.protobuf.Value stores numbers as double; use a string rather
-                // than silently changing a high-precision integer or decimal.
-                return builder.setStringValue(value.toString()).build();
-            }
-            return builder.setNumberValue(numericValue).build();
-        }
-        if (value instanceof Map) {
-            return builder.setStructValue(toStruct(value)).build();
-        }
-        if (value instanceof Collection) {
-            ListValue.Builder list = ListValue.newBuilder();
-            for (Object item : (Collection<?>) value) {
-                list.addValues(toProtobufValue(item));
-            }
-            return builder.setListValue(list.build()).build();
-        }
-        return builder.setStringValue(String.valueOf(value)).build();
-    }
-
-    /**
-     * 清理消息名称，确保符合 Protobuf 命名规范
-     */
-    private String sanitizeMessageName(String name) {
-        if (name == null || name.isEmpty()) {
-            return "Message";
-        }
-        // 替换非字母数字字符为下划线
-        String sanitized = name.replaceAll("[^a-zA-Z0-9_]", "_");
-        // 确保以字母开头
-        if (!Character.isLetter(sanitized.charAt(0))) {
-            sanitized = "M_" + sanitized;
-        }
-        return sanitized;
-    }
-
-    private String sanitizeFieldName(String name) {
-        if (StringUtils.isBlank(name)) {
-            return "field";
-        }
-        String sanitized = name.replaceAll("[^a-zA-Z0-9_]", "_");
-        if (!Character.isLetter(sanitized.charAt(0)) && sanitized.charAt(0) != '_') {
-            sanitized = "field_" + sanitized;
-        }
-        return sanitized;
+    private String protobufPureType(TapField field) {
+        return field == null ? null : field.getPureDataType();
     }
 
     /**
@@ -1739,7 +1040,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                                                                          long referenceTime) {
         String oldType = tapFieldSignature(oldField);
         String newType = protobufFieldSignature(newField);
-        boolean hasDetailedOldType = StringUtils.isNotBlank(oldField.getPureDataType());
+        boolean hasDetailedOldType = StringUtils.isNotBlank(protobufPureType(oldField));
         if (!hasDetailedOldType) {
             oldType = StringKit.removeParentheses(StringUtils.defaultString(oldField.getDataType()));
             newType = protobufPrimaryTypeName(newField);
@@ -1777,16 +1078,16 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         if (field == null) {
             return null;
         }
-        return StringUtils.isNotBlank(field.getPureDataType())
-                ? field.getPureDataType()
+        return StringUtils.isNotBlank(protobufPureType(field))
+                ? protobufPureType(field)
                 : StringKit.removeParentheses(StringUtils.defaultString(field.getDataType()));
     }
 
     private String tapFieldEventType(TapField field) {
-        if (field == null || StringUtils.isBlank(field.getPureDataType())) {
+        if (field == null || StringUtils.isBlank(protobufPureType(field))) {
             return field == null ? null : field.getDataType();
         }
-        return eventTypeFromSignature(field.getPureDataType(), field.getDataType());
+        return eventTypeFromSignature(protobufPureType(field), field.getDataType());
     }
 
     private String protobufEventType(Descriptors.FieldDescriptor field) {
