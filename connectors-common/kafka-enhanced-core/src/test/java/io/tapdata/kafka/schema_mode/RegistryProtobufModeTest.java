@@ -184,6 +184,242 @@ class RegistryProtobufModeTest {
         assertNotEquals(1, descriptor.findFieldByName("x").getNumber());
     }
 
+    @Test
+    void registryDescriptorIdentityAndOneofSurviveIncrementalEvolution() throws Exception {
+        DescriptorProtos.DescriptorProto registeredRoot = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Order")
+                .addOneofDecl(DescriptorProtos.OneofDescriptorProto.newBuilder().setName("identity"))
+                .addField(field("email", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING,
+                        DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL, null).toBuilder()
+                        .setOneofIndex(0).build())
+                .addField(field("id", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64))
+                .build();
+        Descriptors.FileDescriptor registeredFile = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName("orders.proto").setPackage("sales.v1").setSyntax("proto3")
+                        .addMessageType(registeredRoot).build(), new Descriptors.FileDescriptor[0]);
+        Descriptors.Descriptor registered = registeredFile.findMessageTypeByName("Order");
+        configureRegistry(registered);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("email", "STRING"));
+        table.add(new TapField("id", "INTEGER"));
+        table.add(new TapField("createdAt", "STRING"));
+        Descriptors.Descriptor evolved = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        assertEquals("sales.v1.Order", evolved.getFullName());
+        assertEquals("orders.proto", evolved.getFile().getName());
+        assertEquals(registered.getOneofs().get(0).getName(), evolved.getOneofs().get(0).getName());
+        assertEquals(0, evolved.findFieldByName("email").getContainingOneof().getIndex());
+        assertEquals(3, evolved.findFieldByName("createdAt").getNumber());
+        assertTrue(new ProtobufSchema(evolved).isBackwardCompatible(new ProtobufSchema(registered)).isEmpty());
+    }
+
+    @Test
+    void addingFieldUnderTopLevelSiblingMessageIsMergedIntoRegisteredType() throws Exception {
+        DescriptorProtos.DescriptorProto address = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Address")
+                .addField(field("city", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .build();
+        DescriptorProtos.DescriptorProto order = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Order")
+                .addField(field("address", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".sales.Address"))
+                .build();
+        Descriptors.FileDescriptor file = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder().setName("sales.proto")
+                        .setPackage("sales").setSyntax("proto3")
+                        .addMessageType(order).addMessageType(address).build(), new Descriptors.FileDescriptor[0]);
+        Descriptors.Descriptor registered = file.findMessageTypeByName("Order");
+        configureRegistry(registered);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("address", "OBJECT"));
+        table.add(new TapField("address.city", "STRING"));
+        table.add(new TapField("address.zip", "STRING"));
+        Descriptors.Descriptor evolved = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        Descriptors.Descriptor evolvedAddress = evolved.findFieldByName("address").getMessageType();
+        assertEquals("sales.Address", evolvedAddress.getFullName());
+        assertNotNull(evolvedAddress.findFieldByName("city"));
+        assertEquals(2, evolvedAddress.findFieldByName("zip").getNumber());
+        assertTrue(new ProtobufSchema(evolved).isBackwardCompatible(new ProtobufSchema(registered)).isEmpty());
+    }
+
+    @Test
+    void recursiveRegisteredTypeRemainsRecursiveAfterEvolution() throws Exception {
+        DescriptorProtos.DescriptorProto root = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Node")
+                .addField(field("id", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64))
+                .addField(field("next", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".tree.Node"))
+                .build();
+        Descriptors.FileDescriptor file = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder().setName("tree.proto")
+                        .setPackage("tree").setSyntax("proto3").addMessageType(root).build(),
+                new Descriptors.FileDescriptor[0]);
+        Descriptors.Descriptor registered = file.findMessageTypeByName("Node");
+        configureRegistry(registered);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("id", "INTEGER"));
+        table.add(new TapField("next", "OBJECT"));
+        table.add(new TapField("next.createdAt", "STRING"));
+        Descriptors.Descriptor evolved = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        assertEquals("tree.Node", evolved.getFullName());
+        assertEquals(evolved, evolved.findFieldByName("next").getMessageType());
+        assertNotNull(evolved.findFieldByName("createdAt"));
+        assertEquals(3, evolved.findFieldByName("createdAt").getNumber());
+        assertTrue(new ProtobufSchema(evolved).isBackwardCompatible(new ProtobufSchema(registered)).isEmpty());
+    }
+
+    @Test
+    void ancestorReferenceCycleDoesNotLoseNestedDdlFields() throws Exception {
+        DescriptorProtos.DescriptorProto child = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Child")
+                .addField(field("parent", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".tree.Root"))
+                .build();
+        DescriptorProtos.DescriptorProto root = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Root")
+                .addNestedType(child)
+                .addField(field("id", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64))
+                .addField(field("child", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        ".tree.Root.Child"))
+                .build();
+        Descriptors.FileDescriptor file = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder().setName("tree-cycle.proto")
+                        .setPackage("tree").setSyntax("proto3").addMessageType(root).build(),
+                new Descriptors.FileDescriptor[0]);
+        Descriptors.Descriptor registered = file.findMessageTypeByName("Root");
+        configureRegistry(registered);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("id", "INTEGER"));
+        table.add(new TapField("child", "OBJECT"));
+        table.add(new TapField("child.code", "STRING"));
+        table.add(new TapField("child.parent", "OBJECT"));
+        table.add(new TapField("child.parent.createdAt", "STRING"));
+        Descriptors.Descriptor evolved = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        assertNotNull(evolved.findFieldByName("createdAt"));
+        assertEquals(3, evolved.findFieldByName("createdAt").getNumber());
+        assertNotNull(evolved.findFieldByName("child").getMessageType().findFieldByName("code"));
+        assertTrue(new ProtobufSchema(evolved).isBackwardCompatible(new ProtobufSchema(registered)).isEmpty());
+    }
+
+    @Test
+    void nestedMessageSelfReferenceEvolvesTheNestedTypeItself() throws Exception {
+        DescriptorProtos.DescriptorProto child = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Child")
+                .addField(field("id", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64))
+                .addField(field("next", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        ".tree.Root.Child"))
+                .build();
+        DescriptorProtos.DescriptorProto root = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Root").addNestedType(child)
+                .addField(field("child", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        ".tree.Root.Child"))
+                .build();
+        Descriptors.FileDescriptor file = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder().setName("tree-nested-cycle.proto")
+                        .setPackage("tree").setSyntax("proto3").addMessageType(root).build(),
+                new Descriptors.FileDescriptor[0]);
+        Descriptors.Descriptor registered = file.findMessageTypeByName("Root");
+        configureRegistry(registered);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("child", "OBJECT"));
+        table.add(new TapField("child.id", "INTEGER"));
+        table.add(new TapField("child.next", "OBJECT"));
+        table.add(new TapField("child.next.createdAt", "STRING"));
+        Descriptors.Descriptor evolved = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+        Descriptors.Descriptor evolvedChild = evolved.findFieldByName("child").getMessageType();
+
+        assertNotNull(evolvedChild.findFieldByName("createdAt"));
+        assertEquals(3, evolvedChild.findFieldByName("createdAt").getNumber());
+        assertNull(evolved.findFieldByName("createdAt"));
+        assertTrue(new ProtobufSchema(evolved).isBackwardCompatible(new ProtobufSchema(registered)).isEmpty());
+    }
+
+    @Test
+    void registeredCustomMessageMapValueSurvivesIncrementalEvolution() throws Exception {
+        DescriptorProtos.DescriptorProto value = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Value")
+                .addField(field("label", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .build();
+        DescriptorProtos.DescriptorProto entry = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("AttributesEntry").setOptions(DescriptorProtos.MessageOptions.newBuilder().setMapEntry(true))
+                .addField(field("key", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .addField(field("value", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".maps.Value"))
+                .build();
+        DescriptorProtos.DescriptorProto root = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Record")
+                .addNestedType(entry)
+                .addField(field("attributes", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED, ".maps.Record.AttributesEntry"))
+                .addField(field("id", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64))
+                .build();
+        Descriptors.FileDescriptor file = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder().setName("maps.proto")
+                        .setPackage("maps").setSyntax("proto3").addMessageType(root).addMessageType(value).build(),
+                new Descriptors.FileDescriptor[0]);
+        Descriptors.Descriptor registered = file.findMessageTypeByName("Record");
+        configureRegistry(registered);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("attributes", "MAP"));
+        table.add(new TapField("id", "INTEGER"));
+        table.add(new TapField("createdAt", "STRING"));
+        Descriptors.Descriptor evolved = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+        Descriptors.FieldDescriptor attributes = evolved.findFieldByName("attributes");
+
+        assertEquals("maps.Value", attributes.getMessageType().findFieldByName("value")
+                .getMessageType().getFullName());
+        Map<String, Object> row = Collections.singletonMap("label", "kept");
+        Object converted = invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                Collections.singletonMap("one", row), attributes);
+        DynamicMessage message = DynamicMessage.newBuilder(evolved).setField(attributes, converted).build();
+        DynamicMessage storedValue = (DynamicMessage) ((List<?>) message.getField(attributes)).get(0);
+        Descriptors.FieldDescriptor valueField = storedValue.getDescriptorForType().findFieldByName("value");
+        DynamicMessage storedMapValue = (DynamicMessage) storedValue.getField(valueField);
+        assertEquals("kept", storedMapValue.getField(storedMapValue.getDescriptorForType().findFieldByName("label")));
+    }
+
+    @Test
+    void booleanNumericInputsAndUnsignedRangesAreValidated() throws Exception {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("enabled", "BOOLEAN"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor enabled = descriptor.findFieldByName("enabled");
+        assertEquals(true, invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class}, 1, enabled));
+        assertEquals(false, invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class}, "0", enabled));
+
+        Descriptors.Descriptor unsignedDescriptor = messageWithFields("Unsigned",
+                field("value", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_UINT32));
+        Descriptors.FieldDescriptor unsigned = unsignedDescriptor.findFieldByName("value");
+        java.lang.reflect.InvocationTargetException error = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class}, -1, unsigned));
+        assertInstanceOf(IllegalArgumentException.class, error.getCause());
+    }
+
+    @Test
+    void protobufMessageValuesMustMatchTheFieldMessageType() throws Exception {
+        Descriptors.Descriptor descriptor = messageWithDependency("Root", Struct.getDescriptor().getFile(),
+                field("payload", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        ".google.protobuf.Struct"));
+        java.lang.reflect.InvocationTargetException error = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                        Any.getDefaultInstance(), descriptor.findFieldByName("payload")));
+        assertInstanceOf(IllegalArgumentException.class, error.getCause());
+    }
+
     private void configureRegistryHistory(Descriptors.Descriptor version1,
                                           Descriptors.Descriptor version2) throws Exception {
         SchemaRegistryClient registry = mock(SchemaRegistryClient.class);
@@ -229,18 +465,18 @@ class RegistryProtobufModeTest {
                 field("b", 7, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING));
         invoke("persistDescriptor", new Class[]{TapTable.class, Descriptors.Descriptor.class}, table, source);
 
+        TapTable changedTable = new TapTable("topic");
+        changedTable.setTableAttr(new java.util.HashMap<>(table.getTableAttr()));
+        changedTable.add(new TapField("a", "STRING"));
+        changedTable.add(new TapField("b", "STRING"));
+        changedTable.add(new TapField("c", "STRING"));
+        mode = new RegistryProtobufMode(kafkaService); // Simulate task restart.
         Descriptors.Descriptor restored = invoke("getOrCreateDescriptor",
-                new Class[]{TapTable.class, String.class}, table, "topic");
+                new Class[]{TapTable.class, String.class}, changedTable, "topic");
         assertEquals(3, restored.findFieldByName("a").getNumber());
         assertEquals(7, restored.findFieldByName("b").getNumber());
-
-        table.add(new TapField("c", "STRING"));
-        Descriptors.Descriptor changed = invoke("getOrCreateDescriptor",
-                new Class[]{TapTable.class, String.class}, table, "topic");
-
-        assertEquals(3, changed.findFieldByName("a").getNumber());
-        assertEquals(7, changed.findFieldByName("b").getNumber());
-        assertEquals(8, changed.findFieldByName("c").getNumber());
+        assertEquals("Topic", restored.getFullName());
+        assertEquals(8, restored.findFieldByName("c").getNumber());
     }
 
     @Test
@@ -302,7 +538,7 @@ class RegistryProtobufModeTest {
         }
 
         Map<String, Object> converted = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, builder.build());
-        assertEquals(Arrays.asList("a", 2.0d), converted.get("items"));
+        assertEquals(Arrays.asList("a", 2), converted.get("items"));
         assertEquals(payload, converted.get("payload"));
     }
 

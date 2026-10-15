@@ -72,4 +72,7 @@ EOF
 - Field numbers are assigned from the topic subject in Schema Registry. Only one writer per topic may assign field numbers; multiple writers can assign the same number to different fields.
 - Only Confluent `TopicNameStrategy` (subject `<topic>-value`) is supported. `RecordNameStrategy` and `TopicRecordNameStrategy` are not supported.
 - When upgrading an existing subject, existing `OBJECT`, `ARRAY`, and `MAP` fields retain their legacy string wire encoding. New fields may use Protobuf structured encodings.
+- Custom message values in MAP fields are preserved only when their complete definitions exist in Schema Registry or the persisted descriptor. TapField metadata alone cannot add this value type, and the schema change fails visibly.
+- Values that cannot be converted cause Protobuf serialization of that record to fail and the error is propagated; records are not silently skipped or converted to strings.
+- Changes limited to `pureDataType` or the Protobuf wire type cannot be represented by the current DDL event model, so they are not propagated to downstream metadata; a warning is logged.
 - `google.protobuf.Value` cannot preserve numbers beyond IEEE 754 double precision; such numbers are written as strings.

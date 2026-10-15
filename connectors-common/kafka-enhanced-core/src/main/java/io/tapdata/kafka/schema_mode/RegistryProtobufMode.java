@@ -412,13 +412,14 @@ public class RegistryProtobufMode extends AbsSchemaMode {
      */
     private Descriptors.Descriptor getOrCreateDescriptor(TapTable tapTable, String outputTopic) throws Descriptors.DescriptorValidationException {
         String tableId = tapTable.getId();
-        Object lock = descriptorLocks.computeIfAbsent(tableId, key -> new Object());
+        String cacheKey = tableId + "|" + outputTopic;
+        Object lock = descriptorLocks.computeIfAbsent(cacheKey, key -> new Object());
         synchronized (lock) {
             String subject = outputTopic + "-value";
             initializeFieldNumbers(tapTable, subject);
             String schemaKey = outputTopic + "|" + descriptorSchemaKey(tapTable);
-            Descriptors.Descriptor cached = descriptorCache.get(tableId);
-            if (cached != null && schemaKey.equals(descriptorSchemaKeys.get(tableId))) {
+            Descriptors.Descriptor cached = descriptorCache.get(cacheKey);
+            if (cached != null && schemaKey.equals(descriptorSchemaKeys.get(cacheKey))) {
                 return cached;
             }
             try {
@@ -435,13 +436,18 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                     if (restored == null) {
                         descriptor = buildProtobufDescriptor(tapTable, outputTopic);
                     } else {
-                        validateAndRememberWireDescriptor(subject, restored);
                         seedFieldNumbersFromDescriptor(subject, restored);
-                        descriptor = restored;
+                        validateAndRememberWireDescriptor(subject, restored);
+                        descriptor = buildIncrementalDescriptor(tapTable, subject, restored);
                     }
                 }
-                descriptorCache.put(tableId, descriptor);
-                descriptorSchemaKeys.put(tableId, schemaKey);
+                // Keep the descriptor selected or built for a new subject as the in-memory
+                // identity baseline immediately. A DDL can arrive before the producer's first
+                // registration completes; it must still evolve this descriptor, not rebuild
+                // the schema identity from the flattened TapTable.
+                latestDescriptorBySubject.put(subject, descriptor);
+                descriptorCache.put(cacheKey, descriptor);
+                descriptorSchemaKeys.put(cacheKey, schemaKey);
                 return descriptor;
             } catch (Descriptors.DescriptorValidationException e) {
                 throw new RuntimeException("Failed to build Protobuf descriptor for table: " + tableId, e);
@@ -475,7 +481,6 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             throws Descriptors.DescriptorValidationException {
         Map<String, Object> attrs = table == null ? null : table.getTableAttr();
         if (attrs == null || !(attrs.get(DESCRIPTOR_TABLE_ATTR) instanceof String)) return null;
-        if (!Objects.equals(descriptorSchemaKey(table), attrs.get(DESCRIPTOR_TABLE_ATTR + ".schemaKey"))) return null;
         try {
             DescriptorProtos.FileDescriptorSet set = DescriptorProtos.FileDescriptorSet.parseFrom(
                     Base64.getDecoder().decode((String) attrs.get(DESCRIPTOR_TABLE_ATTR)));
@@ -508,7 +513,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             }
             throw new IllegalArgumentException("Persisted Protobuf message not found: " + messageName);
         } catch (Descriptors.DescriptorValidationException e) {
-            throw e;
+            tapLogger.warn("Ignoring invalid persisted Protobuf descriptor for table {}: {}", table.getId(), e.getMessage());
+            return null;
         } catch (Exception e) {
             tapLogger.warn("Ignoring invalid persisted Protobuf descriptor for table {}: {}", table.getId(), e.getMessage());
             return null;
@@ -569,8 +575,9 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                     }
                     rememberWireDescriptor(subject, registered);
                     // A descriptor may have been built while Registry was unavailable.
-                    descriptorCache.remove(tableId);
-                    descriptorSchemaKeys.remove(tableId);
+                    String cachePrefix = tableId + "|";
+                    descriptorCache.keySet().removeIf(key -> key.startsWith(cachePrefix));
+                    descriptorSchemaKeys.keySet().removeIf(key -> key.startsWith(cachePrefix));
                 }
                 // Null means the subject is absent or uses a non-Protobuf schema.
                 // Transient lookup failures throw and leave this unset for a retry.
@@ -990,20 +997,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             return registered;
         }
         DescriptorProtos.FileDescriptorProto.Builder fileBuilder = registered.getFile().toProto().toBuilder();
-        int rootIndex = -1;
-        for (int i = 0; i < fileBuilder.getMessageTypeCount(); i++) {
-            if (fileBuilder.getMessageType(i).getName().equals(registered.getName())) {
-                rootIndex = i;
-                break;
-            }
-        }
-        if (rootIndex < 0) {
-            throw new IllegalStateException("Registered Protobuf descriptor " + registered.getFullName()
-                    + " is not a top-level message of file " + registered.getFile().getName());
-        }
-        DescriptorProtos.DescriptorProto.Builder rootBuilder = fileBuilder.getMessageType(rootIndex).toBuilder();
-        mergeMessageFields(rootBuilder, descriptorTree(tapTable), registered.getFullName(), subject, "");
-        fileBuilder.setMessageType(rootIndex, rootBuilder.build());
+        mergeMessageAtFullName(fileBuilder, registered.getFullName(), descriptorTree(tapTable), subject, "",
+                new HashMap<>(), new HashMap<>());
 
         Map<String, Descriptors.FileDescriptor> dependenciesByName = new LinkedHashMap<>();
         for (Descriptors.FileDescriptor dependency : registered.getFile().getDependencies()) {
@@ -1042,11 +1037,124 @@ public class RegistryProtobufMode extends AbsSchemaMode {
      * 类型名与 oneof 归属），只有新字段才按现有规则追加。若某个既有 message 字段在 TapTable 里带有子字段，
      * 则递归进入该注册嵌套类型补充新子字段。
      */
-    private void mergeMessageFields(DescriptorProtos.DescriptorProto.Builder messageBuilder,
+    private void mergeMessageAtFullName(DescriptorProtos.FileDescriptorProto.Builder fileBuilder,
+                                        String fullName,
+                                        DescriptorTreeNode node,
+                                        String subject,
+                                        String scopePath,
+                                        Map<String, DescriptorProtos.DescriptorProto.Builder> activeMessages,
+                                        Map<String, String> activeScopes) {
+        DescriptorProtos.DescriptorProto.Builder activeMessage = activeMessages.get(fullName);
+        if (activeMessage != null) {
+            mergeMessageFields(fileBuilder, activeMessage, node, fullName, subject,
+                    activeScopes.get(fullName), activeMessages, activeScopes);
+            return;
+        }
+        String packagePrefix = fileBuilder.getPackage().isEmpty() ? "" : fileBuilder.getPackage() + ".";
+        if (!fullName.startsWith(packagePrefix)) {
+            throw new IllegalArgumentException("Cannot evolve message outside registered file '"
+                    + fileBuilder.getName() + "': " + fullName);
+        }
+        String relativeName = fullName.substring(packagePrefix.length());
+        String[] path = relativeName.split("\\.");
+        String activeAncestorName = null;
+        for (String activeName : activeMessages.keySet()) {
+            if (fullName.startsWith(activeName + ".")
+                    && (activeAncestorName == null || activeName.length() > activeAncestorName.length())) {
+                activeAncestorName = activeName;
+            }
+        }
+        if (activeAncestorName != null) {
+            String activeRelativeName = activeAncestorName.substring(packagePrefix.length());
+            int activePathLength = activeRelativeName.split("\\.").length;
+            String[] nestedPath = Arrays.copyOfRange(path, activePathLength, path.length);
+            mergeAtNestedMessagePath(fileBuilder, activeMessages.get(activeAncestorName), nestedPath, 0,
+                    node, fullName, subject, scopePath, activeMessages, activeScopes);
+            return;
+        }
+        for (int i = 0; i < fileBuilder.getMessageTypeCount(); i++) {
+            DescriptorProtos.DescriptorProto topLevel = fileBuilder.getMessageType(i);
+            if (topLevel.getName().equals(path[0])) {
+                DescriptorProtos.DescriptorProto.Builder messageBuilder = topLevel.toBuilder();
+                activeMessages.put(fullName, messageBuilder);
+                activeScopes.put(fullName, scopePath);
+                try {
+                    mergeAtNestedMessagePath(fileBuilder, messageBuilder, path, 1, node, fullName, subject,
+                            scopePath, activeMessages, activeScopes);
+                } finally {
+                    activeMessages.remove(fullName);
+                    activeScopes.remove(fullName);
+                }
+                fileBuilder.setMessageType(i, messageBuilder.build());
+                return;
+            }
+        }
+        throw new IllegalArgumentException("Cannot evolve Protobuf message '" + fullName
+                + "' because it is not defined in registered file " + fileBuilder.getName());
+    }
+
+    private void mergeAtNestedMessagePath(DescriptorProtos.FileDescriptorProto.Builder fileBuilder,
+                                          DescriptorProtos.DescriptorProto.Builder messageBuilder,
+                                          String[] path,
+                                          int pathIndex,
+                                          DescriptorTreeNode node,
+                                          String fullName,
+                                          String subject,
+                                          String scopePath,
+                                          Map<String, DescriptorProtos.DescriptorProto.Builder> activeMessages,
+                                          Map<String, String> activeScopes) {
+        if (pathIndex == path.length) {
+            boolean alreadyActive = activeMessages.containsKey(fullName);
+            if (!alreadyActive) {
+                activeMessages.put(fullName, messageBuilder);
+                activeScopes.put(fullName, scopePath);
+            }
+            mergeMessageFields(fileBuilder, messageBuilder, node, fullName, subject, scopePath,
+                    activeMessages, activeScopes);
+            if (!alreadyActive) {
+                activeMessages.remove(fullName);
+                activeScopes.remove(fullName);
+            }
+            return;
+        }
+        for (int i = 0; i < messageBuilder.getNestedTypeCount(); i++) {
+            DescriptorProtos.DescriptorProto nested = messageBuilder.getNestedType(i);
+            if (nested.getName().equals(path[pathIndex])) {
+                DescriptorProtos.DescriptorProto.Builder nestedBuilder = nested.toBuilder();
+                String nestedFullName = fullName;
+                for (int suffix = path.length - 1; suffix > pathIndex; suffix--) {
+                    nestedFullName = nestedFullName.substring(0, nestedFullName.lastIndexOf('.'));
+                }
+                boolean alreadyActive = activeMessages.containsKey(nestedFullName);
+                if (!alreadyActive) {
+                    activeMessages.put(nestedFullName, nestedBuilder);
+                    activeScopes.put(nestedFullName, scopePath);
+                }
+                try {
+                    mergeAtNestedMessagePath(fileBuilder, nestedBuilder, path, pathIndex + 1,
+                            node, fullName, subject, scopePath, activeMessages, activeScopes);
+                } finally {
+                    if (!alreadyActive) {
+                        activeMessages.remove(nestedFullName);
+                        activeScopes.remove(nestedFullName);
+                    }
+                }
+                messageBuilder.setNestedType(i, nestedBuilder.build());
+                return;
+            }
+        }
+        throw new IllegalArgumentException("Cannot evolve nested Protobuf message '" + fullName
+                + "'; registered type path is incomplete");
+    }
+
+    private void mergeMessageFields(DescriptorProtos.FileDescriptorProto.Builder fileBuilder,
+                                    DescriptorProtos.DescriptorProto.Builder messageBuilder,
                                     DescriptorTreeNode node,
                                     String fullName,
                                     String subject,
-                                    String scopePath) {
+                                    String scopePath,
+                                    Map<String, DescriptorProtos.DescriptorProto.Builder> activeMessages,
+                                    Map<String, String> activeScopes) {
         Map<String, Integer> existingFieldIndexes = new HashMap<>();
         for (int i = 0; i < messageBuilder.getFieldCount(); i++) {
             existingFieldIndexes.put(messageBuilder.getField(i).getName(), i);
@@ -1064,22 +1172,23 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             if (index != null) {
                 DescriptorProtos.FieldDescriptorProto existing = messageBuilder.getField(index);
                 if (!child.children.isEmpty()) {
-                    String nestedName = existing.getType() == DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE
-                            ? directNestedTypeName(existing.getTypeName(), fullName) : null;
-                    int nestedIndex = nestedName == null ? -1 : indexOfNestedType(messageBuilder, nestedName);
-                    if (nestedIndex >= 0) {
-                        DescriptorProtos.DescriptorProto.Builder nestedBuilder =
-                                messageBuilder.getNestedType(nestedIndex).toBuilder();
-                        mergeMessageFields(nestedBuilder, child, fullName + "." + nestedName, subject, fieldPath);
-                        messageBuilder.setNestedType(nestedIndex, nestedBuilder.build());
-                    } else {
-                        tapLogger.warn("Ignoring nested Protobuf fields under '{}' because the registered field "
-                                + "is not a resolvable nested message", fieldPath);
+                    if (existing.getType() != DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE) {
+                        throw new IllegalArgumentException("Cannot add nested fields under non-message Protobuf field '"
+                                + fieldPath + "'");
                     }
+                    String nestedFullName = existing.getTypeName();
+                    if (nestedFullName.startsWith(".")) nestedFullName = nestedFullName.substring(1);
+                    if (fileBuilder == null) {
+                        throw new IllegalArgumentException("Cannot resolve registered Protobuf message type '"
+                                + nestedFullName + "' while evolving nested fields under '" + fieldPath + "'");
+                    }
+                    mergeMessageAtFullName(fileBuilder, nestedFullName, child, subject, fieldPath,
+                            activeMessages, activeScopes);
                 }
                 continue;
             }
-            messageBuilder.addField(buildNewFieldProto(messageBuilder, fullName, scopePath, child, subject));
+            messageBuilder.addField(buildNewFieldProto(messageBuilder, fullName, scopePath, child, subject,
+                    activeMessages, activeScopes));
         }
     }
 
@@ -1089,7 +1198,9 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             String fullName,
             String scopePath,
             DescriptorTreeNode child,
-            String subject) {
+            String subject,
+            Map<String, DescriptorProtos.DescriptorProto.Builder> activeMessages,
+            Map<String, String> activeScopes) {
         TapField tapField = child.field;
         String normalizedType = tapField == null ? "OBJECT" : normalizeTapType(tapField.getDataType());
         String fieldName = sanitizeFieldName(child.name);
@@ -1113,7 +1224,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             String nestedFullName = fullName + "." + nestedName;
             DescriptorProtos.DescriptorProto.Builder nested =
                     DescriptorProtos.DescriptorProto.newBuilder().setName(nestedName);
-            mergeMessageFields(nested, child, nestedFullName, subject, fieldPath);
+            mergeMessageFields(null, nested, child, nestedFullName, subject, fieldPath,
+                    activeMessages, activeScopes);
             messageBuilder.addNestedType(nested.build());
             field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
                     .setTypeName("." + nestedFullName);
@@ -1154,28 +1266,6 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             field.setDefaultValue(String.valueOf(tapField.getDefaultValue()));
         }
         return field.build();
-    }
-
-    /** 若 {@code typeName} 恰好是 {@code fullName} 的直接嵌套类型，返回其简单名，否则返回 {@code null}。 */
-    private String directNestedTypeName(String typeName, String fullName) {
-        if (typeName == null) {
-            return null;
-        }
-        String prefix = "." + fullName + ".";
-        if (!typeName.startsWith(prefix)) {
-            return null;
-        }
-        String remainder = typeName.substring(prefix.length());
-        return remainder.indexOf('.') < 0 ? remainder : null;
-    }
-
-    private int indexOfNestedType(DescriptorProtos.DescriptorProto.Builder messageBuilder, String name) {
-        for (int i = 0; i < messageBuilder.getNestedTypeCount(); i++) {
-            if (messageBuilder.getNestedType(i).getName().equals(name)) {
-                return i;
-            }
-        }
-        return -1;
     }
 
     private DescriptorTreeNode descriptorTree(TapTable tapTable) {
@@ -1793,10 +1883,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             }
             switch (fieldDescriptor.getType()) {
                 case BOOL:
-                    if (value instanceof Boolean) {
-                        return value;
-                    }
-                    return Boolean.parseBoolean(value.toString());
+                    return parseBooleanValue(value);
 
                 case INT32:
                 case SINT32:
@@ -1807,12 +1894,9 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                     return parseIntValue(value);
 
                 case FIXED32:
-                    return value instanceof Integer ? value : parseUnsignedIntValue(value);
+                    return parseUnsignedIntValue(value);
 
                 case UINT32:
-                    if (value instanceof Integer) {
-                        return value;
-                    }
                     return parseUnsignedIntValue(value);
 
                 case INT64:
@@ -1824,12 +1908,9 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                     return parseLongValue(value);
 
                 case FIXED64:
-                    return value instanceof Long ? value : parseUnsignedLongValue(value);
+                    return parseUnsignedLongValue(value);
 
                 case UINT64:
-                    if (value instanceof Long) {
-                        return value;
-                    }
                     return parseUnsignedLongValue(value);
 
                 case FLOAT:
@@ -1880,7 +1961,15 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                         return toListValue(value);
                     }
                     if (value instanceof Message) {
-                        return value;
+                        Message message = (Message) value;
+                        if (!fieldDescriptor.getMessageType().getFullName()
+                                .equals(message.getDescriptorForType().getFullName())) {
+                            throw new IllegalArgumentException("Expected message type "
+                                    + fieldDescriptor.getMessageType().getFullName() + " but got "
+                                    + message.getDescriptorForType().getFullName());
+                        }
+                        return DynamicMessage.newBuilder(fieldDescriptor.getMessageType())
+                                .mergeFrom(message).build();
                     }
                     DynamicMessage nested = toDynamicMessage(value, fieldDescriptor.getMessageType());
                     if (nested == null) {
@@ -1950,23 +2039,23 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         }
         switch (fieldDescriptor.getType()) {
             case BOOL:
-                return value instanceof Boolean ? value : Boolean.parseBoolean(value.toString());
+                return parseBooleanValue(value);
             case INT32:
             case SINT32:
             case SFIXED32:
                 return value instanceof Integer ? value : parseIntValue(value);
             case FIXED32:
-                return value instanceof Integer ? value : parseUnsignedIntValue(value);
+                return parseUnsignedIntValue(value);
             case UINT32:
-                return value instanceof Integer ? value : parseUnsignedIntValue(value);
+                return parseUnsignedIntValue(value);
             case INT64:
             case SINT64:
             case SFIXED64:
                 return value instanceof Long ? value : parseLongValue(value);
             case FIXED64:
-                return value instanceof Long ? value : parseUnsignedLongValue(value);
+                return parseUnsignedLongValue(value);
             case UINT64:
-                return value instanceof Long ? value : parseUnsignedLongValue(value);
+                return parseUnsignedLongValue(value);
             case FLOAT:
                 return value instanceof Float ? value : value instanceof Number
                         ? ((Number) value).floatValue() : Float.parseFloat(value.toString());
@@ -1997,6 +2086,14 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
     private int parseIntValue(Object value) {
         return new BigDecimal(value.toString()).intValueExact();
+    }
+
+    private boolean parseBooleanValue(Object value) {
+        if (value instanceof Boolean) return (Boolean) value;
+        String normalized = value.toString().trim();
+        if ("true".equalsIgnoreCase(normalized) || "1".equals(normalized)) return true;
+        if ("false".equalsIgnoreCase(normalized) || "0".equals(normalized)) return false;
+        throw new IllegalArgumentException("Invalid boolean value: " + value);
     }
 
     private long parseLongValue(Object value) {
@@ -2834,6 +2931,10 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         boolean defaultChanged = !Objects.equals(oldDefault, newDefault);
         boolean representableTypeChange = dataTypeChanged && !Objects.equals(oldEventType, newEventType);
         if (!representableTypeChange && !nullableChanged && !defaultChanged) {
+            if (dataTypeChanged) {
+                tapLogger.warn("Protobuf field '{}' changed wire/type metadata, but the DDL event model cannot "
+                        + "represent the change; downstream metadata will not be updated", fieldName);
+            }
             return null;
         }
         TapAlterFieldAttributesEvent attr = new TapAlterFieldAttributesEvent();
@@ -2880,6 +2981,10 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         boolean defaultChanged = !Objects.equals(oldDefault, newDefault);
         boolean representableTypeChange = dataTypeChanged && !Objects.equals(oldEventType, newEventType);
         if (!representableTypeChange && !nullableChanged && !defaultChanged) {
+            if (dataTypeChanged) {
+                tapLogger.warn("Protobuf field '{}' changed wire/type metadata, but the DDL event model cannot "
+                        + "represent the change; downstream metadata will not be updated", fieldName);
+            }
             return null;
         }
         TapAlterFieldAttributesEvent attr = new TapAlterFieldAttributesEvent();

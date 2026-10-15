@@ -65,4 +65,7 @@
 - 欄位編號由 Schema Registry 中的 topic subject 分配；同一個 topic 只允許一個寫入工作分配欄位編號。多個寫入者可能為不同欄位分配相同編號。
 - 僅支援 Confluent `TopicNameStrategy`（subject 名稱為 `<topic>-value`），不支援 `RecordNameStrategy` 和 `TopicRecordNameStrategy`。
 - 從舊版 schema 升級時，既有 `OBJECT`、`ARRAY`、`MAP` 欄位保留原有 string wire 編碼；新欄位可使用 Protobuf 結構編碼。
+- MAP 自訂 message value 僅在 Registry 或持久化 descriptor 已有完整定義時保留；只靠 TapField 無法新增此類 value，遇到時會報錯。
+- 無法轉換的欄位值會使該筆記錄的 Protobuf 序列化失敗並回報錯誤，不會靜默略過或轉成字串。
+- 僅 `pureDataType` 或 wire 類型變更無法由目前的 DDL 事件表達，因此不會傳播至下游 metadata；系統會記錄警告。
 - `google.protobuf.Value` 無法無損保存超出 IEEE 754 double 精度的數字；這類數字會以字串寫入。
