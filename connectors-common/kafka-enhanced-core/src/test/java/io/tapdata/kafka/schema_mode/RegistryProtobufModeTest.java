@@ -9,12 +9,14 @@ import com.google.protobuf.Struct;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
-import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kafka.KafkaConfig;
+import io.confluent.kafka.schemaregistry.client.SchemaMetadata;
+import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
+import io.confluent.kafka.schemaregistry.protobuf.ProtobufSchema;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -25,6 +27,9 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
@@ -33,10 +38,11 @@ import static org.mockito.Mockito.when;
 class RegistryProtobufModeTest {
 
     private RegistryProtobufMode mode;
+    private IKafkaService kafkaService;
 
     @BeforeEach
     void setUp() {
-        IKafkaService kafkaService = mock(IKafkaService.class);
+        kafkaService = mock(IKafkaService.class);
         KafkaConfig config = mock(KafkaConfig.class);
         when(kafkaService.getLog()).thenReturn(mock(Log.class));
         when(kafkaService.getConfig()).thenReturn(config);
@@ -89,6 +95,109 @@ class RegistryProtobufModeTest {
                 reorderedDescriptor.findFieldByName("first").getNumber());
         assertEquals(firstDescriptor.findFieldByName("second").getNumber(),
                 reorderedDescriptor.findFieldByName("second").getNumber());
+    }
+
+    @Test
+    void changingFieldWireTypeWithinOneModeInstanceIsRejected() throws Exception {
+        TapTable integerTable = new TapTable("topic");
+        integerTable.add(new TapField("x", "INTEGER"));
+        invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, integerTable);
+
+        TapTable stringTable = new TapTable("topic");
+        stringTable.add(new TapField("x", "STRING"));
+        java.lang.reflect.InvocationTargetException error = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, stringTable));
+        assertInstanceOf(IllegalArgumentException.class, error.getCause());
+    }
+
+    @Test
+    void readdingDeletedFieldWithDifferentWireTypeIsRejected() throws Exception {
+        TapTable original = new TapTable("topic");
+        original.add(new TapField("x", "INTEGER"));
+        invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, original);
+
+        // Building a descriptor without x records the deletion during this mode's lifetime.
+        invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, new TapTable("topic"));
+
+        TapTable readded = new TapTable("topic");
+        readded.add(new TapField("x", "STRING"));
+        java.lang.reflect.InvocationTargetException error = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, readded));
+        assertInstanceOf(IllegalArgumentException.class, error.getCause());
+    }
+
+    @Test
+    void historicalFieldNumberDriftDoesNotBlockBuildingLatestRegisteredShape() throws Exception {
+        Descriptors.Descriptor version1 = messageWithFields("Topic",
+                field("a", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING),
+                field("b", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING),
+                field("c", 3, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING));
+        Descriptors.Descriptor version2 = messageWithFields("Topic",
+                field("a", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING),
+                field("c", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING));
+        configureRegistryHistory(version1, version2);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("a", "STRING"));
+        table.add(new TapField("c", "STRING"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        assertEquals(1, descriptor.findFieldByName("a").getNumber());
+        assertEquals(2, descriptor.findFieldByName("c").getNumber());
+    }
+
+    @Test
+    void readdingDeletedFieldWithSameTypeUsesNumberAfterAllHistoricalReservations() throws Exception {
+        Descriptors.Descriptor version1 = messageWithFields("Topic",
+                field("x", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT32));
+        Descriptors.Descriptor version2 = messageWithFields("Topic",
+                field("y", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING));
+        configureRegistryHistory(version1, version2);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("x", "INTEGER"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        assertEquals(3, descriptor.findFieldByName("x").getNumber());
+        assertNotEquals(1, descriptor.findFieldByName("x").getNumber());
+    }
+
+    private void configureRegistryHistory(Descriptors.Descriptor version1,
+                                          Descriptors.Descriptor version2) {
+        SchemaRegistryClient registry = mock(SchemaRegistryClient.class);
+        when(kafkaService.getSchemaRegistryClient()).thenReturn(registry);
+        SchemaMetadata metadata1 = new SchemaMetadata(1, 101, "", Collections.emptyList(), ProtobufSchema.TYPE);
+        SchemaMetadata metadata2 = new SchemaMetadata(2, 102, "", Collections.emptyList(), ProtobufSchema.TYPE);
+        when(registry.getLatestSchemaMetadata("topic-value")).thenReturn(metadata2);
+        when(registry.getAllVersions("topic-value")).thenReturn(Arrays.asList(1, 2));
+        when(registry.getSchemaMetadata("topic-value", 1)).thenReturn(metadata1);
+        when(registry.getSchemaMetadata("topic-value", 2)).thenReturn(metadata2);
+        when(registry.getSchemaBySubjectAndId("topic-value", 101)).thenReturn(new ProtobufSchema(version1));
+        when(registry.getSchemaBySubjectAndId("topic-value", 102)).thenReturn(new ProtobufSchema(version2));
+    }
+
+    @Test
+    void newFieldNumberAppendsAfterRegisteredAndReservedNumbers() throws Exception {
+        java.lang.reflect.Field mappingsField = RegistryProtobufMode.class.getDeclaredField("fieldNumbersBySubject");
+        java.lang.reflect.Field reservedField = RegistryProtobufMode.class.getDeclaredField("reservedFieldNumbersBySubject");
+        mappingsField.setAccessible(true);
+        reservedField.setAccessible(true);
+        Map<String, Map<String, Integer>> mappings = (Map<String, Map<String, Integer>>) mappingsField.get(mode);
+        Map<String, Map<String, Set<Integer>>> reserved =
+                (Map<String, Map<String, Set<Integer>>>) reservedField.get(mode);
+        mappings.put("topic-value", new ConcurrentHashMap<>(Collections.singletonMap("current", 2)));
+        Map<String, Set<Integer>> rootReservations = new ConcurrentHashMap<>();
+        rootReservations.put("", new HashSet<>(Collections.singleton(1)));
+        reserved.put("topic-value", rootReservations);
+
+        int next = (Integer) invoke("fieldNumberFor", new Class[]{String.class, String.class},
+                "topic-value", "discount");
+
+        assertEquals(3, next);
     }
 
     @Test
@@ -372,7 +481,7 @@ class RegistryProtobufModeTest {
     }
 
     @Test
-    void repeatedElementTypeChangeProducesAttributeEvent() throws Exception {
+    void repeatedElementTypeChangeDoesNotEmitUnrepresentableAttributeEvent() throws Exception {
         Descriptors.FileDescriptor oldFile = Descriptors.FileDescriptor.buildFrom(
                 DescriptorProtos.FileDescriptorProto.newBuilder()
                         .setName("OldRepeated.proto")
@@ -397,8 +506,46 @@ class RegistryProtobufModeTest {
         List<TapEvent> events = invoke("detectSchemaChangesFlat",
                 new Class[]{String.class, Descriptors.Descriptor.class, Descriptors.Descriptor.class, long.class},
                 "topic", oldFile.findMessageTypeByName("Root"), newFile.findMessageTypeByName("Root"), 1L);
-        assertEquals(1, events.size());
-        assertTrue(events.get(0) instanceof TapAlterFieldAttributesEvent);
+        assertTrue(events.isEmpty());
+    }
+
+    @Test
+    void addingEnumValueIsWireCompatibleButRenumberingExistingValueIsNot() throws Exception {
+        Descriptors.FieldDescriptor oldField = enumField("OldEnum.proto", 1, false);
+        Descriptors.FieldDescriptor addedValueField = enumField("AddedEnum.proto", 1, true);
+        Descriptors.FieldDescriptor renumberedField = enumField("RenumberedEnum.proto", 2, true);
+
+        assertTrue((Boolean) invoke("wireFieldCompatible",
+                new Class[]{Descriptors.FieldDescriptor.class, Descriptors.FieldDescriptor.class, java.util.Set.class},
+                oldField, addedValueField, new java.util.HashSet<>()));
+        assertFalse((Boolean) invoke("wireFieldCompatible",
+                new Class[]{Descriptors.FieldDescriptor.class, Descriptors.FieldDescriptor.class, java.util.Set.class},
+                oldField, renumberedField, new java.util.HashSet<>()));
+    }
+
+    private Descriptors.FieldDescriptor enumField(String fileName, int readyNumber, boolean includeAddedValue)
+            throws Exception {
+        DescriptorProtos.EnumDescriptorProto.Builder status = DescriptorProtos.EnumDescriptorProto.newBuilder()
+                .setName("Status")
+                .addValue(DescriptorProtos.EnumValueDescriptorProto.newBuilder().setName("UNKNOWN").setNumber(0))
+                .addValue(DescriptorProtos.EnumValueDescriptorProto.newBuilder().setName("READY").setNumber(readyNumber));
+        if (includeAddedValue) {
+            status.addValue(DescriptorProtos.EnumValueDescriptorProto.newBuilder()
+                    .setName("NEW_VALUE").setNumber(readyNumber + 1));
+        }
+        DescriptorProtos.DescriptorProto rootProto = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Root")
+                .addEnumType(status)
+                .addField(field("status", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_ENUM,
+                        DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL, ".Root.Status"))
+                .build();
+        Descriptors.FileDescriptor file = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName(fileName)
+                        .setSyntax("proto3")
+                        .addMessageType(rootProto)
+                        .build(), new Descriptors.FileDescriptor[0]);
+        return file.findMessageTypeByName("Root").findFieldByName("status");
     }
 
     @Test
@@ -616,6 +763,20 @@ class RegistryProtobufModeTest {
                                                    DescriptorProtos.DescriptorProto... nested) throws Exception {
         DescriptorProtos.DescriptorProto.Builder builder = DescriptorProtos.DescriptorProto.newBuilder().setName(name).addField(field);
         builder.addAllNestedType(Arrays.asList(nested));
+        Descriptors.FileDescriptor file = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName(name + ".proto")
+                        .setSyntax("proto3")
+                        .addMessageType(builder.build())
+                        .build(), new Descriptors.FileDescriptor[0]);
+        return file.findMessageTypeByName(name);
+    }
+
+    private static Descriptors.Descriptor messageWithFields(String name,
+                                                              DescriptorProtos.FieldDescriptorProto... fields)
+            throws Exception {
+        DescriptorProtos.DescriptorProto.Builder builder = DescriptorProtos.DescriptorProto.newBuilder().setName(name);
+        builder.addAllField(Arrays.asList(fields));
         Descriptors.FileDescriptor file = Descriptors.FileDescriptor.buildFrom(
                 DescriptorProtos.FileDescriptorProto.newBuilder()
                         .setName(name + ".proto")
