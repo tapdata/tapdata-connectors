@@ -51,7 +51,15 @@ public class RegistryProtobufMode extends AbsSchemaMode {
     private static final String MAP_TYPE_PREFIX = "__protobuf_map__:";
 
     // 缓存表的 Protobuf Descriptor，避免重复构建
-    private final Map<String, Descriptors.Descriptor> descriptorCache = new ConcurrentHashMap<>();
+    private static final int MAX_CACHED_DESCRIPTORS = 256;
+    private final Map<String, Descriptors.Descriptor> descriptorCache = new LinkedHashMap<String, Descriptors.Descriptor>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Descriptors.Descriptor> eldest) {
+            return size() > MAX_CACHED_DESCRIPTORS;
+        }
+    };
+    // Retain small schema fingerprints after descriptor eviction to reject unsafe wire-schema changes.
+    private final Map<String, String> schemaKeysByTable = new ConcurrentHashMap<>();
     // 每个 topic 最近一次见到的 Protobuf Descriptor 引用；命中时（==）走快速路径，跳过任何 schema diff 计算
     private final Map<String, Descriptors.Descriptor> lastDescriptorPerTopic = new ConcurrentHashMap<>();
 
@@ -286,6 +294,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
     @Override
     public List<ProducerRecord<Object, Object>> fromTapEvent(TapTable tapTable, TapEvent tapEvent) {
+        validateWritableSchema(tapTable);
         // 提取数据
         Map<String, Object> data;
         DMLType op = INSERT;
@@ -318,7 +327,17 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                 Object value = entry.getValue();
 
                 Descriptors.FieldDescriptor fieldDescriptor = descriptor.findFieldByName(fieldName);
+                if (fieldDescriptor == null && value != null) {
+                    throw new IllegalArgumentException("Field '" + fieldName
+                            + "' is not present in the Registry Protobuf target schema");
+                }
                 if (fieldDescriptor != null && value != null) {
+                    if (value instanceof Map || value instanceof Collection
+                            || (value.getClass().isArray()
+                            && fieldDescriptor.getType() != Descriptors.FieldDescriptor.Type.BYTES)) {
+                        throw new UnsupportedOperationException("Registry Protobuf target cannot encode structured value for field '"
+                                + fieldName + "' as " + fieldDescriptor.getType());
+                    }
                     Object convertedValue = convertValue(value, fieldDescriptor);
                     if (convertedValue != null) {
                         messageBuilder.setField(fieldDescriptor, convertedValue);
@@ -346,14 +365,78 @@ public class RegistryProtobufMode extends AbsSchemaMode {
      * 获取或创建表的 Protobuf Descriptor
      */
     private Descriptors.Descriptor getOrCreateDescriptor(TapTable tapTable) throws Descriptors.DescriptorValidationException {
+        validateWritableSchema(tapTable);
         String tableId = tapTable.getId();
-        return descriptorCache.computeIfAbsent(tableId, k -> {
-            try {
-                return buildProtobufDescriptor(tapTable);
-            } catch (Descriptors.DescriptorValidationException e) {
-                throw new RuntimeException("Failed to build Protobuf descriptor for table: " + tableId, e);
+        String schemaKey = descriptorSchemaKey(tapTable);
+        synchronized (descriptorCache) {
+            String previousKey = schemaKeysByTable.get(tableId);
+            if (previousKey != null && !schemaKey.equals(previousKey)) {
+                throw new IllegalStateException("Registry Protobuf target schema changed for table '" + tableId
+                        + "'; writing with the cached descriptor could lose fields or change wire tags");
             }
-        });
+            Descriptors.Descriptor cached = descriptorCache.get(tableId);
+            if (cached == null) {
+                try {
+                    cached = buildProtobufDescriptor(tapTable);
+                    descriptorCache.put(tableId, cached);
+                    schemaKeysByTable.put(tableId, schemaKey);
+                } catch (Descriptors.DescriptorValidationException e) {
+                    throw new RuntimeException("Failed to build Protobuf descriptor for table: " + tableId, e);
+                }
+            }
+            return cached;
+        }
+    }
+
+    // The target writer only supports flat scalar fields. Source-side TapTables may
+    // describe nested/repeated/map Protobuf fields, which cannot be reconstructed
+    // from this writer's flat descriptor without changing the wire contract.
+    private void validateWritableSchema(TapTable table) {
+        if (table == null || table.getNameFieldMap() == null) return;
+        for (Map.Entry<String, TapField> entry : table.getNameFieldMap().entrySet()) {
+            String name = entry.getKey();
+            TapField field = entry.getValue();
+            String type = field == null ? null : StringKit.removeParentheses(field.getDataType());
+            String normalizedType = StringUtils.defaultString(type).trim().toUpperCase(Locale.ROOT);
+            boolean structuredType = normalizedType.equals("ARRAY") || normalizedType.startsWith("ARRAY<")
+                    || normalizedType.equals("MAP") || normalizedType.startsWith("MAP<")
+                    || normalizedType.equals("OBJECT") || normalizedType.startsWith("OBJECT<")
+                    || normalizedType.endsWith("[]");
+            if (name == null || !name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+                throw new UnsupportedOperationException("Registry Protobuf target requires flat protobuf field names; unsupported field '"
+                        + name + "'");
+            }
+            if (StringUtils.isBlank(type) || structuredType
+                    || field.getPureDataType() != null && field.getPureDataType().startsWith("__protobuf_")) {
+                throw new UnsupportedOperationException("Registry Protobuf target cannot reconstruct field '"
+                        + name + "' of type '" + field.getDataType()
+                        + "' from TapTable without changing the protobuf wire schema");
+            }
+        }
+    }
+
+    private String descriptorSchemaKey(TapTable table) {
+        StringBuilder key = new StringBuilder();
+        if (table.getNameFieldMap() != null) {
+            for (Map.Entry<String, TapField> entry : table.getNameFieldMap().entrySet()) {
+                TapField field = entry.getValue();
+                appendSchemaKeyPart(key, entry.getKey());
+                appendSchemaKeyPart(key, field.getDataType());
+                appendSchemaKeyPart(key, field.getPureDataType());
+                appendSchemaKeyPart(key, field.getDefaultValue());
+                appendSchemaKeyPart(key, field.getNullable());
+            }
+        }
+        return key.toString();
+    }
+
+    private void appendSchemaKeyPart(StringBuilder key, Object value) {
+        if (value == null) {
+            key.append("-1:");
+        } else {
+            String text = String.valueOf(value);
+            key.append(text.length()).append(':').append(text);
+        }
     }
 
     /**

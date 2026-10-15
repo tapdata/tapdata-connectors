@@ -9,14 +9,19 @@ import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kafka.KafkaConfig;
+import io.tapdata.pdk.apis.context.TapConnectionContext;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -29,15 +34,113 @@ import static org.mockito.Mockito.when;
 class RegistryProtobufModeTest {
 
     private RegistryProtobufMode mode;
+    private KafkaConfig config;
 
     @BeforeEach
     void setUp() {
         IKafkaService kafkaService = mock(IKafkaService.class);
-        KafkaConfig config = mock(KafkaConfig.class);
+        config = mock(KafkaConfig.class);
         when(kafkaService.getLog()).thenReturn(mock(Log.class));
         when(kafkaService.getConfig()).thenReturn(config);
         when(config.getNodeApplyDefault()).thenReturn(false);
         mode = new RegistryProtobufMode(kafkaService);
+    }
+
+    @Test
+    void targetRejectsNestedAndCollectionFieldsBeforeWriting() {
+        TapInsertRecordEvent event = TapInsertRecordEvent.create();
+        for (TapField field : Arrays.asList(
+                new TapField("profile.name", "STRING"),
+                new TapField("tags", "ARRAY").pureDataType("__protobuf_repeated_scalar__:STRING"),
+                new TapField("typedItems", "ARRAY<STRING>"),
+                new TapField("attributes", "MAP"),
+                new TapField("status", "STRING").pureDataType("__protobuf_repeated_enum__:Root.Status"),
+                new TapField("profile", "OBJECT"))) {
+            TapTable table = new TapTable("topic");
+            table.add(field);
+            UnsupportedOperationException error = assertThrows(UnsupportedOperationException.class,
+                    () -> mode.fromTapEvent(table, event));
+            assertTrue(error.getMessage().contains(field.getName()));
+        }
+    }
+
+    @Test
+    void targetStillWritesFlatScalarRecords() {
+        TapConnectionContext context = mock(TapConnectionContext.class);
+        when(config.tapConnectionContext()).thenReturn(context);
+        when(context.getNodeConfig()).thenReturn(mock(DataMap.class));
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("name", "STRING"));
+        TapInsertRecordEvent event = TapInsertRecordEvent.create();
+        event.setAfter(Collections.singletonMap("name", "Ada"));
+
+        List<ProducerRecord<Object, Object>> records = mode.fromTapEvent(table, event);
+        assertEquals(1, records.size());
+        assertEquals("topic", records.get(0).topic());
+        DynamicMessage message = (DynamicMessage) records.get(0).value();
+        assertEquals("Ada", message.getField(message.getDescriptorForType().findFieldByName("name")));
+    }
+
+    @Test
+    void targetRejectsRuntimeCollectionInsteadOfStringifyingIt() {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("tags", "STRING"));
+        TapInsertRecordEvent event = TapInsertRecordEvent.create();
+        event.setAfter(Collections.singletonMap("tags", Arrays.asList("a", "b")));
+
+        RuntimeException error = assertThrows(RuntimeException.class,
+                () -> mode.fromTapEvent(table, event));
+        assertTrue(error.getCause() instanceof UnsupportedOperationException);
+        assertTrue(error.getCause().getMessage().contains("tags"));
+    }
+
+    @Test
+    void targetRejectsUndeclaredFieldsInsteadOfDroppingThem() {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("name", "STRING"));
+        TapInsertRecordEvent event = TapInsertRecordEvent.create();
+        event.setAfter(Collections.singletonMap("age", 42));
+
+        RuntimeException error = assertThrows(RuntimeException.class,
+                () -> mode.fromTapEvent(table, event));
+        assertTrue(error.getCause() instanceof IllegalArgumentException);
+        assertTrue(error.getCause().getMessage().contains("age"));
+    }
+
+    @Test
+    void targetRejectsChangedSchemaInsteadOfDroppingNewField() {
+        TapTable original = new TapTable("topic");
+        original.add(new TapField("name", "STRING"));
+        TapTable changed = new TapTable("topic");
+        changed.add(new TapField("name", "STRING"));
+        changed.add(new TapField("age", "INTEGER"));
+
+        assertDoesNotThrow(() -> invoke("getOrCreateDescriptor", new Class[]{TapTable.class}, original));
+        Exception error = assertThrows(Exception.class,
+                () -> invoke("getOrCreateDescriptor", new Class[]{TapTable.class}, changed));
+        assertTrue(error.getCause() instanceof IllegalStateException);
+        assertTrue(error.getCause().getMessage().contains("schema changed"));
+    }
+
+    @Test
+    void descriptorEvictionDoesNotForgetTheSchemaBoundary() throws Exception {
+        TapTable original = new TapTable("topic-0");
+        original.add(new TapField("name", "STRING"));
+        invoke("getOrCreateDescriptor", new Class[]{TapTable.class}, original);
+        for (int i = 1; i <= 256; i++) {
+            TapTable table = new TapTable("topic-" + i);
+            table.add(new TapField("name", "STRING"));
+            invoke("getOrCreateDescriptor", new Class[]{TapTable.class}, table);
+        }
+
+        java.lang.reflect.Field cacheField = RegistryProtobufMode.class.getDeclaredField("descriptorCache");
+        cacheField.setAccessible(true);
+        assertEquals(256, ((Map<?, ?>) cacheField.get(mode)).size());
+        TapTable changed = new TapTable("topic-0");
+        changed.add(new TapField("age", "INTEGER"));
+        InvocationTargetException error = assertThrows(InvocationTargetException.class,
+                () -> invoke("getOrCreateDescriptor", new Class[]{TapTable.class}, changed));
+        assertTrue(error.getCause().getMessage().contains("schema changed"));
     }
 
     @Test
