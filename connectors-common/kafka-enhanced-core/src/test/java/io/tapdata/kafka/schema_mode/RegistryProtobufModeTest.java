@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.InvocationTargetException;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
@@ -130,6 +131,20 @@ class RegistryProtobufModeTest {
         Map<String, Object> decoded = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
         assertTrue(((Map<?, ?>) decoded.get("attributes")).containsKey("missing"));
         assertNull(((Map<?, ?>) decoded.get("attributes")).get("missing"));
+    }
+
+    @Test
+    void nullInScalarMapFailsExplicitlyInsteadOfBecomingDefaultValue() throws Exception {
+        TapTable table = new TapTable("topic");
+        TapField attributes = new TapField("attributes", "MAP");
+        attributes.setPureDataType("__protobuf_map__:SCALAR:STRING|SCALAR:INT32");
+        table.add(attributes);
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor mapField = descriptor.findFieldByName("attributes");
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("missing", null);
+        assertThrows(InvocationTargetException.class, () -> invoke("convertValue",
+                new Class[]{Object.class, Descriptors.FieldDescriptor.class}, source, mapField));
     }
 
     @Test
@@ -384,8 +399,8 @@ class RegistryProtobufModeTest {
         assertEquals(1, events.size());
         assertTrue(events.get(0) instanceof TapAlterFieldAttributesEvent);
         TapAlterFieldAttributesEvent attribute = (TapAlterFieldAttributesEvent) events.get(0);
-        assertEquals("ARRAY", attribute.getDataTypeChange().getBefore());
-        assertEquals("ARRAY", attribute.getDataTypeChange().getAfter());
+        assertEquals("ARRAY<STRING>", attribute.getDataTypeChange().getBefore());
+        assertEquals("ARRAY<INTEGER>", attribute.getDataTypeChange().getAfter());
     }
 
     @Test

@@ -1052,10 +1052,16 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             String sanitizedKey = sanitizeFieldName(key);
             if (key.contains(".")) {
                 String rootKey = key.substring(0, key.indexOf('.'));
-                if (descriptor.findFieldByName(sanitizeFieldName(rootKey)) != null
+                Descriptors.FieldDescriptor rootField = descriptor.findFieldByName(sanitizeFieldName(rootKey));
+                if (rootField != null
                         && data.containsKey(rootKey)) {
                     // The nested root value is authoritative; dotted aliases are
                     // read-side compatibility keys and must not replace arrays/maps.
+                    continue;
+                }
+                if (rootField != null && rootField.isRepeated()
+                        && rootField.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE) {
+                    putRepeatedDottedValue(normalized, key, entry.getValue());
                     continue;
                 }
             }
@@ -1066,6 +1072,30 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             }
         }
         return normalized;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void putRepeatedDottedValue(Map<String, Object> target, String path, Object value) {
+        String[] parts = path.split("\\.");
+        String root = parts[0];
+        String relativePath = String.join(".", Arrays.copyOfRange(parts, 1, parts.length));
+        List<Object> values = value instanceof Collection
+                ? new ArrayList<>((Collection<?>) value)
+                : Collections.singletonList(value);
+        Object existing = target.get(root);
+        List<Map<String, Object>> rows;
+        if (existing instanceof List) {
+            rows = (List<Map<String, Object>>) existing;
+        } else {
+            rows = new ArrayList<>();
+            target.put(root, rows);
+        }
+        while (rows.size() < values.size()) {
+            rows.add(new LinkedHashMap<>());
+        }
+        for (int i = 0; i < values.size(); i++) {
+            putDottedValue(rows.get(i), relativePath, values.get(i));
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -1115,7 +1145,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                     && "google.protobuf.Value".equals(fieldDescriptor.getMessageType().getFullName())) {
                 return toProtobufValue(null);
             }
-            return null;
+            throw new IllegalArgumentException("Null is not representable for map field "
+                    + fieldDescriptor.getFullName());
         }
         if (fieldDescriptor.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE) {
             return convertValue(value, fieldDescriptor);
@@ -1655,7 +1686,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         attr.setReferenceTime(referenceTime);
         attr.fieldName(fieldName);
         if (dataTypeChanged) {
-            attr.dataType(ValueChange.create(protobufPrimaryTypeName(oldField), protobufPrimaryTypeName(newField)));
+            attr.dataType(ValueChange.create(protobufEventType(oldField), protobufEventType(newField)));
         }
         if (nullableChanged) {
             attr.nullable(ValueChange.create(oldNullable, newNullable));
@@ -1695,8 +1726,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         attr.fieldName(fieldName);
         if (dataTypeChanged) {
             attr.dataType(ValueChange.create(
-                    hasDetailedOldType ? oldField.getDataType() : oldType,
-                    protobufPrimaryTypeName(newField)));
+                    hasDetailedOldType ? tapFieldEventType(oldField) : oldType,
+                    protobufEventType(newField)));
         }
         if (nullableChanged) {
             attr.nullable(ValueChange.create(oldNullable, newNullable));
@@ -1714,6 +1745,56 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         return StringUtils.isNotBlank(field.getPureDataType())
                 ? field.getPureDataType()
                 : StringKit.removeParentheses(StringUtils.defaultString(field.getDataType()));
+    }
+
+    private String tapFieldEventType(TapField field) {
+        if (field == null || StringUtils.isBlank(field.getPureDataType())) {
+            return field == null ? null : field.getDataType();
+        }
+        return eventTypeFromSignature(field.getPureDataType(), field.getDataType());
+    }
+
+    private String protobufEventType(Descriptors.FieldDescriptor field) {
+        return eventTypeFromSignature(protobufFieldSignature(field), protobufPrimaryTypeName(field));
+    }
+
+    private String eventTypeFromSignature(String signature, String fallback) {
+        if (signature == null) {
+            return fallback;
+        }
+        if (signature.startsWith(REPEATED_SCALAR_PREFIX)) {
+            return "ARRAY<" + tapTypeFromProtobufType(signature.substring(REPEATED_SCALAR_PREFIX.length())) + ">";
+        }
+        if (signature.startsWith(REPEATED_ENUM_PREFIX)) {
+            return "ARRAY<STRING>";
+        }
+        if (signature.startsWith(MAP_TYPE_PREFIX)) {
+            return "MAP";
+        }
+        if (signature.endsWith("[]")) {
+            return "ARRAY<OBJECT>";
+        }
+        return fallback;
+    }
+
+    private String tapTypeFromProtobufType(String type) {
+        switch (type) {
+            case "BOOL": return "BOOLEAN";
+            case "INT32":
+            case "SINT32":
+            case "SFIXED32":
+            case "UINT32":
+            case "FIXED32": return "INTEGER";
+            case "INT64":
+            case "SINT64":
+            case "SFIXED64":
+            case "UINT64":
+            case "FIXED64": return "LONG";
+            case "FLOAT": return "FLOAT";
+            case "DOUBLE": return "DOUBLE";
+            case "BYTES": return "BINARY";
+            default: return "STRING";
+        }
     }
 
     private String protobufFieldSignature(Descriptors.FieldDescriptor field) {
