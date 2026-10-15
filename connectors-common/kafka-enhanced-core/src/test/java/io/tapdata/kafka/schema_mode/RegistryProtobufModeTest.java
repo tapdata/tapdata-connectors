@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.concurrent.ConcurrentHashMap;
@@ -47,6 +48,7 @@ class RegistryProtobufModeTest {
         when(kafkaService.getLog()).thenReturn(mock(Log.class));
         when(kafkaService.getConfig()).thenReturn(config);
         when(config.getNodeApplyDefault()).thenReturn(false);
+        when(config.buildProducerConfig()).thenReturn(new Properties());
         mode = new RegistryProtobufMode(kafkaService);
     }
 
@@ -112,6 +114,22 @@ class RegistryProtobufModeTest {
     }
 
     @Test
+    void int32ToSint32IsRejectedAsWireIncompatible() throws Exception {
+        Descriptors.Descriptor registered = messageWithFields("Topic",
+                field("x", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT32));
+        Descriptors.Descriptor changed = messageWithFields("Topic",
+                field("x", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_SINT32));
+
+        java.lang.reflect.InvocationTargetException error = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> invoke("validateWireCompatibility",
+                        new Class[]{Descriptors.Descriptor.class, Descriptors.Descriptor.class},
+                        registered, changed));
+
+        assertInstanceOf(IllegalArgumentException.class, error.getCause());
+    }
+
+    @Test
     void readdingDeletedFieldWithDifferentWireTypeIsRejected() throws Exception {
         TapTable original = new TapTable("topic");
         original.add(new TapField("x", "INTEGER"));
@@ -167,11 +185,11 @@ class RegistryProtobufModeTest {
     }
 
     private void configureRegistryHistory(Descriptors.Descriptor version1,
-                                          Descriptors.Descriptor version2) {
+                                          Descriptors.Descriptor version2) throws Exception {
         SchemaRegistryClient registry = mock(SchemaRegistryClient.class);
         when(kafkaService.getSchemaRegistryClient()).thenReturn(registry);
-        SchemaMetadata metadata1 = new SchemaMetadata(1, 101, "", Collections.emptyList(), ProtobufSchema.TYPE);
-        SchemaMetadata metadata2 = new SchemaMetadata(2, 102, "", Collections.emptyList(), ProtobufSchema.TYPE);
+        SchemaMetadata metadata1 = new SchemaMetadata(101, 1, ProtobufSchema.TYPE, Collections.emptyList(), "");
+        SchemaMetadata metadata2 = new SchemaMetadata(102, 2, ProtobufSchema.TYPE, Collections.emptyList(), "");
         when(registry.getLatestSchemaMetadata("topic-value")).thenReturn(metadata2);
         when(registry.getAllVersions("topic-value")).thenReturn(Arrays.asList(1, 2));
         when(registry.getSchemaMetadata("topic-value", 1)).thenReturn(metadata1);
@@ -198,6 +216,31 @@ class RegistryProtobufModeTest {
                 "topic-value", "discount");
 
         assertEquals(3, next);
+    }
+
+    @Test
+    void restoredDescriptorSeedsFieldNumbersBeforeSchemaChanges() throws Exception {
+        when(kafkaService.getSchemaRegistryClient()).thenReturn(mock(SchemaRegistryClient.class));
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("a", "STRING"));
+        table.add(new TapField("b", "STRING"));
+        Descriptors.Descriptor source = messageWithFields("Topic",
+                field("a", 3, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING),
+                field("b", 7, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING));
+        invoke("persistDescriptor", new Class[]{TapTable.class, Descriptors.Descriptor.class}, table, source);
+
+        Descriptors.Descriptor restored = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+        assertEquals(3, restored.findFieldByName("a").getNumber());
+        assertEquals(7, restored.findFieldByName("b").getNumber());
+
+        table.add(new TapField("c", "STRING"));
+        Descriptors.Descriptor changed = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        assertEquals(3, changed.findFieldByName("a").getNumber());
+        assertEquals(7, changed.findFieldByName("b").getNumber());
+        assertEquals(8, changed.findFieldByName("c").getNumber());
     }
 
     @Test

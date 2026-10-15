@@ -59,3 +59,10 @@
     192.168.1.2 kkz.com
     EOF
     ```
+
+# **6. Registry Protobuf 模式限制**
+
+- 字段号由 Schema Registry 中的 topic subject 分配；同一个 topic 只允许一个写入任务分配字段号。多写入方可能为不同字段分配相同字段号。
+- 仅支持 Confluent `TopicNameStrategy`（subject 名为 `<topic>-value`），不支持 `RecordNameStrategy` 和 `TopicRecordNameStrategy`。
+- 从旧版 schema 升级时，已有 `OBJECT`、`ARRAY`、`MAP` 字段保持原有 string wire 编码；新字段可使用 Protobuf 结构编码。
+- `google.protobuf.Value` 无法无损保存超出 IEEE 754 double 精度的数字，此类数字会以字符串写入。

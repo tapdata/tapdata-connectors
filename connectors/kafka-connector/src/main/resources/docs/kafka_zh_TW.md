@@ -59,3 +59,10 @@
     192.168.1.2 kkz.com
     EOF
     ```
+
+# **6. Registry Protobuf 模式限制**
+
+- 欄位編號由 Schema Registry 中的 topic subject 分配；同一個 topic 只允許一個寫入工作分配欄位編號。多個寫入者可能為不同欄位分配相同編號。
+- 僅支援 Confluent `TopicNameStrategy`（subject 名稱為 `<topic>-value`），不支援 `RecordNameStrategy` 和 `TopicRecordNameStrategy`。
+- 從舊版 schema 升級時，既有 `OBJECT`、`ARRAY`、`MAP` 欄位保留原有 string wire 編碼；新欄位可使用 Protobuf 結構編碼。
+- `google.protobuf.Value` 無法無損保存超出 IEEE 754 double 精度的數字；這類數字會以字串寫入。

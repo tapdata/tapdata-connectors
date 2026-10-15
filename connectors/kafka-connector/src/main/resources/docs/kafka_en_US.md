@@ -66,3 +66,10 @@ cat >> /etc/hosts << EOF
 192.168.1.2 kkz.com
 EOF
 ```
+
+# **6. Registry Protobuf mode limitations**
+
+- Field numbers are assigned from the topic subject in Schema Registry. Only one writer per topic may assign field numbers; multiple writers can assign the same number to different fields.
+- Only Confluent `TopicNameStrategy` (subject `<topic>-value`) is supported. `RecordNameStrategy` and `TopicRecordNameStrategy` are not supported.
+- When upgrading an existing subject, existing `OBJECT`, `ARRAY`, and `MAP` fields retain their legacy string wire encoding. New fields may use Protobuf structured encodings.
+- `google.protobuf.Value` cannot preserve numbers beyond IEEE 754 double precision; such numbers are written as strings.
