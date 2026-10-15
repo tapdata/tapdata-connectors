@@ -480,7 +480,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                             .setTypeName(".google.protobuf.Value");
                 } else if ("MAP".equals(normalizedType)) {
                     String entryName = sanitizeMessageName(fieldName + "Entry");
-                    messageBuilder.addNestedType(buildMapEntryDescriptor(entryName, tapField));
+                    messageBuilder.addNestedType(buildMapEntryDescriptor(entryName, messageName + "." + entryName, tapField));
                     fieldBuilder.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
                             .setTypeName("." + messageName + "." + entryName);
                 }
@@ -599,7 +599,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                         .setTypeName(".google.protobuf.Value");
             } else if ("MAP".equals(normalizedType)) {
                 String entryName = sanitizeMessageName(child.name + "Entry");
-                message.addNestedType(buildMapEntryDescriptor(entryName, tapField));
+                message.addNestedType(buildMapEntryDescriptor(entryName, fullName + "." + entryName, tapField));
                 field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
                         .setTypeName("." + fullName + "." + entryName);
             } else {
@@ -810,7 +810,9 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         return types.length > index ? types[index] : null;
     }
 
-    private DescriptorProtos.DescriptorProto buildMapEntryDescriptor(String entryName, TapField tapField) {
+    private DescriptorProtos.DescriptorProto buildMapEntryDescriptor(String entryName,
+                                                                      String fullEntryName,
+                                                                      TapField tapField) {
         String keyType = mapTypeToken(tapField, 0);
         String valueType = mapTypeToken(tapField, 1);
         if (keyType == null) {
@@ -819,15 +821,19 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         if (valueType == null) {
             valueType = "MESSAGE:google.protobuf.Value";
         }
-        return DescriptorProtos.DescriptorProto.newBuilder()
+        DescriptorProtos.DescriptorProto.Builder entry = DescriptorProtos.DescriptorProto.newBuilder()
                 .setName(entryName)
-                .setOptions(DescriptorProtos.MessageOptions.newBuilder().setMapEntry(true).build())
-                .addField(mapEntryField("key", 1, keyType))
-                .addField(mapEntryField("value", 2, valueType))
-                .build();
+                .setOptions(DescriptorProtos.MessageOptions.newBuilder().setMapEntry(true).build());
+        entry.addField(mapEntryField(entry, "key", 1, keyType, fullEntryName));
+        entry.addField(mapEntryField(entry, "value", 2, valueType, fullEntryName));
+        return entry.build();
     }
 
-    private DescriptorProtos.FieldDescriptorProto mapEntryField(String name, int number, String token) {
+    private DescriptorProtos.FieldDescriptorProto mapEntryField(DescriptorProtos.DescriptorProto.Builder entry,
+                                                                String name,
+                                                                int number,
+                                                                String token,
+                                                                String fullEntryName) {
         DescriptorProtos.FieldDescriptorProto.Builder field = DescriptorProtos.FieldDescriptorProto.newBuilder()
                 .setName(name)
                 .setNumber(number)
@@ -835,10 +841,9 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         if (token.startsWith("SCALAR:")) {
             field.setType(protobufTypeFromName(token.substring("SCALAR:".length())));
         } else if (token.startsWith("ENUM:")) {
-            // Enum declarations are not persisted in TapField; downgrade unknown
-            // enum values to google.protobuf.Value instead of emitting a dangling type.
-            field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
-                    .setTypeName(".google.protobuf.Value");
+            String enumName = addEnumType(entry, name, token.substring("ENUM:".length()));
+            field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_ENUM)
+                    .setTypeName("." + fullEntryName + "." + enumName);
         } else if (token.startsWith("MESSAGE:")) {
             String messageType = token.substring("MESSAGE:".length());
             if (isWellKnownMessageName(messageType) && wellKnownDependency(messageType) != null) {
