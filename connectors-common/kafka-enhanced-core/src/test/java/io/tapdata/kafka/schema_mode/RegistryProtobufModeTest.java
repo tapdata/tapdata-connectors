@@ -4,6 +4,7 @@ import com.google.protobuf.DescriptorProtos;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.DynamicMessage;
 import com.google.protobuf.Struct;
+import com.google.protobuf.Value;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
@@ -223,7 +224,56 @@ class RegistryProtobufModeTest {
         assertEquals("Ada", ((Map<?, ?>) decoded.get("profile")).get("name"));
         assertEquals(Arrays.asList("sku-1", null), decoded.get("items.sku"));
         assertEquals("cn", ((Map<?, ?>) decoded.get("attributes")).get("region"));
+        assertFalse(decoded.containsKey("attributes.region"));
         assertFalse(decoded.containsKey("declared_but_unset"));
+        assertTrue(table.getNameFieldMap().keySet().containsAll(decoded.keySet()));
+    }
+
+    @Test
+    void wellKnownStructRemainsALeafInDml() throws Exception {
+        Descriptors.Descriptor root = messageWithDependency("Root", Struct.getDescriptor().getFile(),
+                field("payload", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        ".google.protobuf.Struct"));
+        Struct payload = Struct.newBuilder().putFields("region",
+                Value.newBuilder().setStringValue("cn").build()).build();
+        DynamicMessage message = DynamicMessage.newBuilder(root)
+                .setField(root.findFieldByName("payload"), payload).build();
+        TapTable table = new TapTable("topic");
+        invoke("dynamicMessageToTapTable", new Class[]{TapTable.class, DynamicMessage.class, List.class},
+                table, message, Collections.emptyList());
+
+        Map<String, Object> decoded = invoke("convertDynamicMessageToMap",
+                new Class[]{DynamicMessage.class}, message);
+        assertEquals("cn", ((Map<?, ?>) decoded.get("payload")).get("region"));
+        assertFalse(decoded.containsKey("payload.region"));
+        assertTrue(table.getNameFieldMap().keySet().containsAll(decoded.keySet()));
+    }
+
+    @Test
+    void recursiveMessageAliasesStopAtTheSchemaBoundary() throws Exception {
+        DescriptorProtos.DescriptorProto node = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Node")
+                .addField(field("name", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .addField(field("next", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".Node"))
+                .build();
+        Descriptors.Descriptor descriptor = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder().setName("Node.proto")
+                        .setSyntax("proto3").addMessageType(node).build(),
+                new Descriptors.FileDescriptor[0]).findMessageTypeByName("Node");
+        DynamicMessage nested = DynamicMessage.newBuilder(descriptor)
+                .setField(descriptor.findFieldByName("name"), "inner").build();
+        DynamicMessage message = DynamicMessage.newBuilder(descriptor)
+                .setField(descriptor.findFieldByName("name"), "outer")
+                .setField(descriptor.findFieldByName("next"), nested).build();
+        TapTable table = new TapTable("topic");
+        invoke("dynamicMessageToTapTable", new Class[]{TapTable.class, DynamicMessage.class, List.class},
+                table, message, Collections.emptyList());
+
+        Map<String, Object> decoded = invoke("convertDynamicMessageToMap",
+                new Class[]{DynamicMessage.class}, message);
+        assertEquals("inner", ((Map<?, ?>) decoded.get("next")).get("name"));
+        assertFalse(decoded.containsKey("next.name"));
+        assertTrue(table.getNameFieldMap().keySet().containsAll(decoded.keySet()));
     }
 
     @Test
@@ -351,6 +401,155 @@ class RegistryProtobufModeTest {
         assertTrue(events.get(0) instanceof TapAlterFieldNameEvent);
         assertEquals("address.street", ((TapAlterFieldNameEvent) events.get(0)).getNameChange().getBefore());
         assertEquals("address.city", ((TapAlterFieldNameEvent) events.get(0)).getNameChange().getAfter());
+    }
+
+    @Test
+    void parentMessageRenameAlsoRenamesDeclaredChildren() throws Exception {
+        Descriptors.Descriptor oldRoot = message("Root",
+                field("address", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".Root.Address"),
+                nestedMessage("Address", field("street", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)));
+        Descriptors.Descriptor newRoot = message("Root",
+                field("location", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".Root.Location"),
+                nestedMessage("Location", field("street", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)));
+
+        List<TapEvent> events = invoke("detectSchemaChangesFlat",
+                new Class[]{String.class, Descriptors.Descriptor.class, Descriptors.Descriptor.class, long.class},
+                "topic", oldRoot, newRoot, 1L);
+        assertRenameEvents(events, "address", "location", "address.street", "location.street");
+    }
+
+    @Test
+    void renamedFieldStillEmitsItsTypeChange() throws Exception {
+        Descriptors.Descriptor oldRoot = message("Root",
+                field("old_value", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT32));
+        Descriptors.Descriptor newRoot = message("Root",
+                field("new_value", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64));
+
+        List<TapEvent> events = invoke("detectSchemaChangesFlat",
+                new Class[]{String.class, Descriptors.Descriptor.class, Descriptors.Descriptor.class, long.class},
+                "topic", oldRoot, newRoot, 1L);
+        assertEquals(2, events.size());
+        assertTrue(events.get(0) instanceof TapAlterFieldNameEvent);
+        assertTrue(events.get(1) instanceof TapAlterFieldAttributesEvent);
+        TapAlterFieldAttributesEvent attributes = (TapAlterFieldAttributesEvent) events.get(1);
+        assertEquals("INTEGER", attributes.getDataTypeChange().getBefore());
+        assertEquals("LONG", attributes.getDataTypeChange().getAfter());
+    }
+
+    @Test
+    void parentRenameCarriesNestedAndIndividuallyRenamedFields() throws Exception {
+        DescriptorProtos.DescriptorProto oldInfo = nestedMessage("Info",
+                field("zip", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING));
+        DescriptorProtos.DescriptorProto oldAddress = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Address")
+                .addNestedType(oldInfo)
+                .addField(field("street", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .addField(field("info", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        ".Root.Address.Info"))
+                .build();
+        DescriptorProtos.DescriptorProto newInfo = nestedMessage("Info",
+                field("zip", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING));
+        DescriptorProtos.DescriptorProto newLocation = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Location")
+                .addNestedType(newInfo)
+                .addField(field("road", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .addField(field("info", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        ".Root.Location.Info"))
+                .build();
+        Descriptors.Descriptor oldRoot = message("Root",
+                field("address", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".Root.Address"),
+                oldAddress);
+        Descriptors.Descriptor newRoot = message("Root",
+                field("location", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".Root.Location"),
+                newLocation);
+
+        List<TapEvent> events = invoke("detectSchemaChangesFlat",
+                new Class[]{String.class, Descriptors.Descriptor.class, Descriptors.Descriptor.class, long.class},
+                "topic", oldRoot, newRoot, 1L);
+        assertEquals(4, events.size());
+        assertTrue(events.stream().allMatch(event -> event instanceof TapAlterFieldNameEvent));
+        assertEquals(Arrays.asList("address", "address.street", "address.info", "address.info.zip"),
+                events.stream().map(event -> (String) ((TapAlterFieldNameEvent) event).getNameChange().getBefore())
+                        .collect(java.util.stream.Collectors.toList()));
+        assertEquals(Arrays.asList("location", "location.road", "location.info", "location.info.zip"),
+                events.stream().map(event -> (String) ((TapAlterFieldNameEvent) event).getNameChange().getAfter())
+                        .collect(java.util.stream.Collectors.toList()));
+    }
+
+    @Test
+    void restartBaselineParentRenameDoesNotDropChildren() throws Exception {
+        Descriptors.Descriptor newRoot = message("Root",
+                field("location", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".Root.Location"),
+                nestedMessage("Location", field("street", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)));
+        TapTable previous = new TapTable("topic");
+        previous.add(new TapField("address", "OBJECT"));
+        previous.add(new TapField("address.street", "STRING"));
+
+        List<TapEvent> events = invoke("detectSchemaChangesFromTableFlat",
+                new Class[]{String.class, TapTable.class, Descriptors.Descriptor.class, long.class},
+                "topic", previous, newRoot, 1L);
+        assertRenameEvents(events, "address", "location", "address.street", "location.street");
+    }
+
+    @Test
+    void parentRenameWithAddedChildUsesOriginalDescriptorNumbers() throws Exception {
+        Descriptors.Descriptor oldRoot = message("Root",
+                field("address", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".Root.Address"),
+                nestedMessage("Address", field("street", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)));
+        DescriptorProtos.DescriptorProto location = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Location")
+                .addField(field("street", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .addField(field("city", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .build();
+        Descriptors.Descriptor newRoot = message("Root",
+                field("location", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".Root.Location"),
+                location);
+
+        List<TapEvent> events = invoke("detectSchemaChangesFlat",
+                new Class[]{String.class, Descriptors.Descriptor.class, Descriptors.Descriptor.class, long.class},
+                "topic", oldRoot, newRoot, 1L);
+        assertEquals(3, events.size());
+        assertTrue(events.get(0) instanceof TapAlterFieldNameEvent);
+        assertTrue(events.get(1) instanceof TapAlterFieldNameEvent);
+        assertTrue(events.get(2) instanceof TapNewFieldEvent);
+        assertEquals("location.city", ((TapNewFieldEvent) events.get(2)).getNewFields().get(0).getName());
+    }
+
+    @Test
+    void restartBaselineRejectsAmbiguousParentChangeInsteadOfDroppingFields() throws Exception {
+        DescriptorProtos.DescriptorProto location = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Location")
+                .addField(field("street", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .addField(field("city", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .build();
+        Descriptors.Descriptor newRoot = message("Root",
+                field("location", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".Root.Location"),
+                location);
+        TapTable previous = new TapTable("topic");
+        previous.add(new TapField("address", "OBJECT"));
+        previous.add(new TapField("address.street", "STRING"));
+
+        java.lang.reflect.InvocationTargetException error = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> invoke("detectSchemaChangesFromTableFlat",
+                        new Class[]{String.class, TapTable.class, Descriptors.Descriptor.class, long.class},
+                        "topic", previous, newRoot, 1L));
+        assertTrue(error.getCause() instanceof IllegalStateException);
+        assertTrue(error.getCause().getMessage().contains("Cannot safely distinguish"));
+    }
+
+    private void assertRenameEvents(List<TapEvent> events, String parentBefore, String parentAfter,
+                                    String childBefore, String childAfter) {
+        assertEquals(2, events.size());
+        assertTrue(events.stream().allMatch(event -> event instanceof TapAlterFieldNameEvent));
+        assertEquals(parentBefore,
+                ((TapAlterFieldNameEvent) events.get(0)).getNameChange().getBefore());
+        assertEquals(parentAfter,
+                ((TapAlterFieldNameEvent) events.get(0)).getNameChange().getAfter());
+        assertEquals(childBefore,
+                ((TapAlterFieldNameEvent) events.get(1)).getNameChange().getBefore());
+        assertEquals(childAfter,
+                ((TapAlterFieldNameEvent) events.get(1)).getNameChange().getAfter());
     }
 
     @SuppressWarnings("unchecked")

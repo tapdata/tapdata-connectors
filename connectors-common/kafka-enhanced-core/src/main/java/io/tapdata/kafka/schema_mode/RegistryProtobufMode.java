@@ -667,6 +667,10 @@ public class RegistryProtobufMode extends AbsSchemaMode {
      * 用于从 Kafka 读取 Protobuf 数据后转换为 TapData 格式
      */
     private Map<String, Object> convertDynamicMessageToMap(DynamicMessage message) {
+        return convertDynamicMessageToMap(message, true);
+    }
+
+    private Map<String, Object> convertDynamicMessageToMap(DynamicMessage message, boolean includeAliases) {
         Map<String, Object> result = new HashMap<>();
 
         if (message == null) {
@@ -675,6 +679,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
         // 获取所有已设置的字段
         Map<Descriptors.FieldDescriptor, Object> allFields = message.getAllFields();
+        Set<Descriptors.Descriptor> descriptorPath = new HashSet<>();
+        descriptorPath.add(message.getDescriptorForType());
 
         for (Map.Entry<Descriptors.FieldDescriptor, Object> entry : allFields.entrySet()) {
             Descriptors.FieldDescriptor fieldDescriptor = entry.getKey();
@@ -684,27 +690,49 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             Object convertedValue = convertProtobufValueToJava(value, fieldDescriptor);
 
             result.put(fieldName, convertedValue);
-            addDottedAliases(result, fieldName, convertedValue);
+            if (includeAliases) {
+                addDottedAliases(result, fieldName, convertedValue, fieldDescriptor, descriptorPath, 0);
+            }
         }
 
         return result;
     }
 
-    @SuppressWarnings("unchecked")
-    private void addDottedAliases(Map<String, Object> target, String prefix, Object value) {
+    private void addDottedAliases(Map<String, Object> target, String prefix, Object value,
+                                  Descriptors.FieldDescriptor field, Set<Descriptors.Descriptor> descriptorPath,
+                                  int depth) {
+        if (depth > 32 || field.getJavaType() != Descriptors.FieldDescriptor.JavaType.MESSAGE
+                || field.isMapField() || isWellKnownMessage(field.getMessageType())
+                || !descriptorPath.add(field.getMessageType())) {
+            return;
+        }
+        try {
+            addDeclaredDottedAliases(target, prefix, value, field.getMessageType(), descriptorPath, depth);
+        } finally {
+            descriptorPath.remove(field.getMessageType());
+        }
+    }
+
+    private void addDeclaredDottedAliases(Map<String, Object> target, String prefix, Object value,
+                                           Descriptors.Descriptor messageType,
+                                           Set<Descriptors.Descriptor> descriptorPath, int depth) {
         if (value instanceof Map) {
-            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
-                String path = prefix + "." + entry.getKey();
-                Object child = entry.getValue();
+            Map<?, ?> children = (Map<?, ?>) value;
+            for (Descriptors.FieldDescriptor childField : messageType.getFields()) {
+                if (!children.containsKey(childField.getName())) continue;
+                String path = prefix + "." + childField.getName();
+                Object child = children.get(childField.getName());
                 target.putIfAbsent(path, child);
-                addDottedAliases(target, path, child);
+                addDottedAliases(target, path, child, childField, descriptorPath, depth + 1);
             }
         } else if (value instanceof Collection) {
             Map<String, List<Object>> children = collectionChildren((Collection<?>) value);
-            for (Map.Entry<String, List<Object>> entry : children.entrySet()) {
-                String path = prefix + "." + entry.getKey();
-                target.putIfAbsent(path, entry.getValue());
-                addDottedAliases(target, path, entry.getValue());
+            for (Descriptors.FieldDescriptor childField : messageType.getFields()) {
+                if (!children.containsKey(childField.getName())) continue;
+                String path = prefix + "." + childField.getName();
+                List<Object> child = children.get(childField.getName());
+                target.putIfAbsent(path, child);
+                addDottedAliases(target, path, child, childField, descriptorPath, depth + 1);
             }
         }
     }
@@ -811,7 +839,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                     if ("google.protobuf.ListValue".equals(messageType)) {
                         return convertListValueMessage(message);
                     }
-                    return convertDynamicMessageToMap(message);
+                    return convertDynamicMessageToMap(message, false);
                 }
                 if (value instanceof Value) {
                     return convertGeneratedValue((Value) value);
@@ -925,8 +953,9 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
     private String findSameNumberPath(Map<String, Descriptors.FieldDescriptor> fields,
                                       String newPath,
-                                      Descriptors.FieldDescriptor newField) {
-        String parentPath = parentPath(newPath);
+                                      Descriptors.FieldDescriptor newField,
+                                      Map<String, String> renames) {
+        String parentPath = originalParentPath(parentPath(newPath), renames);
         for (Map.Entry<String, Descriptors.FieldDescriptor> entry : fields.entrySet()) {
             if (Objects.equals(parentPath(entry.getKey()), parentPath)
                     && entry.getValue().getNumber() == newField.getNumber()) {
@@ -934,6 +963,18 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             }
         }
         return null;
+    }
+
+    private String originalParentPath(String newParent, Map<String, String> renames) {
+        String ancestor = newParent;
+        while (!ancestor.isEmpty()) {
+            String oldAncestor = renames.get(ancestor);
+            if (oldAncestor != null) {
+                return oldAncestor + newParent.substring(ancestor.length());
+            }
+            ancestor = parentPath(ancestor);
+        }
+        return newParent;
     }
 
     private String parentPath(String path) {
@@ -961,8 +1002,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
         for (Map.Entry<String, Descriptors.FieldDescriptor> entry : newFields.entrySet()) {
             if (oldFields.containsKey(entry.getKey())) continue;
-            String oldPath = findSameNumberPath(oldFields, entry.getKey(), entry.getValue());
-            if (oldPath != null && !newFields.containsKey(oldPath)) {
+            String oldPath = findSameNumberPath(oldFields, entry.getKey(), entry.getValue(), renames);
+            if (oldPath != null && !newFields.containsKey(oldPath) && !renames.containsValue(oldPath)) {
                 renames.put(entry.getKey(), oldPath);
                 addRenameEvent(events, topic, oldPath, entry.getKey(), referenceTime);
             }
@@ -1011,7 +1052,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         }
 
         for (Map.Entry<String, Descriptors.FieldDescriptor> entry : newFields.entrySet()) {
-            Descriptors.FieldDescriptor oldField = oldFields.get(entry.getKey());
+            Descriptors.FieldDescriptor oldField = oldFields.get(
+                    renames.getOrDefault(entry.getKey(), entry.getKey()));
             if (oldField == null) continue;
             TapAlterFieldAttributesEvent event = diffFieldAttributes(topic, entry.getKey(), oldField, entry.getValue(), referenceTime);
             if (event != null) events.add(event);
@@ -1029,19 +1071,20 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         List<TapEvent> events = new ArrayList<>();
         Map<String, String> renames = new LinkedHashMap<>();
 
+        detectRestartSubtreeRenames(topic, oldFields, newFields, renames, events, referenceTime);
+        rejectAmbiguousRestartSubtreeChanges(oldFields, newFields, renames);
+
         List<String> remainingDrops = oldFields.keySet().stream()
-                .filter(path -> !newFields.containsKey(path))
+                .filter(path -> !newFields.containsKey(path) && !renames.containsValue(path))
                 .collect(Collectors.toList());
         List<String> remainingAdds = newFields.keySet().stream()
-                .filter(path -> !oldFields.containsKey(path))
+                .filter(path -> !oldFields.containsKey(path) && !renames.containsKey(path))
                 .collect(Collectors.toList());
         if (remainingDrops.size() == 1 && remainingAdds.size() == 1
                 && Objects.equals(parentPath(remainingDrops.get(0)), parentPath(remainingAdds.get(0)))) {
             String before = remainingDrops.get(0);
             String after = remainingAdds.get(0);
-            String oldType = oldFields.get(before).getDataType();
-            String newType = protobufPrimaryTypeName(newFields.get(after));
-            if (oldType != null && Objects.equals(StringKit.removeParentheses(oldType), newType)) {
+            if (restartTypesEquivalent(oldFields.get(before), newFields.get(after))) {
                 renames.put(after, before);
                 addRenameEvent(events, topic, before, after, referenceTime);
             }
@@ -1080,6 +1123,97 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             if (event != null) events.add(event);
         }
         return events;
+    }
+
+    private void detectRestartSubtreeRenames(String topic, Map<String, TapField> oldFields,
+                                              Map<String, Descriptors.FieldDescriptor> newFields,
+                                              Map<String, String> renames, List<TapEvent> events,
+                                              long referenceTime) {
+        for (String newPath : newFields.keySet()) {
+            if (oldFields.containsKey(newPath) || renames.containsKey(newPath)
+                    || !hasDescendants(newFields, newPath)) {
+                continue;
+            }
+            List<String> candidates = oldFields.keySet().stream()
+                    .filter(oldPath -> !newFields.containsKey(oldPath)
+                            && !renames.containsValue(oldPath)
+                            && Objects.equals(parentPath(oldPath), originalParentPath(parentPath(newPath), renames))
+                            && sameRestartSubtree(oldFields, newFields, oldPath, newPath))
+                    .collect(Collectors.toList());
+            if (candidates.size() != 1) continue;
+            String oldPath = candidates.get(0);
+            long competingNewPaths = newFields.keySet().stream()
+                    .filter(other -> !other.equals(newPath) && !oldFields.containsKey(other)
+                            && Objects.equals(parentPath(oldPath), originalParentPath(parentPath(other), renames))
+                            && sameRestartSubtree(oldFields, newFields, oldPath, other))
+                    .count();
+            if (competingNewPaths != 0) continue;
+            for (String path : newFields.keySet()) {
+                if (!path.equals(newPath) && !path.startsWith(newPath + ".")) continue;
+                String original = oldPath + path.substring(newPath.length());
+                if (oldFields.containsKey(original) && !newFields.containsKey(original)) {
+                    renames.put(path, original);
+                    addRenameEvent(events, topic, original, path, referenceTime);
+                }
+            }
+        }
+    }
+
+    private boolean hasDescendants(Map<String, ?> fields, String path) {
+        return fields.keySet().stream().anyMatch(name -> name.startsWith(path + "."));
+    }
+
+    private boolean sameRestartSubtree(Map<String, TapField> oldFields,
+                                       Map<String, Descriptors.FieldDescriptor> newFields,
+                                       String oldPath, String newPath) {
+        if (!hasDescendants(oldFields, oldPath) || !hasDescendants(newFields, newPath)) {
+            return false;
+        }
+        List<String> oldPaths = oldFields.keySet().stream()
+                .filter(path -> path.equals(oldPath) || path.startsWith(oldPath + "."))
+                .collect(Collectors.toList());
+        List<String> newPaths = newFields.keySet().stream()
+                .filter(path -> path.equals(newPath) || path.startsWith(newPath + "."))
+                .collect(Collectors.toList());
+        if (oldPaths.size() != newPaths.size()) return false;
+        for (String path : oldPaths) {
+            String corresponding = newPath + path.substring(oldPath.length());
+            Descriptors.FieldDescriptor newField = newFields.get(corresponding);
+            if (newField == null || !restartTypesEquivalent(oldFields.get(path), newField)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void rejectAmbiguousRestartSubtreeChanges(Map<String, TapField> oldFields,
+                                                       Map<String, Descriptors.FieldDescriptor> newFields,
+                                                       Map<String, String> renames) {
+        for (String oldPath : oldFields.keySet()) {
+            if (newFields.containsKey(oldPath) || renames.containsValue(oldPath)
+                    || !hasDescendants(oldFields, oldPath)) continue;
+            for (String newPath : newFields.keySet()) {
+                if (oldFields.containsKey(newPath) || renames.containsKey(newPath)
+                        || !hasDescendants(newFields, newPath)) continue;
+                if (Objects.equals(parentPath(oldPath), originalParentPath(parentPath(newPath), renames))
+                        && Objects.equals(
+                        StringKit.removeParentheses(StringUtils.defaultString(oldFields.get(oldPath).getDataType())),
+                        protobufPrimaryTypeName(newFields.get(newPath)))) {
+                    throw new IllegalStateException("Cannot safely distinguish protobuf message rename from drop/add: '"
+                            + oldPath + "' -> '" + newPath + "' without the previous descriptor");
+                }
+            }
+        }
+    }
+
+    private boolean restartTypesEquivalent(TapField oldField, Descriptors.FieldDescriptor newField) {
+        if (oldField == null || newField == null) return false;
+        if (StringUtils.isNotBlank(protobufPureType(oldField))) {
+            return Objects.equals(tapFieldSignature(oldField), protobufFieldSignature(newField));
+        }
+        return Objects.equals(
+                StringKit.removeParentheses(StringUtils.defaultString(oldField.getDataType())),
+                protobufPrimaryTypeName(newField));
     }
 
     private TapAlterFieldAttributesEvent diffFieldAttributes(String topic,
