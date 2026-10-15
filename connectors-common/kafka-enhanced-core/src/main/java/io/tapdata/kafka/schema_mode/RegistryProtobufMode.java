@@ -404,32 +404,45 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
     /**
      * 获取或创建表的 Protobuf Descriptor
+     *
+     * <p>方案 A（schema 身份归属）：一旦 subject 在 Registry 中已存在，就以 Registry 返回的最新注册
+     * descriptor 作为身份基线做增量演进——它保留注册 schema 的 package、根消息全名、嵌套类型名、oneof、
+     * 递归引用与自定义 message 类型；TapTable 只负责发现需要新增的字段。绝不从 TapTable 重建 schema 身份。
+     * 仅当 subject 尚不存在、且没有可还原的持久化 descriptor 时，才一次性从 TapTable 构建全新 descriptor。</p>
      */
     private Descriptors.Descriptor getOrCreateDescriptor(TapTable tapTable, String outputTopic) throws Descriptors.DescriptorValidationException {
         String tableId = tapTable.getId();
         Object lock = descriptorLocks.computeIfAbsent(tableId, key -> new Object());
         synchronized (lock) {
-            initializeFieldNumbers(tapTable, outputTopic + "-value");
+            String subject = outputTopic + "-value";
+            initializeFieldNumbers(tapTable, subject);
             String schemaKey = outputTopic + "|" + descriptorSchemaKey(tapTable);
             Descriptors.Descriptor cached = descriptorCache.get(tableId);
             if (cached != null && schemaKey.equals(descriptorSchemaKeys.get(tableId))) {
                 return cached;
             }
             try {
-                // A persisted source descriptor is authoritative only for a new
-                // subject. Existing subjects must be rebuilt against their
-                // registered numbering and legacy container encoding rules.
-                Descriptors.Descriptor rebuilt = latestDescriptorBySubject.get(outputTopic + "-value") == null
-                        ? restoreDescriptor(tapTable) : null;
-                if (rebuilt == null) {
-                    rebuilt = buildProtobufDescriptor(tapTable, outputTopic);
+                Descriptors.Descriptor registered = latestDescriptorBySubject.get(subject);
+                Descriptors.Descriptor descriptor;
+                if (registered != null) {
+                    // Existing subject: evolve the registered descriptor so schema identity
+                    // comes from the Registry, not from the lossy flat TapTable.
+                    descriptor = buildIncrementalDescriptor(tapTable, subject, registered);
                 } else {
-                    validateAndRememberWireDescriptor(outputTopic + "-value", rebuilt);
-                    seedFieldNumbersFromDescriptor(outputTopic + "-value", rebuilt);
+                    // No registered schema yet: a persisted source descriptor is authoritative
+                    // only for this brand-new subject; otherwise build one from the TapTable.
+                    Descriptors.Descriptor restored = restoreDescriptor(tapTable);
+                    if (restored == null) {
+                        descriptor = buildProtobufDescriptor(tapTable, outputTopic);
+                    } else {
+                        validateAndRememberWireDescriptor(subject, restored);
+                        seedFieldNumbersFromDescriptor(subject, restored);
+                        descriptor = restored;
+                    }
                 }
-                descriptorCache.put(tableId, rebuilt);
+                descriptorCache.put(tableId, descriptor);
                 descriptorSchemaKeys.put(tableId, schemaKey);
-                return rebuilt;
+                return descriptor;
             } catch (Descriptors.DescriptorValidationException e) {
                 throw new RuntimeException("Failed to build Protobuf descriptor for table: " + tableId, e);
             }
@@ -874,7 +887,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                 String enumType = enumType(tapField);
                 String wireType = wireType(tapField);
                 String explicitMessageType = protobufMessageType(tapField);
-                if (legacyStringEncoding(subject, entry.getKey(), tapField)) {
+                if (legacyStringEncoding(subject, fieldName, tapField)) {
                     fieldBuilder.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)
                             .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING);
                 } else if (repeatedScalarType != null) {
@@ -958,6 +971,211 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         Descriptors.Descriptor descriptor = fileDescriptor.findMessageTypeByName(messageName);
         validateAndRememberWireDescriptor(subject, descriptor);
         return descriptor;
+    }
+
+    /**
+     * 方案 A：以 Registry 最新注册 descriptor 为身份基线做增量演进。
+     *
+     * <p>从注册 schema 的 {@link DescriptorProtos.FileDescriptorProto} 出发，保留 package、根消息全名、
+     * 嵌套类型名、oneof、递归引用与自定义 message 类型；TapTable 中在原 schema 里不存在的字段，按
+     * append-only 的字段号追加进去，已有字段原样保留。这样重启后重新构建出的 descriptor 与首次注册的
+     * schema 身份一致，Confluent 的 BACKWARD 兼容校验（按 package/名称比较）才能通过。</p>
+     */
+    private Descriptors.Descriptor buildIncrementalDescriptor(TapTable tapTable,
+                                                              String subject,
+                                                              Descriptors.Descriptor registered)
+            throws Descriptors.DescriptorValidationException {
+        Map<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
+        if (nameFieldMap == null || nameFieldMap.isEmpty()) {
+            return registered;
+        }
+        DescriptorProtos.FileDescriptorProto.Builder fileBuilder = registered.getFile().toProto().toBuilder();
+        int rootIndex = -1;
+        for (int i = 0; i < fileBuilder.getMessageTypeCount(); i++) {
+            if (fileBuilder.getMessageType(i).getName().equals(registered.getName())) {
+                rootIndex = i;
+                break;
+            }
+        }
+        if (rootIndex < 0) {
+            throw new IllegalStateException("Registered Protobuf descriptor " + registered.getFullName()
+                    + " is not a top-level message of file " + registered.getFile().getName());
+        }
+        DescriptorProtos.DescriptorProto.Builder rootBuilder = fileBuilder.getMessageType(rootIndex).toBuilder();
+        mergeMessageFields(rootBuilder, descriptorTree(tapTable), registered.getFullName(), subject, "");
+        fileBuilder.setMessageType(rootIndex, rootBuilder.build());
+
+        Map<String, Descriptors.FileDescriptor> dependenciesByName = new LinkedHashMap<>();
+        for (Descriptors.FileDescriptor dependency : registered.getFile().getDependencies()) {
+            dependenciesByName.put(dependency.getName(), dependency);
+        }
+        // New fields appended from the TapTable may reference well-known types that the
+        // registered schema did not import; declare those imports so buildFrom can resolve them.
+        for (Descriptors.FileDescriptor dependency : protobufDependencyFiles(tapTable)) {
+            if (!dependenciesByName.containsKey(dependency.getName())) {
+                fileBuilder.addDependency(dependency.getName());
+                dependenciesByName.put(dependency.getName(), dependency);
+            }
+        }
+        List<Descriptors.FileDescriptor> dependencies = new ArrayList<>();
+        for (String dependencyName : fileBuilder.getDependencyList()) {
+            Descriptors.FileDescriptor dependency = dependenciesByName.get(dependencyName);
+            if (dependency == null) {
+                throw new IllegalStateException("Missing Protobuf dependency '" + dependencyName
+                        + "' while evolving registered schema for subject " + subject);
+            }
+            dependencies.add(dependency);
+        }
+        Descriptors.FileDescriptor fileDescriptor = Descriptors.FileDescriptor.buildFrom(
+                fileBuilder.build(), dependencies.toArray(new Descriptors.FileDescriptor[0]));
+        Descriptors.Descriptor evolved = fileDescriptor.findMessageTypeByName(registered.getName());
+        if (evolved == null) {
+            throw new IllegalStateException("Evolved Protobuf descriptor lost its root message "
+                    + registered.getFullName());
+        }
+        validateAndRememberWireDescriptor(subject, evolved);
+        return evolved;
+    }
+
+    /**
+     * 在既有 message proto 上合并 TapTable 的字段。已存在于注册 schema 的字段原样保留（连同其字段号、
+     * 类型名与 oneof 归属），只有新字段才按现有规则追加。若某个既有 message 字段在 TapTable 里带有子字段，
+     * 则递归进入该注册嵌套类型补充新子字段。
+     */
+    private void mergeMessageFields(DescriptorProtos.DescriptorProto.Builder messageBuilder,
+                                    DescriptorTreeNode node,
+                                    String fullName,
+                                    String subject,
+                                    String scopePath) {
+        Map<String, Integer> existingFieldIndexes = new HashMap<>();
+        for (int i = 0; i < messageBuilder.getFieldCount(); i++) {
+            existingFieldIndexes.put(messageBuilder.getField(i).getName(), i);
+        }
+        Set<String> sanitizedNames = new HashSet<>();
+        List<DescriptorTreeNode> children = new ArrayList<>(node.children.values());
+        children.sort(Comparator.comparing(child -> child.name));
+        for (DescriptorTreeNode child : children) {
+            String fieldName = sanitizeFieldName(child.name);
+            if (!sanitizedNames.add(fieldName)) {
+                throw new IllegalArgumentException("Protobuf field name collision after sanitization: " + child.name);
+            }
+            String fieldPath = scopePath.isEmpty() ? fieldName : scopePath + "." + fieldName;
+            Integer index = existingFieldIndexes.get(fieldName);
+            if (index != null) {
+                DescriptorProtos.FieldDescriptorProto existing = messageBuilder.getField(index);
+                if (!child.children.isEmpty()) {
+                    String nestedName = existing.getType() == DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE
+                            ? directNestedTypeName(existing.getTypeName(), fullName) : null;
+                    int nestedIndex = nestedName == null ? -1 : indexOfNestedType(messageBuilder, nestedName);
+                    if (nestedIndex >= 0) {
+                        DescriptorProtos.DescriptorProto.Builder nestedBuilder =
+                                messageBuilder.getNestedType(nestedIndex).toBuilder();
+                        mergeMessageFields(nestedBuilder, child, fullName + "." + nestedName, subject, fieldPath);
+                        messageBuilder.setNestedType(nestedIndex, nestedBuilder.build());
+                    } else {
+                        tapLogger.warn("Ignoring nested Protobuf fields under '{}' because the registered field "
+                                + "is not a resolvable nested message", fieldPath);
+                    }
+                }
+                continue;
+            }
+            messageBuilder.addField(buildNewFieldProto(messageBuilder, fullName, scopePath, child, subject));
+        }
+    }
+
+    /** 为一个在原注册 schema 中不存在的字段构建 field proto（字段号 append-only）。 */
+    private DescriptorProtos.FieldDescriptorProto buildNewFieldProto(
+            DescriptorProtos.DescriptorProto.Builder messageBuilder,
+            String fullName,
+            String scopePath,
+            DescriptorTreeNode child,
+            String subject) {
+        TapField tapField = child.field;
+        String normalizedType = tapField == null ? "OBJECT" : normalizeTapType(tapField.getDataType());
+        String fieldName = sanitizeFieldName(child.name);
+        String fieldPath = scopePath.isEmpty() ? fieldName : scopePath + "." + fieldName;
+        DescriptorProtos.FieldDescriptorProto.Builder field = DescriptorProtos.FieldDescriptorProto.newBuilder()
+                .setName(fieldName)
+                .setNumber(fieldNumberFor(subject, fieldPath))
+                .setLabel(labelForTapType(normalizedType));
+
+        String repeatedScalarType = repeatedScalarType(tapField);
+        String repeatedEnumType = repeatedEnumType(tapField);
+        String enumType = enumType(tapField);
+        String wireType = wireType(tapField);
+        String explicitMessageType = protobufMessageType(tapField);
+        if (legacyStringEncoding(subject, fieldPath, tapField)) {
+            field.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)
+                    .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING);
+        } else if (!child.children.isEmpty()
+                && ("OBJECT".equals(normalizedType) || "ARRAY".equals(normalizedType))) {
+            String nestedName = sanitizeMessageName(child.name + "Message");
+            String nestedFullName = fullName + "." + nestedName;
+            DescriptorProtos.DescriptorProto.Builder nested =
+                    DescriptorProtos.DescriptorProto.newBuilder().setName(nestedName);
+            mergeMessageFields(nested, child, nestedFullName, subject, fieldPath);
+            messageBuilder.addNestedType(nested.build());
+            field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
+                    .setTypeName("." + nestedFullName);
+        } else if (repeatedScalarType != null) {
+            field.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
+                    .setType(protobufTypeFromName(repeatedScalarType));
+        } else if (repeatedEnumType != null) {
+            field.setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)
+                    .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_ENUM)
+                    .setTypeName("." + fullName + "." + addEnumType(messageBuilder, fieldName, repeatedEnumType));
+        } else if (enumType != null) {
+            field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_ENUM)
+                    .setTypeName("." + fullName + "." + addEnumType(messageBuilder, fieldName, enumType));
+        } else if (wireType != null) {
+            field.setType(protobufTypeFromName(wireType));
+        } else if (explicitMessageType != null && isWellKnownMessageName(explicitMessageType)) {
+            field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
+                    .setTypeName("." + explicitMessageType)
+                    .setLabel(isRepeatedProtobufMessage(tapField)
+                            ? DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED
+                            : DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL);
+        } else if ("OBJECT".equals(normalizedType)) {
+            field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
+                    .setTypeName(".google.protobuf.Struct");
+        } else if ("ARRAY".equals(normalizedType)) {
+            field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
+                    .setTypeName(".google.protobuf.Value");
+        } else if ("MAP".equals(normalizedType)) {
+            String entryName = sanitizeMessageName(child.name + "Entry");
+            messageBuilder.addNestedType(buildMapEntryDescriptor(messageBuilder, fullName, entryName, tapField));
+            field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
+                    .setTypeName("." + fullName + "." + entryName);
+        } else {
+            field.setType(mapTapTypeToProtobufType(normalizedType));
+        }
+        if (tapField != null && EmptyKit.isNotNull(tapField.getDefaultValue()) && applyDefault
+                && canApplyProtobufDefault(tapField, normalizedType)) {
+            field.setDefaultValue(String.valueOf(tapField.getDefaultValue()));
+        }
+        return field.build();
+    }
+
+    /** 若 {@code typeName} 恰好是 {@code fullName} 的直接嵌套类型，返回其简单名，否则返回 {@code null}。 */
+    private String directNestedTypeName(String typeName, String fullName) {
+        if (typeName == null) {
+            return null;
+        }
+        String prefix = "." + fullName + ".";
+        if (!typeName.startsWith(prefix)) {
+            return null;
+        }
+        String remainder = typeName.substring(prefix.length());
+        return remainder.indexOf('.') < 0 ? remainder : null;
+    }
+
+    private int indexOfNestedType(DescriptorProtos.DescriptorProto.Builder messageBuilder, String name) {
+        for (int i = 0; i < messageBuilder.getNestedTypeCount(); i++) {
+            if (messageBuilder.getNestedType(i).getName().equals(name)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private DescriptorTreeNode descriptorTree(TapTable tapTable) {

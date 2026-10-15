@@ -768,6 +768,196 @@ class RegistryProtobufModeTest {
         assertEquals("address.city", ((TapAlterFieldNameEvent) events.get(0)).getNameChange().getAfter());
     }
 
+    // ---------------------------------------------------------------------
+    // 方案 A 回归：已存在 subject 时以 Registry 注册 descriptor 为身份基线做增量演进。
+    // ---------------------------------------------------------------------
+
+    @Test
+    void existingSubjectReusesRegisteredSchemaIdentityWithoutRebuild() throws Exception {
+        DescriptorProtos.DescriptorProto addressProto = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Address")
+                .addField(field("street", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .build();
+        DescriptorProtos.DescriptorProto rootProto = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Root")
+                .addField(field("id", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .addField(field("address", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        ".com.example.Root.Address"))
+                .addNestedType(addressProto)
+                .build();
+        Descriptors.Descriptor registered = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName("source.proto")
+                        .setSyntax("proto3")
+                        .setPackage("com.example")
+                        .addMessageType(rootProto)
+                        .build(), new Descriptors.FileDescriptor[0]).findMessageTypeByName("Root");
+        configureRegistry(registered);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("id", "STRING"));
+        table.add(new TapField("address", "OBJECT"));
+        table.add(new TapField("address.street", "STRING"));
+
+        Descriptors.Descriptor evolved = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        // package/根消息全名/嵌套类型名都来自 Registry，重启后不会因重建而改变身份。
+        assertEquals("com.example.Root", evolved.getFullName());
+        assertEquals("com.example", evolved.getFile().getPackage());
+        assertEquals("com.example.Root.Address", evolved.findFieldByName("address").getMessageType().getFullName());
+        // 与注册 schema 保持 wire 兼容（真实兼容校验不允许抛异常）。
+        invoke("validateWireCompatibility",
+                new Class[]{Descriptors.Descriptor.class, Descriptors.Descriptor.class}, registered, evolved);
+    }
+
+    @Test
+    void existingSubjectPreservesOneofWhenEvolving() throws Exception {
+        DescriptorProtos.FieldDescriptorProto aField = DescriptorProtos.FieldDescriptorProto.newBuilder()
+                .setName("a").setNumber(1)
+                .setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)
+                .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)
+                .setOneofIndex(0).build();
+        DescriptorProtos.FieldDescriptorProto bField = DescriptorProtos.FieldDescriptorProto.newBuilder()
+                .setName("b").setNumber(2)
+                .setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)
+                .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT32)
+                .setOneofIndex(0).build();
+        DescriptorProtos.DescriptorProto rootProto = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Root")
+                .addOneofDecl(DescriptorProtos.OneofDescriptorProto.newBuilder().setName("choice"))
+                .addField(aField)
+                .addField(bField)
+                .addField(field("c", 3, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .build();
+        Descriptors.Descriptor registered = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName("OneofRoot.proto").setSyntax("proto3")
+                        .addMessageType(rootProto).build(),
+                new Descriptors.FileDescriptor[0]).findMessageTypeByName("Root");
+        configureRegistry(registered);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("a", "STRING"));
+        table.add(new TapField("b", "INTEGER"));
+        table.add(new TapField("c", "STRING"));
+
+        Descriptors.Descriptor evolved = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        assertEquals(1, evolved.getOneofs().size());
+        assertNotNull(evolved.findFieldByName("a").getContainingOneof());
+        assertNotNull(evolved.findFieldByName("b").getContainingOneof());
+        assertNull(evolved.findFieldByName("c").getContainingOneof());
+    }
+
+    @Test
+    void existingSubjectPreservesRecursiveMessageField() throws Exception {
+        DescriptorProtos.DescriptorProto rootProto = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Node")
+                .addField(field("value", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .addField(field("next", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".Node"))
+                .build();
+        Descriptors.Descriptor registered = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName("Node.proto").setSyntax("proto3")
+                        .addMessageType(rootProto).build(),
+                new Descriptors.FileDescriptor[0]).findMessageTypeByName("Node");
+        configureRegistry(registered);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("value", "STRING"));
+        table.add(new TapField("next", "OBJECT"));
+
+        Descriptors.Descriptor evolved = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        Descriptors.FieldDescriptor next = evolved.findFieldByName("next");
+        assertEquals(Descriptors.FieldDescriptor.Type.MESSAGE, next.getType());
+        assertEquals("Node", next.getMessageType().getFullName());
+        assertNotEquals("google.protobuf.Struct", next.getMessageType().getFullName());
+    }
+
+    @Test
+    void existingSubjectPreservesCustomMapValueMessage() throws Exception {
+        DescriptorProtos.DescriptorProto money = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Money")
+                .addField(field("amount", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64))
+                .build();
+        DescriptorProtos.DescriptorProto entry = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("PricesEntry")
+                .setOptions(DescriptorProtos.MessageOptions.newBuilder().setMapEntry(true))
+                .addField(field("key", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING))
+                .addField(field("value", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE, ".Root.Money"))
+                .build();
+        DescriptorProtos.DescriptorProto rootProto = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Root")
+                .addNestedType(money)
+                .addNestedType(entry)
+                .addField(field("prices", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                        DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED, ".Root.PricesEntry"))
+                .build();
+        Descriptors.Descriptor registered = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName("MapRoot.proto").setSyntax("proto3")
+                        .addMessageType(rootProto).build(),
+                new Descriptors.FileDescriptor[0]).findMessageTypeByName("Root");
+        configureRegistry(registered);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("prices", "MAP"));
+
+        Descriptors.Descriptor evolved = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        Descriptors.FieldDescriptor prices = evolved.findFieldByName("prices");
+        assertTrue(prices.isMapField());
+        assertEquals("Root.Money",
+                prices.getMessageType().findFieldByName("value").getMessageType().getFullName());
+    }
+
+    @Test
+    void existingSubjectAppendsNewFieldsAfterRegisteredNumbers() throws Exception {
+        Descriptors.Descriptor registered = messageWithFields("Root",
+                field("a", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING),
+                field("b", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING));
+        configureRegistry(registered);
+
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("a", "STRING"));
+        table.add(new TapField("b", "STRING"));
+        table.add(new TapField("c", "STRING"));
+
+        Descriptors.Descriptor evolved = invoke("getOrCreateDescriptor",
+                new Class[]{TapTable.class, String.class}, table, "topic");
+
+        assertEquals(1, evolved.findFieldByName("a").getNumber());
+        assertEquals(2, evolved.findFieldByName("b").getNumber());
+        assertEquals(3, evolved.findFieldByName("c").getNumber());
+    }
+
+    private void configureRegistry(Descriptors.Descriptor... versions) throws Exception {
+        SchemaRegistryClient registry = mock(SchemaRegistryClient.class);
+        when(kafkaService.getSchemaRegistryClient()).thenReturn(registry);
+        int latestVersion = versions.length;
+        SchemaMetadata latest = new SchemaMetadata(1000 + latestVersion, latestVersion,
+                ProtobufSchema.TYPE, Collections.emptyList(), "");
+        when(registry.getLatestSchemaMetadata("topic-value")).thenReturn(latest);
+        List<Integer> allVersions = new java.util.ArrayList<>();
+        for (int i = 0; i < versions.length; i++) {
+            allVersions.add(i + 1);
+        }
+        when(registry.getAllVersions("topic-value")).thenReturn(allVersions);
+        for (int i = 0; i < versions.length; i++) {
+            int version = i + 1;
+            SchemaMetadata metadata = new SchemaMetadata(1000 + version, version,
+                    ProtobufSchema.TYPE, Collections.emptyList(), "");
+            when(registry.getSchemaMetadata("topic-value", version)).thenReturn(metadata);
+            when(registry.getSchemaBySubjectAndId("topic-value", 1000 + version))
+                    .thenReturn(new ProtobufSchema(versions[i]));
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private <T> T invoke(String name, Class<?>[] parameterTypes, Object... args) throws Exception {
         Method method = RegistryProtobufMode.class.getDeclaredMethod(name, parameterTypes);
