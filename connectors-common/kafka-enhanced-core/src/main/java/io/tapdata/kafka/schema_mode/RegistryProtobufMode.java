@@ -366,17 +366,19 @@ public class RegistryProtobufMode extends AbsSchemaMode {
     private Descriptors.Descriptor getOrCreateDescriptor(TapTable tapTable) throws Descriptors.DescriptorValidationException {
         String tableId = tapTable.getId();
         String schemaKey = descriptorSchemaKey(tapTable);
-        Descriptors.Descriptor cached = descriptorCache.get(tableId);
-        if (cached != null && schemaKey.equals(descriptorSchemaKeys.get(tableId))) {
-            return cached;
-        }
-        try {
-            Descriptors.Descriptor rebuilt = buildProtobufDescriptor(tapTable);
-            descriptorCache.put(tableId, rebuilt);
-            descriptorSchemaKeys.put(tableId, schemaKey);
-            return rebuilt;
-        } catch (Descriptors.DescriptorValidationException e) {
-            throw new RuntimeException("Failed to build Protobuf descriptor for table: " + tableId, e);
+        synchronized (descriptorCache) {
+            Descriptors.Descriptor cached = descriptorCache.get(tableId);
+            if (cached != null && schemaKey.equals(descriptorSchemaKeys.get(tableId))) {
+                return cached;
+            }
+            try {
+                Descriptors.Descriptor rebuilt = buildProtobufDescriptor(tapTable);
+                descriptorCache.put(tableId, rebuilt);
+                descriptorSchemaKeys.put(tableId, schemaKey);
+                return rebuilt;
+            } catch (Descriptors.DescriptorValidationException e) {
+                throw new RuntimeException("Failed to build Protobuf descriptor for table: " + tableId, e);
+            }
         }
     }
 
@@ -696,6 +698,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         } else if (token.startsWith("ENUM:")) {
             // Enum declarations are not persisted in TapField; downgrade unknown
             // enum values to google.protobuf.Value instead of emitting a dangling type.
+            tapLogger.warn("Downgrade unsupported protobuf map enum value type {} to google.protobuf.Value", token);
             field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
                     .setTypeName(".google.protobuf.Value");
         } else if (token.startsWith("MESSAGE:")) {
@@ -706,6 +709,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             } else {
                 // Custom message declarations are unavailable when rebuilding from
                 // TapField alone; use the generic Value representation explicitly.
+                tapLogger.warn("Downgrade unsupported protobuf map message value type {} to google.protobuf.Value", token);
                 field.setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE)
                         .setTypeName(".google.protobuf.Value");
             }
