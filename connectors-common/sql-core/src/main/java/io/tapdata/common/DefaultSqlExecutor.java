@@ -43,8 +43,17 @@ public class DefaultSqlExecutor implements SqlExecutor {
 
     @Override
     public void execute(String sql, TapSupplier<Connection> connectionSupplier, Consumer<Object> consumer, Supplier<Boolean> aliveSupplier, int batchSize) throws Throwable {
+        execute(sql, connectionSupplier, consumer, aliveSupplier, batchSize, 0);
+    }
+
+    @Override
+    public void execute(String sql, TapSupplier<Connection> connectionSupplier, Consumer<Object> consumer,
+                        Supplier<Boolean> aliveSupplier, int batchSize, int queryTimeoutSeconds) throws Throwable {
         try (Connection connection = connectionSupplier.get();
              Statement sqlStatement = connection.createStatement()) {
+            if (queryTimeoutSeconds > 0) {
+                sqlStatement.setQueryTimeout(queryTimeoutSeconds);
+            }
             boolean hasResult = sqlStatement.execute(sql);
             if (!hasResult) {
                 consumer.accept((long) sqlStatement.getUpdateCount());

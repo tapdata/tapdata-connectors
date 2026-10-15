@@ -74,7 +74,11 @@ public class SqlExecuteCommandFunction {
                 case "executeQuery":
                     String sql = (String) params.get("sql");
                     int batchSize = params.get("batchSize") != null ? (int) params.get("batchSize") : 1000;
-                    sqlExecutor.execute(sql, connectionSupplier, list -> executeResultConsumer.accept(new ExecuteResult().result(list)), aliveSupplier, batchSize);
+                    int queryTimeoutSeconds = params.get("queryTimeoutSeconds") instanceof Number
+                            ? ((Number) params.get("queryTimeoutSeconds")).intValue() : 0;
+                    sqlExecutor.execute(sql, connectionSupplier,
+                            list -> executeResultConsumer.accept(new ExecuteResult().result(list)),
+                            aliveSupplier, batchSize, queryTimeoutSeconds);
                     break;
                 case "call":
                     String funcName = (String) params.get("funcName");

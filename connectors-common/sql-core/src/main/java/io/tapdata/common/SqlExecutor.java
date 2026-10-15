@@ -13,6 +13,11 @@ public interface SqlExecutor {
 
     void execute(String sql, TapSupplier<Connection> connectionSupplier, Consumer<Object> consumer, Supplier<Boolean> aliveSupplier, int batchSize) throws Throwable;
 
+    default void execute(String sql, TapSupplier<Connection> connectionSupplier, Consumer<Object> consumer,
+                         Supplier<Boolean> aliveSupplier, int batchSize, int queryTimeoutSeconds) throws Throwable {
+        execute(sql, connectionSupplier, consumer, aliveSupplier, batchSize);
+    }
+
     @Deprecated
     ExecuteResult<?> execute(String sql, TapSupplier<Connection> connectionSupplier);
 
