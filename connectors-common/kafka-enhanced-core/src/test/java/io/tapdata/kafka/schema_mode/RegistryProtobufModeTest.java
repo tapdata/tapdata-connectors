@@ -74,6 +74,24 @@ class RegistryProtobufModeTest {
     }
 
     @Test
+    void fieldNumbersRemainStableWhenTapTableOrderChanges() throws Exception {
+        TapTable first = new TapTable("topic");
+        first.add(new TapField("first", "STRING"));
+        first.add(new TapField("second", "INTEGER"));
+        TapTable reordered = new TapTable("topic");
+        reordered.add(new TapField("second", "INTEGER"));
+        reordered.add(new TapField("first", "STRING"));
+
+        Descriptors.Descriptor firstDescriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, first);
+        Descriptors.Descriptor reorderedDescriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, reordered);
+
+        assertEquals(firstDescriptor.findFieldByName("first").getNumber(),
+                reorderedDescriptor.findFieldByName("first").getNumber());
+        assertEquals(firstDescriptor.findFieldByName("second").getNumber(),
+                reorderedDescriptor.findFieldByName("second").getNumber());
+    }
+
+    @Test
     void mapValuesAreConvertedToMapsInsteadOfEntryLists() throws Exception {
         TapTable table = new TapTable("topic");
         table.add(new TapField("attributes", "MAP"));
@@ -154,7 +172,7 @@ class RegistryProtobufModeTest {
     }
 
     @Test
-    void nestedReadKeepsDocumentShapeAndProvidesDottedCompatibilityKeys() throws Exception {
+    void nestedReadKeepsDocumentShapeWithoutDottedAliases() throws Exception {
         TapTable table = new TapTable("topic");
         table.add(new TapField("address", "OBJECT"));
         table.add(new TapField("address.street", "STRING"));
@@ -169,7 +187,24 @@ class RegistryProtobufModeTest {
 
         Map<String, Object> decoded = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
         assertEquals("Main Street", ((Map<?, ?>) decoded.get("address")).get("street"));
-        assertEquals("Main Street", decoded.get("address.street"));
+        assertNull(decoded.get("address.street"));
+    }
+
+    @Test
+    void nullMapValuesRoundTripAsNull() throws Exception {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("attributes", "MAP"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor mapField = descriptor.findFieldByName("attributes");
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("region", null);
+
+        Object converted = invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class}, source, mapField);
+        DynamicMessage message = DynamicMessage.newBuilder(descriptor).setField(mapField, converted).build();
+        Map<String, Object> decoded = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
+
+        assertTrue(((Map<?, ?>) decoded.get("attributes")).containsKey("region"));
+        assertNull(((Map<?, ?>) decoded.get("attributes")).get("region"));
     }
 
     @Test
@@ -456,6 +491,48 @@ class RegistryProtobufModeTest {
                 "topic", table, root, 1L);
 
         assertTrue(events.isEmpty(), "unchanged nested fields must not generate restart DDL");
+    }
+
+    @Test
+    void restartBaselineDoesNotAlterScalarFields() throws Exception {
+        DescriptorProtos.DescriptorProto rootProto = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("Root")
+                .addField(field("id", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT32))
+                .addField(field("enabled", 2, DescriptorProtos.FieldDescriptorProto.Type.TYPE_BOOL))
+                .addField(field("payload", 3, DescriptorProtos.FieldDescriptorProto.Type.TYPE_BYTES))
+                .build();
+        Descriptors.FileDescriptor file = Descriptors.FileDescriptor.buildFrom(
+                DescriptorProtos.FileDescriptorProto.newBuilder()
+                        .setName("RootScalar.proto")
+                        .setSyntax("proto3")
+                        .addMessageType(rootProto)
+                        .build(), new Descriptors.FileDescriptor[0]);
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("id", "INTEGER"));
+        table.add(new TapField("enabled", "BOOLEAN"));
+        table.add(new TapField("payload", "BINARY"));
+
+        List<TapEvent> events = invoke("detectSchemaChangesFromTableFlat",
+                new Class[]{String.class, TapTable.class, Descriptors.Descriptor.class, long.class},
+                "topic", table, file.findMessageTypeByName("Root"), 1L);
+        assertTrue(events.isEmpty(), "unchanged scalar fields must not generate restart DDL");
+    }
+
+    @Test
+    void restartBaselineDoesNotAlterRepeatedCustomMessages() throws Exception {
+        DescriptorProtos.DescriptorProto item = nestedMessage("Item",
+                field("id", 1, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT32));
+        Descriptors.Descriptor root = message("Root", field("items", 1,
+                DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE,
+                DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED, ".Root.Item"), item);
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("items", "ARRAY"));
+        table.add(new TapField("items.id", "INTEGER"));
+
+        List<TapEvent> events = invoke("detectSchemaChangesFromTableFlat",
+                new Class[]{String.class, TapTable.class, Descriptors.Descriptor.class, long.class},
+                "topic", table, root, 1L);
+        assertTrue(events.isEmpty(), "unchanged repeated messages must not generate restart DDL");
     }
 
     @Test
