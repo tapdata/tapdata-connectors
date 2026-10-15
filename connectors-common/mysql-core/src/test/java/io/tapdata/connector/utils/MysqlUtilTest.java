@@ -1,6 +1,8 @@
 package io.tapdata.connector.utils;
 
 import io.tapdata.connector.mysql.util.MysqlUtil;
+import io.tapdata.entity.schema.value.DateTime;
+import io.tapdata.entity.schema.value.TapTimeValue;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -22,5 +24,13 @@ public class MysqlUtilTest {
 		datatype = "TIMESTAMP(6)";
 		datatype = MysqlUtil.fixDataType(datatype, version);
 		Assertions.assertEquals("TIMESTAMP", datatype);
+	}
+
+	@Test
+	public void object2StringPreservesNegativeZeroTime() {
+		Assertions.assertEquals("'-00:00:00.000001'",
+				MysqlUtil.object2String(new TapTimeValue(DateTime.withTimeStr("-00:00:00.000001"))));
+		Assertions.assertEquals("'-12:34:56.123456'",
+				MysqlUtil.object2String(new TapTimeValue(DateTime.withTimeStr("-12:34:56.123456"))));
 	}
 }

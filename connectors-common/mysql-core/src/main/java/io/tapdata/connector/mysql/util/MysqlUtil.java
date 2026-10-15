@@ -4,6 +4,7 @@ import io.debezium.util.HexConverter;
 import io.tapdata.connector.mysql.MysqlJdbcContextV2;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
+import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.util.NetUtil;
@@ -174,6 +175,9 @@ public class MysqlUtil extends JdbcUtil {
                 return "1";
             }
             return "0";
+        } else if (obj instanceof TapTimeValue) {
+            TapTimeValue tapTimeValue = (TapTimeValue) obj;
+            return tapTimeValue.getValue() == null ? "null" : "'" + tapTimeValue.getValue().toTimeStr() + "'";
         } else {
             return "'" + obj + "'";
         }
