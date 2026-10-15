@@ -148,6 +148,42 @@ class RegistryProtobufModeTest {
     }
 
     @Test
+    void unsignedRepeatedIntegersUseProtobufUnsignedWireRepresentation() throws Exception {
+        TapTable table = new TapTable("topic");
+        TapField uint32 = new TapField("uint32Values", "ARRAY");
+        uint32.setPureDataType("__protobuf_repeated_scalar__:UINT32");
+        TapField uint64 = new TapField("uint64Values", "ARRAY");
+        uint64.setPureDataType("__protobuf_repeated_scalar__:UINT64");
+        table.add(uint32);
+        table.add(uint64);
+
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor uint32Field = descriptor.findFieldByName("uint32Values");
+        Descriptors.FieldDescriptor uint64Field = descriptor.findFieldByName("uint64Values");
+        DynamicMessage message = DynamicMessage.newBuilder(descriptor)
+                .setField(uint32Field, invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                        Collections.singletonList("4294967295"), uint32Field))
+                .setField(uint64Field, invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                        Collections.singletonList("18446744073709551615"), uint64Field))
+                .build();
+
+        assertEquals(-1, ((List<?>) message.getField(uint32Field)).get(0));
+        assertEquals(-1L, ((List<?>) message.getField(uint64Field)).get(0));
+    }
+
+    @Test
+    void mismatchedProtobufMessageIsRejectedInsteadOfBeingPassedThrough() throws Exception {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("payload", "OBJECT"));
+        table.add(new TapField("payload.name", "STRING"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor payload = descriptor.findFieldByName("payload");
+
+        assertThrows(InvocationTargetException.class, () -> invoke("convertValue",
+                new Class[]{Object.class, Descriptors.FieldDescriptor.class}, Struct.getDefaultInstance(), payload));
+    }
+
+    @Test
     void arrayAndObjectValuesRoundTripThroughDynamicMessage() throws Exception {
         TapTable table = new TapTable("topic");
         table.add(new TapField("items", "ARRAY"));
@@ -241,6 +277,27 @@ class RegistryProtobufModeTest {
         assertTrue(nestedItems.get(0) instanceof DynamicMessage);
         DynamicMessage nested = (DynamicMessage) nestedItems.get(0);
         assertEquals(7, nested.getField(nested.getDescriptorForType().findFieldByName("id")));
+    }
+
+    @Test
+    void dottedAliasesKeepNullPlaceholdersForSparseRepeatedObjects() throws Exception {
+        TapTable table = new TapTable("topic");
+        table.add(new TapField("items", "ARRAY"));
+        table.add(new TapField("items.id", "INTEGER"));
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor items = descriptor.findFieldByName("items");
+
+        Map<String, Object> first = new LinkedHashMap<>();
+        first.put("id", 1);
+        Map<String, Object> second = new LinkedHashMap<>();
+        Map<String, Object> third = new LinkedHashMap<>();
+        third.put("id", 3);
+        Object converted = invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                Arrays.asList(first, second, third), items);
+        DynamicMessage message = DynamicMessage.newBuilder(descriptor).setField(items, converted).build();
+
+        Map<String, Object> decoded = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
+        assertEquals(Arrays.asList(1, null, 3), decoded.get("items.id"));
     }
 
     @Test

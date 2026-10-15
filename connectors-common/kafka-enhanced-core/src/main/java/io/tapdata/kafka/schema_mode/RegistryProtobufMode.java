@@ -874,6 +874,13 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                     }
                     return Integer.parseInt(value.toString());
 
+                case UINT32:
+                case FIXED32:
+                    if (value instanceof Integer) {
+                        return value;
+                    }
+                    return Integer.parseUnsignedInt(value.toString());
+
                 case INT64:
                 case SINT64:
                 case SFIXED64:
@@ -881,6 +888,13 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                         return value;
                     }
                     return Long.parseLong(value.toString());
+
+                case UINT64:
+                case FIXED64:
+                    if (value instanceof Long) {
+                        return value;
+                    }
+                    return Long.parseUnsignedLong(value.toString());
 
                 case FLOAT:
                     if (value instanceof Float) {
@@ -914,7 +928,16 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                         return toListValue(value);
                     }
                     if (value instanceof Message) {
-                        return value;
+                        Message message = (Message) value;
+                        if (!fieldDescriptor.getMessageType().equals(message.getDescriptorForType())) {
+                            throw new IllegalArgumentException("Message descriptor "
+                                    + message.getDescriptorForType().getFullName()
+                                    + " does not match field " + fieldDescriptor.getFullName()
+                                    + " descriptor " + fieldDescriptor.getMessageType().getFullName());
+                        }
+                        return DynamicMessage.newBuilder(fieldDescriptor.getMessageType())
+                                .mergeFrom(message)
+                                .build();
                     }
                     DynamicMessage nested = toDynamicMessage(value, fieldDescriptor.getMessageType());
                     if (nested == null) {
@@ -970,15 +993,17 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             case INT32:
             case SINT32:
             case SFIXED32:
+                return value instanceof Integer ? value : Integer.parseInt(value.toString());
             case UINT32:
             case FIXED32:
-                return value instanceof Integer ? value : Integer.parseInt(value.toString());
+                return value instanceof Integer ? value : Integer.parseUnsignedInt(value.toString());
             case INT64:
             case SINT64:
             case SFIXED64:
+                return value instanceof Long ? value : Long.parseLong(value.toString());
             case UINT64:
             case FIXED64:
-                return value instanceof Long ? value : Long.parseLong(value.toString());
+                return value instanceof Long ? value : Long.parseUnsignedLong(value.toString());
             case FLOAT:
                 return value instanceof Float ? value : Float.parseFloat(value.toString());
             case DOUBLE:
@@ -1302,19 +1327,29 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
     private Map<String, List<Object>> collectionChildren(Collection<?> values) {
         Map<String, List<Object>> children = new LinkedHashMap<>();
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
         for (Object item : values) {
             if (item instanceof Map) {
-                for (Map.Entry<?, ?> entry : ((Map<?, ?>) item).entrySet()) {
-                    children.computeIfAbsent(String.valueOf(entry.getKey()), key -> new ArrayList<>())
-                            .add(entry.getValue());
+                for (Object key : ((Map<?, ?>) item).keySet()) {
+                    keys.add(String.valueOf(key));
                 }
             } else if (item instanceof Collection) {
-                Map<String, List<Object>> nested = collectionChildren((Collection<?>) item);
-                for (Map.Entry<String, List<Object>> entry : nested.entrySet()) {
-                    children.computeIfAbsent(entry.getKey(), key -> new ArrayList<>())
-                            .add(entry.getValue());
+                keys.addAll(collectionChildren((Collection<?>) item).keySet());
+            }
+        }
+
+        for (String key : keys) {
+            List<Object> valuesForKey = new ArrayList<>(values.size());
+            for (Object item : values) {
+                if (item instanceof Map) {
+                    valuesForKey.add(((Map<?, ?>) item).get(key));
+                } else if (item instanceof Collection) {
+                    valuesForKey.add(collectionChildren((Collection<?>) item).get(key));
+                } else {
+                    valuesForKey.add(null);
                 }
             }
+            children.put(key, valuesForKey);
         }
         return children;
     }
