@@ -113,6 +113,26 @@ class RegistryProtobufModeTest {
     }
 
     @Test
+    void mapValueNullIsEncodedAsProtobufNullValue() throws Exception {
+        TapTable table = new TapTable("topic");
+        TapField attributes = new TapField("attributes", "MAP");
+        attributes.setPureDataType("__protobuf_map__:SCALAR:STRING|MESSAGE:google.protobuf.Value");
+        table.add(attributes);
+        Descriptors.Descriptor descriptor = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
+        Descriptors.FieldDescriptor mapField = descriptor.findFieldByName("attributes");
+
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("missing", null);
+        DynamicMessage message = DynamicMessage.newBuilder(descriptor)
+                .setField(mapField, invoke("convertValue", new Class[]{Object.class, Descriptors.FieldDescriptor.class},
+                        source, mapField))
+                .build();
+        Map<String, Object> decoded = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
+        assertTrue(((Map<?, ?>) decoded.get("attributes")).containsKey("missing"));
+        assertNull(((Map<?, ?>) decoded.get("attributes")).get("missing"));
+    }
+
+    @Test
     void arrayAndObjectValuesRoundTripThroughDynamicMessage() throws Exception {
         TapTable table = new TapTable("topic");
         table.add(new TapField("items", "ARRAY"));
@@ -363,6 +383,9 @@ class RegistryProtobufModeTest {
                 "topic", oldFile.findMessageTypeByName("Root"), newFile.findMessageTypeByName("Root"), 1L);
         assertEquals(1, events.size());
         assertTrue(events.get(0) instanceof TapAlterFieldAttributesEvent);
+        TapAlterFieldAttributesEvent attribute = (TapAlterFieldAttributesEvent) events.get(0);
+        assertEquals("ARRAY", attribute.getDataTypeChange().getBefore());
+        assertEquals("ARRAY", attribute.getDataTypeChange().getAfter());
     }
 
     @Test

@@ -1096,13 +1096,23 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         for (Map.Entry<?, ?> item : ((Map<?, ?>) value).entrySet()) {
             DynamicMessage.Builder entry = DynamicMessage.newBuilder(entryDescriptor);
             entry.setField(keyField, convertMapEntryValue(item.getKey(), keyField));
-            entry.setField(valueField, convertMapEntryValue(item.getValue(), valueField));
+            Object convertedValue = convertMapEntryValue(item.getValue(), valueField);
+            if (convertedValue != null) {
+                entry.setField(valueField, convertedValue);
+            }
             entries.add(entry.build());
         }
         return entries;
     }
 
     private Object convertMapEntryValue(Object value, Descriptors.FieldDescriptor fieldDescriptor) {
+        if (value == null) {
+            if (fieldDescriptor.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE
+                    && "google.protobuf.Value".equals(fieldDescriptor.getMessageType().getFullName())) {
+                return toProtobufValue(null);
+            }
+            return null;
+        }
         if (fieldDescriptor.getJavaType() == Descriptors.FieldDescriptor.JavaType.MESSAGE) {
             return convertValue(value, fieldDescriptor);
         }
@@ -1246,15 +1256,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                 addDottedAliases(target, path, child);
             }
         } else if (value instanceof Collection) {
-            Map<String, List<Object>> children = new LinkedHashMap<>();
-            for (Object item : flattenCollection(value)) {
-                if (item instanceof Map) {
-                    for (Map.Entry<?, ?> entry : ((Map<?, ?>) item).entrySet()) {
-                        children.computeIfAbsent(String.valueOf(entry.getKey()), key -> new ArrayList<>())
-                                .add(entry.getValue());
-                    }
-                }
-            }
+            Map<String, List<Object>> children = collectionChildren((Collection<?>) value);
             for (Map.Entry<String, List<Object>> entry : children.entrySet()) {
                 String path = prefix + "." + entry.getKey();
                 target.putIfAbsent(path, entry.getValue());
@@ -1263,19 +1265,23 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         }
     }
 
-    private List<Object> flattenCollection(Object value) {
-        List<Object> flattened = new ArrayList<>();
-        if (!(value instanceof Collection)) {
-            return flattened;
-        }
-        for (Object item : (Collection<?>) value) {
-            if (item instanceof Collection) {
-                flattened.addAll(flattenCollection(item));
-            } else {
-                flattened.add(item);
+    private Map<String, List<Object>> collectionChildren(Collection<?> values) {
+        Map<String, List<Object>> children = new LinkedHashMap<>();
+        for (Object item : values) {
+            if (item instanceof Map) {
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) item).entrySet()) {
+                    children.computeIfAbsent(String.valueOf(entry.getKey()), key -> new ArrayList<>())
+                            .add(entry.getValue());
+                }
+            } else if (item instanceof Collection) {
+                Map<String, List<Object>> nested = collectionChildren((Collection<?>) item);
+                for (Map.Entry<String, List<Object>> entry : nested.entrySet()) {
+                    children.computeIfAbsent(entry.getKey(), key -> new ArrayList<>())
+                            .add(entry.getValue());
+                }
             }
         }
-        return flattened;
+        return children;
     }
 
     /**
@@ -1645,7 +1651,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         attr.setReferenceTime(referenceTime);
         attr.fieldName(fieldName);
         if (dataTypeChanged) {
-            attr.dataType(ValueChange.create(oldType, newType));
+            attr.dataType(ValueChange.create(protobufPrimaryTypeName(oldField), protobufPrimaryTypeName(newField)));
         }
         if (nullableChanged) {
             attr.nullable(ValueChange.create(oldNullable, newNullable));
@@ -1663,10 +1669,9 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                                                                          long referenceTime) {
         String oldType = tapFieldSignature(oldField);
         String newType = protobufFieldSignature(newField);
-        if (StringUtils.isBlank(oldField.getPureDataType())
-                && (newType.startsWith(REPEATED_SCALAR_PREFIX)
-                || newType.startsWith(REPEATED_ENUM_PREFIX)
-                || newType.startsWith(MAP_TYPE_PREFIX))) {
+        boolean hasDetailedOldType = StringUtils.isNotBlank(oldField.getPureDataType());
+        if (!hasDetailedOldType) {
+            oldType = StringKit.removeParentheses(StringUtils.defaultString(oldField.getDataType()));
             newType = protobufPrimaryTypeName(newField);
         }
         boolean oldNullable = !Boolean.FALSE.equals(oldField.getNullable());
@@ -1685,7 +1690,9 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         attr.setReferenceTime(referenceTime);
         attr.fieldName(fieldName);
         if (dataTypeChanged) {
-            attr.dataType(ValueChange.create(oldType, newType));
+            attr.dataType(ValueChange.create(
+                    hasDetailedOldType ? oldField.getDataType() : oldType,
+                    protobufPrimaryTypeName(newField)));
         }
         if (nullableChanged) {
             attr.nullable(ValueChange.create(oldNullable, newNullable));
