@@ -106,7 +106,7 @@ class RegistryProtobufModeTest {
 
         Map<String, Object> converted = invoke("convertDynamicMessageToMap", new Class[]{DynamicMessage.class}, message);
         assertEquals("cn", ((Map<?, ?>) converted.get("attributes")).get("region"));
-        assertEquals(3.0d, ((Map<?, ?>) converted.get("attributes")).get("retries"));
+        assertEquals(3, ((Map<?, ?>) converted.get("attributes")).get("retries"));
     }
 
     @Test
@@ -343,7 +343,7 @@ class RegistryProtobufModeTest {
     }
 
     @Test
-    void repeatedEnumsDowngradeToStringsInsteadOfDanglingDescriptors() throws Exception {
+    void repeatedEnumsPreserveEnumWireTypeWhenRebuildingDescriptor() throws Exception {
         DescriptorProtos.EnumDescriptorProto status = DescriptorProtos.EnumDescriptorProto.newBuilder()
                 .setName("Status")
                 .addValue(DescriptorProtos.EnumValueDescriptorProto.newBuilder().setName("UNKNOWN").setNumber(0))
@@ -366,8 +366,9 @@ class RegistryProtobufModeTest {
                 table, DynamicMessage.newBuilder(file.findMessageTypeByName("Root")).build(), Collections.emptyList());
 
         Descriptors.Descriptor rebuilt = invoke("buildProtobufDescriptor", new Class[]{TapTable.class}, table);
-        assertEquals(Descriptors.FieldDescriptor.Type.STRING, rebuilt.findFieldByName("statuses").getType());
+        assertEquals(Descriptors.FieldDescriptor.Type.ENUM, rebuilt.findFieldByName("statuses").getType());
         assertTrue(rebuilt.findFieldByName("statuses").isRepeated());
+        assertEquals("READY", rebuilt.findFieldByName("statuses").getEnumType().findValueByName("READY").getName());
     }
 
     @Test
