@@ -33,7 +33,7 @@ def main():
                         help="JSON export of immutable connector releases in Nexus")
     parser.add_argument("--pdk-api-version", required=True)
     parser.add_argument("--bom-version", required=True,
-                        help="new immutable BOM version, e.g. 2.0.8-20261016.1")
+                        help="new immutable BOM version, e.g. 2.0.11-20261016.1")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 

@@ -7,17 +7,18 @@ requested PDK API and generating a new, immutable BOM.
 
 ## Current develop branch values
 
-The two sample connectors do not currently target the same PDK API:
+Both sample connectors inherit the same PDK API version from
+`connectors/pom.xml`:
 
 | Connector | Current Maven version | `tapdata.pdk.api.version` |
 | --- | --- | --- |
-| `mysql-connector` | `1.0-SNAPSHOT` | `2.0.8-SNAPSHOT` |
-| `postgres-connector` | `1.0-SNAPSHOT` | `2.0.5-SNAPSHOT` |
+| `mysql-connector` | `1.0-SNAPSHOT` | `2.0.11-SNAPSHOT` |
+| `postgres-connector` | `1.0-SNAPSHOT` | `2.0.11-SNAPSHOT` |
 
-For that reason, this demo has one BOM per API version. The BOMs use the
-connectors' current Maven coordinates so they can be inspected alongside the
-existing POMs. Production releases should use independent, immutable connector
-versions (for example, `1.1.0`, `1.0.0`) instead of `1.0-SNAPSHOT`.
+This demo has one BOM containing both connectors. It uses the connectors'
+current Maven coordinates so it can be inspected alongside the existing POMs.
+Production releases should use independent, immutable connector versions (for
+example, `1.1.0`, `1.0.0`) instead of `1.0-SNAPSHOT`.
 
 ## How CI fits in
 
@@ -45,8 +46,8 @@ inventory, then run:
 ```sh
 python3 connector-distribution-demo/generate_bom.py \
   --inventory target/nexus-connector-releases.json \
-  --pdk-api-version 2.0.8 \
-  --bom-version 2.0.8-20261016.1 \
+  --pdk-api-version 2.0.11-SNAPSHOT \
+  --bom-version 2.0.11-20261016.1 \
   --output target/connectors-bom/pom.xml
 ```
 
@@ -60,12 +61,11 @@ select compatible connectors or detect source changes by itself.
 
 ## Files
 
-- `boms/pdk-2.0.5/pom.xml` and `boms/pdk-2.0.8/pom.xml`: PDK-specific BOM
-  examples based on the current develop branch declarations.
+- `boms/pdk-2.0.11/pom.xml`: a PDK-specific BOM containing both connectors,
+  based on the current develop branch declarations.
 - `tapstate-consumer/pom.xml`: sample showing BOM import and versionless
-  connector dependencies. Use `-Ppdk-2.0.5` for Postgres or `-Ppdk-2.0.8`
-  for MySQL in this current-branch example.
+  connector dependencies for PDK API `2.0.11-SNAPSHOT`.
 
 This is an integration demo, not yet a production release job. The current
-connector modules still use `1.0-SNAPSHOT`, and their existing POMs declare
-different PDK API versions.
+connector modules still use `1.0-SNAPSHOT`; their shared PDK API version is
+inherited from `connectors/pom.xml` as `2.0.11-SNAPSHOT`.
