@@ -29,6 +29,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Connection;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -36,11 +38,41 @@ import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 public class MysqlConnectorTest {
+    @Test
+    void executeWithTimeoutKeepsMysqlStreamingAndValueConversion() throws Throwable {
+        MysqlConnector connector = Mockito.spy(new MysqlConnector());
+        JdbcContext jdbcContext = mock(JdbcContext.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        ResultSetMetaData metaData = mock(ResultSetMetaData.class);
+        Map<String, Object> convertedRow = Collections.singletonMap("created_at", "mysql-value");
+        ReflectionTestUtils.setField(connector, "jdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(connector, "isAlive", new AtomicBoolean(true));
+        when(jdbcContext.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(statement);
+        when(statement.execute("select created_at from records")).thenReturn(true);
+        when(statement.getResultSet()).thenReturn(resultSet);
+        when(resultSet.getMetaData()).thenReturn(metaData);
+        when(resultSet.next()).thenReturn(true, false);
+        when(statement.getMoreResults()).thenReturn(false);
+        doReturn(convertedRow).when(connector).filterTimeForMysql(resultSet, metaData);
+        List<Object> batches = new ArrayList<>();
+
+        connector.execute("select created_at from records", batches::add, 10, 8);
+
+        verify(statement).setQueryTimeout(8);
+        verify(statement).setFetchSize(Integer.MIN_VALUE);
+        verify(connector).filterTimeForMysql(resultSet, metaData);
+        assertEquals(Collections.singletonList(convertedRow), batches.get(0));
+    }
+
     @Test
     void discoverSchemaMarksInformationSchemaViewAsView() throws SQLException {
         MysqlConnector connector = new MysqlConnector();
