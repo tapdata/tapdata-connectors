@@ -128,11 +128,16 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
                 + after.keySet().stream().map(k -> quoteAndEscape(k) + "=values(" + quoteAndEscape(k) + ")").collect(Collectors.joining(", "));
     }
 
+    @Override
+    protected String object2String(Object value) {
+        return MysqlUtil.object2String(value);
+    }
+
     protected Object filterValue(Object value, String dataType) {
         if (dataType.startsWith("char")) {
             return StringKit.trimTailBlank(value);
         }
-        return value;
+        return MysqlUtil.toJdbcValue(value);
     }
 
     @Override
