@@ -6,6 +6,12 @@ import io.tapdata.entity.schema.value.TapTimeValue;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.sql.ResultSet;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
 /**
  * @author samuel
  * @Description
@@ -38,5 +44,12 @@ public class MysqlUtilTest {
 	public void toJdbcValuePreservesNegativeZeroTime() {
 		Assertions.assertEquals("-00:00:00.000001",
 				MysqlUtil.toJdbcValue(new TapTimeValue(DateTime.withTimeStr("-00:00:00.000001"))));
+	}
+
+	@Test
+	public void getTimeStringPreservesRawNegativeZeroTime() throws Exception {
+		ResultSet resultSet = mock(ResultSet.class);
+		when(resultSet.getBytes(1)).thenReturn("-00:00:00.000001".getBytes(StandardCharsets.UTF_8));
+		Assertions.assertEquals("-00:00:00.000001", MysqlUtil.getTimeString(resultSet, 1));
 	}
 }
