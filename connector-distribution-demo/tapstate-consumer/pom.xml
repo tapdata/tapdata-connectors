@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>io.tapdata.demo</groupId>
+    <artifactId>tapstate-connector-consumer</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <!-- Choose one profile matching Tapstate's PDK API. The branches currently
+         declare different APIs, so the demo BOMs intentionally select one each. -->
+    <profiles>
+        <profile>
+            <id>pdk-2.0.5</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <dependencyManagement>
+                <dependencies>
+                    <dependency>
+                        <groupId>io.tapdata</groupId>
+                        <artifactId>connectors-bom</artifactId>
+                        <version>2.0.5-demo-SNAPSHOT</version>
+                        <type>pom</type>
+                        <scope>import</scope>
+                    </dependency>
+                </dependencies>
+            </dependencyManagement>
+            <dependencies>
+                <dependency>
+                    <groupId>io.tapdata</groupId>
+                    <artifactId>postgres-connector</artifactId>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>pdk-2.0.8</id>
+            <dependencyManagement>
+                <dependencies>
+                    <dependency>
+                        <groupId>io.tapdata</groupId>
+                        <artifactId>connectors-bom</artifactId>
+                        <version>2.0.8-demo-SNAPSHOT</version>
+                        <type>pom</type>
+                        <scope>import</scope>
+                    </dependency>
+                </dependencies>
+            </dependencyManagement>
+            <dependencies>
+                <dependency>
+                    <groupId>io.tapdata</groupId>
+                    <artifactId>mysql-connector</artifactId>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
+</project>
