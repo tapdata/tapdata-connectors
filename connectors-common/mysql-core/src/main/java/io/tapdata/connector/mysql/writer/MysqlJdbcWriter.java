@@ -229,7 +229,7 @@ public abstract class MysqlJdbcWriter extends MysqlWriter {
 				if (!needAddIntoPreparedStatementValues(tapField, tapRecordEvent)) {
 					continue;
 				}
-				preparedStatement.setObject(parameterIndex++, after.get(fieldName));
+				preparedStatement.setObject(parameterIndex++, MysqlUtil.toJdbcValue(after.get(fieldName)));
 				afterKeys.remove(fieldName);
 			} catch (SQLException e) {
 				throw exceptionWrapper.wrap(tapConnectorContext, tapTable, tapRecordEvent, e, (ex) -> {
@@ -268,7 +268,7 @@ public abstract class MysqlJdbcWriter extends MysqlWriter {
 				throw new Exception("Set prepared statement where clause failed, unique key \"" + uniqueKey + "\" not exists in data: " + tapRecordEvent);
 			}
 			Object value = (EmptyKit.isNotEmpty(before) && before.containsKey(uniqueKey)) ? before.get(uniqueKey) : after.get(uniqueKey);
-			preparedStatement.setObject(parameterIndex++, value);
+			preparedStatement.setObject(parameterIndex++, MysqlUtil.toJdbcValue(value));
 		}
 	}
 
