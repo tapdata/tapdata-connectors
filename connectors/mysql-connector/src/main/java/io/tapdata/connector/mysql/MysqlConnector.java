@@ -1217,9 +1217,18 @@ public class MysqlConnector extends CommonDbConnector {
         return exportEventSql(writeRecorder, connectorContext, tapEvent, table);
     }
 
+    @Override
     protected void execute(String sql, Consumer<Object> consumer, int batchSize) throws Throwable {
+        execute(sql, consumer, batchSize, 0);
+    }
+
+    @Override
+    protected void execute(String sql, Consumer<Object> consumer, int batchSize, int queryTimeoutSeconds) throws Throwable {
         try (Connection connection = jdbcContext.getConnection();
              Statement sqlStatement = connection.createStatement()) {
+            if (queryTimeoutSeconds > 0) {
+                sqlStatement.setQueryTimeout(queryTimeoutSeconds);
+            }
             sqlStatement.setFetchSize(Integer.MIN_VALUE);
             boolean hasResult = sqlStatement.execute(sql);
             if (!hasResult) {

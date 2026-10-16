@@ -1126,7 +1126,10 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 case "executeQuery":
                     String sql = (String) params.get("sql");
                     int batchSize = params.get("batchSize") != null ? (int) params.get("batchSize") : 1000;
-                    execute(sql, list -> consumer.accept(new ExecuteResult().result(list)), batchSize);
+                    int queryTimeoutSeconds = params.get("queryTimeoutSeconds") instanceof Number
+                            ? ((Number) params.get("queryTimeoutSeconds")).intValue() : 0;
+                    execute(sql, list -> consumer.accept(new ExecuteResult().result(list)), batchSize,
+                            queryTimeoutSeconds);
                     break;
                 case "call":
                     String funcName = (String) params.get("funcName");
@@ -1142,8 +1145,15 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void execute(String sql, Consumer<Object> consumer, int batchSize) throws Throwable {
+        execute(sql, consumer, batchSize, 0);
+    }
+
+    protected void execute(String sql, Consumer<Object> consumer, int batchSize, int queryTimeoutSeconds) throws Throwable {
         try (Connection connection = jdbcContext.getConnection();
              Statement sqlStatement = connection.createStatement()) {
+            if (queryTimeoutSeconds > 0) {
+                sqlStatement.setQueryTimeout(queryTimeoutSeconds);
+            }
             sqlStatement.setFetchSize(batchSize > 0 ? batchSize : 1000); //protected from OM
             boolean hasResult = sqlStatement.execute(sql);
             if (!hasResult) {
