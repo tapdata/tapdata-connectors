@@ -48,7 +48,7 @@ python3 connector-distribution-demo/generate_bom.py \
   --inventory target/nexus-connector-releases.json \
   --pdk-api-version 2.0.11-SNAPSHOT \
   --bom-version 2.0.11-20261016.1 \
-  --output target/connectors-bom/pom.xml
+  --output target/generated-boms/pdk-2.0.11/pom.xml
 ```
 
 Each inventory record contains `groupId`, `artifactId`, `version`,
@@ -59,10 +59,14 @@ new BOM coordinate. Nexus credentials belong in CI settings/secrets, not in
 this repository. `maven-deploy-plugin` uploads Maven artifacts; it does not
 select compatible connectors or detect source changes by itself.
 
+The generated POM is a build artifact, so CI writes it under `target/` and
+deploys it from there. It is not kept in a versioned `boms/` source directory;
+the immutable BOM versions and contents come from the release inventory.
+
 ## Files
 
-- `boms/pdk-2.0.11/pom.xml`: a PDK-specific BOM containing both connectors,
-  based on the current develop branch declarations.
+- `generate_bom.py`: generates the immutable BOM POM from published release
+  metadata; CI supplies the inventory and output path.
 - `tapstate-consumer/pom.xml`: sample showing BOM import and versionless
   connector dependencies for PDK API `2.0.11-SNAPSHOT`.
 
