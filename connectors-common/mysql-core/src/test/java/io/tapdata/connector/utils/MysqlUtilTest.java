@@ -33,4 +33,10 @@ public class MysqlUtilTest {
 		Assertions.assertEquals("'-12:34:56.123456'",
 				MysqlUtil.object2String(new TapTimeValue(DateTime.withTimeStr("-12:34:56.123456"))));
 	}
+
+	@Test
+	public void toJdbcValuePreservesNegativeZeroTime() {
+		Assertions.assertEquals("-00:00:00.000001",
+				MysqlUtil.toJdbcValue(new TapTimeValue(DateTime.withTimeStr("-00:00:00.000001"))));
+	}
 }

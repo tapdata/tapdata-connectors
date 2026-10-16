@@ -184,6 +184,14 @@ public class MysqlUtil extends JdbcUtil {
         return result;
     }
 
+    public static Object toJdbcValue(Object obj) {
+        if (obj instanceof TapTimeValue) {
+            TapTimeValue tapTimeValue = (TapTimeValue) obj;
+            return tapTimeValue.getValue() == null ? null : tapTimeValue.getValue().toTimeStr();
+        }
+        return obj;
+    }
+
     public static void testHostPortForMasterSlave(MysqlConfig mysqlConfig) {
         ArrayList<LinkedHashMap<String, Object>> masterSlaveAddress = mysqlConfig.getMasterSlaveAddress();
         ArrayList<LinkedHashMap<String, Object>> availableMasterSlaveAddress = Optional.ofNullable(mysqlConfig.getAvailableMasterSlaveAddress()).orElse(new ArrayList<>());
