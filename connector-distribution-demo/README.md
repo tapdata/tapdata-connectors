@@ -70,6 +70,61 @@ the immutable BOM versions and contents come from the release inventory.
 - `tapstate-consumer/pom.xml`: sample showing BOM import and versionless
   connector dependencies for PDK API `2.0.11-SNAPSHOT`.
 
-This is an integration demo, not yet a production release job. The current
-connector modules still use `1.0-SNAPSHOT`; their shared PDK API version is
-inherited from `connectors/pom.xml` as `2.0.11-SNAPSHOT`.
+## Artifact publishing workflow
+
+`.github/workflows/publish-connectors.yml` is the separate artifact publishing
+flow. It has no push or pull request trigger, so reviewing or merging this PR
+does not publish anything. It can be started manually with `workflow_dispatch`
+or called by another repository's release workflow with `workflow_call`.
+Configure the `NEXUS_USERNAME` and `NEXUS_PASSWORD` Actions secrets.
+
+The caller supplies the complete connector set for one PDK API version. For
+example, to publish MySQL `1.1.0` and keep using Postgres `1.0.0`:
+
+```json
+[
+  {
+    "module": "connectors/mysql-connector",
+    "groupId": "io.tapdata",
+    "artifactId": "mysql-connector",
+    "version": "1.1.0",
+    "pdkApiVersion": "2.0.11-SNAPSHOT",
+    "publish": true
+  },
+  {
+    "module": "connectors/postgres-connector",
+    "groupId": "io.tapdata",
+    "artifactId": "postgres-connector",
+    "version": "1.0.0",
+    "pdkApiVersion": "2.0.11-SNAPSHOT",
+    "publish": false
+  }
+]
+```
+
+The workflow checks each PDK API value against the connector POM. It builds
+only entries with `publish: true`. For a new coordinate it deploys the shaded
+JAR and a generated POM under the requested immutable release version. If the
+coordinate already exists with the same SHA-256, it skips upload; if the bytes
+differ, it fails. Entries with `publish: false` are fetched from Nexus and
+hashed, so a missing reused version fails before BOM deployment. The generated
+BOM contains the exact versions from the full input set and is deployed under
+the requested new BOM version. This demo supports a single PDK API group per
+run and requires a new numeric BOM version, for example
+`2.0.11.20261016.1`.
+
+The reusable workflow lets Tapdata's OpenSource Version Construction supply
+the connector-set manifest and BOM version. That orchestration decides which
+modules changed and sets `publish`; this workflow builds/uploads the selected
+connectors, validates reused coordinates, and publishes the BOM. It sets each
+selected module's project version in the runner's checkout before building,
+so the JAR manifest and Maven coordinate use the requested release version;
+the source POM in Git is not changed. Reusable callers also pass `source_ref`
+to choose the connector branch or tag to build. Nexus must enforce release
+redeploy prevention as a second immutability guard.
+
+This is an integration demo, not yet a production release job. The sample
+connector modules still declare `1.0-SNAPSHOT`; their shared PDK API version
+is inherited from `connectors/pom.xml` as `2.0.11-SNAPSHOT`. The release
+workflow publishes a separately versioned distribution coordinate and does
+does not commit version edits to source POMs.
