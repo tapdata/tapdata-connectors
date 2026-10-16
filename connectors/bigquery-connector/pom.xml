@@ -17,7 +17,6 @@
         <java.version>8</java.version>
         <akka.version>2.7.0</akka.version>
         <scala.binary.version>2.13</scala.binary.version>
-<!--        <tapdata.pdk.api.version>1.2.0</tapdata.pdk.api.version>-->
     </properties>
 
     <dependencies>
@@ -35,6 +34,7 @@
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>tapdata-pdk-runner</artifactId>
+            <version>${tapdata.pdk.runner.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>

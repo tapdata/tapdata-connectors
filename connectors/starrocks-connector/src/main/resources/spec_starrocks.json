@@ -756,7 +756,7 @@
       "to": "TapNumber"
     },
     "float": {
-      "to": "TapNumber",
+      "to": "TapFloat",
       "precision": [
         1,
         6
@@ -768,7 +768,7 @@
       "fixed": false
     },
     "double": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "precision": [
         1,
         17

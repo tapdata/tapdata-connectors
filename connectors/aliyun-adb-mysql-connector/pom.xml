@@ -22,7 +22,6 @@
     </modules>
 
     <properties>
-        <tapdata.pdk.api.version>2.0.5-SNAPSHOT</tapdata.pdk.api.version>
         <java.version>8</java.version>
     </properties>
     <dependencies>
@@ -50,6 +49,7 @@
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>tapdata-pdk-runner</artifactId>
+            <version>${tapdata.pdk.runner.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
