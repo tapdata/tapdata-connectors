@@ -36,6 +36,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.time.LocalDate;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -277,6 +278,19 @@ public class PaimonConnector extends ConnectorBase {
     private static Integer toEpochDay(TapDateValue tapDateValue) {
         if (tapDateValue == null || tapDateValue.getValue() == null) {
             return null;
+        }
+        Object origin = tapDateValue.getOriginValue();
+        // SQL Date and date text carry a calendar date, not a UTC instant. Converting their
+        // epoch milliseconds also introduces java.sql.Date's pre-1582 calendar cutover.
+        if (origin instanceof java.sql.Date) {
+            return Math.toIntExact(((java.sql.Date) origin).toLocalDate().toEpochDay());
+        }
+        if (origin instanceof CharSequence) {
+            try {
+                return Math.toIntExact(LocalDate.parse(origin.toString()).toEpochDay());
+            } catch (RuntimeException e) {
+                throw temporalConversionFailure("TapDate", "DATE", origin, "invalid calendar date");
+            }
         }
         Long seconds = tapDateValue.getValue().getSeconds();
         if (seconds == null) {

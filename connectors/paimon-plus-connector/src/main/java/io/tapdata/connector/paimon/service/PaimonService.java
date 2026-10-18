@@ -3012,7 +3012,7 @@ public class PaimonService implements AutoCloseable {
                 return decimal != null ? decimal.toBigDecimal() : null;
             case "DATE":
                 int days = row.getInt(pos);
-                return new java.sql.Date(days * 86400000L);
+                return java.sql.Date.valueOf(LocalDate.ofEpochDay(days));
             case "TIMESTAMP_WITHOUT_TIME_ZONE": {
                 Timestamp timestamp;
                 if (dataType instanceof TimestampType) {
