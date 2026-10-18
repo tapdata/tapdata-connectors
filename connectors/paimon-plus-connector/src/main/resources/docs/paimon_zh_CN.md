@@ -99,6 +99,9 @@ Paimon 数据库名称（默认：default）
 
 `INT` 和 `INTEGER` 都创建 Paimon `INT`。不带参数的 `DECIMAL` 使用 `DECIMAL(38,10)`；
 不带参数的 `TIME` 使用 `TIME(3)`，仅支持 0-3 位精度，包含亚毫秒精度的输入会被拒绝。
+
+DECIMAL 值必须精确符合物理列的 precision 和 scale。精度溢出或缩减小数位数会改变数值时，写入失败；连接器不会执行 `HALF_UP` 舍入。例如，写入 `DECIMAL(5,2)` 时，`1.235` 会被拒绝，`1.2300` 则可作为 `1.23` 写入，因为去除尾随零不会改变数值。
+
 连接器不会自动迁移已有目标列：历史 STRING 列仍按实际物理类型写入，原生 Paimon
 ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 JSON 写入 STRING 列。
 

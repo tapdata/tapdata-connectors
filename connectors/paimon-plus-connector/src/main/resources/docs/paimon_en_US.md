@@ -78,6 +78,9 @@ The Paimon database name (default: default)
 
 `INT` and `INTEGER` both create Paimon `INT`. Bare `DECIMAL` uses `DECIMAL(38,10)`. Bare
 `TIME` uses `TIME(3)`; only precision 0-3 is supported, and sub-millisecond input is rejected.
+
+DECIMAL values must fit the physical column's precision and scale exactly. Precision overflow or a scale reduction that would change the value fails the write; the connector does not apply `HALF_UP` rounding. For `DECIMAL(5,2)`, `1.235` is rejected, while `1.2300` is accepted as `1.23` because removing trailing zeros preserves its value.
+
 Existing target columns are not migrated: legacy STRING columns remain writable according to their
 physical type, while native Paimon ARRAY/MAP/ROW/MULTISET/VARIANT targets are rejected. Complex CDC
 values must be stored as JSON in STRING columns.

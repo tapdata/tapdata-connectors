@@ -41,8 +41,11 @@ import net.sf.jsqlparser.statement.select.SubSelect;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DecimalType;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -276,8 +279,7 @@ final class PaimonSqlQueryParser {
     private static Predicate parseComparison(BinaryExpression expression, String tableName,
                                              RowType rowType, PredicateBuilder builder) {
         int index = fieldIndex(expression.getLeftExpression(), tableName, rowType, builder);
-        Object value = literal(expression.getRightExpression());
-        value = PredicateBuilder.convertJavaObject(rowType.getTypeAt(index), value);
+        Object value = typedLiteral(rowType.getTypeAt(index), expression.getRightExpression());
         if (expression instanceof EqualsTo) {
             return builder.equal(index, value);
         }
@@ -304,10 +306,8 @@ final class PaimonSqlQueryParser {
     private static Predicate parseBetween(Between expression, String tableName, RowType rowType,
                                           PredicateBuilder builder) {
         int index = fieldIndex(expression.getLeftExpression(), tableName, rowType, builder);
-        Object start = PredicateBuilder.convertJavaObject(rowType.getTypeAt(index),
-                literal(expression.getBetweenExpressionStart()));
-        Object end = PredicateBuilder.convertJavaObject(rowType.getTypeAt(index),
-                literal(expression.getBetweenExpressionEnd()));
+        Object start = typedLiteral(rowType.getTypeAt(index), expression.getBetweenExpressionStart());
+        Object end = typedLiteral(rowType.getTypeAt(index), expression.getBetweenExpressionEnd());
         Predicate predicate = builder.between(index, start, end);
         return expression.isNot() ? negate(predicate, expression) : predicate;
     }
@@ -370,7 +370,7 @@ final class PaimonSqlQueryParser {
         }
         List<Object> values = new ArrayList<>(expressions.size());
         for (Expression item : expressions) {
-            values.add(PredicateBuilder.convertJavaObject(rowType.getTypeAt(index), literal(item)));
+            values.add(typedLiteral(rowType.getTypeAt(index), item));
         }
         return expression.isNot() ? builder.notIn(index, values) : builder.in(index, values);
     }
@@ -432,6 +432,37 @@ final class PaimonSqlQueryParser {
             throw unsupported("NULL is only supported by IS NULL or IS NOT NULL");
         }
         throw unsupported("unsupported literal: " + expression);
+    }
+
+    private static Object typedLiteral(DataType type, Expression expression) {
+        if (type instanceof DecimalType) {
+            if (!(expression instanceof LongValue || expression instanceof DoubleValue
+                    || expression instanceof SignedExpression || expression instanceof StringValue)) {
+                throw unsupported("DECIMAL requires a numeric literal: " + expression);
+            }
+            DecimalType decimalType = (DecimalType) type;
+            String text = expression instanceof StringValue
+                    ? ((StringValue) expression).getValue() : expression.toString();
+            try {
+                // Keep the parser's numeric text: Double loses digits and Long overflows for UNSIGNED.
+                BigDecimal value = new BigDecimal(text);
+                if ((value.signum() != 0 && (long) value.precision() - value.scale()
+                        > decimalType.getPrecision() - decimalType.getScale())
+                        || value.stripTrailingZeros().scale() > decimalType.getScale()) {
+                    throw new ArithmeticException("literal exceeds target precision or scale");
+                }
+                value = value.setScale(decimalType.getScale(), RoundingMode.UNNECESSARY);
+                if (value.precision() > decimalType.getPrecision()) {
+                    throw new ArithmeticException("precision overflow");
+                }
+                return PredicateBuilder.convertJavaObject(type, value);
+            } catch (ArithmeticException | NumberFormatException e) {
+                // Paimon's converter rounds HALF_UP; doing that to a predicate changes its meaning.
+                throw unsupported("DECIMAL literal is not exactly representable as " + type.asSQLString()
+                        + ": " + text, e);
+            }
+        }
+        return PredicateBuilder.convertJavaObject(type, literal(expression));
     }
 
     private static Object castLiteral(CastExpression expression) {

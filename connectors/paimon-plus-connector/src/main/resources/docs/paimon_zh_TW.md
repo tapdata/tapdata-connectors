@@ -78,6 +78,9 @@ Paimon 數據庫名稱（默認：default）
 
 `INT` 和 `INTEGER` 都建立 Paimon `INT`。不帶參數的 `DECIMAL` 使用 `DECIMAL(38,10)`；
 不帶參數的 `TIME` 使用 `TIME(3)`，僅支援 0-3 位精度，包含亞毫秒精度的輸入會被拒絕。
+
+DECIMAL 值必須精確符合實體欄位的 precision 和 scale。精度溢位或縮減小數位數會改變數值時，寫入失敗；連接器不會執行 `HALF_UP` 捨入。例如，寫入 `DECIMAL(5,2)` 時，`1.235` 會被拒絕，`1.2300` 則可作為 `1.23` 寫入，因為去除尾隨零不會改變數值。
+
 連接器不會自動遷移既有目標欄位：歷史 STRING 欄位仍按實際物理類型寫入，原生 Paimon
 ARRAY/MAP/ROW/MULTISET/VARIANT 目標欄位會被拒絕。複雜 CDC 值必須以 JSON 寫入 STRING 欄位。
 
