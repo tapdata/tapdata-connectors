@@ -287,13 +287,9 @@ public class PaimonConnector extends ConnectorBase {
                     tapTimeValue.getValue(),
                     "value must be within one day");
         }
-        if (nanos % 1_000_000 != 0) {
-            throw temporalConversionFailure(
-                    "TapTime",
-                    "TIME(3)",
-                    tapTimeValue.getValue(),
-                    "sub-millisecond precision is unsupported");
-        }
+        // Paimon 1.3.2 InternalRow represents TIME as integer milliseconds of the day.
+        // Source: https://github.com/apache/paimon/blob/release-1.3.2/paimon-common/src/main/java/org/apache/paimon/data/InternalRow.java
+        // Preserve the legacy connector's truncation of sub-millisecond fractions.
         try {
             return Math.toIntExact(
                     Math.addExact(
