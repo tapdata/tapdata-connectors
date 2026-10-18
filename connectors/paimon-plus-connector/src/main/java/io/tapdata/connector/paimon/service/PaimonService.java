@@ -3012,7 +3012,9 @@ public class PaimonService implements AutoCloseable {
                 return decimal != null ? decimal.toBigDecimal() : null;
             case "DATE":
                 int days = row.getInt(pos);
-                return java.sql.Date.valueOf(LocalDate.ofEpochDay(days));
+                // The PDK DATE codec supports LocalDateTime, but not LocalDate.
+                // Avoid java.sql.Date's Gregorian cutover and default timezone conversion.
+                return LocalDate.ofEpochDay(days).atStartOfDay();
             case "TIMESTAMP_WITHOUT_TIME_ZONE": {
                 Timestamp timestamp;
                 if (dataType instanceof TimestampType) {
