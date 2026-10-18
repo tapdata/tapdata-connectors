@@ -946,6 +946,12 @@
       "defaultScale": 10,
       "fixed": true
     },
+    "DECIMAL[($precision,0)]": {
+      "to": "TapNumber",
+      "precision": [1, 38],
+      "defaultPrecision": 38,
+      "fixed": true
+    },
     "CHAR[($byte)]": {
       "to": "TapString",
       "byte": 255,
