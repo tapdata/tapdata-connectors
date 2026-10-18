@@ -111,7 +111,7 @@ The connector supports multiple storage backends:
 **Precision and compatibility notes**:
 - `INT` and `INTEGER` both create Paimon `INT` columns. Existing columns previously created as STRING remain unchanged and numeric CDC values continue to be stringified against the physical target schema.
 - Integer writes are exact: fractional and out-of-range values fail instead of being truncated.
-- Bare `DECIMAL` keeps the connector default `DECIMAL(38,10)`. Paimon applies `HALF_UP` when scaling decimal values and precision overflow fails the write.
+- Bare `DECIMAL` keeps the connector default `DECIMAL(38,10)`. Values must fit the physical column's precision and scale exactly: precision overflow or a scale reduction that would change the value fails the write. The connector does not apply `HALF_UP` rounding. For `DECIMAL(5,2)`, `1.235` is rejected, while `1.2300` is accepted as `1.23` because removing trailing zeros preserves its value.
 - Bare `TIME` creates `TIME(3)`. `TIME(0)` through `TIME(3)` are supported; higher declared or incoming precision is rejected to prevent silent loss.
 
 ## Building
