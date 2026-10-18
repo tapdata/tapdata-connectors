@@ -189,7 +189,7 @@ class PaimonServiceValueConversionTest {
                                 new DataField(0, "id", DataTypes.DECIMAL(10, 0))));
 
         service.writeRecords(
-                Collections.singletonList(insertEvent(new BigDecimal("12.5"))),
+                Collections.singletonList(insertEvent(new BigDecimal("12.0"))),
                 tapTable,
                 connectorContext);
 
@@ -197,11 +197,20 @@ class PaimonServiceValueConversionTest {
         verify(writerStrategy).write(rowCaptor.capture());
         GenericRow convertedRow = assertInstanceOf(GenericRow.class, rowCaptor.getValue());
         Decimal convertedValue = assertInstanceOf(Decimal.class, convertedRow.getField(0));
-        assertEquals("13", convertedValue.toString());
+        assertEquals("12", convertedValue.toString());
 
         BinaryRow serializedRow =
                 new InternalRowSerializer(DataTypes.DECIMAL(10, 0)).toBinaryRow(convertedRow);
-        assertEquals("13", serializedRow.getDecimal(0, 10, 0).toString());
+        assertEquals("12", serializedRow.getDecimal(0, 10, 0).toString());
+    }
+
+    @Test
+    void existingPhysicalDecimalMustRejectScaleLossBeforeWriter() throws Exception {
+        fieldCache(service).put(TABLE_KEY, Collections.singletonList(
+                new DataField(0, "id", DataTypes.DECIMAL(10, 0))));
+        assertThrows(PaimonFatalWriteException.class, () -> service.writeRecords(
+                Collections.singletonList(insertEvent(new BigDecimal("12.5"))), tapTable, connectorContext));
+        verify(writerStrategy, never()).write(any(InternalRow.class));
     }
 
     @Test
