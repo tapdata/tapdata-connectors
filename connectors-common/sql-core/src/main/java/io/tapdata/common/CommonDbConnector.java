@@ -1125,9 +1125,8 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 case "execute":
                 case "executeQuery":
                     String sql = (String) params.get("sql");
-                    int batchSize = params.get("batchSize") != null ? (int) params.get("batchSize") : 1000;
-                    int queryTimeoutSeconds = params.get("queryTimeoutSeconds") instanceof Number
-                            ? ((Number) params.get("queryTimeoutSeconds")).intValue() : 0;
+                    int batchSize = SqlCommandParams.getInteger(params, "batchSize", 1000);
+                    int queryTimeoutSeconds = SqlCommandParams.getQueryTimeoutSeconds(params);
                     execute(sql, list -> consumer.accept(new ExecuteResult().result(list)), batchSize,
                             queryTimeoutSeconds);
                     break;
