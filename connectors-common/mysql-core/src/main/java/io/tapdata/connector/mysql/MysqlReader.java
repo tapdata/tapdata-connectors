@@ -149,7 +149,7 @@ public class MysqlReader implements Closeable {
                             Object value;
                             // 抹除 time 字段的时区，兼容 "-838:59:59", "838:59:59" 格式数据
                             if ("TIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                                value = rs.getString(i + 1);
+                                value = MysqlUtil.getTimeString(rs, i + 1);
                             } else {
                                 value = rs.getObject(i + 1);
                                 if (null == value && dateTypeSet.contains(columnName)) {
@@ -197,7 +197,7 @@ public class MysqlReader implements Closeable {
                             Object value;
                             // 抹除 time 字段的时区，兼容 "-838:59:59", "838:59:59" 格式数据
                             if ("TIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                                value = rs.getString(i + 1);
+                                value = MysqlUtil.getTimeString(rs, i + 1);
                             } else {
                                 value = rs.getObject(i + 1);
                                 if (null == value && dateTypeSet.contains(columnName)) {

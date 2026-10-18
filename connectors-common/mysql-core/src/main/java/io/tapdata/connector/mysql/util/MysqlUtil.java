@@ -4,12 +4,15 @@ import io.debezium.util.HexConverter;
 import io.tapdata.connector.mysql.MysqlJdbcContextV2;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
+import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.util.NetUtil;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.text.DateFormat;
@@ -174,10 +177,26 @@ public class MysqlUtil extends JdbcUtil {
                 return "1";
             }
             return "0";
+        } else if (obj instanceof TapTimeValue) {
+            TapTimeValue tapTimeValue = (TapTimeValue) obj;
+            return tapTimeValue.getValue() == null ? "null" : "'" + tapTimeValue.getValue().toTimeStr() + "'";
         } else {
             return "'" + obj + "'";
         }
         return result;
+    }
+
+    public static Object toJdbcValue(Object obj) {
+        if (obj instanceof TapTimeValue) {
+            TapTimeValue tapTimeValue = (TapTimeValue) obj;
+            return tapTimeValue.getValue() == null ? null : tapTimeValue.getValue().toTimeStr();
+        }
+        return obj;
+    }
+
+    public static String getTimeString(ResultSet resultSet, int columnIndex) throws SQLException {
+        byte[] value = resultSet.getBytes(columnIndex);
+        return value == null ? null : new String(value, StandardCharsets.UTF_8);
     }
 
     public static void testHostPortForMasterSlave(MysqlConfig mysqlConfig) {
