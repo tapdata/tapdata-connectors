@@ -926,6 +926,7 @@
     },
     "FLOAT": {
       "to": "TapFloat",
+      "queryOnly": true,
       "bit": 32,
       "precision": 7,
       "scale": 7,
