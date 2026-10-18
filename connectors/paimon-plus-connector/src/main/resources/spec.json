@@ -938,6 +938,13 @@
       "scale": 15,
       "fixed": false
     },
+    "DOUBLE[($precision,$scale)]": {
+      "to": "TapNumber",
+      "precision": [1, 255],
+      "scale": [0, 30],
+      "value": ["-99999999999999999999999999999999999999", "99999999999999999999999999999999999999"],
+      "fixed": false
+    },
     "DECIMAL[($precision,$scale)]": {
       "to": "TapNumber",
       "precision": [1, 38],
