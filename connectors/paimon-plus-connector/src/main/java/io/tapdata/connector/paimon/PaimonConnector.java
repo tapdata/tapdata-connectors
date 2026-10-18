@@ -32,8 +32,10 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.collections4.MapUtils;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -247,7 +249,29 @@ public class PaimonConnector extends ConnectorBase {
             }
             return PaimonConnector.toMillisOfDay(t);
         });
-        codecRegistry.registerFromTapValue(TapYearValue.class, "CHAR(4)", TapValue::getOriginValue);
+        codecRegistry.registerFromTapValue(TapYearValue.class, "CHAR(4)", PaimonConnector::toYear);
+    }
+
+    private static String toYear(TapYearValue value) {
+        if (value == null || value.getValue() == null || value.getValue().isContainsIllegal()) {
+            return null;
+        }
+        Object origin = value.getOriginValue();
+        try {
+            // Connector/J exposes YEAR as a SQL date; CDC exposes it as an integer.
+            int year = origin instanceof java.sql.Date
+                    ? ((java.sql.Date) origin).toLocalDate().getYear()
+                    : origin instanceof Number || origin instanceof CharSequence
+                            ? new BigDecimal(origin.toString()).intValueExact()
+                            : value.getValue().toLocalDateTime().getYear();
+            if (year < 0 || year > 9999) {
+                throw new ArithmeticException("year is outside CHAR(4)");
+            }
+            return String.format(Locale.ROOT, "%04d", year);
+        } catch (RuntimeException e) {
+            throw temporalConversionFailure(
+                    "TapYear", "CHAR(4)", origin, "value must be an integer year from 0000 to 9999");
+        }
     }
 
     private static Integer toEpochDay(TapDateValue tapDateValue) {
