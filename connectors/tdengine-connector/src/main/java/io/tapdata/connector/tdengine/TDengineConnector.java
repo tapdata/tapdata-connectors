@@ -11,6 +11,7 @@ import io.tapdata.connector.tdengine.config.TDengineConfig;
 import io.tapdata.connector.tdengine.ddl.TDengineDDLSqlGenerator;
 import io.tapdata.connector.tdengine.subscribe.TDengineSubscribe;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.conversion.impl.TableFieldTypesGeneratorImpl;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -346,6 +347,7 @@ public class TDengineConnector extends CommonDbConnector {
 
     @Override
     public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) {
+        TableFieldTypesGeneratorImpl tableFieldTypesGenerator = new TableFieldTypesGeneratorImpl();
         //get table info
         List<DataMap> tableList = tdengineJdbcContext.queryAllTables(tables);
         //paginate by tableSize
@@ -367,6 +369,10 @@ public class TDengineConnector extends CommonDbConnector {
                 columnList.stream().filter(col -> table.equals(col.getString("table_name")))
                         .forEach(col -> {
                             TapField tapField = new TDengineColumn(col).getTapField(); //make up fields
+                            if (connectionContext.getSpecification() != null
+                                    && connectionContext.getSpecification().getDataTypesMap() != null) {
+                                tableFieldTypesGenerator.autoFill(tapField, connectionContext.getSpecification().getDataTypesMap());
+                            }
                             tapField.setPos(keyPos.incrementAndGet());
                             if (col.getValue("is_primary", Boolean.FALSE)) {
                                 tapField.setPrimaryKey(Boolean.TRUE);

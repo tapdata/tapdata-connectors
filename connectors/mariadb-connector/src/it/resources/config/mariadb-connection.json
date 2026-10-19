@@ -1,0 +1,8 @@
+{
+  "host": "113.98.206.142",
+  "port": 13306,
+  "database": "demo",
+  "user": "root",
+  "password": "Gotapd8!",
+  "highPerformance": true
+}

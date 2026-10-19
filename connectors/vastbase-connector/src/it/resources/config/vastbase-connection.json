@@ -1,0 +1,10 @@
+{
+  "host": "192.168.1.183",
+  "port": 5434,
+  "database": "postgres",
+  "schema": "public",
+  "user": "tapdata",
+  "password": "Gotapd8!",
+  "logPluginName": "physical",
+  "ddlTriggerEnable": false
+}

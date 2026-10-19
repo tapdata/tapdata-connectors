@@ -1,0 +1,11 @@
+{
+  "host": "113.98.206.142",
+  "port": 6041,
+  "user": "root",
+  "password": "taosdata",
+  "database": "test",
+  "timezone": "",
+  "supportWebSocket": false,
+  "supportSuperTable": false,
+  "dataSaving": false
+}
