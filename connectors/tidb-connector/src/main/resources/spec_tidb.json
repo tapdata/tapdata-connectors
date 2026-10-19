@@ -584,8 +584,7 @@
         0,
         6
       ],
-      "fixed": false,
-      "queryOnly": true
+      "fixed": false
     },
     "double": {
       "to": "TapDouble",
