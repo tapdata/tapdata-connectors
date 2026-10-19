@@ -3,6 +3,7 @@ package io.tapdata.connector.csv;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.codec.ToTapValueCodec;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
 import io.tapdata.connector.csv.config.CsvConfig;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,7 @@ import java.lang.reflect.Method;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -91,6 +93,22 @@ class CsvConnectorTest {
         assertNotNull(dateCodec.toTapValue(LocalDate.of(2026, 8, 8), null));
         assertNull(dateCodec.toTapValue(LocalDate.of(999, 12, 31), null));
         assertNull(dateCodec.toTapValue(null, null));
+    }
+
+    @Test
+    void registerCapabilitiesPreservesCsvDateTimeWallClockValue() {
+        CsvConnector connector = new CsvConnector();
+        TapCodecsRegistry codecRegistry = TapCodecsRegistry.create();
+        LocalDateTime localDateTime = LocalDateTime.of(2026, 9, 18, 12, 0, 1);
+
+        connector.registerCapabilities(new ConnectorFunctions(), codecRegistry);
+
+        ToTapValueCodec<?> dateTimeCodec = codecRegistry.getCustomToTapValueCodec(LocalDateTime.class);
+        assertNotNull(dateTimeCodec);
+        TapDateTimeValue dateTimeValue = (TapDateTimeValue) dateTimeCodec.toTapValue(localDateTime, null);
+
+        assertEquals(localDateTime, dateTimeValue.getValue().toLocalDateTime());
+        assertEquals(localDateTime.toInstant(ZoneOffset.UTC), dateTimeValue.getValue().toInstant());
     }
 
     @Test
