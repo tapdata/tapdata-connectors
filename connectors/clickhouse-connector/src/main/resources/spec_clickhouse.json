@@ -629,6 +629,20 @@
         115792089237316195423570985008687907853269984665640564039457584007913129639935
       ]
     },
+    "Float32": {
+      "to": "TapFloat",
+      "name": "float",
+      "precision": [
+        1,
+        30
+      ],
+      "scale": [
+        0,
+        30
+      ],
+      "unsigned": "unsigned",
+      "fixed": false
+    },
     "Float32[($precision,$scale)]": {
       "queryOnly": true,
       "to": "TapFloat",
@@ -645,15 +659,14 @@
       "fixed": false
     },
     "Float64": {
-      "queryOnly": true,
       "to": "TapDouble",
       "precision": [
-        0,
-        30
+        6,
+        7
       ],
       "scale": [
-        0,
-        30
+        6,
+        7
       ],
       "fixed": false
     },
