@@ -146,3 +146,47 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 J
 
 - [Apache Paimon 文档](https://paimon.apache.org/)
 - [Paimon GitHub 仓库](https://github.com/apache/paimon)
+
+## 自定义 SQL 查询校验（executeCommand）
+
+`executeCommand` 的 `executeQuery` 命令支持以下单表只读子集，复用 Paimon Core 和 JSqlParser，不引入 Flink、Spark 或其他 SQL 引擎：
+
+- `SELECT *`、普通列投影、列别名。
+- `COUNT(*)`、`COUNT(1)`、`COUNT(col)`、`SUM`、`MIN`、`MAX`、`AVG`；不支持 DISTINCT 聚合。`SUM/AVG` 只接受数值列，DECIMAL 全程使用 BigDecimal；AVG 按 DECIMAL128 精度舍入。空输入的 COUNT 为 0，其余聚合为 NULL；分组查询的空输入返回空结果集。
+- 多列 `GROUP BY`，以及 `CAST(timestamp_column AS DATE)` 日期投影、分组。日期转换仅接受 DATE 或无时区 TIMESTAMP，不隐式选择时区。
+- 按已选择的表达式、别名、列序号 `ORDER BY`，支持 ASC/DESC、NULLS FIRST/LAST；默认 ASC 时 NULL 在前、DESC 时 NULL 在后。排序仅处理受结果行数限制的最终结果。
+- 原有 WHERE 子集：列与常量比较、BETWEEN、IN、IS NULL、有限的 LIKE、AND/OR/NOT。WHERE 下推至 Paimon，并由 reader 精确执行；读取投影保留 SELECT、GROUP BY、WHERE 所需的列。
+
+不支持 JOIN、通用子查询、WITH、UNION、HAVING、窗口函数、通用算术表达式、分页、表别名或带数据库/schema 前缀的表名。不支持的语法明确报错，不会静默忽略。历史 `COUNT(1) FROM (SELECT * ...)` 计数包装继续支持，历史直接 COUNT(1) 和计数包装仍返回 Long；其他查询返回 `List<Map<String,Object>>`，建议为所有表达式指定唯一别名。
+
+客户示例可写成以下形式；SQL Server 源端也使用相同的四个别名，避免两种驱动对未命名表达式返回不同字段名：
+
+```sql
+SELECT CAST(CreationTime AS DATE) AS creation_date,
+       COUNT(*) AS row_count,
+       SUM(TotalValues) AS total_values,
+       SUM(PointsAfterRedemption) AS points_after_redemption
+FROM DRSRedemptions
+WHERE TransactionDatetime BETWEEN '2025-01-01 00:00:00' AND '2025-07-01 00:00:00'
+  AND op <> 'd'
+GROUP BY CAST(CreationTime AS DATE)
+ORDER BY CAST(CreationTime AS DATE)
+```
+
+### 执行限制
+
+新增投影、聚合、排序查询默认要求分区列或前导主键上的比较、BETWEEN 或 IN 过滤。如果客户表的 `TransactionDatetime` 不符合要求，需在 **Paimon 连接配置**启用“允许无分区或前导主键过滤的自定义查询”，对应 `queryAllowFullScan=true`；直接调用 API 时也可以在命令参数传 `allowFullScan=true`。命令参数优先于连接配置。历史 `SELECT *` 和直接/包装 COUNT(1) 保持允许无键过滤的行为，但仍应用下面的资源限制。
+
+`executeQuery` 命令参数（与 `sql` 一起放在 `params`）：
+
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `queryTimeoutSeconds` | 300 | 正整数秒；在 catalog/规划/批次/行/结果阶段检查的协作式截止时间 |
+| `maxScanRows` | 10000000 | reader 实际交付给连接器的最大行数，**不是底层文件物理扫描行数** |
+| `maxGroups` | 100000 | 最大聚合分组数，按组保存状态，不缓存全部明细行 |
+| `maxResultRows` | 1000 | 最大结果行数；不会将被截断结果当成成功返回 |
+| `allowFullScan` | 连接配置，默认 false | 是否允许没有上述键过滤的新增查询 |
+
+数值参数必须是范围内的正整数；0、负数、小数、溢出值均拒绝。任一限制触发，整次命令失败，不返回部分结果。reader 和 batch 在异常路径也会释放。日志记录计划 splits 数、投影列数、reader 交付行数、有效行数、分组数和耗时。
+
+存在键过滤只表示可能裁剪，不保证实际裁剪。非键过滤、宽范围过滤仍可能读取大量文件；聚合成本取决于过滤后行数和分组数。行数、分组数限制不等于精确的内存字节上限。超时不能强制中断已阻塞的 Paimon/文件系统 I/O，也不能代替存储端 I/O 超时；不会启动超时后仍在后台继续扫描的查询线程。需要用客户表布局、存储和代表性数据评估吞吐及裁剪效果。

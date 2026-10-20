@@ -24,6 +24,14 @@
     "connection": {
       "type": "object",
       "properties": {
+        "queryAllowFullScan": {
+          "type": "boolean",
+          "title": "${queryAllowFullScan}",
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "default": false,
+          "x-index": 95
+        },
         "warehouse": {
           "type": "string",
           "title": "${warehouse}",
@@ -752,6 +760,7 @@
       "batchAccumulationSize_placeholder": "Records to accumulate before commit (0=immediate, default: 100000)",
       "commitIntervalMs": "Commit Interval (ms)",
       "commitIntervalMs_placeholder": "Time interval for commits in milliseconds (default: 30000)",
+      "queryAllowFullScan": "Allow custom queries without partition or leading primary key filters",
       "enableAsyncCommit": "Enable Async Commit",
       "asyncCommitConcurrency": "Async Commit Concurrency",
       "asyncCommitConcurrency_placeholder": "Concurrent physical-table commits (1-16, default: 4)",
@@ -815,6 +824,7 @@
       "batchAccumulationSize_placeholder": "提交前累积的记录数（0=立即提交，默认：100000）",
       "commitIntervalMs": "提交间隔（毫秒）",
       "commitIntervalMs_placeholder": "提交的时间间隔（毫秒，默认：30000）",
+      "queryAllowFullScan": "允许无分区或前导主键过滤的自定义查询（可能全表扫描）",
       "enableAsyncCommit": "启用异步提交",
       "asyncCommitConcurrency": "异步提交并发数",
       "asyncCommitConcurrency_placeholder": "并发提交的物理表数量（1-16，默认：4）",
@@ -878,6 +888,7 @@
       "batchAccumulationSize_placeholder": "提交前累積的記錄數（0=立即提交，默認：100000）",
       "commitIntervalMs": "提交間隔（毫秒）",
       "commitIntervalMs_placeholder": "提交的時間間隔（毫秒，默認：30000）",
+      "queryAllowFullScan": "允許無分區或前導主鍵過濾的自訂查詢（可能全表掃描）",
       "enableAsyncCommit": "啟用異步提交",
       "asyncCommitConcurrency": "異步提交併發數",
       "asyncCommitConcurrency_placeholder": "併發提交的物理表數量（1-16，默認：4）",

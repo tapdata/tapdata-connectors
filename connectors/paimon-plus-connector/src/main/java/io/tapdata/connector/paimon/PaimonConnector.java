@@ -586,7 +586,7 @@ public class PaimonConnector extends ConnectorBase {
             if (!(sql instanceof String) || ((String) sql).trim().isEmpty()) {
                 throw new IllegalArgumentException("executeQuery requires a non-empty params.sql");
             }
-            Object result = paimonService.executeQuery((String) sql, connectorContext.getLog());
+            Object result = paimonService.executeQuery((String) sql, command.getParams(), connectorContext.getLog());
             consumer.accept(new ExecuteResult<>().result(result));
         } catch (Throwable throwable) {
             consumer.accept(new ExecuteResult<>().error(throwable));

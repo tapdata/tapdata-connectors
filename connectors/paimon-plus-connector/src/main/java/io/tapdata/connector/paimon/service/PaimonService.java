@@ -3132,54 +3132,88 @@ public class PaimonService implements AutoCloseable {
      * scan.
      */
     public Object executeQuery(String sql, Log log) throws Exception {
+        return executeQuery(sql, Collections.emptyMap(), log);
+    }
+
+    public Object executeQuery(String sql, Map<String, Object> params, Log log) throws Exception {
+        Map<String, Object> options = new java.util.HashMap<>();
+        if (params != null) { options.putAll(params); }
+        options.putIfAbsent("allowFullScan", config.getQueryAllowFullScan());
+        PaimonQueryLimits limits = new PaimonQueryLimits(options);
         try (PaimonServiceLifecycle.Ingress ignored = enterIngress("executeQuery")) {
-            return executeQueryAdmitted(sql, log);
+            return executeQueryAdmitted(sql, limits, log);
         }
     }
 
-    private Object executeQueryAdmitted(String sql, Log log) throws Exception {
+    private Object executeQueryAdmitted(String sql, PaimonQueryLimits limits, Log log) throws Exception {
+        limits.check();
         String tableName = PaimonSqlQueryParser.tableName(sql);
         Identifier identifier = Identifier.create(config.getDatabase(), tableName);
         Table paimonTable = stopController.call("catalog getTable", () -> catalog.getTable(identifier));
+        limits.check();
         PaimonSqlQueryParser.ParsedQuery query = PaimonSqlQueryParser.parse(sql, paimonTable.rowType());
         if (!tableName.equals(query.tableName())) {
             throw new IllegalArgumentException("Paimon SQL table name changed during parsing");
         }
-
-        ReadBuilder readBuilder = paimonTable.newReadBuilder();
-        if (query.predicate() != null) {
-            readBuilder.withFilter(query.predicate());
+        PaimonQueryPlan queryPlan = query.plan();
+        if (queryPlan != null && !queryPlan.legacyRows() && !limits.allowFullScan
+                && !queryPlan.hasPruningFilter(paimonTable.partitionKeys(), paimonTable.primaryKeys())) {
+            throw new IllegalArgumentException("Paimon executeQuery requires a filter on a partition key or leading primary key; "
+                    + "enable connection queryAllowFullScan or set params.allowFullScan=true to explicitly allow a potentially full scan");
         }
+        ReadBuilder readBuilder = paimonTable.newReadBuilder();
+        if (query.predicate() != null) { readBuilder.withFilter(query.predicate()); }
+        // Keep WHERE columns in the projection so executeFilter can evaluate the full predicate.
+        java.util.Set<Integer> projectedColumns = new java.util.LinkedHashSet<>();
+        if (queryPlan != null) {
+            for (int index : queryPlan.projection()) { projectedColumns.add(index); }
+        }
+        PaimonQueryPlan.addPredicateColumns(query.predicate(), projectedColumns);
+        if (projectedColumns.isEmpty()) { projectedColumns.add(0); }
+        int[] projection = projectedColumns.stream().mapToInt(Integer::intValue).toArray();
+        readBuilder.withProjection(projection);
+        limits.check();
         TableScan.Plan plan = stopController.call("plan filtered scan", () -> readBuilder.newScan().plan());
+        limits.check();
         TableRead tableRead = readBuilder.newRead().executeFilter();
-        List<DataField> paimonFields = paimonTable.rowType().getFields();
-        List<Map<String, Object>> rows = new ArrayList<>();
+        PaimonQueryPlan.Accumulator accumulator = queryPlan == null ? null : queryPlan.accumulator(limits, projection);
+        long readRows = 0;
         long count = 0;
-
-        for (Split split : plan.splits()) {
-            try (RecordReader<InternalRow> reader =
-                         createFiniteReader(() -> tableRead.createReader(split))) {
-                RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
-                while (iterator != null) {
-                    InternalRow row;
-                    while ((row = iterator.next()) != null) {
-                        RowKind rowKind = row.getRowKind();
-                        if (rowKind == RowKind.UPDATE_BEFORE || rowKind == RowKind.DELETE) {
-                            continue;
+        try {
+            for (Split split : plan.splits()) {
+                limits.check();
+                try (RecordReader<InternalRow> reader = createFiniteReader(() -> tableRead.createReader(split))) {
+                    limits.check();
+                    RecordReader.RecordIterator<InternalRow> iterator;
+                    while ((iterator = reader.readBatch()) != null) {
+                        try {
+                            limits.check();
+                            InternalRow row;
+                            while ((row = iterator.next()) != null) {
+                                limits.check();
+                                if (readRows >= limits.maxScanRows) { throw limits.exceeded("maxScanRows", limits.maxScanRows); }
+                                readRows++;
+                                RowKind rowKind = row.getRowKind();
+                                if (rowKind == RowKind.UPDATE_BEFORE || rowKind == RowKind.DELETE) { continue; }
+                                count++;
+                                if (accumulator != null) { accumulator.add(row); }
+                            }
+                        } finally {
+                            iterator.releaseBatch();
                         }
-                        count++;
-                        if (!query.countQuery()) {
-                            rows.add(convertInternalRowToMap(row, paimonFields, Collections.emptyMap()));
-                        }
+                        limits.check();
                     }
-                    iterator.releaseBatch();
-                    iterator = reader.readBatch();
                 }
             }
+            limits.check();
+            Object result = query.countQuery() ? count : accumulator.finish();
+            limits.check();
+            return result;
+        } finally {
+            log.info("Paimon executeQuery table={}, splits={}, projectedColumns={}, readRows={}, matchedRows={}, groups={}, elapsedMs={}",
+                    tableName, plan.splits().size(), projection.length, readRows, count,
+                    accumulator == null ? 0 : accumulator.groupCount(), limits.elapsedMillis());
         }
-
-        log.info("Paimon executeQuery completed for table: {}, count: {}", tableName, count);
-        return query.countQuery() ? count : rows;
     }
 
     /**
