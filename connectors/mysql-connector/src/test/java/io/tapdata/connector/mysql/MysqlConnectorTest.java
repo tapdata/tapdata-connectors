@@ -26,6 +26,7 @@ import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -203,6 +204,7 @@ public class MysqlConnectorTest {
             when(metaData.getColumnCount()).thenReturn(1);
             when(metaData.getColumnName(1)).thenReturn("_time");
             when(metaData.getColumnTypeName(1)).thenReturn("TIME");
+            when(resultSet.getBytes(1)).thenReturn("00:00:00".getBytes(StandardCharsets.UTF_8));
             when(resultSet.getString(1)).thenReturn("00:00:00");
             when(resultSet.getObject(1)).thenReturn("00:00:00");
             Map<String, Object> actual = mysqlConnector.filterTimeForMysql(resultSet, metaData, recordEvent, illegalDateConsumer);

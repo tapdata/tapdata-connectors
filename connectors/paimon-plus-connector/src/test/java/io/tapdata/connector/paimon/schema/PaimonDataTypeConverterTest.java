@@ -162,12 +162,12 @@ class PaimonDataTypeConverterTest {
     }
 
     @Test
-    void decimalConversionMustAcceptCdcNumberShapesAndUsePaimonRounding() {
+    void decimalConversionMustAcceptExactCdcNumberShapesAndRejectRounding() {
         Decimal fromString =
                 assertInstanceOf(
                         Decimal.class,
                         PaimonDataTypeConverter.toInternalValue(
-                                "amount", "1.235", DataTypes.DECIMAL(5, 2)));
+                                "amount", "1.230", DataTypes.DECIMAL(5, 2)));
         Decimal fromLong =
                 assertInstanceOf(
                         Decimal.class,
@@ -179,12 +179,13 @@ class PaimonDataTypeConverterTest {
                         PaimonDataTypeConverter.toInternalValue(
                                 "amount", BigInteger.valueOf(7), DataTypes.DECIMAL(5, 2)));
 
-        assertEquals("1.24", fromString.toString());
+        assertEquals("1.23", fromString.toString());
         assertEquals("12.00", fromLong.toString());
         assertEquals("7.00", fromBigInteger.toString());
         assertConversionFailure("amount", "999.99", DataTypes.DECIMAL(4, 2));
         assertConversionFailure("amount", Double.POSITIVE_INFINITY, DataTypes.DECIMAL(5, 2));
         assertConversionFailure("amount", "not-a-number", DataTypes.DECIMAL(5, 2));
+        assertConversionFailure("amount", "1.235", DataTypes.DECIMAL(5, 2));
     }
 
     @Test
@@ -255,8 +256,8 @@ class PaimonDataTypeConverterTest {
                 "legacy",
                 serialized("text", "legacy", DataTypes.STRING()).getString(0).toString());
         assertEquals(
-                "1.24",
-                serialized("amount", "1.235", DataTypes.DECIMAL(5, 2))
+                "1.23",
+                serialized("amount", "1.230", DataTypes.DECIMAL(5, 2))
                         .getDecimal(0, 5, 2)
                         .toString());
 

@@ -936,17 +936,25 @@
       "value": [-9223372036854775808, 9223372036854775807]
     },
     "FLOAT": {
-      "to": "TapNumber",
+      "to": "TapFloat",
+      "queryOnly": true,
       "bit": 32,
       "precision": 7,
       "scale": 7,
       "fixed": false
     },
     "DOUBLE": {
-      "to": "TapNumber",
+      "to": "TapDouble",
       "bit": 64,
       "precision": 15,
       "scale": 15,
+      "fixed": false
+    },
+    "DOUBLE[($precision,$scale)]": {
+      "to": "TapNumber",
+      "precision": [1, 255],
+      "scale": [0, 30],
+      "value": ["-99999999999999999999999999999999999999", "99999999999999999999999999999999999999"],
       "fixed": false
     },
     "DECIMAL[($precision,$scale)]": {
@@ -955,6 +963,12 @@
       "scale": [0, 38],
       "defaultPrecision": 38,
       "defaultScale": 10,
+      "fixed": true
+    },
+    "DECIMAL[($precision,0)]": {
+      "to": "TapNumber",
+      "precision": [1, 38],
+      "defaultPrecision": 38,
       "fixed": true
     },
     "CHAR[($byte)]": {
@@ -1003,7 +1017,7 @@
     },
     "TIMESTAMP[($fraction)]": {
       "to": "TapDateTime",
-      "range": ["1970-01-01 00:00:00", "2038-01-19 03:14:07"],
+      "range": ["0001-01-01 00:00:00", "9999-12-31 23:59:59"],
       "pattern": "yyyy-MM-dd HH:mm:ss",
       "fraction": [0, 6],
       "defaultFraction": 6

@@ -663,7 +663,9 @@ public class MysqlConnector extends CommonDbConnector {
                     } catch (Exception e) {
                         value = null;
                     }
-                    String string = resultSet.getString(i + 1);
+                    String string = "TIME".equalsIgnoreCase(columnType)
+                            ? MysqlUtil.getTimeString(resultSet, i + 1)
+                            : resultSet.getString(i + 1);
                     //非法时间
                     if (EmptyKit.isNull(value) && EmptyKit.isNotNull(string)) {
                         if (null == illegalDateConsumer || null == recordEvent) {

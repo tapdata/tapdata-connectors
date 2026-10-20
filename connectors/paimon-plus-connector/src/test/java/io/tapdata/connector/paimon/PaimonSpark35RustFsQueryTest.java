@@ -10,23 +10,23 @@
 //import java.util.List;
 //
 ///**
-// * 使用 Spark 3.5 手动查询 MinIO 上的 Paimon 表。
+// * 使用 Spark 3.5 手动查询 RustFS (rustfs/rustfs:1.0.1) 上的 Paimon 表。
 // *
 // * <p>运行前请修改下方静态变量，并移除 {@link Disabled}。清空表方法还要求显式开启
 // * {@code ALLOW_CLEAR_TABLE}，该测试连接真实环境，默认不参与 CI。
 // * 使用 JDK 17 时，需在测试 VM options 中加入
 // * {@code --add-opens=java.base/sun.nio.ch=ALL-UNNAMED}。
 // */
-//@Disabled("手动连接真实 MinIO/Paimon 表；修改类顶部配置后移除此注解")
-//class PaimonSpark35MinioQueryTest {
+//@Disabled("手动连接本地 RustFS/Paimon 表；配置环境变量和查询后移除此注解")
+//class PaimonSpark35RustFsQueryTest {
 //
-//    // ===== Paimon Catalog / MinIO 配置：运行前直接修改，切勿提交真实凭证 =====
+//    // ===== Paimon Catalog / RustFS 配置：从环境变量读取本地测试连接，切勿提交真实凭证 =====
 //    private static final String CATALOG_NAME = "paimon";
-//    private static final String WAREHOUSE = "s3://paimon-test/warehouse/";
-//    private static final String S3_ENDPOINT = "http://127.0.0.1:9000";
-//    private static final String S3_ACCESS_KEY = "tapdata-minio-test";
-//    private static final String S3_SECRET_KEY = "7041b93b9ae2cb383db69f45fc05185503be4de37bb3b745";
-//    private static final String S3_REGION = "";
+//    private static final String WAREHOUSE = System.getenv("PAIMON_SPARK_WAREHOUSE");
+//    private static final String S3_ENDPOINT = System.getenv("PAIMON_S3_ENDPOINT");
+//    private static final String S3_ACCESS_KEY = System.getenv("PAIMON_S3_ACCESS_KEY");
+//    private static final String S3_SECRET_KEY = System.getenv("PAIMON_S3_SECRET_KEY");
+//    private static final String S3_REGION = "us-east-1";
 //    private static final boolean S3_PATH_STYLE_ACCESS = true;
 //
 //    // ===== 查询配置：可按核对目标随时修改 =====
@@ -91,7 +91,7 @@
 //        String catalogPrefix = "spark.sql.catalog." + CATALOG_NAME;
 //        SparkSession.Builder builder =
 //                SparkSession.builder()
-//                        .appName("paimon-spark-3.5-minio-manual-query")
+//                        .appName("paimon-spark-3.5-rustfs-manual-query")
 //                        .master("local[2]")
 //                        .config("spark.ui.enabled", "false")
 //                        .config("spark.driver.bindAddress", "127.0.0.1")

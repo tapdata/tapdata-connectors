@@ -645,7 +645,7 @@
       "preferPrecision": 20,
       "preferScale": 8,
       "priority": 1,
-      "to": "TapNumber"
+      "to": "TapDouble"
     },
     "LONG": {
       "to": "TapNumber",

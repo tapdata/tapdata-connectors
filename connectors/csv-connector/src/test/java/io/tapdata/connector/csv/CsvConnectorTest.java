@@ -9,6 +9,8 @@ import io.tapdata.entity.schema.value.TapDateTimeValue;
 import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.connector.csv.config.CsvConfig;
+import io.tapdata.file.TapFile;
+import io.tapdata.file.TapFileStorage;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.Test;
 
@@ -21,10 +23,15 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.TimeZone;
+import java.util.concurrent.ConcurrentMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class CsvConnectorTest {
 
@@ -98,6 +105,20 @@ class CsvConnectorTest {
         assertNotNull(dateCodec.toTapValue(LocalDate.of(2026, 8, 8), null));
         assertNull(dateCodec.toTapValue(LocalDate.of(999, 12, 31), null));
         assertNull(dateCodec.toTapValue(null, null));
+    }
+
+    @Test
+    void discoverSchemaDestroysStorageWhenErrorIsThrown() throws Exception {
+        TapFileStorage storage = mock(TapFileStorage.class);
+        Error failure = new AssertionError("schema discovery failed");
+        CsvConnector connector = new ErrorCsvConnector(storage, failure);
+
+        Error thrown = assertThrows(Error.class,
+                () -> connector.discoverSchema(null, null, 0, tables -> {
+                }));
+
+        assertSame(failure, thrown);
+        verify(storage).destroy();
     }
 
     @Test
@@ -208,7 +229,7 @@ class CsvConnectorTest {
     void parseValidFallbackDateTimeFormats() {
         assertEquals(LocalDate.of(2024, 5, 17),
                 CsvValueConverter.parse("17-05-2024 12:30:45", CsvValueConverter.DATE));
-        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2024, 5, 17, 12, 30, 45)),
+        assertEquals(LocalDateTime.of(2024, 5, 17, 12, 30, 45),
                 CsvValueConverter.parse("17-05-2024 12:30:45", CsvValueConverter.DATETIME));
     }
 
@@ -239,25 +260,25 @@ class CsvConnectorTest {
     void parseCsvDateTimeSupportsSingleDigitParts() {
         Object parsed = CsvValueConverter.parse("2026/8/8 8:00:1", CsvValueConverter.DATETIME);
 
-        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2026, 8, 8, 8, 0, 1)), parsed);
-        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2026, 9, 18, 12, 0, 1)),
+        assertEquals(LocalDateTime.of(2026, 8, 8, 8, 0, 1), parsed);
+        assertEquals(LocalDateTime.of(2026, 9, 18, 12, 0, 1),
                 CsvValueConverter.parse("2026-09-18 12:00:01", CsvValueConverter.DATETIME));
         assertNull(CsvValueConverter.parse("2026/2/30 8:00:1", CsvValueConverter.DATETIME));
     }
 
     @Test
     void parseDateOnlyValueAsDateTimeUsesStartOfDay() {
-        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2024, 6, 17, 0, 0)),
+        assertEquals(LocalDateTime.of(2024, 6, 17, 0, 0),
                 CsvValueConverter.parse("2024-06-17", CsvValueConverter.DATETIME));
     }
 
     @Test
-    void parseCsvDateTimeResolvesUnzonedValueInSystemDefaultZone() {
+    void parseCsvDateTimePreservesUnzonedWallClockValue() {
         TimeZone originalTimeZone = TimeZone.getDefault();
         try {
             TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
 
-            assertEquals(Instant.parse("2024-06-17T04:30:45.123Z"),
+            assertEquals(LocalDateTime.of(2024, 6, 17, 12, 30, 45, 123000000),
                     CsvValueConverter.parse("2024-06-17 12:30:45.123", CsvValueConverter.DATETIME));
         } finally {
             TimeZone.setDefault(originalTimeZone);
@@ -295,10 +316,6 @@ class CsvConnectorTest {
         assertNull(after.get("city"));
     }
 
-    private static Instant toSystemDefaultInstant(LocalDateTime value) {
-        return value.atZone(TimeZone.getDefault().toZoneId()).toInstant();
-    }
-
     private static class TestCsvConnector extends CsvConnector {
         private void makeTapTableForTest(TapTable table, Map<String, Object> sample, boolean justString) {
             makeTapTable(table, sample, justString);
@@ -315,6 +332,26 @@ class CsvConnectorTest {
                     String[].class, Map.class);
             method.setAccessible(true);
             method.invoke(this, after, headers, data, dataTypeMap);
+        }
+    }
+
+    private static class ErrorCsvConnector extends CsvConnector {
+        private final Error failure;
+
+        private ErrorCsvConnector(TapFileStorage storage, Error failure) {
+            this.storage = storage;
+            this.failure = failure;
+        }
+
+        @Override
+        protected void initConnection(io.tapdata.pdk.apis.context.TapConnectionContext connectorContext) {
+            fileConfig = new CsvConfig();
+            fileConfig.setModelName("csv");
+        }
+
+        @Override
+        protected ConcurrentMap<String, TapFile> getFilteredFiles() {
+            throw failure;
         }
     }
 }
