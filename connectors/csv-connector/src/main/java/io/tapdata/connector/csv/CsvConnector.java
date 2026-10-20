@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
@@ -68,6 +69,7 @@ public class CsvConnector extends FileConnector {
     @Override
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
         codecRegistry.registerToTapValue(LocalDate.class, (value, tapType) -> toTapDateValue(value));
+        codecRegistry.registerToTapValue(LocalDateTime.class, (value, tapType) -> toTapDateTimeValue(value));
         codecRegistry.registerToTapValue(LocalTime.class, (value, tapType) -> toTapTimeValue(value));
         codecRegistry.registerFromTapValue(TapRawValue.class, "STRING", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null) return tapRawValue.getValue().toString();
@@ -95,6 +97,17 @@ public class CsvConnector extends FileConnector {
         }
         try {
             return new TapDateValue(new DateTime(localDate.atStartOfDay()));
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static TapDateTimeValue toTapDateTimeValue(Object value) {
+        if (!(value instanceof LocalDateTime)) {
+            return null;
+        }
+        try {
+            return new TapDateTimeValue(new DateTime((LocalDateTime) value));
         } catch (RuntimeException e) {
             return null;
         }
