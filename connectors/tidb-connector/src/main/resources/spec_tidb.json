@@ -584,8 +584,7 @@
         0,
         6
       ],
-      "fixed": false,
-      "queryOnly": true
+      "fixed": false
     },
     "double": {
       "to": "TapDouble",
@@ -599,6 +598,7 @@
         0,
         17
       ],
+      "priority": 1,
       "fixed": false
     },
     "double[($precision,$scale)][unsigned]": {
@@ -615,6 +615,7 @@
         "-1.7976931348623157E+308",
         "1.7976931348623157E+308"
       ],
+      "priority": 2,
       "unsigned": "unsigned",
       "fixed": false
     },
