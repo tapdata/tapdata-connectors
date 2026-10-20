@@ -140,9 +140,8 @@ final class PaimonQueryPlan {
             throw unsupported("ORDER BY ordinal is out of range");
         }
         for (int i = 0; i < items.size(); i++) {
-            if (items.get(i).expressionSql.equalsIgnoreCase(expression.toString()) || items.get(i).label.equals(expression.toString())
-                    || expression instanceof Column && items.get(i).label.equals(
-                    PaimonSqlQueryParser.unquote(((Column) expression).getColumnName()))) { return i; }
+            if (expression instanceof Column ? aliasMatches(items.get(i).label, ((Column) expression).getColumnName())
+                    : items.get(i).expressionSql.equalsIgnoreCase(expression.toString())) { return i; }
         }
         Scalar scalar = scalar(expression);
         for (int i = 0; i < items.size(); i++) {
@@ -152,12 +151,17 @@ final class PaimonQueryPlan {
         throw unsupported("ORDER BY must reference a selected expression or alias");
     }
 
+    private static boolean aliasMatches(String label, String identifier) {
+        String unquoted = PaimonSqlQueryParser.unquote(identifier);
+        return identifier.equals(unquoted) ? label.equalsIgnoreCase(unquoted) : label.equals(unquoted);
+    }
+
     private Scalar column(int index) {
         columns.add(index);
         DataType type = rowType.getTypeAt(index);
         String root = type.getTypeRoot().name();
         if (Arrays.asList("ARRAY", "MAP", "MULTISET", "ROW").contains(root)) {
-            throw unsupported("complex column types are not supported: " + rowType.getFieldNames().get(index));
+            throw unsupported("complex column types are not supported; explicitly select scalar columns instead: " + rowType.getFieldNames().get(index));
         }
         return new Scalar(index, type, false);
     }
@@ -203,7 +207,9 @@ final class PaimonQueryPlan {
                 || expression instanceof net.sf.jsqlparser.expression.operators.relational.GreaterThanEquals
                 || expression instanceof net.sf.jsqlparser.expression.operators.relational.MinorThan
                 || expression instanceof net.sf.jsqlparser.expression.operators.relational.MinorThanEquals) {
-            column = ((net.sf.jsqlparser.expression.BinaryExpression) expression).getLeftExpression();
+            net.sf.jsqlparser.expression.BinaryExpression comparison = (net.sf.jsqlparser.expression.BinaryExpression) expression;
+            column = comparison.getLeftExpression() instanceof Column
+                    ? comparison.getLeftExpression() : comparison.getRightExpression();
         } else if (expression instanceof net.sf.jsqlparser.expression.operators.relational.Between) {
             net.sf.jsqlparser.expression.operators.relational.Between between = (net.sf.jsqlparser.expression.operators.relational.Between) expression;
             if (!between.isNot()) { column = between.getLeftExpression(); }
@@ -322,6 +328,8 @@ final class PaimonQueryPlan {
                     }
                     return 0;
                 };
+                // Cancellation propagates out of List.sort; the partially sorted private buffer
+                // is discarded on failure and is never exposed to the caller.
                 try { rows.sort(comparator); }
                 catch (SortCancelled failure) {
                     if (failure.getCause() instanceof InterruptedException) {
@@ -335,10 +343,26 @@ final class PaimonQueryPlan {
             for (Object[] row : rows) {
                 limits.check();
                 Map<String, Object> mapped = new LinkedHashMap<>();
-                for (int i = 0; i < row.length; i++) { mapped.put(items.get(i).label, row[i]); }
+                for (int i = 0; i < row.length; i++) { mapped.put(items.get(i).label, resultValue(items.get(i), row[i])); }
                 result.add(mapped);
             }
             return result;
+        }
+    }
+
+    // Preserve the connector's existing scalar return types for both star and projected queries.
+    // CAST AS DATE is an expression and deliberately returns LocalDate, independent of JVM zone.
+    private static Object resultValue(Item item, Object value) {
+        if (value == null || item.scalar == null || item.scalar.date
+                || "SUM".equals(item.function) || "AVG".equals(item.function)
+                || "COUNT".equals(item.function)) { return value; }
+        switch (item.scalar.type.getTypeRoot().name()) {
+            case "DATE": return new java.sql.Date(((LocalDate) value).toEpochDay() * 86400000L);
+            case "TIME_WITHOUT_TIME_ZONE":
+                return ((java.time.LocalTime) value).atDate(LocalDate.of(1970, 1, 1));
+            case "TIMESTAMP_WITH_LOCAL_TIME_ZONE":
+                return ((java.time.Instant) value).atZone(java.time.ZoneOffset.UTC);
+            default: return value;
         }
     }
 
@@ -362,7 +386,13 @@ final class PaimonQueryPlan {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static int compare(Object left, Object right) {
-        if (left instanceof Number && right instanceof Number) { return decimal(left).compareTo(decimal(right)); }
+        if (left instanceof Number && right instanceof Number) {
+            if (nonFinite(left) || nonFinite(right)) {
+                // Total order: -Infinity < finite values < +Infinity < NaN; signed zeros compare equal.
+                return Double.compare(((Number) left).doubleValue(), ((Number) right).doubleValue());
+            }
+            return decimal(left).compareTo(decimal(right));
+        }
         if (left instanceof byte[]) {
             byte[] a = (byte[]) left, b = (byte[]) right;
             for (int i = 0; i < Math.min(a.length, b.length); i++) {
@@ -374,7 +404,15 @@ final class PaimonQueryPlan {
         return ((Comparable) left).compareTo(right);
     }
 
+    private static boolean nonFinite(Object value) {
+        return (value instanceof Double || value instanceof Float)
+                && !Double.isFinite(((Number) value).doubleValue());
+    }
+
     private static BigDecimal decimal(Object value) {
+        if (nonFinite(value)) {
+            throw new IllegalArgumentException("Paimon SUM/AVG requires finite numeric values; encountered " + value);
+        }
         return value instanceof BigDecimal ? (BigDecimal) value : new BigDecimal(value.toString());
     }
 

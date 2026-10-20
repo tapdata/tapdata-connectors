@@ -120,6 +120,44 @@ class PaimonServiceExecuteQueryIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"UTC", "Asia/Shanghai", "America/Los_Angeles"})
+    void realPaimonSelectStarPreservesTemporalJavaTypes(String zone) throws Exception {
+        java.util.TimeZone previous = java.util.TimeZone.getDefault();
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone(zone));
+        PaimonService service = new PaimonService(config(), mock(Log.class));
+        try {
+            service.init();
+            Catalog catalog = catalog(service);
+            catalog.createDatabase(DATABASE, true);
+            Identifier id = Identifier.create(DATABASE, "temporal_values");
+            catalog.createTable(id, Schema.newBuilder().column("id", DataTypes.INT())
+                    .column("d", DataTypes.DATE()).column("t", DataTypes.TIME(3))
+                    .column("ts", DataTypes.TIMESTAMP(3))
+                    .column("ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))
+                    .primaryKey("id").option("bucket", "1").build(), false);
+            org.apache.paimon.table.sink.BatchWriteBuilder builder = catalog.getTable(id).newBatchWriteBuilder();
+            java.time.LocalDate date = java.time.LocalDate.of(2026, 4, 2);
+            java.time.LocalDateTime timestamp = date.atTime(12, 34, 56);
+            try (org.apache.paimon.table.sink.BatchTableWrite writer = builder.newWrite();
+                 org.apache.paimon.table.sink.BatchTableCommit commit = builder.newCommit()) {
+                writer.write(org.apache.paimon.data.GenericRow.of(1, (int) date.toEpochDay(), 45_296_000,
+                        org.apache.paimon.data.Timestamp.fromLocalDateTime(timestamp),
+                        org.apache.paimon.data.Timestamp.fromInstant(timestamp.toInstant(java.time.ZoneOffset.UTC))));
+                commit.commit(writer.prepareCommit());
+            }
+            Map<String, Object> row = castRows(service.executeQuery("SELECT * FROM temporal_values", mock(Log.class))).get(0);
+            assertEquals(java.sql.Date.class, row.get("d").getClass());
+            assertEquals(date.toEpochDay() * 86400000L, ((java.sql.Date) row.get("d")).getTime());
+            assertEquals(java.time.LocalDate.of(1970, 1, 1).atTime(12, 34, 56), row.get("t"));
+            assertEquals(timestamp, row.get("ts"));
+            assertEquals(timestamp.atZone(java.time.ZoneOffset.UTC), row.get("ltz"));
+        } finally {
+            try { service.close(); }
+            finally { java.util.TimeZone.setDefault(previous); }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"UTC", "Asia/Shanghai", "America/Los_Angeles"})
     void executesCustomerDateAggregationOnRealPaimonWithProjectionAndFiltering(String zone) throws Throwable {
         java.util.TimeZone previous = java.util.TimeZone.getDefault();
         try {

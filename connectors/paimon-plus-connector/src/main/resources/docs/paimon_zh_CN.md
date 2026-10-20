@@ -193,3 +193,26 @@ ORDER BY CAST(CreationTime AS DATE)
 行数与分组数参数必须是范围内的正整数；超时接受 0 到 2147483647 的整数秒（JDBC 参数兼容上界，0 明确表示关闭，不必填写大数模拟无限制）。负数、小数、溢出值均拒绝。任一限制触发，整次命令失败，不返回部分结果。reader 和 batch 在异常路径也会释放。日志记录计划 splits 数、投影列数、reader 交付行数、有效行数、分组数和耗时。
 
 存在键过滤只表示可能裁剪，不保证实际裁剪。非键过滤、宽范围过滤仍可能读取大量文件；聚合成本取决于过滤后行数和分组数。行数、分组数限制不等于精确的内存字节上限。超时不能强制中断已阻塞的 Paimon/文件系统 I/O，也不能代替存储端 I/O 超时；不会启动超时后仍在后台继续扫描的查询线程。需要用客户表布局、存储和代表性数据评估吞吐及裁剪效果。
+
+### 返回类型与数值边界
+
+直接及历史包装 `COUNT(1)` 返回单个 `Long`；其他查询返回 `List<Map<String,Object>>`。SQL NULL 返回 Java null。普通列投影（含 SELECT *）及 MIN/MAX 保持连接器原有类型：
+
+| SQL 值或表达式 | Java 值 |
+| --- | --- |
+| BOOLEAN；TINYINT / SMALLINT / INT / BIGINT | Boolean；Byte / Short / Integer / Long |
+| FLOAT / DOUBLE / DECIMAL | Float / Double / BigDecimal |
+| CHAR / VARCHAR；BINARY / VARBINARY | String；byte[] |
+| DATE 列 | java.sql.Date，毫秒值为 epoch-day × 86400000（历史行为；文本显示取决于 JVM 时区） |
+| TIME 列 | 锚定 1970-01-01 的 LocalDateTime |
+| 无时区 TIMESTAMP | LocalDateTime |
+| 本地时区 TIMESTAMP | UTC ZonedDateTime |
+| CAST(column AS DATE) | LocalDate |
+| COUNT；SUM / AVG | Long；BigDecimal |
+| MIN / MAX | 与参数列类型相同；CAST AS DATE 参数返回 LocalDate |
+
+SUM/AVG 对所有数值类型返回 BigDecimal，AVG 使用 DECIMAL128 舍入。SUM/AVG 遇到 NaN 或正负无穷会明确报数据错误，不返回部分结果。MIN/MAX 和 ORDER BY 的顺序为 -Infinity < 有限数值 < +Infinity < NaN；正负零相等。COUNT 和普通投影允许上述浮点特殊值。
+
+不支持选择或在表达式中引用 ARRAY/MAP/MULTISET/ROW 列；含复杂列的表请显式列出标量列。ORDER BY 未加引号的别名忽略大小写，带引号的别名精确匹配；当前 JSqlParser 4.4 不接受标识符内部双写双引号的语法。WHERE 比较支持列在左右任一侧；DATE(column) 不受支持，请使用 CAST(column AS DATE)。
+
+截止时间与耗时在生命周期准入完成后开始计算，包含 catalog、规划、读取、排序及结果构建。排序取消时丢弃内部缓冲，不发布部分排序结果。

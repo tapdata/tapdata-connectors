@@ -184,6 +184,103 @@ class PaimonQueryPlanTest {
         assertArrayEquals(new byte[]{(byte) 255}, (byte[]) result.get("hi"));
     }
 
+    @Test
+    void preservesScalarTemporalTypesWhileDateCastReturnsLocalDate() throws Exception {
+        RowType type = RowType.of(new DataType[]{DataTypes.DATE(), DataTypes.TIME(3),
+                DataTypes.TIMESTAMP(3), DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3)},
+                new String[]{"d", "t", "ts", "ltz"});
+        java.time.LocalDate date = java.time.LocalDate.of(2026, 4, 2);
+        java.time.LocalDateTime timestamp = date.atTime(12, 34, 56);
+        GenericRow row = GenericRow.of((int) date.toEpochDay(), 45_296_000,
+                org.apache.paimon.data.Timestamp.fromLocalDateTime(timestamp),
+                org.apache.paimon.data.Timestamp.fromInstant(timestamp.toInstant(java.time.ZoneOffset.UTC)));
+        for (String sql : Arrays.asList("SELECT * FROM orders", "SELECT d, t, ts, ltz FROM orders ORDER BY ltz")) {
+            PaimonQueryPlan.Accumulator accumulator = PaimonSqlQueryParser.parse(sql, type).plan().accumulator(limits());
+            accumulator.add(row);
+            Map<String, Object> result = accumulator.finish().get(0);
+            assertEquals(java.sql.Date.class, result.get("d").getClass());
+            assertEquals(date.toEpochDay() * 86400000L, ((java.sql.Date) result.get("d")).getTime());
+            assertEquals(java.time.LocalDate.of(1970, 1, 1).atTime(12, 34, 56), result.get("t"));
+            assertEquals(timestamp, result.get("ts"));
+            assertEquals(timestamp.atZone(java.time.ZoneOffset.UTC), result.get("ltz"));
+        }
+        PaimonQueryPlan.Accumulator cast = PaimonSqlQueryParser.parse("SELECT CAST(d AS DATE) AS day FROM orders", type)
+                .plan().accumulator(limits());
+        cast.add(GenericRow.of((int) date.toEpochDay()));
+        assertEquals(date, cast.finish().get(0).get("day"));
+    }
+
+    @Test
+    void floatingAggregatesAndSortHandleFiniteAndNonFiniteValuesExplicitly() throws Exception {
+        for (DataType floating : Arrays.asList(DataTypes.FLOAT(), DataTypes.DOUBLE())) {
+            RowType type = RowType.of(new DataType[]{floating}, new String[]{"v"});
+            boolean single = floating.getTypeRoot().name().equals("FLOAT");
+            for (String function : Arrays.asList("SUM", "AVG")) {
+                for (double special : new double[]{Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY}) {
+                    PaimonQueryPlan.Accumulator a = PaimonSqlQueryParser.parse("SELECT " + function + "(v) AS n FROM orders", type)
+                            .plan().accumulator(limits());
+                    Object input = single ? (Object) (float) special : special;
+                    IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> a.add(GenericRow.of(input)));
+                    assertTrue(error.getMessage().contains("requires finite numeric values"));
+                }
+                PaimonQueryPlan.Accumulator a = PaimonSqlQueryParser.parse("SELECT " + function + "(v) AS n FROM orders", type)
+                        .plan().accumulator(limits());
+                for (double n : new double[]{-0.0, 1.5, 3.0}) { a.add(GenericRow.of(single ? (Object) (float) n : n)); }
+                BigDecimal expected = new BigDecimal(function.equals("SUM") ? "4.5" : "1.5");
+                assertEquals(0, expected.compareTo((BigDecimal) a.finish().get(0).get("n")));
+            }
+            PaimonQueryPlan.Accumulator a = PaimonSqlQueryParser.parse("SELECT MIN(v) AS lo, MAX(v) AS hi FROM orders", type)
+                    .plan().accumulator(limits());
+            PaimonQueryPlan.Accumulator sorted = PaimonSqlQueryParser.parse("SELECT v FROM orders ORDER BY v", type)
+                    .plan().accumulator(limits());
+            for (double n : new double[]{Double.NaN, 0.0, Double.POSITIVE_INFINITY, -0.0, Double.NEGATIVE_INFINITY, 2.0}) {
+                GenericRow input = GenericRow.of(single ? (Object) (float) n : n);
+                a.add(input); sorted.add(input);
+            }
+            Map<String, Object> result = a.finish().get(0);
+            assertEquals(Double.NEGATIVE_INFINITY, ((Number) result.get("lo")).doubleValue());
+            assertTrue(Double.isNaN(((Number) result.get("hi")).doubleValue()));
+            List<Map<String, Object>> rows = sorted.finish();
+            assertEquals(Double.NEGATIVE_INFINITY, ((Number) rows.get(0).get("v")).doubleValue());
+            assertEquals(Double.POSITIVE_INFINITY, ((Number) rows.get(4).get("v")).doubleValue());
+            assertTrue(Double.isNaN(((Number) rows.get(5).get("v")).doubleValue()));
+        }
+    }
+
+    @Test
+    void resolvesUnquotedAliasesIgnoringCaseAndQuotedAliasesExactly() throws Exception {
+        for (String alias : Arrays.asList("amount", "AMOUNT", "\"Amount\"")) {
+            PaimonQueryPlan.Accumulator a = plan("SELECT SUM(amount) AS Amount FROM orders ORDER BY " + alias).accumulator(limits());
+            a.add(GenericRow.of(Decimal.fromBigDecimal(new BigDecimal("1.00"), 20, 2)));
+            assertEquals(new BigDecimal("1.00"), a.finish().get(0).get("Amount"));
+        }
+        assertThrows(IllegalArgumentException.class, () -> plan("SELECT SUM(amount) AS Amount FROM orders ORDER BY \"amount\""));
+    }
+
+    @Test
+    void reversedKeyComparisonsArePushedDownWithCorrectDirection() {
+        for (String operator : Arrays.asList("=", "<", "<=", ">", ">=")) {
+            String reverse = operator.equals("<") ? ">" : operator.equals("<=") ? ">="
+                    : operator.equals(">") ? "<" : operator.equals(">=") ? "<=" : "=";
+            PaimonSqlQueryParser.ParsedQuery query = PaimonSqlQueryParser.parse(
+                    "SELECT SUM(amount) FROM orders WHERE 5 " + operator + " unused", TYPE);
+            assertTrue(query.plan().hasPruningFilter(Collections.singletonList("unused"), Collections.emptyList()));
+            assertEquals(PaimonSqlQueryParser.parse("SELECT SUM(amount) FROM orders WHERE unused " + reverse + " 5", TYPE).predicate(),
+                    query.predicate());
+        }
+    }
+
+    @Test
+    void escapedIdentifierQuotesAreDecodedOnce() throws Exception {
+        RowType type = RowType.of(new DataType[]{DataTypes.INT()}, new String[]{"col\"name"});
+        // JSqlParser 4.4 rejects doubled double quotes before planning; keep this boundary explicit.
+        assertThrows(IllegalArgumentException.class, () -> PaimonSqlQueryParser.parse(
+                "SELECT \"col\"\"name\" FROM orders", type));
+        assertEquals("col\"name", PaimonSqlQueryParser.unquote("\"col\"\"name\""));
+        assertEquals("a]b", PaimonSqlQueryParser.unquote("[a]]b]"));
+        assertEquals("a`b", PaimonSqlQueryParser.unquote("`a``b`"));
+    }
+
     private static PaimonQueryPlan plan(String sql) { return PaimonSqlQueryParser.parse(sql, TYPE).plan(); }
     private static PaimonQueryLimits limits() { return new PaimonQueryLimits(Collections.emptyMap()); }
     private static GenericRow row(String region, String amount) {

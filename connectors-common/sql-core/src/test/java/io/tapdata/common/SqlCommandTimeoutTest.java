@@ -89,6 +89,51 @@ class SqlCommandTimeoutTest {
         verify(statement, never()).execute(anyString());
     }
 
+    @Test
+    void sharedJdbcLifecycleBatchesConvertedRowsAndClosesResources() throws Throwable {
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        java.sql.ResultSet resultSet = mock(java.sql.ResultSet.class);
+        when(connection.createStatement()).thenReturn(statement);
+        when(statement.execute("select v")).thenReturn(true);
+        when(statement.getResultSet()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true, true, true, false);
+        List<Object> batches = new ArrayList<>();
+        JdbcQueryExecutor.execute("select v", () -> connection, batches::add, () -> true, 2, 8,
+                Integer.MIN_VALUE, rs -> () -> Collections.singletonMap("v", "converted"));
+        assertEquals(2, batches.size());
+        assertEquals(2, ((List<?>) batches.get(0)).size());
+        assertEquals(Collections.singletonList(Collections.singletonMap("v", "converted")), batches.get(1));
+        verify(statement).setQueryTimeout(8);
+        verify(statement).setFetchSize(Integer.MIN_VALUE);
+        verify(connection).commit();
+        verify(resultSet).close();
+        verify(statement).close();
+        verify(connection).close();
+    }
+
+    @Test
+    void sharedJdbcLifecyclePropagatesConversionFailuresAndClosesWithoutCommit() throws Exception {
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        java.sql.ResultSet resultSet = mock(java.sql.ResultSet.class);
+        when(connection.createStatement()).thenReturn(statement);
+        when(statement.execute("select v")).thenReturn(true);
+        when(statement.getResultSet()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        java.sql.SQLException error = new java.sql.SQLException("conversion failed");
+        List<Object> batches = new ArrayList<>();
+        assertSame(error, assertThrows(java.sql.SQLException.class, () ->
+                JdbcQueryExecutor.execute("select v", () -> connection, batches::add, () -> true, 2, 0,
+                        null, rs -> () -> { throw error; })));
+        assertTrue(batches.isEmpty());
+        verify(connection, never()).commit();
+        verify(statement, never()).setFetchSize(anyInt());
+        verify(resultSet).close();
+        verify(statement).close();
+        verify(connection).close();
+    }
+
     static class BaseConnector extends CommonDbConnector {
         @Override public ConnectionOptions connectionTest(TapConnectionContext context, Consumer<TestItem> consumer) { return null; }
         @Override public void registerCapabilities(ConnectorFunctions functions, TapCodecsRegistry registry) { }

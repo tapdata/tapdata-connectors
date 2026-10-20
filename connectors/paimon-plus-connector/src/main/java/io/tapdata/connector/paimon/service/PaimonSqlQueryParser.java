@@ -255,7 +255,8 @@ final class PaimonSqlQueryParser {
     static String unquote(String name) {
         if (name != null && name.length() >= 2 && ((name.startsWith("\"") && name.endsWith("\""))
                 || (name.startsWith("`") && name.endsWith("`")) || (name.startsWith("[") && name.endsWith("]")))) {
-            return name.substring(1, name.length() - 1);
+            String delimiter = name.startsWith("[") ? "]" : name.substring(0, 1);
+            return name.substring(1, name.length() - 1).replace(delimiter + delimiter, delimiter);
         }
         return name;
     }
@@ -306,8 +307,10 @@ final class PaimonSqlQueryParser {
 
     private static Predicate parseComparison(BinaryExpression expression, String tableName,
                                              RowType rowType, PredicateBuilder builder) {
-        int index = fieldIndex(expression.getLeftExpression(), tableName, rowType, builder);
-        Object value = typedLiteral(rowType.getTypeAt(index), expression.getRightExpression());
+        boolean reversed = !(expression.getLeftExpression() instanceof Column)
+                && expression.getRightExpression() instanceof Column;
+        int index = fieldIndex(reversed ? expression.getRightExpression() : expression.getLeftExpression(), tableName, rowType, builder);
+        Object value = typedLiteral(rowType.getTypeAt(index), reversed ? expression.getLeftExpression() : expression.getRightExpression());
         if (expression instanceof EqualsTo) {
             return builder.equal(index, value);
         }
@@ -315,15 +318,15 @@ final class PaimonSqlQueryParser {
             return builder.notEqual(index, value);
         }
         if (expression instanceof GreaterThan) {
-            return builder.greaterThan(index, value);
+            return reversed ? builder.lessThan(index, value) : builder.greaterThan(index, value);
         }
         if (expression instanceof GreaterThanEquals) {
-            return builder.greaterOrEqual(index, value);
+            return reversed ? builder.lessOrEqual(index, value) : builder.greaterOrEqual(index, value);
         }
         if (expression instanceof MinorThan) {
-            return builder.lessThan(index, value);
+            return reversed ? builder.greaterThan(index, value) : builder.lessThan(index, value);
         }
-        return builder.lessOrEqual(index, value);
+        return reversed ? builder.greaterOrEqual(index, value) : builder.lessOrEqual(index, value);
     }
 
     private static Predicate parseOptionalPredicate(Expression expression, String tableName, RowType rowType,

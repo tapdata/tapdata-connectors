@@ -122,7 +122,7 @@ values must be stored as JSON in STRING columns.
 
 ## Custom read-only SQL (`executeQuery`)
 
-Supports one table: column projection, `CAST(timestamp AS DATE)` / `DATE(timestamp)`, `COUNT`, `SUM`, `MIN`, `MAX`, `AVG`, `GROUP BY`, and `ORDER BY`. Use identical explicit aliases on both validation endpoints. JOIN, UNION, HAVING, DISTINCT, arbitrary expressions, and mutations are rejected. WHERE predicates are pushed into Paimon; only required columns are read. Aggregation scans matching records and keeps state per group, so large scans and high-cardinality groups still cost time and memory.
+Supports one table: column projection, `CAST(timestamp AS DATE)`, `COUNT`, `SUM`, `MIN`, `MAX`, `AVG`, `GROUP BY`, and `ORDER BY`. Use identical explicit aliases on both validation endpoints. JOIN, UNION, HAVING, DISTINCT, arbitrary expressions, and mutations are rejected. WHERE predicates are pushed into Paimon; only required columns are read. Aggregation scans matching records and keeps state per group, so large scans and high-cardinality groups still cost time and memory.
 
 New projection, aggregation and sorted queries require comparison, BETWEEN or IN predicates on a partition key or leading primary key. For an existing connection without a suitable key filter, edit the connection and enable `queryAllowFullScan`, or explicitly pass `params.allowFullScan=true` per command. Command options take precedence. This gate applies to newly supported SQL; historical unsorted `SELECT *` and direct/wrapped `COUNT(1)` remain allowed without key filters.
 
@@ -137,3 +137,42 @@ Pass these options alongside `sql` in the command's `params`:
 | `allowFullScan` | Connection setting, false when absent | Permit new queries without the key predicates above |
 
 Historical `SELECT *` and direct/wrapped `COUNT(1)` have no new default scan/result caps; explicitly supplied limits still apply. Row/group limits must be positive whole numbers; negative, fractional and overflowing parameters fail. A limit failure returns an error without partial results. Timeout checks run during catalog access, planning, reading, sorting and result construction. This is a **cooperative deadline**, and cannot interrupt blocked Paimon/filesystem I/O; configure storage I/O timeouts separately. A key predicate permits pruning but does not guarantee it. Benchmark representative data and table layouts before using large queries.
+
+### SQL boundaries and return values
+
+`SELECT *`, scalar projections and aliases, `COUNT(*)`, `COUNT(1)`, `COUNT(column)`, `SUM`, `AVG`, `MIN`, `MAX`, multi-column `GROUP BY`, and `ORDER BY` selected expressions, aliases or ordinals are supported. `CAST(column AS DATE)` accepts DATE or TIMESTAMP without time zone; it uses the calendar date without an implicit zone conversion. `DATE(column)` is not supported. ASC defaults to NULLS FIRST and DESC to NULLS LAST; explicit NULLS FIRST/LAST are supported. Unquoted ORDER BY aliases ignore case; quoted aliases match exactly. The existing JSqlParser 4.4 grammar rejects doubled double quotes inside identifiers; such names cannot currently be queried.
+
+WHERE supports column/literal comparisons (in either operand order), BETWEEN, IN, IS NULL, limited LIKE, AND/OR/NOT. General subqueries, WITH, windows, arithmetic, pagination, table aliases and qualified table names are rejected. ARRAY/MAP/MULTISET/ROW columns cannot be selected or used in expressions; explicitly select scalar columns on tables containing them.
+
+Empty input returns COUNT=0 and NULL for other global aggregates; grouped queries return no rows. SUM/AVG use BigDecimal for all numeric input, AVG rounds with DECIMAL128. SUM/AVG reject NaN and either infinity with an explicit data error and no partial result. MIN/MAX and ORDER BY use -Infinity < finite numbers < +Infinity < NaN; signed zeros compare equal. COUNT and plain projection permit these floating values.
+
+Direct and legacy wrapped `COUNT(1)` return a scalar `Long`; all other queries return `List<Map<String,Object>>`. SQL NULL becomes Java null. Scalar columns and MIN/MAX keep the connector's existing Java types; CAST expressions have the types below:
+
+| SQL value / expression | Java value |
+| --- | --- |
+| BOOLEAN; TINYINT / SMALLINT / INT / BIGINT | Boolean; Byte / Short / Integer / Long |
+| FLOAT / DOUBLE / DECIMAL | Float / Double / BigDecimal |
+| CHAR / VARCHAR; BINARY / VARBINARY | String; byte[] |
+| DATE column | java.sql.Date, epoch-day multiplied by 86400000 milliseconds (historical behavior; textual display depends on JVM zone) |
+| TIME column | LocalDateTime anchored at 1970-01-01 |
+| TIMESTAMP without time zone | LocalDateTime |
+| TIMESTAMP with local time zone | ZonedDateTime in UTC |
+| CAST(column AS DATE) | LocalDate |
+| COUNT; SUM / AVG | Long; BigDecimal |
+| MIN / MAX | Same Java type as the argument column (or LocalDate for CAST AS DATE) |
+
+The query deadline and elapsed time start after lifecycle admission; catalog access, planning, reading, sorting and result construction are included. Sorting cancellation discards its private buffer without publishing partially sorted data.
+
+Use the same aliases in the SQL Server source query, for example:
+
+```sql
+SELECT CAST(CreationTime AS DATE) AS creation_date,
+       COUNT(*) AS row_count,
+       SUM(TotalValues) AS total_values,
+       SUM(PointsAfterRedemption) AS points_after_redemption
+FROM DRSRedemptions
+WHERE TransactionDatetime BETWEEN '2025-01-01 00:00:00' AND '2025-07-01 00:00:00'
+  AND op <> 'd'
+GROUP BY CAST(CreationTime AS DATE)
+ORDER BY CAST(CreationTime AS DATE)
+```

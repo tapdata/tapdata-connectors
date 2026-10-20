@@ -3139,8 +3139,8 @@ public class PaimonService implements AutoCloseable {
         Map<String, Object> options = new java.util.HashMap<>();
         if (params != null) { options.putAll(params); }
         options.putIfAbsent("allowFullScan", config.getQueryAllowFullScan());
-        PaimonQueryLimits limits = new PaimonQueryLimits(options);
         try (PaimonServiceLifecycle.Ingress ignored = enterIngress("executeQuery")) {
+            PaimonQueryLimits limits = new PaimonQueryLimits(options);
             return executeQueryAdmitted(sql, limits, log);
         }
     }

@@ -49,41 +49,15 @@ public class DefaultSqlExecutor implements SqlExecutor {
     @Override
     public void execute(String sql, TapSupplier<Connection> connectionSupplier, Consumer<Object> consumer,
                         Supplier<Boolean> aliveSupplier, int batchSize, int queryTimeoutSeconds) throws Throwable {
-        try (Connection connection = connectionSupplier.get();
-             Statement sqlStatement = connection.createStatement()) {
-            if (queryTimeoutSeconds > 0) {
-                try { sqlStatement.setQueryTimeout(queryTimeoutSeconds); }
-                catch (java.sql.SQLFeatureNotSupportedException unsupported) {
-                    throw new java.sql.SQLFeatureNotSupportedException(
-                            "JDBC driver cannot enforce queryTimeoutSeconds; omit it or set 0 to explicitly run without a timeout", unsupported);
-                }
-            }
-            boolean hasResult = sqlStatement.execute(sql);
-            if (!hasResult) {
-                consumer.accept((long) sqlStatement.getUpdateCount());
-            } else {
-                while (aliveSupplier.get() && hasResult) {
-                    try (ResultSet resultSet = sqlStatement.getResultSet()) {
-                        List<Map<String, Object>> list = TapSimplify.list();
-                        List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
-                        while (aliveSupplier.get() && resultSet.next()) {
-                            DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
-                            processDataMap(dataMap);
-                            list.add(dataMap);
-                            if (list.size() == batchSize) {
-                                consumer.accept(list);
-                                list = TapSimplify.list();
-                            }
-                        }
-                        if (EmptyKit.isNotEmpty(list)) {
-                            consumer.accept(list);
-                        }
-                    }
-                    hasResult = sqlStatement.getMoreResults();
-                }
-            }
-            connection.commit();
-        }
+        JdbcQueryExecutor.execute(sql, connectionSupplier, consumer, aliveSupplier, batchSize, queryTimeoutSeconds,
+                null, resultSet -> {
+                    List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
+                    return () -> {
+                        DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+                        processDataMap(dataMap);
+                        return dataMap;
+                    };
+                });
     }
 
     @Override

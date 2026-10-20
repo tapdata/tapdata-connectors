@@ -121,7 +121,7 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目標欄位會被拒絕。複雜 CDC 值必須�
 
 ## 自訂唯讀 SQL（`executeQuery`）
 
-支援單表投影、`CAST(timestamp AS DATE)` / `DATE(timestamp)`、`COUNT/SUM/MIN/MAX/AVG`、`GROUP BY` 與 `ORDER BY`。校驗兩端請使用相同的明確別名。不支援 JOIN、UNION、HAVING、DISTINCT、任意運算式或資料修改。WHERE 下推至 Paimon，並只讀取必要欄位；聚合仍須掃描匹配資料並按組儲存狀態。
+支援單表投影、`CAST(timestamp AS DATE)`、`COUNT/SUM/MIN/MAX/AVG`、`GROUP BY` 與 `ORDER BY`。校驗兩端請使用相同的明確別名。不支援 JOIN、UNION、HAVING、DISTINCT、任意運算式或資料修改。WHERE 下推至 Paimon，並只讀取必要欄位；聚合仍須掃描匹配資料並按組儲存狀態。
 
 新增投影、聚合及排序查詢預設要求分區鍵或前導主鍵的比較、BETWEEN 或 IN 篩選。舊連線若需在沒有此類篩選時使用新增查詢，請編輯連線開啟 `queryAllowFullScan`，或在個別命令傳入 `params.allowFullScan=true`。命令參數優先。歷史未排序的 `SELECT *` 及直接／包裝 `COUNT(1)` 仍允許無鍵篩選，預設不增加掃描／結果上限，明確傳入的限制仍生效。
 
@@ -136,3 +136,42 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目標欄位會被拒絕。複雜 CDC 值必須�
 | `allowFullScan` | 連線設定，缺省 false | 是否允許新增查詢沒有上述鍵篩選 |
 
 行數／組數參數須為正整數；負數、小數及溢位值會報錯。限制觸發即整次命令失敗，不回傳部分結果。超時在 catalog、規劃、讀取、排序及結果階段檢查，屬於**協作式期限**，無法中斷已阻塞的 Paimon／檔案系統 I/O，須另外設定儲存端 I/O 超時。有鍵篩選不保證實際裁剪；大表及高基數分組仍須以代表性資料評估效能與記憶體。
+
+### SQL 邊界與回傳類型
+
+支援 `SELECT *`、標量欄位投影與別名、`COUNT(*)`、`COUNT(1)`、`COUNT(column)`、`SUM`、`AVG`、`MIN`、`MAX`、多欄位 GROUP BY，以及依已選擇的表達式、別名或序號 ORDER BY。`CAST(column AS DATE)` 僅接受 DATE 或無時區 TIMESTAMP，直接取日曆日期，不隱式轉換時區；不支援 DATE(column)。ASC 預設 NULLS FIRST，DESC 預設 NULLS LAST，也可明確指定。ORDER BY 未加引號的別名忽略大小寫，帶引號的別名精確匹配。目前 JSqlParser 4.4 不接受識別字內部雙寫雙引號的語法。
+
+WHERE 支援欄位與常數比較（欄位可在任一側）、BETWEEN、IN、IS NULL、有限 LIKE、AND/OR/NOT。不支援通用子查詢、WITH、視窗函數、算術、分頁、表別名或帶資料庫/schema 前綴的表名。不可選擇或在表達式中引用 ARRAY/MAP/MULTISET/ROW 欄位，含複雜欄位的表請明確列出標量欄位。
+
+空輸入的全域 COUNT 為 0，其他聚合為 NULL；分組查詢回傳空結果。SUM/AVG 對所有數值類型使用 BigDecimal，AVG 按 DECIMAL128 捨入。SUM/AVG 遇到 NaN 或正負無窮時明確報資料錯誤，不回傳部分結果。MIN/MAX 與 ORDER BY 的順序為 -Infinity < 有限數值 < +Infinity < NaN；正負零相等。COUNT 及一般投影允許上述浮點特殊值。
+
+直接及歷史包裝 COUNT(1) 回傳單個 Long，其他查詢回傳 `List<Map<String,Object>>`；SQL NULL 對應 Java null。一般欄位與 MIN/MAX 保持既有類型：
+
+| SQL 值或表達式 | Java 值 |
+| --- | --- |
+| BOOLEAN；TINYINT / SMALLINT / INT / BIGINT | Boolean；Byte / Short / Integer / Long |
+| FLOAT / DOUBLE / DECIMAL | Float / Double / BigDecimal |
+| CHAR / VARCHAR；BINARY / VARBINARY | String；byte[] |
+| DATE 欄位 | java.sql.Date，毫秒值為 epoch-day × 86400000（歷史行為；文字顯示取決於 JVM 時區） |
+| TIME 欄位 | 錨定 1970-01-01 的 LocalDateTime |
+| 無時區 TIMESTAMP | LocalDateTime |
+| 本地時區 TIMESTAMP | UTC ZonedDateTime |
+| CAST(column AS DATE) | LocalDate |
+| COUNT；SUM / AVG | Long；BigDecimal |
+| MIN / MAX | 與參數欄位類型相同；CAST AS DATE 參數回傳 LocalDate |
+
+截止時間與耗時在生命週期准入完成後開始計算，包含 catalog、規劃、讀取、排序及結果建構。排序取消會丟棄內部緩衝，不發布部分排序結果。
+
+SQL Server 來源端使用相同別名，例如：
+
+```sql
+SELECT CAST(CreationTime AS DATE) AS creation_date,
+       COUNT(*) AS row_count,
+       SUM(TotalValues) AS total_values,
+       SUM(PointsAfterRedemption) AS points_after_redemption
+FROM DRSRedemptions
+WHERE TransactionDatetime BETWEEN '2025-01-01 00:00:00' AND '2025-07-01 00:00:00'
+  AND op <> 'd'
+GROUP BY CAST(CreationTime AS DATE)
+ORDER BY CAST(CreationTime AS DATE)
+```

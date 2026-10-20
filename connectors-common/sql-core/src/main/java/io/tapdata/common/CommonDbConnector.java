@@ -1165,42 +1165,12 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     private void executeJdbcQuery(String sql, Consumer<Object> consumer, int batchSize, int queryTimeoutSeconds) throws Throwable {
-        try (Connection connection = jdbcContext.getConnection();
-             Statement sqlStatement = connection.createStatement()) {
-            if (queryTimeoutSeconds > 0) {
-                try { sqlStatement.setQueryTimeout(queryTimeoutSeconds); }
-                catch (java.sql.SQLFeatureNotSupportedException unsupported) {
-                    throw new java.sql.SQLFeatureNotSupportedException(
-                            "JDBC driver cannot enforce queryTimeoutSeconds; omit it or set 0 to explicitly run without a timeout", unsupported);
-                }
-            }
-            sqlStatement.setFetchSize(batchSize > 0 ? batchSize : 1000); //protected from OM
-            boolean hasResult = sqlStatement.execute(sql);
-            if (!hasResult) {
-                consumer.accept((long) sqlStatement.getUpdateCount());
-            } else {
-                while (isAlive() && hasResult) {
-                    try (ResultSet resultSet = sqlStatement.getResultSet()) {
-                        List<Map<String, Object>> list = TapSimplify.list();
-                        String[] columnNames = DbKit.getColumnsFromResultSet(resultSet).toArray(new String[0]);
-                        String[] columnTypes = DbKit.getColumnTypesFromResultSet(resultSet).toArray(new String[0]);
-                        while (isAlive() && resultSet.next()) {
-                            DataMap dataMap = filterData(resultSet, columnNames, columnTypes);
-                            list.add(dataMap);
-                            if (list.size() == batchSize) {
-                                consumer.accept(list);
-                                list = TapSimplify.list();
-                            }
-                        }
-                        if (EmptyKit.isNotEmpty(list)) {
-                            consumer.accept(list);
-                        }
-                    }
-                    hasResult = sqlStatement.getMoreResults();
-                }
-            }
-            connection.commit();
-        }
+        JdbcQueryExecutor.execute(sql, jdbcContext::getConnection, consumer, this::isAlive,
+                batchSize, queryTimeoutSeconds, batchSize > 0 ? batchSize : 1000, resultSet -> {
+                    String[] columnNames = DbKit.getColumnsFromResultSet(resultSet).toArray(new String[0]);
+                    String[] columnTypes = DbKit.getColumnTypesFromResultSet(resultSet).toArray(new String[0]);
+                    return () -> filterData(resultSet, columnNames, columnTypes);
+                });
     }
 
     public ExecuteResult<?> call(String funcName, List<Map<String, Object>> params) {

@@ -4,6 +4,7 @@ import com.mysql.cj.exceptions.StatementIsClosedException;
 import io.debezium.type.TapIllegalDate;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.JdbcProcedureParam;
+import io.tapdata.common.JdbcQueryExecutor;
 import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.common.ddl.type.DDLParserType;
 import io.tapdata.common.dml.NormalRecordWriter;
@@ -1226,41 +1227,11 @@ public class MysqlConnector extends CommonDbConnector {
 
     @Override
     protected void execute(String sql, Consumer<Object> consumer, int batchSize, int queryTimeoutSeconds) throws Throwable {
-        try (Connection connection = jdbcContext.getConnection();
-             Statement sqlStatement = connection.createStatement()) {
-            if (queryTimeoutSeconds > 0) {
-                try { sqlStatement.setQueryTimeout(queryTimeoutSeconds); }
-                catch (java.sql.SQLFeatureNotSupportedException unsupported) {
-                    throw new java.sql.SQLFeatureNotSupportedException(
-                            "JDBC driver cannot enforce queryTimeoutSeconds; omit it or set 0 to explicitly run without a timeout", unsupported);
-                }
-            }
-            sqlStatement.setFetchSize(Integer.MIN_VALUE);
-            boolean hasResult = sqlStatement.execute(sql);
-            if (!hasResult) {
-                consumer.accept((long) sqlStatement.getUpdateCount());
-            } else {
-                while (isAlive() && hasResult) {
-                    try (ResultSet resultSet = sqlStatement.getResultSet()) {
-                        List<Map<String, Object>> list = TapSimplify.list();
-                        ResultSetMetaData metaData = resultSet.getMetaData();
-                        while (isAlive() && resultSet.next()) {
-                            Map<String, Object> dataMap = filterTimeForMysql(resultSet, metaData);
-                            list.add(dataMap);
-                            if (list.size() == batchSize) {
-                                consumer.accept(list);
-                                list = TapSimplify.list();
-                            }
-                        }
-                        if (EmptyKit.isNotEmpty(list)) {
-                            consumer.accept(list);
-                        }
-                    }
-                    hasResult = sqlStatement.getMoreResults();
-                }
-            }
-            connection.commit();
-        }
+        JdbcQueryExecutor.execute(sql, jdbcContext::getConnection, consumer, this::isAlive,
+                batchSize, queryTimeoutSeconds, Integer.MIN_VALUE, resultSet -> {
+                    ResultSetMetaData metaData = resultSet.getMetaData();
+                    return () -> filterTimeForMysql(resultSet, metaData);
+                });
     }
 
     public ExecuteResult<?> call(String funcName, List<Map<String, Object>> params) {
