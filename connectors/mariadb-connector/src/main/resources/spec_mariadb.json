@@ -724,6 +724,7 @@
         0,
         17
       ],
+      "priority": 1,
       "fixed": false
     },
     "double[($precision,$scale)][unsigned]": {
@@ -741,6 +742,7 @@
         "1.7976931348623157E+308"
       ],
       "unsigned": "unsigned",
+      "priority": 2,
       "fixed": false
     },
     "date": {
