@@ -21,6 +21,8 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -116,8 +118,19 @@ class PaimonServiceExecuteQueryIntegrationTest {
         }
     }
 
-    @Test
-    void executesCustomerDateAggregationOnRealPaimonWithProjectionAndFiltering() throws Throwable {
+    @ParameterizedTest
+    @ValueSource(strings = {"UTC", "Asia/Shanghai", "America/Los_Angeles"})
+    void executesCustomerDateAggregationOnRealPaimonWithProjectionAndFiltering(String zone) throws Throwable {
+        java.util.TimeZone previous = java.util.TimeZone.getDefault();
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone(zone));
+            executeCustomerDateAggregation();
+        } finally {
+            java.util.TimeZone.setDefault(previous);
+        }
+    }
+
+    private void executeCustomerDateAggregation() throws Throwable {
         PaimonConfig config = config();
         PaimonService service = new PaimonService(config, mock(Log.class));
         try {
@@ -305,6 +318,9 @@ class PaimonServiceExecuteQueryIntegrationTest {
     }
 
     private java.sql.Timestamp timestamp(String value) {
-        return java.sql.Timestamp.valueOf(value);
+        // writeRecords receives codec output encoded as epoch time. Build that same
+        // representation explicitly; valueOf would shift fixtures with the JVM timezone.
+        return java.sql.Timestamp.from(java.time.LocalDateTime.parse(value.replace(' ', 'T'))
+                .toInstant(java.time.ZoneOffset.UTC));
     }
 }
