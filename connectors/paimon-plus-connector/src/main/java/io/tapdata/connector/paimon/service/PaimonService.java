@@ -3156,6 +3156,7 @@ public class PaimonService implements AutoCloseable {
             throw new IllegalArgumentException("Paimon SQL table name changed during parsing");
         }
         PaimonQueryPlan queryPlan = query.plan();
+        if (queryPlan == null || queryPlan.legacyRows()) { limits = limits.forLegacyQuery(); }
         if (queryPlan != null && !queryPlan.legacyRows() && !limits.allowFullScan
                 && !queryPlan.hasPruningFilter(paimonTable.partitionKeys(), paimonTable.primaryKeys())) {
             throw new IllegalArgumentException("Paimon executeQuery requires a filter on a partition key or leading primary key; "

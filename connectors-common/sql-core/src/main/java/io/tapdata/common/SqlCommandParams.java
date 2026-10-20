@@ -14,9 +14,11 @@ final class SqlCommandParams {
             return defaultValue;
         }
         try {
-            return new BigDecimal(value.toString()).intValueExact();
+            int parsed = new BigDecimal(value.toString()).intValueExact();
+            if (parsed <= 0) { throw new ArithmeticException("must be positive"); }
+            return parsed;
         } catch (NumberFormatException | ArithmeticException e) {
-            throw new IllegalArgumentException("Parameter '" + name + "' must be a 32-bit integer", e);
+            throw new IllegalArgumentException("Parameter '" + name + "' must be a positive whole number between 1 and " + Integer.MAX_VALUE + "; got: " + value, e);
         }
     }
 
@@ -29,10 +31,10 @@ final class SqlCommandParams {
         try {
             seconds = new BigDecimal(value.toString()).longValueExact();
         } catch (NumberFormatException | ArithmeticException e) {
-            throw new IllegalArgumentException("Parameter 'queryTimeoutSeconds' must be an integer", e);
+            throw new IllegalArgumentException("Parameter 'queryTimeoutSeconds' must be a whole number between 0 and 2147483647 (0 disables the timeout)", e);
         }
-        if (seconds <= 0) {
-            return 0;
+        if (seconds < 0) {
+            throw new IllegalArgumentException("Parameter 'queryTimeoutSeconds' must be non-negative; 0 disables the timeout");
         }
         if (seconds > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("Parameter 'queryTimeoutSeconds' must not exceed " + Integer.MAX_VALUE);

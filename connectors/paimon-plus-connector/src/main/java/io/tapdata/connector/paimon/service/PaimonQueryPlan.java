@@ -304,7 +304,12 @@ final class PaimonQueryPlan {
                 }
             }
             if (!sorts.isEmpty()) {
+                limits.check();
                 Comparator<Object[]> comparator = (a, b) -> {
+                    try { limits.check(); }
+                    catch (java.sql.SQLTimeoutException | InterruptedException failure) {
+                        throw new SortCancelled(failure);
+                    }
                     for (Sort sort : sorts) {
                         Object left = a[sort.index], right = b[sort.index];
                         int order;
@@ -317,7 +322,14 @@ final class PaimonQueryPlan {
                     }
                     return 0;
                 };
-                rows.sort(comparator);
+                try { rows.sort(comparator); }
+                catch (SortCancelled failure) {
+                    if (failure.getCause() instanceof InterruptedException) {
+                        throw (InterruptedException) failure.getCause();
+                    }
+                    throw (java.sql.SQLTimeoutException) failure.getCause();
+                }
+                limits.check();
             }
             List<Map<String, Object>> result = new ArrayList<>(rows.size());
             for (Object[] row : rows) {
@@ -328,6 +340,10 @@ final class PaimonQueryPlan {
             }
             return result;
         }
+    }
+
+    private static final class SortCancelled extends RuntimeException {
+        private SortCancelled(Exception cause) { super(cause); }
     }
 
     private static Object javaValue(Object value, DataType type) {
@@ -347,7 +363,14 @@ final class PaimonQueryPlan {
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static int compare(Object left, Object right) {
         if (left instanceof Number && right instanceof Number) { return decimal(left).compareTo(decimal(right)); }
-        if (left instanceof byte[]) { return Arrays.compareUnsigned((byte[]) left, (byte[]) right); }
+        if (left instanceof byte[]) {
+            byte[] a = (byte[]) left, b = (byte[]) right;
+            for (int i = 0; i < Math.min(a.length, b.length); i++) {
+                int order = Integer.compare(a[i] & 0xff, b[i] & 0xff);
+                if (order != 0) { return order; }
+            }
+            return Integer.compare(a.length, b.length);
+        }
         return ((Comparable) left).compareTo(right);
     }
 

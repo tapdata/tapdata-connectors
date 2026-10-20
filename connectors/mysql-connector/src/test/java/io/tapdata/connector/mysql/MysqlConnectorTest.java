@@ -46,7 +46,7 @@ import static org.mockito.Mockito.*;
 
 public class MysqlConnectorTest {
     @Test
-    void executeWithTimeoutKeepsMysqlStreamingAndValueConversion() throws Throwable {
+    void executeWithTimeoutUsesMysqlStreamingAndConversionPath() throws Throwable {
         MysqlConnector connector = Mockito.spy(new MysqlConnector());
         JdbcContext jdbcContext = mock(JdbcContext.class);
         Connection connection = mock(Connection.class);
@@ -72,6 +72,21 @@ public class MysqlConnectorTest {
         verify(statement).setFetchSize(Integer.MIN_VALUE);
         verify(connector).filterTimeForMysql(resultSet, metaData);
         assertEquals(Collections.singletonList(convertedRow), batches.get(0));
+    }
+
+    @Test
+    void omittedAndZeroTimeoutKeepMysqlStreamingWithoutSettingJdbcTimeout() throws Throwable {
+        MysqlConnector connector = new MysqlConnector();
+        JdbcContext jdbc = mock(JdbcContext.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        ReflectionTestUtils.setField(connector, "jdbcContext", jdbc);
+        when(jdbc.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(statement);
+        connector.execute("select 1", ignored -> {}, 10);
+        connector.execute("select 1", ignored -> {}, 10, 0);
+        verify(statement, never()).setQueryTimeout(anyInt());
+        verify(statement, times(2)).setFetchSize(Integer.MIN_VALUE);
     }
 
     @Test

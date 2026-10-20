@@ -81,3 +81,7 @@ SELECT host,user,Grant_priv,Super_priv FROM mysql.user where user='username';
 UPDATE mysql.user SET Grant_priv='Y' WHERE user='username';
 FLUSH PRIVILEGES;
 ```
+
+### 自定义 SQL 命令超时
+
+`execute` / `executeQuery` 命令参数：`sql` 为 SQL；`batchSize` 为正整数，默认 1000；`queryTimeoutSeconds` 为 0..2147483647 的整数秒。省略或 0 不设置期限，负数、小数及溢出值会报错。正值通过 JDBC `Statement.setQueryTimeout` 生效；驱动不支持时明确报错，接受无期限执行时才设为 0。

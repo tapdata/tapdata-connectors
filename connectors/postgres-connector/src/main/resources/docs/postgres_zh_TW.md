@@ -216,3 +216,7 @@ create trigger trg_uptime before update on <schema>.mytable for each row execute
 - regtype (增量不支持不報錯)
 - regconfig (增量不支持不報錯)
 - regdictionary (增量不支持不報錯)
+
+### 自訂 SQL 命令超時
+
+`execute` / `executeQuery` 命令參數：`sql` 為 SQL；`batchSize` 為正整數，預設 1000；`queryTimeoutSeconds` 為 0..2147483647 的整數秒。省略或 0 不設定期限，負數、小數及溢位值會報錯。正值透過 JDBC `Statement.setQueryTimeout` 生效；驅動不支援時明確報錯，若接受無期限執行才設為 0。

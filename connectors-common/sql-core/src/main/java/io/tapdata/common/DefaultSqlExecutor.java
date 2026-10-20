@@ -52,7 +52,11 @@ public class DefaultSqlExecutor implements SqlExecutor {
         try (Connection connection = connectionSupplier.get();
              Statement sqlStatement = connection.createStatement()) {
             if (queryTimeoutSeconds > 0) {
-                sqlStatement.setQueryTimeout(queryTimeoutSeconds);
+                try { sqlStatement.setQueryTimeout(queryTimeoutSeconds); }
+                catch (java.sql.SQLFeatureNotSupportedException unsupported) {
+                    throw new java.sql.SQLFeatureNotSupportedException(
+                            "JDBC driver cannot enforce queryTimeoutSeconds; omit it or set 0 to explicitly run without a timeout", unsupported);
+                }
             }
             boolean hasResult = sqlStatement.execute(sql);
             if (!hasResult) {

@@ -139,6 +139,51 @@ class PaimonQueryPlanTest {
         }
     }
 
+    @Test
+    void timeoutIsOptInAndLegacyLimitsPreserveExistingQueries() throws Exception {
+        AtomicLong clock = new AtomicLong();
+        PaimonQueryLimits defaults = new PaimonQueryLimits(Collections.emptyMap(), clock::get);
+        PaimonQueryLimits zero = new PaimonQueryLimits(Collections.singletonMap("queryTimeoutSeconds", 0), clock::get);
+        clock.set(600_000_000_000L);
+        defaults.check();
+        zero.check();
+        PaimonQueryLimits legacy = defaults.forLegacyQuery();
+        assertEquals(Long.MAX_VALUE, legacy.maxScanRows);
+        assertEquals(Integer.MAX_VALUE, legacy.maxResultRows);
+        assertEquals(1000, defaults.maxResultRows);
+        PaimonQueryLimits explicit = new PaimonQueryLimits(Collections.singletonMap("maxResultRows", 7)).forLegacyQuery();
+        assertEquals(7, explicit.maxResultRows);
+        assertThrows(IllegalArgumentException.class,
+                () -> new PaimonQueryLimits(Collections.singletonMap("queryTimeoutSeconds", -1)));
+    }
+
+    @Test
+    void deadlineIsCheckedInsideSortAndCheckedExceptionIsPreserved() {
+        AtomicLong ticks = new AtomicLong();
+        PaimonQueryLimits limits = new PaimonQueryLimits(Collections.singletonMap("queryTimeoutSeconds", 1),
+                () -> ticks.getAndAdd(400_000_000L));
+        PaimonQueryPlan.Accumulator accumulator = plan("SELECT region FROM orders ORDER BY region").accumulator(limits);
+        accumulator.add(GenericRow.of(BinaryString.fromString("B")));
+        accumulator.add(GenericRow.of(BinaryString.fromString("A")));
+        SQLTimeoutException failure = assertThrows(SQLTimeoutException.class, accumulator::finish);
+        assertTrue(failure.getMessage().contains("queryTimeoutSeconds=1"));
+        // Constructor, finish, pre-sort and first comparator: expiry occurs during comparison.
+        assertEquals(1_600_000_000L, ticks.get());
+    }
+
+    @Test
+    void binaryMinMaxUsesUnsignedLexicographicOrdering() throws Exception {
+        RowType type = RowType.of(new DataType[]{DataTypes.BYTES()}, new String[]{"payload"});
+        PaimonQueryPlan.Accumulator accumulator = PaimonSqlQueryParser.parse(
+                "SELECT MIN(payload) AS lo, MAX(payload) AS hi FROM orders", type).plan().accumulator(limits());
+        accumulator.add(GenericRow.of(new byte[]{(byte) 255}));
+        accumulator.add(GenericRow.of(new byte[]{0, 1}));
+        accumulator.add(GenericRow.of(new byte[]{0}));
+        Map<String, Object> result = accumulator.finish().get(0);
+        assertArrayEquals(new byte[]{0}, (byte[]) result.get("lo"));
+        assertArrayEquals(new byte[]{(byte) 255}, (byte[]) result.get("hi"));
+    }
+
     private static PaimonQueryPlan plan(String sql) { return PaimonSqlQueryParser.parse(sql, TYPE).plan(); }
     private static PaimonQueryLimits limits() { return new PaimonQueryLimits(Collections.emptyMap()); }
     private static GenericRow row(String region, String amount) {

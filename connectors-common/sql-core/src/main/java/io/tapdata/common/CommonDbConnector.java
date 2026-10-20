@@ -1144,14 +1144,35 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void execute(String sql, Consumer<Object> consumer, int batchSize) throws Throwable {
-        execute(sql, consumer, batchSize, 0);
+        executeJdbcQuery(sql, consumer, batchSize, 0);
     }
 
     protected void execute(String sql, Consumer<Object> consumer, int batchSize, int queryTimeoutSeconds) throws Throwable {
+        if (queryTimeoutSeconds == 0) {
+            execute(sql, consumer, batchSize);
+            return;
+        }
+        // Old subclasses may have driver-specific streaming/conversion in this extension point.
+        for (Class<?> type = getClass(); type != CommonDbConnector.class; type = type.getSuperclass()) {
+            try {
+                type.getDeclaredMethod("execute", String.class, Consumer.class, int.class);
+                throw new UnsupportedOperationException("Connector must override execute with queryTimeoutSeconds to preserve its custom query path");
+            } catch (NoSuchMethodException absent) {
+                // Continue through the subclass hierarchy.
+            }
+        }
+        executeJdbcQuery(sql, consumer, batchSize, queryTimeoutSeconds);
+    }
+
+    private void executeJdbcQuery(String sql, Consumer<Object> consumer, int batchSize, int queryTimeoutSeconds) throws Throwable {
         try (Connection connection = jdbcContext.getConnection();
              Statement sqlStatement = connection.createStatement()) {
             if (queryTimeoutSeconds > 0) {
-                sqlStatement.setQueryTimeout(queryTimeoutSeconds);
+                try { sqlStatement.setQueryTimeout(queryTimeoutSeconds); }
+                catch (java.sql.SQLFeatureNotSupportedException unsupported) {
+                    throw new java.sql.SQLFeatureNotSupportedException(
+                            "JDBC driver cannot enforce queryTimeoutSeconds; omit it or set 0 to explicitly run without a timeout", unsupported);
+                }
             }
             sqlStatement.setFetchSize(batchSize > 0 ? batchSize : 1000); //protected from OM
             boolean hasResult = sqlStatement.execute(sql);

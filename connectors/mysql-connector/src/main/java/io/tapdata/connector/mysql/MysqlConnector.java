@@ -1229,7 +1229,11 @@ public class MysqlConnector extends CommonDbConnector {
         try (Connection connection = jdbcContext.getConnection();
              Statement sqlStatement = connection.createStatement()) {
             if (queryTimeoutSeconds > 0) {
-                sqlStatement.setQueryTimeout(queryTimeoutSeconds);
+                try { sqlStatement.setQueryTimeout(queryTimeoutSeconds); }
+                catch (java.sql.SQLFeatureNotSupportedException unsupported) {
+                    throw new java.sql.SQLFeatureNotSupportedException(
+                            "JDBC driver cannot enforce queryTimeoutSeconds; omit it or set 0 to explicitly run without a timeout", unsupported);
+                }
             }
             sqlStatement.setFetchSize(Integer.MIN_VALUE);
             boolean hasResult = sqlStatement.execute(sql);

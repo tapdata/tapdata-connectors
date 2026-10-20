@@ -1,0 +1,5 @@
+# Streaming SQL command parameters
+
+The `execute` / `executeQuery` command accepts `params.sql` (SQL text), `params.batchSize` (positive whole number, default 1000) and `params.queryTimeoutSeconds` (whole seconds from 0 through 2147483647). An absent or zero timeout leaves the JDBC statement timeout unset; negative, fractional, nonnumeric and overflowing values fail validation. Positive values call `Statement.setQueryTimeout` before executing SQL. Cancellation and timeout enforcement depend on the JDBC driver.
+
+A driver that rejects timeout configuration returns an explicit `SQLFeatureNotSupportedException`; the command does not silently continue without the requested timeout. Omit the parameter or explicitly set it to 0 to run without that guarantee. Legacy `SqlExecutor` implementations and `CommonDbConnector` subclasses that override only the original `execute` method preserve their original path with zero/absent timeout; requesting a positive timeout requires implementing the new overload, otherwise it returns an explicit unsupported-operation error. Streaming commands can have delivered earlier batches before a JDBC error occurs.

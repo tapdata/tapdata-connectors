@@ -15,6 +15,9 @@ public interface SqlExecutor {
 
     default void execute(String sql, TapSupplier<Connection> connectionSupplier, Consumer<Object> consumer,
                          Supplier<Boolean> aliveSupplier, int batchSize, int queryTimeoutSeconds) throws Throwable {
+        if (queryTimeoutSeconds != 0) {
+            throw new UnsupportedOperationException("This SqlExecutor does not support queryTimeoutSeconds; override the timeout overload");
+        }
         execute(sql, connectionSupplier, consumer, aliveSupplier, batchSize);
     }
 

@@ -118,3 +118,21 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目標欄位會被拒絕。複雜 CDC 值必須�
 
 - [Apache Paimon 文檔](https://paimon.apache.org/)
 - [Paimon GitHub 倉庫](https://github.com/apache/paimon)
+
+## 自訂唯讀 SQL（`executeQuery`）
+
+支援單表投影、`CAST(timestamp AS DATE)` / `DATE(timestamp)`、`COUNT/SUM/MIN/MAX/AVG`、`GROUP BY` 與 `ORDER BY`。校驗兩端請使用相同的明確別名。不支援 JOIN、UNION、HAVING、DISTINCT、任意運算式或資料修改。WHERE 下推至 Paimon，並只讀取必要欄位；聚合仍須掃描匹配資料並按組儲存狀態。
+
+新增投影、聚合及排序查詢預設要求分區鍵或前導主鍵的比較、BETWEEN 或 IN 篩選。舊連線若需在沒有此類篩選時使用新增查詢，請編輯連線開啟 `queryAllowFullScan`，或在個別命令傳入 `params.allowFullScan=true`。命令參數優先。歷史未排序的 `SELECT *` 及直接／包裝 `COUNT(1)` 仍允許無鍵篩選，預設不增加掃描／結果上限，明確傳入的限制仍生效。
+
+以下參數與 `sql` 一起放在命令的 `params`：
+
+| 參數 | 預設值 | 說明 |
+| --- | --- | --- |
+| `queryTimeoutSeconds` | 0 | 整數秒，省略或 0 表示無期限；範圍 0..2147483647，與 JDBC 上界一致 |
+| `maxScanRows` | 新增查詢 10000000 | reader 交付行數，並非底層實際掃描的檔案行數 |
+| `maxGroups` | 新增查詢 100000 | 記憶體內最大聚合組數 |
+| `maxResultRows` | 新增查詢 1000 | 最大結果行數，超過即整次失敗 |
+| `allowFullScan` | 連線設定，缺省 false | 是否允許新增查詢沒有上述鍵篩選 |
+
+行數／組數參數須為正整數；負數、小數及溢位值會報錯。限制觸發即整次命令失敗，不回傳部分結果。超時在 catalog、規劃、讀取、排序及結果階段檢查，屬於**協作式期限**，無法中斷已阻塞的 Paimon／檔案系統 I/O，須另外設定儲存端 I/O 超時。有鍵篩選不保證實際裁剪；大表及高基數分組仍須以代表性資料評估效能與記憶體。

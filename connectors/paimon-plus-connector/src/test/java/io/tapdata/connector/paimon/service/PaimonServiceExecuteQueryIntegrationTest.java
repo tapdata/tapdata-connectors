@@ -237,6 +237,27 @@ class PaimonServiceExecuteQueryIntegrationTest {
         } finally { service.close(); }
     }
 
+    @Test
+    void legacyTwoArgumentQueryReturnsMoreThanOneThousandRowsAndExplicitLimitsStillApply() throws Exception {
+        PaimonService service = new PaimonService(config(), mock(Log.class));
+        try {
+            service.init();
+            Catalog catalog = catalog(service);
+            catalog.createDatabase(DATABASE, true);
+            catalog.createTable(Identifier.create(DATABASE, TABLE), Schema.newBuilder()
+                    .column("id", DataTypes.INT()).primaryKey("id").option("bucket", "1")
+                    .option("write-buffer-size", "8mb").build(), false);
+            TapTable table = new TapTable(TABLE).add(new TapField("id", "INT").primaryKeyPos(1));
+            List<TapRecordEvent> input = new java.util.ArrayList<>();
+            for (int i = 0; i < 1001; i++) { input.add(cdcInsert(map("id", i))); }
+            service.writeRecords(input, table, context());
+            assertEquals(1001, castRows(service.executeQuery("SELECT * FROM " + TABLE, mock(Log.class))).size());
+            assertEquals(1001L, service.executeQuery("SELECT COUNT(1) FROM " + TABLE, mock(Log.class)));
+            assertThrows(IllegalStateException.class, () -> service.executeQuery("SELECT * FROM " + TABLE,
+                    Collections.singletonMap("maxResultRows", 1000), mock(Log.class)));
+        } finally { service.close(); }
+    }
+
     private TapInsertRecordEvent redemption(int id, String created, String transaction, String total, String points, String op) {
         return cdcInsert(map("id", id, "CreationTime", created == null ? null : timestamp(created),
                 "TransactionDatetime", timestamp(transaction),
