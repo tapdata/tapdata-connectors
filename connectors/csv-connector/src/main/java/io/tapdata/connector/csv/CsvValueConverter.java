@@ -10,7 +10,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.chrono.IsoEra;
 import java.time.format.DateTimeFormatter;
@@ -18,6 +17,7 @@ import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.DateTimeParseException;
 import java.time.format.ResolverStyle;
 import java.time.temporal.ChronoField;
+import java.time.temporal.Temporal;
 import java.time.temporal.TemporalAccessor;
 import java.util.Locale;
 import java.util.Collection;
@@ -158,7 +158,7 @@ final class CsvValueConverter {
         }
     }
 
-    private static Instant parseDateTime(String value) {
+    private static Temporal parseDateTime(String value) {
         if (FLEXIBLE_DATETIME.matcher(value).matches()) {
             return parseFlexibleDateTime(value);
         }
@@ -181,10 +181,10 @@ final class CsvValueConverter {
         if (dateFormat.contains("'Z'")) {
             return localDateTime.toInstant(ZoneOffset.UTC);
         }
-        return toSystemDefaultInstant(localDateTime);
+        return localDateTime;
     }
 
-    private static Instant parseFlexibleDateTime(String value) {
+    private static LocalDateTime parseFlexibleDateTime(String value) {
         Matcher matcher = FLEXIBLE_DATETIME.matcher(value);
         if (!matcher.matches()) {
             throw new DateTimeParseException("Unsupported CSV datetime format", value, 0);
@@ -203,12 +203,7 @@ final class CsvValueConverter {
             timeValue.append('.').append(matcher.group(8));
         }
         LocalTime time = parseTime(timeValue.toString());
-        return toSystemDefaultInstant(LocalDateTime.of(date, time));
-    }
-
-    private static Instant toSystemDefaultInstant(LocalDateTime value) {
-        // CSV values without an offset are wall-clock values; resolve them before DateTime(LocalDateTime) can assume UTC.
-        return value.atZone(ZoneId.systemDefault()).toInstant();
+        return LocalDateTime.of(date, time);
     }
 
     private static LocalDate parseDate(String value) {

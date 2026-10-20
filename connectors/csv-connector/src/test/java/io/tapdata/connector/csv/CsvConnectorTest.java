@@ -229,7 +229,7 @@ class CsvConnectorTest {
     void parseValidFallbackDateTimeFormats() {
         assertEquals(LocalDate.of(2024, 5, 17),
                 CsvValueConverter.parse("17-05-2024 12:30:45", CsvValueConverter.DATE));
-        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2024, 5, 17, 12, 30, 45)),
+        assertEquals(LocalDateTime.of(2024, 5, 17, 12, 30, 45),
                 CsvValueConverter.parse("17-05-2024 12:30:45", CsvValueConverter.DATETIME));
     }
 
@@ -260,25 +260,25 @@ class CsvConnectorTest {
     void parseCsvDateTimeSupportsSingleDigitParts() {
         Object parsed = CsvValueConverter.parse("2026/8/8 8:00:1", CsvValueConverter.DATETIME);
 
-        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2026, 8, 8, 8, 0, 1)), parsed);
-        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2026, 9, 18, 12, 0, 1)),
+        assertEquals(LocalDateTime.of(2026, 8, 8, 8, 0, 1), parsed);
+        assertEquals(LocalDateTime.of(2026, 9, 18, 12, 0, 1),
                 CsvValueConverter.parse("2026-09-18 12:00:01", CsvValueConverter.DATETIME));
         assertNull(CsvValueConverter.parse("2026/2/30 8:00:1", CsvValueConverter.DATETIME));
     }
 
     @Test
     void parseDateOnlyValueAsDateTimeUsesStartOfDay() {
-        assertEquals(toSystemDefaultInstant(LocalDateTime.of(2024, 6, 17, 0, 0)),
+        assertEquals(LocalDateTime.of(2024, 6, 17, 0, 0),
                 CsvValueConverter.parse("2024-06-17", CsvValueConverter.DATETIME));
     }
 
     @Test
-    void parseCsvDateTimeResolvesUnzonedValueInSystemDefaultZone() {
+    void parseCsvDateTimePreservesUnzonedWallClockValue() {
         TimeZone originalTimeZone = TimeZone.getDefault();
         try {
             TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"));
 
-            assertEquals(Instant.parse("2024-06-17T04:30:45.123Z"),
+            assertEquals(LocalDateTime.of(2024, 6, 17, 12, 30, 45, 123000000),
                     CsvValueConverter.parse("2024-06-17 12:30:45.123", CsvValueConverter.DATETIME));
         } finally {
             TimeZone.setDefault(originalTimeZone);
@@ -314,10 +314,6 @@ class CsvConnectorTest {
         connector.putIntoMapForTest(after, new String[]{"address", "city"}, new String[]{"柳州"}, dataTypeMap);
 
         assertNull(after.get("city"));
-    }
-
-    private static Instant toSystemDefaultInstant(LocalDateTime value) {
-        return value.atZone(TimeZone.getDefault().toZoneId()).toInstant();
     }
 
     private static class TestCsvConnector extends CsvConnector {
