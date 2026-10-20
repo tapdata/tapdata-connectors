@@ -84,4 +84,4 @@ FLUSH PRIVILEGES;
 
 ### Custom SQL command timeout
 
-`execute` / `executeQuery` command parameters: `sql` is the SQL text; `batchSize` is a positive integer (default 1000); `queryTimeoutSeconds` is whole seconds in 0..2147483647. Omitted or 0 means no statement timeout; negative, fractional and overflowing values are rejected. Positive values use JDBC `Statement.setQueryTimeout`. A driver that cannot enforce it returns an explicit error; set 0 only if an unlimited query is acceptable.
+`execute` / `executeQuery` command parameters: `sql` is the SQL text; `batchSize` is a whole int (default 1000; zero or negative values use the default); `queryTimeoutSeconds` is whole seconds in 0..2147483647. Omitted or 0 means no statement timeout; negative, fractional and overflowing values are rejected. Positive values use JDBC `Statement.setQueryTimeout`. A driver that cannot enforce it returns an explicit error; set 0 only if an unlimited query is acceptable.

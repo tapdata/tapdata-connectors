@@ -124,19 +124,21 @@ values must be stored as JSON in STRING columns.
 
 Supports one table: column projection, `CAST(timestamp AS DATE)`, `COUNT`, `SUM`, `MIN`, `MAX`, `AVG`, `GROUP BY`, and `ORDER BY`. Use identical explicit aliases on both validation endpoints. JOIN, UNION, HAVING, DISTINCT, arbitrary expressions, and mutations are rejected. WHERE predicates are pushed into Paimon; only required columns are read. Aggregation scans matching records and keeps state per group, so large scans and high-cardinality groups still cost time and memory.
 
-New projection, aggregation and sorted queries require comparison, BETWEEN or IN predicates on a partition key or leading primary key. For an existing connection without a suitable key filter, edit the connection and enable `queryAllowFullScan`, or explicitly pass `params.allowFullScan=true` per command. Command options take precedence. This gate applies to newly supported SQL; historical unsorted `SELECT *` and direct/wrapped `COUNT(1)` remain allowed without key filters.
+Projection, aggregation and sorted queries allow non-key filters and full scans by default. Set connection `queryAllowFullScan=false` (or command `allowFullScan=false`) to opt into the partition/leading-primary-key filter requirement. Command options take precedence; historical unsorted `SELECT *` and direct/wrapped `COUNT(1)` remain exempt from that gate. A supported filter is pushed down, but SQL syntax alone does not guarantee file pruning.
+
+The 1000-row inspection limit belongs to the engine, not the connector. It counts result rows across callbacks and fails on row 1001, discarding all partial results. `executeCommand` uses its existing `batchSize` and result callback to stream unordered projections; a consumer exception stops reading and closes resources. Aggregation and sorting must finish scanning before final rows are delivered; input rows are not capped at 1000. Direct command callers can receive more than 1000 result rows. Streaming callers must discard already received batches if a later callback reports an error.
 
 Pass these options alongside `sql` in the command's `params`:
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `queryTimeoutSeconds` | 0 | Whole seconds, 0 or absent disables the deadline; range 0..2147483647 (JDBC-compatible upper bound) |
-| `maxScanRows` | 10000000 for new queries | Rows delivered by the reader, not physical file rows scanned |
+| `maxScanRows` | 10000000 for new queries | At most N rows are processed; another reader row fails the command. Not physical file rows scanned |
 | `maxGroups` | 100000 for new queries | Maximum groups held in memory |
-| `maxResultRows` | 1000 for new queries | Maximum returned rows; exceeding it fails the entire command |
-| `allowFullScan` | Connection setting, false when absent | Permit new queries without the key predicates above |
+| `maxResultRows` | No default inspection limit | Maximum returned rows; exceeding it fails the entire command |
+| `allowFullScan` | Connection setting, true when absent | Permit new queries without the key predicates above |
 
-Historical `SELECT *` and direct/wrapped `COUNT(1)` have no new default scan/result caps; explicitly supplied limits still apply. Row/group limits must be positive whole numbers; negative, fractional and overflowing parameters fail. A limit failure returns an error without partial results. Timeout checks run during catalog access, planning, reading, sorting and result construction. This is a **cooperative deadline**, and cannot interrupt blocked Paimon/filesystem I/O; configure storage I/O timeouts separately. A key predicate permits pruning but does not guarantee it. Benchmark representative data and table layouts before using large queries.
+Historical `SELECT *` and direct/wrapped `COUNT(1)` have no new default scan/result caps; explicitly supplied limits still apply. Row/group limits must be positive whole numbers; negative, fractional and overflowing parameters fail. A limit failure fails the command; streaming callers must discard any previously delivered batches. Timeout checks run during catalog access, planning, reading, sorting and result construction. This is a **cooperative deadline**, and cannot interrupt blocked Paimon/filesystem I/O; configure storage I/O timeouts separately. A key predicate permits pruning but does not guarantee it. Benchmark representative data and table layouts before using large queries.
 
 ### SQL boundaries and return values
 

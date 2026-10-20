@@ -13,7 +13,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-/** Shared JDBC command lifecycle; callers retain their driver-specific fetch and row conversion. */
+/** Owns and closes the supplied connection, committing only non-autocommit connections on success.
+ * Callers retain their driver-specific fetch and row conversion. */
 public final class JdbcQueryExecutor {
     private JdbcQueryExecutor() { }
 
@@ -59,7 +60,7 @@ public final class JdbcQueryExecutor {
                     hasResult = statement.getMoreResults();
                 }
             }
-            connection.commit();
+            if (!connection.getAutoCommit()) connection.commit();
         }
     }
 }

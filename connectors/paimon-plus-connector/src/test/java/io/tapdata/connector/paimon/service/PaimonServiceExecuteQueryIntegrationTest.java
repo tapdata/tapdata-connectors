@@ -206,8 +206,10 @@ class PaimonServiceExecuteQueryIntegrationTest {
                     + "FROM DRSRedemptions "
                     + "WHERE TransactionDatetime BETWEEN '2025-01-01 00:00:00' AND '2025-07-01 00:00:00' "
                     + "AND op <> 'd' GROUP BY CAST(CreationTime AS DATE) ORDER BY CAST(CreationTime AS DATE)";
-            // The customer's filter is not on this test table's PK/partition. Require explicit opt-in.
+            // Non-key filters are allowed by default; administrators can still opt into the key gate.
+            config.setQueryAllowFullScan(false);
             assertThrows(IllegalArgumentException.class, () -> service.executeQuery(sql, mock(Log.class)));
+            config.setQueryAllowFullScan(true);
             Map<String, Object> params = new LinkedHashMap<>();
             params.put("allowFullScan", true);
             List<Map<String, Object>> rows = castRows(service.executeQuery(sql, params, mock(Log.class)));
@@ -276,7 +278,7 @@ class PaimonServiceExecuteQueryIntegrationTest {
     }
 
     @Test
-    void legacyTwoArgumentQueryReturnsMoreThanOneThousandRowsAndExplicitLimitsStillApply() throws Exception {
+    void queryRowLimitBelongsToCallerAndExplicitConnectorLimitsStillApply() throws Throwable {
         PaimonService service = new PaimonService(config(), mock(Log.class));
         try {
             service.init();
@@ -287,10 +289,44 @@ class PaimonServiceExecuteQueryIntegrationTest {
                     .option("write-buffer-size", "8mb").build(), false);
             TapTable table = new TapTable(TABLE).add(new TapField("id", "INT").primaryKeyPos(1));
             List<TapRecordEvent> input = new java.util.ArrayList<>();
-            for (int i = 0; i < 1001; i++) { input.add(cdcInsert(map("id", i))); }
+            for (int i = 0; i < 2005; i++) { input.add(cdcInsert(map("id", i))); }
             service.writeRecords(input, table, context());
-            assertEquals(1001, castRows(service.executeQuery("SELECT * FROM " + TABLE, mock(Log.class))).size());
-            assertEquals(1001L, service.executeQuery("SELECT COUNT(1) FROM " + TABLE, mock(Log.class)));
+            assertEquals(2005, castRows(service.executeQuery("SELECT * FROM " + TABLE, mock(Log.class))).size());
+            assertEquals(2005L, service.executeQuery("SELECT COUNT(1) FROM " + TABLE, mock(Log.class)));
+            assertEquals(2005, castRows(service.executeQuery("SELECT id FROM " + TABLE, mock(Log.class))).size());
+            assertEquals(2005, castRows(service.executeQuery(
+                    "SELECT id, COUNT(*) AS n FROM " + TABLE + " GROUP BY id ORDER BY id", mock(Log.class))).size());
+            List<Map<String, Object>> total = castRows(service.executeQuery(
+                    "SELECT SUM(id) AS total FROM " + TABLE, mock(Log.class)));
+            assertEquals(new java.math.BigDecimal("2009010"), total.get(0).get("total"));
+
+            // Existing executeCommand contract: no new limit/cancellation parameter is required.
+            PaimonConnector connector = new PaimonConnector();
+            java.lang.reflect.Field serviceField = PaimonConnector.class.getDeclaredField("paimonService");
+            serviceField.setAccessible(true);
+            serviceField.set(connector, service);
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+            java.util.concurrent.atomic.AtomicInteger delivered = new java.util.concurrent.atomic.AtomicInteger();
+            RuntimeException stop = new RuntimeException("engine stopped at row 1001");
+            assertEquals(stop, assertThrows(RuntimeException.class, () ->
+                    functions.getExecuteCommandFunction().execute(context(), TapExecuteCommand.create()
+                            .command("executeQuery").params(map("sql", "SELECT id FROM " + TABLE, "batchSize", 1001)), result -> {
+                        if (result.getError() != null) throw (RuntimeException) result.getError();
+                        delivered.addAndGet(((List<?>) result.getResult()).size());
+                        throw stop;
+                    })));
+            assertEquals(1001, delivered.get());
+            // Consumer cancellation released ingress and readers, allowing another real-table query.
+            assertEquals(2005L, service.executeQuery("SELECT COUNT(1) FROM " + TABLE, mock(Log.class)));
+            List<ExecuteResult> batches = new java.util.ArrayList<>();
+            functions.getExecuteCommandFunction().execute(context(), TapExecuteCommand.create()
+                    .command("executeQuery").params(map("sql", "SELECT id FROM " + TABLE, "batchSize", 400)), batches::add);
+            assertEquals(6, batches.size());
+            assertEquals(400, ((List<?>) batches.get(0).getResult()).size());
+            assertEquals(5, ((List<?>) batches.get(5).getResult()).size());
+            assertThrows(IllegalStateException.class, () -> service.executeQueryBatches("SELECT id FROM " + TABLE,
+                    Collections.singletonMap("maxResultRows", 1000), mock(Log.class), ignored -> {}, 400));
             assertThrows(IllegalStateException.class, () -> service.executeQuery("SELECT * FROM " + TABLE,
                     Collections.singletonMap("maxResultRows", 1000), mock(Log.class)));
         } finally { service.close(); }

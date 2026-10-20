@@ -15,10 +15,10 @@ final class SqlCommandParams {
         }
         try {
             int parsed = new BigDecimal(value.toString()).intValueExact();
-            if (parsed <= 0) { throw new ArithmeticException("must be positive"); }
+            if (parsed <= 0) return defaultValue;
             return parsed;
         } catch (NumberFormatException | ArithmeticException e) {
-            throw new IllegalArgumentException("Parameter '" + name + "' must be a positive whole number between 1 and " + Integer.MAX_VALUE + "; got: " + value, e);
+            throw new IllegalArgumentException("Parameter '" + name + "' must be a whole number within the int range; positive values must not exceed " + Integer.MAX_VALUE + "; got: " + value, e);
         }
     }
 

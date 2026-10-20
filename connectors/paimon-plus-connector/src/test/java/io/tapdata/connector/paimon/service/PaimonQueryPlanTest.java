@@ -150,7 +150,7 @@ class PaimonQueryPlanTest {
         PaimonQueryLimits legacy = defaults.forLegacyQuery();
         assertEquals(Long.MAX_VALUE, legacy.maxScanRows);
         assertEquals(Integer.MAX_VALUE, legacy.maxResultRows);
-        assertEquals(1000, defaults.maxResultRows);
+        assertEquals(Integer.MAX_VALUE, defaults.maxResultRows);
         PaimonQueryLimits explicit = new PaimonQueryLimits(Collections.singletonMap("maxResultRows", 7)).forLegacyQuery();
         assertEquals(7, explicit.maxResultRows);
         assertThrows(IllegalArgumentException.class,

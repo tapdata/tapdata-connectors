@@ -606,8 +606,13 @@ public class PaimonConnector extends ConnectorBase {
             if (!(sql instanceof String) || ((String) sql).trim().isEmpty()) {
                 throw new IllegalArgumentException("executeQuery requires a non-empty params.sql");
             }
-            Object result = paimonService.executeQuery((String) sql, command.getParams(), connectorContext.getLog());
-            consumer.accept(new ExecuteResult<>().result(result));
+            Object requestedBatchSize = command.getParams().get("batchSize");
+            int batchSize = requestedBatchSize == null
+                    ? (command.getBatchSize() == null ? 1000 : command.getBatchSize())
+                    : new java.math.BigDecimal(requestedBatchSize.toString()).intValueExact();
+            if (batchSize <= 0) batchSize = 1000;
+            paimonService.executeQueryBatches((String) sql, command.getParams(), connectorContext.getLog(),
+                    result -> consumer.accept(new ExecuteResult<>().result(result)), batchSize);
         } catch (Throwable throwable) {
             consumer.accept(new ExecuteResult<>().error(throwable));
         }

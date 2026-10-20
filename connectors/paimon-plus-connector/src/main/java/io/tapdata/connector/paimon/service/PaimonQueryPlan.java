@@ -222,6 +222,7 @@ final class PaimonQueryPlan {
 
     int[] projection() { return columns.stream().mapToInt(Integer::intValue).toArray(); }
     boolean aggregate() { return aggregate; }
+    boolean streamable() { return !aggregate && sorts.isEmpty(); }
     boolean legacyRows() { return star && sorts.isEmpty() && !aggregate; }
     Accumulator accumulator(PaimonQueryLimits limits) { return new Accumulator(limits, projection()); }
     Accumulator accumulator(PaimonQueryLimits limits, int[] projection) { return new Accumulator(limits, projection); }
@@ -240,6 +241,7 @@ final class PaimonQueryPlan {
         private final PaimonQueryLimits limits;
         private final Map<List<Object>, State[]> states = new LinkedHashMap<>();
         private final List<Object[]> rows = new ArrayList<>();
+        private long resultRows;
         private final int[] projected;
         private final InternalRow.FieldGetter[] getters;
         private final int[] positions = new int[rowType.getFieldCount()];
@@ -259,7 +261,7 @@ final class PaimonQueryPlan {
             Object[] values = new Object[projected.length];
             for (int i = 0; i < values.length; i++) { values[i] = javaValue(getters[i].getFieldOrNull(row), rowType.getTypeAt(projected[i])); }
             if (!aggregate) {
-                if (rows.size() >= limits.maxResultRows) { throw limits.exceeded("maxResultRows", limits.maxResultRows); }
+                if (resultRows++ >= limits.maxResultRows) { throw limits.exceeded("maxResultRows", limits.maxResultRows); }
                 Object[] result = new Object[items.size()];
                 for (int i = 0; i < result.length; i++) { result[i] = value(items.get(i).scalar, values); }
                 rows.add(result);
@@ -297,6 +299,15 @@ final class PaimonQueryPlan {
         }
 
         int groupCount() { return states.size(); }
+
+        int bufferedRows() { return rows.size(); }
+
+        List<Map<String, Object>> drain() throws java.sql.SQLTimeoutException, InterruptedException {
+            if (!streamable()) throw new IllegalStateException("Only unordered projection rows can be drained");
+            List<Map<String, Object>> batch = finish();
+            rows.clear();
+            return batch;
+        }
 
         List<Map<String, Object>> finish() throws java.sql.SQLTimeoutException, InterruptedException {
             limits.check();

@@ -3141,11 +3141,24 @@ public class PaimonService implements AutoCloseable {
         options.putIfAbsent("allowFullScan", config.getQueryAllowFullScan());
         try (PaimonServiceLifecycle.Ingress ignored = enterIngress("executeQuery")) {
             PaimonQueryLimits limits = new PaimonQueryLimits(options);
-            return executeQueryAdmitted(sql, limits, log);
+            return executeQueryAdmitted(sql, limits, log, null, 0);
         }
     }
 
-    private Object executeQueryAdmitted(String sql, PaimonQueryLimits limits, Log log) throws Exception {
+    /** Uses the existing executeCommand callback to stream unordered rows; callback failures stop the reader. */
+    public void executeQueryBatches(String sql, Map<String, Object> params, Log log,
+                                    java.util.function.Consumer<Object> consumer, int batchSize) throws Exception {
+        if (batchSize <= 0) throw new IllegalArgumentException("batchSize must be positive");
+        Map<String, Object> options = new java.util.HashMap<>();
+        if (params != null) options.putAll(params);
+        options.putIfAbsent("allowFullScan", config.getQueryAllowFullScan());
+        try (PaimonServiceLifecycle.Ingress ignored = enterIngress("executeQuery")) {
+            executeQueryAdmitted(sql, new PaimonQueryLimits(options), log, consumer, batchSize);
+        }
+    }
+
+    private Object executeQueryAdmitted(String sql, PaimonQueryLimits limits, Log log,
+                                         java.util.function.Consumer<Object> consumer, int batchSize) throws Exception {
         limits.check();
         String tableName = PaimonSqlQueryParser.tableName(sql);
         Identifier identifier = Identifier.create(config.getDatabase(), tableName);
@@ -3156,6 +3169,9 @@ public class PaimonService implements AutoCloseable {
             throw new IllegalArgumentException("Paimon SQL table name changed during parsing");
         }
         PaimonQueryPlan queryPlan = query.plan();
+        if (queryPlan == null && !query.countQuery()) {
+            throw new IllegalStateException("Paimon row query requires a query plan");
+        }
         if (queryPlan == null || queryPlan.legacyRows()) { limits = limits.forLegacyQuery(); }
         if (queryPlan != null && !queryPlan.legacyRows() && !limits.allowFullScan
                 && !queryPlan.hasPruningFilter(paimonTable.partitionKeys(), paimonTable.primaryKeys())) {
@@ -3178,6 +3194,7 @@ public class PaimonService implements AutoCloseable {
         limits.check();
         TableRead tableRead = readBuilder.newRead().executeFilter();
         PaimonQueryPlan.Accumulator accumulator = queryPlan == null ? null : queryPlan.accumulator(limits, projection);
+        boolean streaming = consumer != null && queryPlan != null && queryPlan.streamable();
         long readRows = 0;
         long count = 0;
         try {
@@ -3191,13 +3208,18 @@ public class PaimonService implements AutoCloseable {
                             limits.check();
                             InternalRow row;
                             while ((row = iterator.next()) != null) {
-                                limits.check();
+                                if ((readRows & 1023) == 0) limits.check();
                                 if (readRows >= limits.maxScanRows) { throw limits.exceeded("maxScanRows", limits.maxScanRows); }
                                 readRows++;
                                 RowKind rowKind = row.getRowKind();
                                 if (rowKind == RowKind.UPDATE_BEFORE || rowKind == RowKind.DELETE) { continue; }
                                 count++;
-                                if (accumulator != null) { accumulator.add(row); }
+                                if (accumulator != null) {
+                                    accumulator.add(row);
+                                    if (streaming && accumulator.bufferedRows() >= batchSize) {
+                                        consumer.accept(accumulator.drain());
+                                    }
+                                }
                             }
                         } finally {
                             iterator.releaseBatch();
@@ -3209,6 +3231,20 @@ public class PaimonService implements AutoCloseable {
             limits.check();
             Object result = query.countQuery() ? count : accumulator.finish();
             limits.check();
+            if (consumer != null) {
+                if (result instanceof List) {
+                    List<?> rows = (List<?>) result;
+                    for (int offset = 0; offset < rows.size(); offset += batchSize) {
+                        limits.check();
+                        consumer.accept(new java.util.ArrayList<>(rows.subList(offset,
+                                (int) Math.min((long) offset + batchSize, rows.size()))));
+                    }
+                    if (rows.isEmpty() && (!streaming || count == 0)) consumer.accept(Collections.emptyList());
+                } else {
+                    consumer.accept(result);
+                }
+                return null;
+            }
             return result;
         } finally {
             log.info("Paimon executeQuery table={}, splits={}, projectedColumns={}, readRows={}, matchedRows={}, groups={}, elapsedMs={}",

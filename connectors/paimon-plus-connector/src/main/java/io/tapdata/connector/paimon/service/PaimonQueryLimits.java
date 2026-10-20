@@ -24,7 +24,7 @@ final class PaimonQueryLimits {
         this.params = values;
         maxScanRows = positive(values, "maxScanRows", 10_000_000, Long.MAX_VALUE);
         maxGroups = (int) positive(values, "maxGroups", 100_000, Integer.MAX_VALUE);
-        maxResultRows = (int) positive(values, "maxResultRows", 1000, Integer.MAX_VALUE);
+        maxResultRows = (int) positive(values, "maxResultRows", Integer.MAX_VALUE, Integer.MAX_VALUE);
         long seconds = nonNegative(values, "queryTimeoutSeconds", 0, Integer.MAX_VALUE);
         timeoutNanos = seconds * 1_000_000_000L;
         Object fullScan = values.get("allowFullScan");
@@ -41,7 +41,7 @@ final class PaimonQueryLimits {
         if (timeoutNanos > 0 && clock.getAsLong() - started >= timeoutNanos) {
             throw new SQLTimeoutException("Paimon executeQuery exceeded queryTimeoutSeconds=" + timeoutNanos / 1_000_000_000L
                     + "; increase params.queryTimeoutSeconds or set it to 0 to disable the cooperative deadline"
-                    + "; blocked storage I/O cannot be interrupted; no partial result returned");
+                    + "; blocked storage I/O cannot be interrupted; command failed; discard any previously delivered batches");
         }
     }
 
@@ -63,7 +63,7 @@ final class PaimonQueryLimits {
 
     IllegalStateException exceeded(String limit, long value) {
         return new IllegalStateException("Paimon executeQuery exceeded " + limit + "=" + value
-                + "; narrow the WHERE range or increase params." + limit + "; no partial result returned");
+                + "; narrow the WHERE range or increase params." + limit + "; command failed; discard any previously delivered batches");
     }
 
     private static long nonNegative(Map<String, Object> params, String key, long defaultValue, long max) {

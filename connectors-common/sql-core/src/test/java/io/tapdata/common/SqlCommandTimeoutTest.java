@@ -32,14 +32,17 @@ class SqlCommandTimeoutTest {
             assertEquals(8, SqlCommandParams.getQueryTimeoutSeconds(Collections.singletonMap("queryTimeoutSeconds", valid)));
             assertEquals(8, SqlCommandParams.getInteger(Collections.singletonMap("batchSize", valid), "batchSize", 1000));
         }
-        for (Object invalid : Arrays.asList(-1, "1.5", "oops", true, "2147483648", "9223372036854775808")) {
+        for (Object invalid : Arrays.asList("1.5", "oops", true, "2147483648", "9223372036854775808")) {
             assertThrows(IllegalArgumentException.class,
                     () -> SqlCommandParams.getQueryTimeoutSeconds(Collections.singletonMap("queryTimeoutSeconds", invalid)));
             assertThrows(IllegalArgumentException.class,
                     () -> SqlCommandParams.getInteger(Collections.singletonMap("batchSize", invalid), "batchSize", 1000));
         }
+        for (int value : Arrays.asList(0, -1)) {
+            assertEquals(1000, SqlCommandParams.getInteger(Collections.singletonMap("batchSize", value), "batchSize", 1000));
+        }
         assertThrows(IllegalArgumentException.class,
-                () -> SqlCommandParams.getInteger(Collections.singletonMap("batchSize", 0), "batchSize", 1000));
+                () -> SqlCommandParams.getQueryTimeoutSeconds(Collections.singletonMap("queryTimeoutSeconds", -1)));
         assertEquals(Integer.MAX_VALUE, SqlCommandParams.getQueryTimeoutSeconds(
                 Collections.singletonMap("queryTimeoutSeconds", Integer.MAX_VALUE)));
     }
@@ -134,6 +137,39 @@ class SqlCommandTimeoutTest {
         verify(connection).close();
     }
 
+    @Test
+    void autoCommitConnectionIsClosedWithoutExplicitCommit() throws Throwable {
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        when(connection.createStatement()).thenReturn(statement);
+        when(connection.getAutoCommit()).thenReturn(true);
+        JdbcQueryExecutor.execute("select 1", () -> connection, ignored -> {}, () -> true, 10, 0,
+                null, rs -> () -> Collections.emptyMap());
+        verify(connection, never()).commit();
+        verify(connection).close();
+        verify(statement).close();
+    }
+
+    @Test
+    void callbackCancellationClosesJdbcResourcesBeforeReadingAnotherRow() throws Throwable {
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        java.sql.ResultSet resultSet = mock(java.sql.ResultSet.class);
+        when(connection.createStatement()).thenReturn(statement);
+        when(statement.execute("select v")).thenReturn(true);
+        when(statement.getResultSet()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        RuntimeException stop = new RuntimeException("engine row limit");
+        assertSame(stop, assertThrows(RuntimeException.class, () -> JdbcQueryExecutor.execute("select v",
+                () -> connection, batch -> { throw stop; }, () -> true, 1001, 0, null,
+                rs -> () -> Collections.singletonMap("v", 1))));
+        verify(resultSet, times(1001)).next();
+        verify(resultSet).close();
+        verify(statement).close();
+        verify(connection).close();
+        verify(connection, never()).commit();
+    }
+
     static class BaseConnector extends CommonDbConnector {
         @Override public ConnectionOptions connectionTest(TapConnectionContext context, Consumer<TestItem> consumer) { return null; }
         @Override public void registerCapabilities(ConnectorFunctions functions, TapCodecsRegistry registry) { }
@@ -154,6 +190,27 @@ class SqlCommandTimeoutTest {
         assertEquals(Collections.singletonList("legacy"), values);
         assertThrows(UnsupportedOperationException.class, () -> connector.execute("select 1", values::add, 10, 8));
         assertEquals(1, connector.calls);
+    }
+
+    static class DelegatingConnector extends LegacyConnector {
+        @Override protected void execute(String sql, Consumer<Object> consumer, int batchSize, int timeout) throws Throwable {
+            super.execute(sql, consumer, batchSize, timeout);
+        }
+    }
+
+    @Test
+    void timeoutOverrideCanDelegateToSharedJdbcEvenWithLegacyOverride() throws Throwable {
+        DelegatingConnector connector = new DelegatingConnector();
+        JdbcContext jdbc = mock(JdbcContext.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        ReflectionTestUtils.setField(connector, "jdbcContext", jdbc);
+        when(jdbc.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(statement);
+        connector.execute("select 1", ignored -> {}, 10, 8);
+        verify(statement).setQueryTimeout(8);
+        verify(statement).execute("select 1");
+        assertEquals(0, connector.calls);
     }
 
     @Test

@@ -1152,14 +1152,25 @@ public abstract class CommonDbConnector extends ConnectorBase {
             execute(sql, consumer, batchSize);
             return;
         }
-        // Old subclasses may have driver-specific streaming/conversion in this extension point.
+        // A subclass that implements the timeout overload can deliberately delegate to super.
+        boolean timeoutOverridden = false;
+        boolean legacyOverridden = false;
         for (Class<?> type = getClass(); type != CommonDbConnector.class; type = type.getSuperclass()) {
             try {
-                type.getDeclaredMethod("execute", String.class, Consumer.class, int.class);
-                throw new UnsupportedOperationException("Connector must override execute with queryTimeoutSeconds to preserve its custom query path");
+                type.getDeclaredMethod("execute", String.class, Consumer.class, int.class, int.class);
+                timeoutOverridden = true;
             } catch (NoSuchMethodException absent) {
                 // Continue through the subclass hierarchy.
             }
+            try {
+                type.getDeclaredMethod("execute", String.class, Consumer.class, int.class);
+                legacyOverridden = true;
+            } catch (NoSuchMethodException absent) {
+                // Continue through the subclass hierarchy.
+            }
+        }
+        if (legacyOverridden && !timeoutOverridden) {
+            throw new UnsupportedOperationException("Connector must override execute with queryTimeoutSeconds to preserve its custom query path");
         }
         executeJdbcQuery(sql, consumer, batchSize, queryTimeoutSeconds);
     }
