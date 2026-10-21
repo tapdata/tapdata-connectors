@@ -107,7 +107,7 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 J
 
 ## 限制
 
-1. **读取操作**: 此连接器目前仅支持写入操作。不支持读取和 CDC 操作。
+1. **读取操作**: 不支持 CDC 和流式读取；只读临时查询请使用 `executeQuery`（见下文）。
 2. **索引**: Paimon 不支持传统索引。仅支持主键。
 3. **模型变更**: 不支持运行时动态模型变更。
 
@@ -158,7 +158,7 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 J
 - `COUNT(*)`、`COUNT(1)`、`COUNT(col)`、`SUM`、`MIN`、`MAX`、`AVG`；不支持 DISTINCT 聚合。`SUM/AVG` 只接受数值列，DECIMAL 全程使用 BigDecimal；AVG 按 DECIMAL128 精度舍入。空输入的 COUNT 为 0，其余聚合为 NULL；分组查询的空输入返回空结果集。
 - 多列 `GROUP BY`，以及 `CAST(timestamp_column AS DATE)` 日期投影、分组。日期转换仅接受 DATE 或无时区 TIMESTAMP，不隐式选择时区。
 - 按已选择的表达式、别名、列序号 `ORDER BY`，支持 ASC/DESC、NULLS FIRST/LAST；默认 ASC 时 NULL 在前、DESC 时 NULL 在后。排序需要把结果行缓存在内存中，受 `maxBufferedRows` 限制：超过限制整次失败，不会返回截断或未排序的结果。
-- 原有 WHERE 子集：列与常量比较、BETWEEN、IN、IS NULL、有限的 LIKE、AND/OR/NOT。WHERE 下推至 Paimon，并由 reader 精确执行；读取投影保留 SELECT、GROUP BY、WHERE 所需的列。
+- 原有 WHERE 子集：列与常量比较、BETWEEN、IN、IS NULL、有限的 LIKE、AND/OR/NOT。整型列只接受列范围内的整数字面量；小数或超范围字面量会以 `literal ... is not representable as ...` 明确报错，不会被静默截断，也不会被误报为语法错误。WHERE 下推至 Paimon，并由 reader 精确执行；读取投影保留 SELECT、GROUP BY、WHERE 所需的列。
 
 不支持 JOIN、通用子查询、WITH、UNION、HAVING、窗口函数、通用算术表达式、分页、表别名或带数据库/schema 前缀的表名。不支持的语法明确报错，不会静默忽略。历史 `COUNT(1) FROM (SELECT * ...)` 计数包装继续支持，历史直接 COUNT(1) 和计数包装仍返回 Long；其他查询返回 `List<Map<String,Object>>`，建议为所有表达式指定唯一别名。
 
@@ -180,17 +180,17 @@ ORDER BY CAST(CreationTime AS DATE)
 
 投影、聚合、排序查询默认允许非键过滤和全表扫描。需要限制时，可将连接配置 `queryAllowFullScan=false`，或在命令中设置布尔值 `allowFullScan=false`，启用分区列或前导主键过滤要求。命令参数优先；直接/包装 `COUNT(1)` 不受该键过滤要求影响。键过滤要求也适用于历史无排序 `SELECT *`。`AND` 中任意一个条件约束键即可；`OR` 的每个分支都必须约束键。相同键的多个等值条件可改写为 `IN`；`IS NULL` 可用于键过滤，`NOT` 与否定形式不计作键过滤。非键查询若确实要全表扫描，再显式设为 `true`。支持的 WHERE 会下推，但 SQL 写了过滤条件并不保证文件裁剪。
 
-自定义校验的 1000 行上限由引擎负责，跨回调累计查询结果行数，在第 1001 行报错并丢弃全部部分结果。`executeCommand` 使用已有的 `batchSize` 和结果回调分批返回无排序投影；回调抛出异常会停止读取并关闭资源。聚合和排序需要完成扫描后才能返回最终结果，不会把聚合输入明细限制为 1000 行。带 `ORDER BY` 的查询会把结果行缓存在内存中，上限为 `maxBufferedRows`；聚合按组保存状态，上限为 `maxGroups`。直接调用连接器可返回超过 1000 行；流式调用方若收到后续错误，必须丢弃之前收到的批次。
+自定义校验的 1000 行上限由引擎负责，跨回调累计查询结果行数，在第 1001 行报错并丢弃全部部分结果。`executeCommand` 使用已有的 `batchSize` 和结果回调分批返回无排序投影；回调抛出异常会停止读取并关闭资源。聚合和排序需要完成扫描后才能返回最终结果，不会把聚合输入明细限制为 1000 行。带 `ORDER BY` 的查询会把结果行缓存在内存中，上限为 `maxBufferedRows`；聚合按组保存状态，上限为 `maxGroups`；带 `ORDER BY` 的聚合查询会把每组物化为一行后排序，同时受两个上限约束。直接调用连接器可返回超过 1000 行；流式调用方若收到后续错误，必须丢弃之前收到的批次。
 
 `executeQuery` 命令参数（与 `sql` 一起放在 `params`）：
 
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
-| `queryTimeoutSeconds` | 0 | 非负整数秒；省略或 0 不设超时，正值在 catalog/规划/批次/行/排序/结果阶段检查协作式截止时间 |
+| `queryTimeoutSeconds` | 0 | 整数秒，范围 0..2147483647（与 JDBC 上界一致）；省略或 0 不设超时，正值在 catalog/规划/批次/行/排序/结果阶段检查协作式截止时间 |
 | `maxScanRows` | 10000000 | 最多处理 N 行，若 reader 还有下一行则命令失败；**不是底层文件物理扫描行数** |
 | `maxGroups` | 100000 | 最大聚合分组数，按组保存状态，不缓存全部明细行 |
 | `maxResultRows` | 默认不设校验行数上限 | 最大结果行数；失败时应丢弃已收到的批次 |
-| `maxBufferedRows` | 100000 | 带 `ORDER BY` 的查询必须缓存全部结果行后才能排序，缓存超过 N 行整次失败；无排序投影按 `batchSize` 流式返回，不受此限制 |
+| `maxBufferedRows` | 100000 | 带 `ORDER BY` 的查询必须缓存全部结果行后才能排序，缓存超过 N 行整次失败；带 `ORDER BY` 的聚合查询也会按组缓存一行并受此限制；无排序投影按 `batchSize` 流式返回，不受此限制 |
 | `allowFullScan` | 连接配置，默认 true | 布尔值或 `"true"`/`"false"` 字符串；是否允许没有上述键过滤的查询 |
 
 行数与分组数参数必须是范围内的正整数；超时接受 0 到 2147483647 的整数秒（JDBC 参数兼容上界，0 明确表示关闭，不必填写大数模拟无限制）。负数、小数、溢出值均拒绝。任一限制触发，整次命令失败，调用方应丢弃已收到的批次。reader 和 batch 在异常路径也会释放。日志记录计划 splits 数、投影列数、reader 交付行数、有效行数、分组数和耗时。

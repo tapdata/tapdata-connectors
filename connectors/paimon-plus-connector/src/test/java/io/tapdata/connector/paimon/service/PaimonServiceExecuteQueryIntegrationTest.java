@@ -123,8 +123,9 @@ class PaimonServiceExecuteQueryIntegrationTest {
     void realPaimonSelectStarPreservesTemporalJavaTypes(String zone) throws Exception {
         java.util.TimeZone previous = java.util.TimeZone.getDefault();
         java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone(zone));
-        PaimonService service = new PaimonService(config(), mock(Log.class));
+        PaimonService service = null;
         try {
+            service = new PaimonService(config(), mock(Log.class));
             service.init();
             Catalog catalog = catalog(service);
             catalog.createDatabase(DATABASE, true);
@@ -151,7 +152,7 @@ class PaimonServiceExecuteQueryIntegrationTest {
             assertEquals(timestamp, row.get("ts"));
             assertEquals(timestamp.atZone(java.time.ZoneOffset.UTC), row.get("ltz"));
         } finally {
-            try { service.close(); }
+            try { if (service != null) { service.close(); } }
             finally { java.util.TimeZone.setDefault(previous); }
         }
     }

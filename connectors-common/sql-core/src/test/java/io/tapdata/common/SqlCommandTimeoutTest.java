@@ -214,6 +214,37 @@ class SqlCommandTimeoutTest {
     }
 
     @Test
+    void deprecatedCommandAlsoPassesTimeoutToJdbc() throws Exception {
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        when(connection.createStatement()).thenReturn(statement);
+        when(statement.execute("select 1")).thenReturn(false);
+        when(statement.getUpdateCount()).thenReturn(0);
+        Map<String, Object> params = new HashMap<>();
+        params.put("sql", "select 1");
+        params.put("queryTimeoutSeconds", 8);
+        List<ExecuteResult> results = new ArrayList<>();
+        SqlExecuteCommandFunction.executeCommand(null,
+                TapExecuteCommand.create().command("executeQuery").params(params), () -> connection, results::add);
+        verify(statement).setQueryTimeout(8);
+        assertEquals(1, results.size());
+    }
+
+    static class RecursiveConnector extends BaseConnector {
+        @Override protected void execute(String sql, Consumer<Object> consumer, int batchSize) throws Throwable {
+            execute(sql, consumer, batchSize, 0);
+        }
+    }
+
+    @Test
+    void delegatingLegacyOverrideFailsClearlyInsteadOfOverflowingTheStack() {
+        RecursiveConnector connector = new RecursiveConnector();
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> connector.execute("select 1", ignored -> {}, 10, 0));
+        assertTrue(failure.getMessage().contains("must not delegate back"), failure.getMessage());
+    }
+
+    @Test
     void commonCommandAppliesPositiveTimeoutAndLeavesOmittedOrZeroUnset() throws Throwable {
         for (Integer timeout : Arrays.asList(null, 0, 8)) {
             BaseConnector connector = new BaseConnector();

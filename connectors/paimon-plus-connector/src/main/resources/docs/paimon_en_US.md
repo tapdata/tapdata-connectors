@@ -87,7 +87,7 @@ values must be stored as JSON in STRING columns.
 
 ## Limitations
 
-1. **Read Operations**: This connector currently only supports write operations. Read and CDC operations are not supported.
+1. **Read Operations**: CDC and streaming reads are not supported. Read-only ad-hoc queries are available through `executeQuery` (see below).
 2. **Indexes**: Paimon doesn't support traditional indexes. Only primary keys are supported.
 3. **Schema Changes**: Dynamic schema changes during runtime are not supported.
 
@@ -126,7 +126,7 @@ Supports one table: column projection, `CAST(timestamp AS DATE)`, `COUNT`, `SUM`
 
 Projection, aggregation and sorted queries allow non-key filters and full scans by default. Set connection `queryAllowFullScan=false` (or command boolean `allowFullScan=false`) to opt into the partition/leading-primary-key filter requirement. Command options take precedence; direct/wrapped `COUNT(1)` remains exempt, while the gate also applies to historical unsorted `SELECT *`. For `AND`, any qualifying condition is enough; for `OR`, every branch must constrain an eligible key. Same-key equality alternatives can be rewritten as `IN`. Positive `IS NULL` on a key qualifies; `NOT` and negated forms do not. Use `allowFullScan=true` only when a full scan is intended. A supported filter is pushed down, but SQL syntax alone does not guarantee file pruning.
 
-The 1000-row inspection limit belongs to the engine, not the connector. It counts result rows across callbacks and fails on row 1001, discarding all partial results. `executeCommand` uses its existing `batchSize` and result callback to stream unordered projections; a consumer exception stops reading and closes resources. Aggregation and sorting must finish scanning before final rows are delivered; input rows are not capped at 1000. Ordered queries buffer result rows in memory up to `maxBufferedRows`; group-by aggregation keeps one state per group up to `maxGroups`. Direct command callers can receive more than 1000 result rows. Streaming callers must discard already received batches if a later callback reports an error.
+The 1000-row inspection limit belongs to the engine, not the connector. It counts result rows across callbacks and fails on row 1001, discarding all partial results. `executeCommand` uses its existing `batchSize` and result callback to stream unordered projections; a consumer exception stops reading and closes resources. Aggregation and sorting must finish scanning before final rows are delivered; input rows are not capped at 1000. Ordered queries buffer result rows in memory up to `maxBufferedRows`; group-by aggregation keeps one state per group up to `maxGroups`, and a grouped query with `ORDER BY` materializes one row per group, so it is bounded by both `maxGroups` and `maxBufferedRows`. Direct command callers can receive more than 1000 result rows. Streaming callers must discard already received batches if a later callback reports an error.
 
 Pass these options alongside `sql` in the command's `params`:
 
@@ -136,7 +136,7 @@ Pass these options alongside `sql` in the command's `params`:
 | `maxScanRows` | 10000000 for new queries | At most N rows are processed; another reader row fails the command. Not physical file rows scanned |
 | `maxGroups` | 100000 for new queries | Maximum groups held in memory |
 | `maxResultRows` | No default inspection limit | Maximum returned rows; exceeding it fails the entire command |
-| `maxBufferedRows` | 100000 | `ORDER BY` must hold every result row until the scan ends, so more than N buffered rows fails the command; unordered projections stream by `batchSize` and are not bounded by this |
+| `maxBufferedRows` | 100000 | `ORDER BY` must hold every result row until the scan ends, so more than N buffered rows fails the command; aggregate queries with `ORDER BY` buffer one row per group and are bounded by this too; unordered projections stream by `batchSize` and are not bounded by this |
 | `allowFullScan` | Connection setting, true when absent | Boolean or `"true"`/`"false"` string; permit queries without the key predicates above |
 
 Historical `SELECT *` and direct/wrapped `COUNT(1)` have no new default scan/result caps; explicitly supplied limits still apply. Row/group limits must be positive whole numbers; negative, fractional and overflowing parameters fail. A limit failure fails the command; streaming callers must discard any previously delivered batches. Timeout checks run during catalog access, planning, reading, sorting and result construction. This is a **cooperative deadline**, and cannot interrupt blocked Paimon/filesystem I/O; configure storage I/O timeouts separately. A key predicate permits pruning but does not guarantee it. Benchmark representative data and table layouts before using large queries.
@@ -145,7 +145,7 @@ Historical `SELECT *` and direct/wrapped `COUNT(1)` have no new default scan/res
 
 `SELECT *`, scalar projections and aliases, `COUNT(*)`, `COUNT(1)`, `COUNT(column)`, `SUM`, `AVG`, `MIN`, `MAX`, multi-column `GROUP BY`, and `ORDER BY` selected expressions, aliases or ordinals are supported. `CAST(column AS DATE)` accepts DATE or TIMESTAMP without time zone; it uses the calendar date without an implicit zone conversion. `DATE(column)` is not supported. ASC defaults to NULLS FIRST and DESC to NULLS LAST; explicit NULLS FIRST/LAST are supported. Unquoted ORDER BY aliases ignore case; quoted aliases match exactly. The existing JSqlParser 4.4 grammar rejects doubled double quotes inside identifiers; such names cannot currently be queried.
 
-WHERE supports column/literal comparisons (in either operand order), BETWEEN, IN, IS NULL, limited LIKE, AND/OR/NOT. General subqueries, WITH, windows, arithmetic, pagination, table aliases and qualified table names are rejected. ARRAY/MAP/MULTISET/ROW columns cannot be selected or used in expressions; explicitly select scalar columns on tables containing them.
+WHERE supports column/literal comparisons (in either operand order), BETWEEN, IN, IS NULL, limited LIKE, AND/OR/NOT. Integer columns accept only whole-number literals inside the column range; fractional or out-of-range literals fail with an explicit `literal ... is not representable as ...` error instead of being truncated or reported as a syntax error. General subqueries, WITH, windows, arithmetic, pagination, table aliases and qualified table names are rejected. ARRAY/MAP/MULTISET/ROW columns cannot be selected or used in expressions; explicitly select scalar columns on tables containing them.
 
 Empty input returns COUNT=0 and NULL for other global aggregates; grouped queries return no rows. SUM/AVG use BigDecimal for all numeric input, AVG rounds with DECIMAL128. SUM/AVG reject NaN and either infinity with an explicit data error and no partial result. MIN/MAX and ORDER BY use -Infinity < finite numbers < +Infinity < NaN; signed zeros compare equal. `GROUP BY` also treats signed zeros as one group and puts every NaN in one group. COUNT and plain projection permit these floating values.
 

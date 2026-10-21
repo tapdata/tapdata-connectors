@@ -452,9 +452,6 @@ final class PaimonSqlQueryParser {
             if (value instanceof Long) {
                 return -((Long) value);
             }
-            if (value instanceof Double) {
-                return -((Double) value);
-            }
             if (value instanceof BigDecimal) {
                 return ((BigDecimal) value).negate();
             }
@@ -501,18 +498,13 @@ final class PaimonSqlQueryParser {
         if (value instanceof Number) {
             BigDecimal number = value instanceof BigDecimal ? (BigDecimal) value : new BigDecimal(value.toString());
             switch (root) {
-                case "TINYINT": value = number.byteValueExact(); break;
-                case "SMALLINT": value = number.shortValueExact(); break;
-                case "INTEGER": value = number.intValueExact(); break;
-                case "BIGINT": value = number.longValueExact(); break;
-                case "DECIMAL":
-                    org.apache.paimon.types.DecimalType decimalType = (org.apache.paimon.types.DecimalType) type;
-                    number = number.setScale(decimalType.getScale(), java.math.RoundingMode.UNNECESSARY);
-                    if (number.precision() > decimalType.getPrecision()) {
-                        throw unsupported("numeric literal exceeds column precision: " + number);
-                    }
-                    value = number;
-                    break;
+                // Integer columns only take whole numbers inside the column range. Anything else is
+                // rejected with a dedicated message: wrapping or rounding would silently change the
+                // predicate, and reporting it as "invalid SELECT syntax" would hide the real cause.
+                case "TINYINT": value = narrow(number, type, Byte.MIN_VALUE, Byte.MAX_VALUE); break;
+                case "SMALLINT": value = narrow(number, type, Short.MIN_VALUE, Short.MAX_VALUE); break;
+                case "INTEGER": value = narrow(number, type, Integer.MIN_VALUE, Integer.MAX_VALUE); break;
+                case "BIGINT": value = narrow(number, type, Long.MIN_VALUE, Long.MAX_VALUE); break;
                 default: break;
             }
         }
@@ -525,6 +517,25 @@ final class PaimonSqlQueryParser {
             }
         }
         return PredicateBuilder.convertJavaObject(type, value);
+    }
+
+    /**
+     * Converts a numeric literal to the column's integer type without rounding or wrapping.
+     * Fractional or out-of-range literals are reported explicitly instead of being truncated.
+     */
+    private static Object narrow(BigDecimal number, org.apache.paimon.types.DataType type, long min, long max) {
+        try {
+            switch (type.getTypeRoot().name()) {
+                case "TINYINT": return number.byteValueExact();
+                case "SMALLINT": return number.shortValueExact();
+                case "INTEGER": return number.intValueExact();
+                default: return number.longValueExact();
+            }
+        } catch (ArithmeticException failure) {
+            throw unsupported("literal " + number.toPlainString() + " is not representable as "
+                    + type.asSQLString() + "; integer columns accept only whole numbers between "
+                    + min + " and " + max + ", use a CAST or compare with a different column", failure);
+        }
     }
 
     private static Object castLiteral(CastExpression expression) {

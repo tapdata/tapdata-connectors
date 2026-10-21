@@ -5,6 +5,7 @@ import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.Function;
 import net.sf.jsqlparser.expression.LongValue;
 import net.sf.jsqlparser.schema.Column;
+import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.select.AllColumns;
 import net.sf.jsqlparser.statement.select.OrderByElement;
 import net.sf.jsqlparser.statement.select.PlainSelect;
@@ -139,9 +140,22 @@ final class PaimonQueryPlan {
             if (ordinal >= 1 && ordinal <= items.size()) { return (int) ordinal - 1; }
             throw unsupported("ORDER BY ordinal is out of range");
         }
-        for (int i = 0; i < items.size(); i++) {
-            if (expression instanceof Column ? aliasMatches(items.get(i).label, ((Column) expression).getColumnName())
-                    : items.get(i).expressionSql.equalsIgnoreCase(expression.toString())) { return i; }
+        if (expression instanceof Column) {
+            Column column = (Column) expression;
+            // ORDER BY must not silently resolve another table's column to a same-named projection.
+            Table qualifier = column.getTable();
+            if (qualifier != null && qualifier.getName() != null
+                    && (!PaimonSqlQueryParser.unquote(qualifier.getName()).equals(table)
+                    || qualifier.getSchemaName() != null)) {
+                throw unsupported("ORDER BY references another table: " + column);
+            }
+            for (int i = 0; i < items.size(); i++) {
+                if (aliasMatches(items.get(i).label, column.getColumnName())) { return i; }
+            }
+        } else {
+            for (int i = 0; i < items.size(); i++) {
+                if (items.get(i).expressionSql.equalsIgnoreCase(expression.toString())) { return i; }
+            }
         }
         Scalar scalar = scalar(expression);
         for (int i = 0; i < items.size(); i++) {
@@ -299,13 +313,7 @@ final class PaimonQueryPlan {
          * normalize signed zeros; every NaN still shares one group and binary keys compare by bytes.
          */
         private Object groupKey(Object part) {
-            if (part == null) { return null; }
-            if (part instanceof Double || part instanceof Float) {
-                double number = ((Number) part).doubleValue();
-                return number == 0.0d ? Double.valueOf(0.0d) : (Object) number;
-            }
-            if (part instanceof byte[]) { return java.nio.ByteBuffer.wrap((byte[]) part); }
-            return part;
+            return part == null ? null : part instanceof byte[] ? java.nio.ByteBuffer.wrap((byte[]) part) : normalizeZero(part);
         }
 
         private Object value(Scalar scalar, Object[] values) {
@@ -337,6 +345,11 @@ final class PaimonQueryPlan {
             limits.check();
             if (aggregate) {
                 if (states.size() > limits.maxResultRows) { throw limits.exceeded("maxResultRows", limits.maxResultRows); }
+                // ORDER BY materializes one row per group before sorting, so the ordered buffer cap
+                // applies to aggregate results as well as to plain projections.
+                if (!sorts.isEmpty() && states.size() > limits.maxBufferedRows) {
+                    throw limits.exceeded("maxBufferedRows", limits.maxBufferedRows);
+                }
                 for (State[] state : states.values()) {
                     limits.check();
                     Object[] result = new Object[items.size()];
@@ -346,10 +359,15 @@ final class PaimonQueryPlan {
             }
             if (!sorts.isEmpty()) {
                 limits.check();
+                // Polling the deadline (and the interruption flag) on every comparison would add a
+                // clock read per comparison; sampling keeps cancellation responsive at O(n log n / 1024).
+                int[] comparisons = {0};
                 Comparator<Object[]> comparator = (a, b) -> {
-                    try { limits.check(); }
-                    catch (java.sql.SQLTimeoutException | InterruptedException failure) {
-                        throw new SortCancelled(failure);
+                    if ((comparisons[0]++ & 1023) == 0) {
+                        try { limits.check(); }
+                        catch (java.sql.SQLTimeoutException | InterruptedException failure) {
+                            throw new SortCancelled(failure);
+                        }
                     }
                     for (Sort sort : sorts) {
                         Object left = a[sort.index], right = b[sort.index];
@@ -465,13 +483,26 @@ final class PaimonQueryPlan {
         return value instanceof BigDecimal ? (BigDecimal) value : new BigDecimal(value.toString());
     }
 
+    /** Signed zeros are one SQL value; normalize them so grouping, ordering and display agree. */
+    private static Object normalizeZero(Object value) {
+        if (value instanceof Double) {
+            return (Double) value == 0.0d ? Double.valueOf(0.0d) : value;
+        }
+        if (value instanceof Float) {
+            return (Float) value == 0.0f ? Float.valueOf(0.0f) : value;
+        }
+        return value;
+    }
+
     private static final class State {
         private final Item item;
         private long count;
         private Object value;
         private State(Item item) { this.item = item; }
         void add(Object next) {
-            if (item.function == null) { value = next; return; }
+            // A grouped column shows one value per group; normalize signed zeros so the chosen
+            // sign never depends on scan order.
+            if (item.function == null) { value = normalizeZero(next); return; }
             if ("COUNT".equals(item.function)) {
                 if (item.scalar == null || next != null) { count = Math.addExact(count, 1); }
                 return;

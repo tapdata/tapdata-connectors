@@ -180,7 +180,7 @@ class PaimonQueryPlanTest {
     }
 
     @Test
-    void orderedQueriesBoundBufferedRowsWhileStreamingAndAggregatesDoNot() throws Exception {
+    void orderedQueriesBoundBufferedRowsWhileStreamingAndUnorderedAggregatesDoNot() throws Exception {
         PaimonQueryLimits bounded = new PaimonQueryLimits(Collections.singletonMap("maxBufferedRows", 2));
         PaimonQueryPlan.Accumulator ordered = plan("SELECT region FROM orders ORDER BY region").accumulator(bounded);
         ordered.add(GenericRow.of(BinaryString.fromString("B")));
@@ -193,11 +193,23 @@ class PaimonQueryPlanTest {
         for (String region : Arrays.asList("B", "A", "C")) { streamed.add(GenericRow.of(BinaryString.fromString(region))); }
         assertEquals(3, streamed.drain().size());
         assertEquals(0, streamed.bufferedRows());
-        // Grouped results are capped by maxGroups and keep one state per group, not one row per input.
+        // Unordered grouped results keep one state per group, so they are bounded by maxGroups only.
         PaimonQueryPlan.Accumulator grouped = plan("SELECT region, COUNT(*) AS n FROM orders GROUP BY region")
                 .accumulator(bounded);
         for (int i = 0; i < 10; i++) { grouped.add(row("A", "1.00")); }
         assertEquals(10L, grouped.finish().get(0).get("n"));
+    }
+
+    @Test
+    void orderedAggregatesAlsoBoundMaterializedGroups() throws Exception {
+        // GROUP BY ... ORDER BY materializes one row per group before sorting, so the documented
+        // maxBufferedRows cap must apply instead of only maxGroups/maxResultRows.
+        PaimonQueryLimits bounded = new PaimonQueryLimits(Collections.singletonMap("maxBufferedRows", 2));
+        PaimonQueryPlan.Accumulator accumulator = plan(
+                "SELECT region, COUNT(*) AS n FROM orders GROUP BY region ORDER BY region").accumulator(bounded);
+        for (String region : Arrays.asList("A", "B", "C")) { accumulator.add(row(region, "1.00")); }
+        IllegalStateException failure = assertThrows(IllegalStateException.class, accumulator::finish);
+        assertTrue(failure.getMessage().contains("maxBufferedRows"), failure.getMessage());
     }
 
     @Test
@@ -215,6 +227,9 @@ class PaimonQueryPlanTest {
             List<Map<String, Object>> groups = grouped.finish();
             assertEquals(1, groups.size());
             assertEquals(2L, groups.get(0).get("n"));
+            // The displayed group value is normalized to +0.0, so it does not depend on scan order.
+            assertEquals(Double.doubleToRawLongBits(0.0d),
+                    Double.doubleToRawLongBits(((Number) groups.get(0).get("v")).doubleValue()));
             // Both zeros are the same value, so MIN/MAX may report either sign.
             assertTrue(((Number) groups.get(0).get("lo")).doubleValue() == 0.0d);
             assertTrue(((Number) groups.get(0).get("hi")).doubleValue() == 0.0d);
@@ -243,8 +258,9 @@ class PaimonQueryPlanTest {
         accumulator.add(GenericRow.of(BinaryString.fromString("A")));
         SQLTimeoutException failure = assertThrows(SQLTimeoutException.class, accumulator::finish);
         assertTrue(failure.getMessage().contains("queryTimeoutSeconds=1"));
-        // Constructor, finish, pre-sort and first comparator: expiry occurs during comparison.
-        assertEquals(1_600_000_000L, ticks.get());
+        // The exact number of clock reads is an implementation detail (the sort samples the
+        // deadline); only require that the deadline was actually polled.
+        assertTrue(ticks.get() > 0);
     }
 
     @Test

@@ -32,6 +32,8 @@ import io.tapdata.util.DateUtil;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.sql.*;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -1144,35 +1146,62 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void execute(String sql, Consumer<Object> consumer, int batchSize) throws Throwable {
+        // Subclasses may override this overload; the base implementation shares the JDBC path.
         executeJdbcQuery(sql, consumer, batchSize, 0);
     }
 
     protected void execute(String sql, Consumer<Object> consumer, int batchSize, int queryTimeoutSeconds) throws Throwable {
-        if (queryTimeoutSeconds == 0) {
-            execute(sql, consumer, batchSize);
+        int overridden = OVERRIDDEN.get(getClass())[0];
+        boolean legacyOverridden = (overridden & 1) != 0;
+        boolean timeoutOverridden = (overridden & 2) != 0;
+        if (legacyOverridden && !timeoutOverridden) {
+            if (queryTimeoutSeconds > 0) {
+                throw new UnsupportedOperationException("Connector must override execute with queryTimeoutSeconds to preserve its custom query path");
+            }
+            // Preserve a subclass that only customizes the three-argument overload. A subclass whose
+            // three-argument override delegates back here would recurse forever, so fail loudly.
+            if (Boolean.TRUE.equals(LEGACY_DELEGATION.get())) {
+                throw new IllegalStateException("execute(sql, consumer, batchSize) must not delegate back to"
+                        + " execute(sql, consumer, batchSize, queryTimeoutSeconds); override both overloads or neither");
+            }
+            LEGACY_DELEGATION.set(Boolean.TRUE);
+            try {
+                execute(sql, consumer, batchSize);
+            } finally {
+                LEGACY_DELEGATION.remove();
+            }
             return;
         }
-        // A subclass that implements the timeout overload can deliberately delegate to super.
-        boolean timeoutOverridden = false;
-        boolean legacyOverridden = false;
-        for (Class<?> type = getClass(); type != CommonDbConnector.class; type = type.getSuperclass()) {
-            try {
-                type.getDeclaredMethod("execute", String.class, Consumer.class, int.class, int.class);
-                timeoutOverridden = true;
-            } catch (NoSuchMethodException absent) {
-                // Continue through the subclass hierarchy.
-            }
-            try {
-                type.getDeclaredMethod("execute", String.class, Consumer.class, int.class);
-                legacyOverridden = true;
-            } catch (NoSuchMethodException absent) {
-                // Continue through the subclass hierarchy.
-            }
-        }
-        if (legacyOverridden && !timeoutOverridden) {
-            throw new UnsupportedOperationException("Connector must override execute with queryTimeoutSeconds to preserve its custom query path");
-        }
         executeJdbcQuery(sql, consumer, batchSize, queryTimeoutSeconds);
+    }
+
+    /** Guards the legacy overload delegation so a mutual override cannot overflow the stack. */
+    private static final ThreadLocal<Boolean> LEGACY_DELEGATION = new ThreadLocal<>();
+
+    /** Bit 1: the class overrides the three-argument execute; bit 2: it overrides the timeout overload. */
+    private static final ClassValue<int[]> OVERRIDDEN = new ClassValue<int[]>() {
+        @Override
+        protected int[] computeValue(Class<?> type) {
+            int flags = 0;
+            for (Class<?> current = type; current != null && current != CommonDbConnector.class;
+                 current = current.getSuperclass()) {
+                if (declaresExecute(current, 3)) { flags |= 1; }
+                if (declaresExecute(current, 4)) { flags |= 2; }
+            }
+            return new int[]{flags};
+        }
+    };
+
+    private static boolean declaresExecute(Class<?> type, int parameters) {
+        try {
+            Method method = parameters == 3
+                    ? type.getDeclaredMethod("execute", String.class, Consumer.class, int.class)
+                    : type.getDeclaredMethod("execute", String.class, Consumer.class, int.class, int.class);
+            int modifiers = method.getModifiers();
+            return !Modifier.isPrivate(modifiers) && !method.isBridge() && !method.isSynthetic();
+        } catch (NoSuchMethodException absent) {
+            return false;
+        }
     }
 
     private void executeJdbcQuery(String sql, Consumer<Object> consumer, int batchSize, int queryTimeoutSeconds) throws Throwable {
