@@ -12,6 +12,7 @@ final class PaimonQueryLimits {
     final long maxScanRows;
     final int maxGroups;
     final int maxResultRows;
+    final int maxBufferedRows;
     final boolean allowFullScan;
     private final long started;
     private final long timeoutNanos;
@@ -25,6 +26,8 @@ final class PaimonQueryLimits {
         maxScanRows = positive(values, "maxScanRows", 10_000_000, Long.MAX_VALUE);
         maxGroups = (int) positive(values, "maxGroups", 100_000, Integer.MAX_VALUE);
         maxResultRows = (int) positive(values, "maxResultRows", Integer.MAX_VALUE, Integer.MAX_VALUE);
+        // ORDER BY must buffer every projected row until the scan ends, so it needs a real default cap.
+        maxBufferedRows = (int) positive(values, "maxBufferedRows", 100_000, Integer.MAX_VALUE);
         long seconds = nonNegative(values, "queryTimeoutSeconds", 0, Integer.MAX_VALUE);
         timeoutNanos = seconds * 1_000_000_000L;
         Object fullScan = values.get("allowFullScan");
@@ -50,6 +53,8 @@ final class PaimonQueryLimits {
         maxScanRows = positive(params, "maxScanRows", Long.MAX_VALUE, Long.MAX_VALUE);
         maxGroups = (int) positive(params, "maxGroups", Integer.MAX_VALUE, Integer.MAX_VALUE);
         maxResultRows = (int) positive(params, "maxResultRows", Integer.MAX_VALUE, Integer.MAX_VALUE);
+        // A legacy SELECT * or COUNT keeps its unlimited scan, but ordered queries still buffer rows.
+        maxBufferedRows = (int) positive(params, "maxBufferedRows", 100_000, Integer.MAX_VALUE);
         allowFullScan = original.allowFullScan;
         started = original.started;
         timeoutNanos = original.timeoutNanos;

@@ -169,8 +169,68 @@ class PaimonQueryPlanTest {
         assertEquals(Integer.MAX_VALUE, defaults.maxResultRows);
         PaimonQueryLimits explicit = new PaimonQueryLimits(Collections.singletonMap("maxResultRows", 7)).forLegacyQuery();
         assertEquals(7, explicit.maxResultRows);
+        // ORDER BY buffers rows, so it keeps a real default cap in both new and legacy modes.
+        assertEquals(100_000, defaults.maxBufferedRows);
+        assertEquals(100_000, legacy.maxBufferedRows);
+        assertEquals(5, new PaimonQueryLimits(Collections.singletonMap("maxBufferedRows", 5)).forLegacyQuery().maxBufferedRows);
+        assertThrows(IllegalArgumentException.class,
+                () -> new PaimonQueryLimits(Collections.singletonMap("maxBufferedRows", 0)));
         assertThrows(IllegalArgumentException.class,
                 () -> new PaimonQueryLimits(Collections.singletonMap("queryTimeoutSeconds", -1)));
+    }
+
+    @Test
+    void orderedQueriesBoundBufferedRowsWhileStreamingAndAggregatesDoNot() throws Exception {
+        PaimonQueryLimits bounded = new PaimonQueryLimits(Collections.singletonMap("maxBufferedRows", 2));
+        PaimonQueryPlan.Accumulator ordered = plan("SELECT region FROM orders ORDER BY region").accumulator(bounded);
+        ordered.add(GenericRow.of(BinaryString.fromString("B")));
+        ordered.add(GenericRow.of(BinaryString.fromString("A")));
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> ordered.add(GenericRow.of(BinaryString.fromString("C"))));
+        assertTrue(failure.getMessage().contains("maxBufferedRows"));
+        // Unordered rows leave in batches, so they are never held for the whole scan.
+        PaimonQueryPlan.Accumulator streamed = plan("SELECT region FROM orders").accumulator(bounded);
+        for (String region : Arrays.asList("B", "A", "C")) { streamed.add(GenericRow.of(BinaryString.fromString(region))); }
+        assertEquals(3, streamed.drain().size());
+        assertEquals(0, streamed.bufferedRows());
+        // Grouped results are capped by maxGroups and keep one state per group, not one row per input.
+        PaimonQueryPlan.Accumulator grouped = plan("SELECT region, COUNT(*) AS n FROM orders GROUP BY region")
+                .accumulator(bounded);
+        for (int i = 0; i < 10; i++) { grouped.add(row("A", "1.00")); }
+        assertEquals(10L, grouped.finish().get(0).get("n"));
+    }
+
+    @Test
+    void signedZerosShareOneGroupAndOneSortPosition() throws Exception {
+        for (DataType floating : Arrays.asList(DataTypes.FLOAT(), DataTypes.DOUBLE())) {
+            boolean single = floating.getTypeRoot().name().equals("FLOAT");
+            RowType type = RowType.of(new DataType[]{floating}, new String[]{"v"});
+            Object positive = single ? (Object) Float.valueOf(0.0f) : (Object) Double.valueOf(0.0d);
+            Object negative = single ? (Object) Float.valueOf(-0.0f) : (Object) Double.valueOf(-0.0d);
+            PaimonQueryPlan.Accumulator grouped = PaimonSqlQueryParser.parse(
+                    "SELECT v, COUNT(*) AS n, MIN(v) AS lo, MAX(v) AS hi FROM orders GROUP BY v", type)
+                    .plan().accumulator(limits());
+            grouped.add(GenericRow.of(positive));
+            grouped.add(GenericRow.of(negative));
+            List<Map<String, Object>> groups = grouped.finish();
+            assertEquals(1, groups.size());
+            assertEquals(2L, groups.get(0).get("n"));
+            // Both zeros are the same value, so MIN/MAX may report either sign.
+            assertTrue(((Number) groups.get(0).get("lo")).doubleValue() == 0.0d);
+            assertTrue(((Number) groups.get(0).get("hi")).doubleValue() == 0.0d);
+            assertEquals(groups.get(0).get("lo").getClass(), groups.get(0).get("hi").getClass());
+            PaimonQueryPlan.Accumulator sorted = PaimonSqlQueryParser.parse("SELECT v FROM orders ORDER BY v", type)
+                    .plan().accumulator(limits());
+            sorted.add(GenericRow.of(positive));
+            sorted.add(GenericRow.of(negative));
+            List<Map<String, Object>> rows = sorted.finish();
+            assertEquals(2, rows.size());
+            // Equal values keep scan order, so the +0.0 row that was read first stays first.
+            assertEquals(Double.doubleToRawLongBits(0.0d),
+                    Double.doubleToRawLongBits(((Number) rows.get(0).get("v")).doubleValue()));
+            assertEquals(Double.doubleToRawLongBits(-0.0d),
+                    Double.doubleToRawLongBits(((Number) rows.get(1).get("v")).doubleValue()));
+        }
     }
 
     @Test

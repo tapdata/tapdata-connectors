@@ -272,16 +272,16 @@ final class PaimonQueryPlan {
             for (int i = 0; i < values.length; i++) { values[i] = javaValue(getters[i].getFieldOrNull(row), rowType.getTypeAt(projected[i])); }
             if (!aggregate) {
                 if (resultRows++ >= limits.maxResultRows) { throw limits.exceeded("maxResultRows", limits.maxResultRows); }
+                if (!streamable() && rows.size() >= limits.maxBufferedRows) {
+                    throw limits.exceeded("maxBufferedRows", limits.maxBufferedRows);
+                }
                 Object[] result = new Object[items.size()];
                 for (int i = 0; i < result.length; i++) { result[i] = value(items.get(i).scalar, values); }
                 rows.add(result);
                 return;
             }
             List<Object> key = new ArrayList<>(groups.size());
-            for (Scalar group : groups) {
-                Object part = value(group, values);
-                key.add(part instanceof byte[] ? java.nio.ByteBuffer.wrap((byte[]) part) : part);
-            }
+            for (Scalar group : groups) { key.add(groupKey(value(group, values))); }
             State[] state = states.get(key);
             if (state == null) {
                 if (states.size() >= limits.maxGroups) { throw limits.exceeded("maxGroups", limits.maxGroups); }
@@ -292,6 +292,20 @@ final class PaimonQueryPlan {
                 Item item = items.get(i);
                 state[i].add(item.scalar == null ? null : value(item.scalar, values));
             }
+        }
+
+        /**
+         * Grouping equality must follow SQL semantics: -0.0 and +0.0 are the same value, so keys
+         * normalize signed zeros; every NaN still shares one group and binary keys compare by bytes.
+         */
+        private Object groupKey(Object part) {
+            if (part == null) { return null; }
+            if (part instanceof Double || part instanceof Float) {
+                double number = ((Number) part).doubleValue();
+                return number == 0.0d ? Double.valueOf(0.0d) : (Object) number;
+            }
+            if (part instanceof byte[]) { return java.nio.ByteBuffer.wrap((byte[]) part); }
+            return part;
         }
 
         private Object value(Scalar scalar, Object[] values) {
@@ -408,13 +422,10 @@ final class PaimonQueryPlan {
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static int compare(Object left, Object right) {
         if (left instanceof Number && right instanceof Number) {
-            if (nonFinite(left) || nonFinite(right)) {
-                // Total order: -Infinity < finite values < +Infinity < NaN; signed zeros compare equal.
-                return Double.compare(((Number) left).doubleValue(), ((Number) right).doubleValue());
+            if (fractional(left) && fractional(right)) {
+                return compareFloating(((Number) left).doubleValue(), ((Number) right).doubleValue());
             }
-            if ((left instanceof Double || left instanceof Float) && (right instanceof Double || right instanceof Float)) {
-                return Double.compare(((Number) left).doubleValue(), ((Number) right).doubleValue());
-            }
+            // Mixed floating/exact comparison stays exact; decimal() rejects non-finite values explicitly.
             return decimal(left).compareTo(decimal(right));
         }
         if (left instanceof byte[] && right instanceof byte[]) {
@@ -430,6 +441,16 @@ final class PaimonQueryPlan {
                     + " and " + right.getClass().getName());
         }
         return ((Comparable) left).compareTo(right);
+    }
+
+    /** Total order over floating values: -Infinity < finite values < +Infinity < NaN; signed zeros compare equal. */
+    private static int compareFloating(double left, double right) {
+        // Double.compare alone distinguishes -0.0 from 0.0, which would split groups and reorder equal rows.
+        return left == right ? 0 : Double.compare(left, right);
+    }
+
+    private static boolean fractional(Object value) {
+        return value instanceof Double || value instanceof Float;
     }
 
     private static boolean nonFinite(Object value) {

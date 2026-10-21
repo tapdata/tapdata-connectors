@@ -125,7 +125,7 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目標欄位會被拒絕。複雜 CDC 值必須�
 
 投影、聚合及排序查詢預設允許非鍵篩選與全表掃描。需要限制時，可設定連線 `queryAllowFullScan=false` 或命令布林值 `allowFullScan=false`，啟用分區鍵或前導主鍵篩選要求。命令參數優先；直接／包裝 `COUNT(1)` 不受該鍵篩選要求影響；該限制也適用於歷史未排序 `SELECT *`。`AND` 任一條件符合即可；`OR` 的每個分支都必須限制合格鍵。相同鍵的多個等值條件可改寫為 `IN`。鍵欄位的正向 `IS NULL` 可用於鍵篩選；`NOT` 及否定形式不符合。確實要全表掃描時才明確設為 `true`。支援的 WHERE 會下推，但篩選語法本身不保證檔案裁剪。
 
-自訂校驗的 1000 行上限由引擎負責，跨回呼累計查詢結果行數，在第 1001 行報錯並丟棄全部部分結果。`executeCommand` 使用既有 `batchSize` 與結果回呼分批回傳未排序投影；回呼拋出例外會停止讀取並關閉資源。聚合及排序須完成掃描後才能回傳最終結果，不會將聚合輸入明細限制為 1000 行。直接呼叫連接器可回傳超過 1000 行；串流呼叫方若收到後續錯誤，必須丟棄先前收到的批次。
+自訂校驗的 1000 行上限由引擎負責，跨回呼累計查詢結果行數，在第 1001 行報錯並丟棄全部部分結果。`executeCommand` 使用既有 `batchSize` 與結果回呼分批回傳未排序投影；回呼拋出例外會停止讀取並關閉資源。聚合及排序須完成掃描後才能回傳最終結果，不會將聚合輸入明細限制為 1000 行。帶 `ORDER BY` 的查詢會將結果行快取在記憶體中，上限為 `maxBufferedRows`；聚合按組儲存狀態，上限為 `maxGroups`。直接呼叫連接器可回傳超過 1000 行；串流呼叫方若收到後續錯誤，必須丟棄先前收到的批次。
 
 以下參數與 `sql` 一起放在命令的 `params`：
 
@@ -135,17 +135,18 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目標欄位會被拒絕。複雜 CDC 值必須�
 | `maxScanRows` | 新增查詢 10000000 | 最多處理 N 行，若 reader 還有下一行則命令失敗；並非底層檔案實體掃描行數 |
 | `maxGroups` | 新增查詢 100000 | 記憶體內最大聚合組數 |
 | `maxResultRows` | 預設不設校驗行數上限 | 最大結果行數，超過即整次失敗 |
+| `maxBufferedRows` | 100000 | 帶 `ORDER BY` 的查詢必須快取全部結果行才能排序，快取超過 N 行即整次失敗；未排序投影按 `batchSize` 串流回傳，不受此限制 |
 | `allowFullScan` | 連線設定，缺省 true | 布林值或 `"true"`/`"false"` 字串；是否允許查詢沒有上述鍵篩選 |
 
 行數／組數參數須為正整數；負數、小數及溢位值會報錯。限制觸發即整次命令失敗，呼叫方應丟棄已收到的批次。超時在 catalog、規劃、讀取、排序及結果階段檢查，屬於**協作式期限**，無法中斷已阻塞的 Paimon／檔案系統 I/O，須另外設定儲存端 I/O 超時。有鍵篩選不保證實際裁剪；大表及高基數分組仍須以代表性資料評估效能與記憶體。
 
 ### SQL 邊界與回傳類型
 
-支援 `SELECT *`、標量欄位投影與別名、`COUNT(*)`、`COUNT(1)`、`COUNT(column)`、`SUM`、`AVG`、`MIN`、`MAX`、多欄位 GROUP BY，以及依已選擇的表達式、別名或序號 ORDER BY。`CAST(column AS DATE)` 僅接受 DATE 或無時區 TIMESTAMP，直接取日曆日期，不隱式轉換時區；不支援 DATE(column)。ASC 預設 NULLS FIRST，DESC 預設 NULLS LAST，也可明確指定。ORDER BY 未加引號的別名忽略大小寫，帶引號的別名精確匹配。目前 JSqlParser 4.4 不接受識別字內部雙寫雙引號的語法。
+支援 `SELECT *`、標量欄位投影與別名、`COUNT(*)`、`COUNT(1)`、`COUNT(column)`、`SUM`、`AVG`、`MIN`、`MAX`、多欄位 GROUP BY，以及依已選擇的表達式、別名或序號 ORDER BY。`CAST(column AS DATE)` 僅接受 DATE 或無時區 TIMESTAMP，直接取日曆日期，不隱式轉換時區；不支援 DATE(column)。ASC 預設 NULLS FIRST，DESC 預設 NULLS LAST，也可明確指定。排序需將結果行快取在記憶體，超過 `maxBufferedRows` 即整次失敗。ORDER BY 未加引號的別名忽略大小寫，帶引號的別名精確匹配。目前 JSqlParser 4.4 不接受識別字內部雙寫雙引號的語法。
 
 WHERE 支援欄位與常數比較（欄位可在任一側）、BETWEEN、IN、IS NULL、有限 LIKE、AND/OR/NOT。不支援通用子查詢、WITH、視窗函數、算術、分頁、表別名或帶資料庫/schema 前綴的表名。不可選擇或在表達式中引用 ARRAY/MAP/MULTISET/ROW 欄位，含複雜欄位的表請明確列出標量欄位。
 
-空輸入的全域 COUNT 為 0，其他聚合為 NULL；分組查詢回傳空結果。SUM/AVG 對所有數值類型使用 BigDecimal，AVG 按 DECIMAL128 捨入。SUM/AVG 遇到 NaN 或正負無窮時明確報資料錯誤，不回傳部分結果。MIN/MAX 與 ORDER BY 的順序為 -Infinity < 有限數值 < +Infinity < NaN；正負零相等。COUNT 及一般投影允許上述浮點特殊值。
+空輸入的全域 COUNT 為 0，其他聚合為 NULL；分組查詢回傳空結果。SUM/AVG 對所有數值類型使用 BigDecimal，AVG 按 DECIMAL128 捨入。SUM/AVG 遇到 NaN 或正負無窮時明確報資料錯誤，不回傳部分結果。MIN/MAX 與 ORDER BY 的順序為 -Infinity < 有限數值 < +Infinity < NaN；正負零相等。`GROUP BY` 同樣將正負零歸入同一分組，所有 NaN 也歸入同一分組。COUNT 及一般投影允許上述浮點特殊值。
 
 直接及歷史包裝 COUNT(1) 回傳單個 Long，其他查詢回傳 `List<Map<String,Object>>`；SQL NULL 對應 Java null。一般欄位與 MIN/MAX 保持既有類型：
 

@@ -157,7 +157,7 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 J
 - `SELECT *`、普通列投影、列别名。
 - `COUNT(*)`、`COUNT(1)`、`COUNT(col)`、`SUM`、`MIN`、`MAX`、`AVG`；不支持 DISTINCT 聚合。`SUM/AVG` 只接受数值列，DECIMAL 全程使用 BigDecimal；AVG 按 DECIMAL128 精度舍入。空输入的 COUNT 为 0，其余聚合为 NULL；分组查询的空输入返回空结果集。
 - 多列 `GROUP BY`，以及 `CAST(timestamp_column AS DATE)` 日期投影、分组。日期转换仅接受 DATE 或无时区 TIMESTAMP，不隐式选择时区。
-- 按已选择的表达式、别名、列序号 `ORDER BY`，支持 ASC/DESC、NULLS FIRST/LAST；默认 ASC 时 NULL 在前、DESC 时 NULL 在后。排序仅处理受结果行数限制的最终结果。
+- 按已选择的表达式、别名、列序号 `ORDER BY`，支持 ASC/DESC、NULLS FIRST/LAST；默认 ASC 时 NULL 在前、DESC 时 NULL 在后。排序需要把结果行缓存在内存中，受 `maxBufferedRows` 限制：超过限制整次失败，不会返回截断或未排序的结果。
 - 原有 WHERE 子集：列与常量比较、BETWEEN、IN、IS NULL、有限的 LIKE、AND/OR/NOT。WHERE 下推至 Paimon，并由 reader 精确执行；读取投影保留 SELECT、GROUP BY、WHERE 所需的列。
 
 不支持 JOIN、通用子查询、WITH、UNION、HAVING、窗口函数、通用算术表达式、分页、表别名或带数据库/schema 前缀的表名。不支持的语法明确报错，不会静默忽略。历史 `COUNT(1) FROM (SELECT * ...)` 计数包装继续支持，历史直接 COUNT(1) 和计数包装仍返回 Long；其他查询返回 `List<Map<String,Object>>`，建议为所有表达式指定唯一别名。
@@ -180,7 +180,7 @@ ORDER BY CAST(CreationTime AS DATE)
 
 投影、聚合、排序查询默认允许非键过滤和全表扫描。需要限制时，可将连接配置 `queryAllowFullScan=false`，或在命令中设置布尔值 `allowFullScan=false`，启用分区列或前导主键过滤要求。命令参数优先；直接/包装 `COUNT(1)` 不受该键过滤要求影响。键过滤要求也适用于历史无排序 `SELECT *`。`AND` 中任意一个条件约束键即可；`OR` 的每个分支都必须约束键。相同键的多个等值条件可改写为 `IN`；`IS NULL` 可用于键过滤，`NOT` 与否定形式不计作键过滤。非键查询若确实要全表扫描，再显式设为 `true`。支持的 WHERE 会下推，但 SQL 写了过滤条件并不保证文件裁剪。
 
-自定义校验的 1000 行上限由引擎负责，跨回调累计查询结果行数，在第 1001 行报错并丢弃全部部分结果。`executeCommand` 使用已有的 `batchSize` 和结果回调分批返回无排序投影；回调抛出异常会停止读取并关闭资源。聚合和排序需要完成扫描后才能返回最终结果，不会把聚合输入明细限制为 1000 行。直接调用连接器可返回超过 1000 行；流式调用方若收到后续错误，必须丢弃之前收到的批次。
+自定义校验的 1000 行上限由引擎负责，跨回调累计查询结果行数，在第 1001 行报错并丢弃全部部分结果。`executeCommand` 使用已有的 `batchSize` 和结果回调分批返回无排序投影；回调抛出异常会停止读取并关闭资源。聚合和排序需要完成扫描后才能返回最终结果，不会把聚合输入明细限制为 1000 行。带 `ORDER BY` 的查询会把结果行缓存在内存中，上限为 `maxBufferedRows`；聚合按组保存状态，上限为 `maxGroups`。直接调用连接器可返回超过 1000 行；流式调用方若收到后续错误，必须丢弃之前收到的批次。
 
 `executeQuery` 命令参数（与 `sql` 一起放在 `params`）：
 
@@ -190,6 +190,7 @@ ORDER BY CAST(CreationTime AS DATE)
 | `maxScanRows` | 10000000 | 最多处理 N 行，若 reader 还有下一行则命令失败；**不是底层文件物理扫描行数** |
 | `maxGroups` | 100000 | 最大聚合分组数，按组保存状态，不缓存全部明细行 |
 | `maxResultRows` | 默认不设校验行数上限 | 最大结果行数；失败时应丢弃已收到的批次 |
+| `maxBufferedRows` | 100000 | 带 `ORDER BY` 的查询必须缓存全部结果行后才能排序，缓存超过 N 行整次失败；无排序投影按 `batchSize` 流式返回，不受此限制 |
 | `allowFullScan` | 连接配置，默认 true | 布尔值或 `"true"`/`"false"` 字符串；是否允许没有上述键过滤的查询 |
 
 行数与分组数参数必须是范围内的正整数；超时接受 0 到 2147483647 的整数秒（JDBC 参数兼容上界，0 明确表示关闭，不必填写大数模拟无限制）。负数、小数、溢出值均拒绝。任一限制触发，整次命令失败，调用方应丢弃已收到的批次。reader 和 batch 在异常路径也会释放。日志记录计划 splits 数、投影列数、reader 交付行数、有效行数、分组数和耗时。
@@ -213,7 +214,7 @@ ORDER BY CAST(CreationTime AS DATE)
 | COUNT；SUM / AVG | Long；BigDecimal |
 | MIN / MAX | 与参数列类型相同；CAST AS DATE 参数返回 LocalDate |
 
-SUM/AVG 对所有数值类型返回 BigDecimal，AVG 使用 DECIMAL128 舍入。SUM/AVG 遇到 NaN 或正负无穷会明确报数据错误，调用方应丢弃已收到的批次。MIN/MAX 和 ORDER BY 的顺序为 -Infinity < 有限数值 < +Infinity < NaN；正负零相等。COUNT 和普通投影允许上述浮点特殊值。
+SUM/AVG 对所有数值类型返回 BigDecimal，AVG 使用 DECIMAL128 舍入。SUM/AVG 遇到 NaN 或正负无穷会明确报数据错误，调用方应丢弃已收到的批次。MIN/MAX 和 ORDER BY 的顺序为 -Infinity < 有限数值 < +Infinity < NaN；正负零相等。`GROUP BY` 同样把正负零归入同一分组，所有 NaN 也归入同一分组。COUNT 和普通投影允许上述浮点特殊值。
 
 不支持选择或在表达式中引用 ARRAY/MAP/MULTISET/ROW 列；含复杂列的表请显式列出标量列。ORDER BY 未加引号的别名忽略大小写，带引号的别名精确匹配；当前 JSqlParser 4.4 不接受标识符内部双写双引号的语法。WHERE 比较支持列在左右任一侧；DATE(column) 不受支持，请使用 CAST(column AS DATE)。
 
