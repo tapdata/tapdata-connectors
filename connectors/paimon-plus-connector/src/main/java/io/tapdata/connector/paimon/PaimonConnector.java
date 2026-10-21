@@ -36,6 +36,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -602,19 +603,29 @@ public class PaimonConnector extends ConnectorBase {
                 throw new IllegalArgumentException("Not supported command: "
                         + (command == null ? null : command.getCommand()));
             }
-            Object sql = command.getParams() == null ? null : command.getParams().get("sql");
+            Map<String, Object> params = command.getParams();
+            Object sql = params == null ? null : params.get("sql");
             if (!(sql instanceof String) || ((String) sql).trim().isEmpty()) {
                 throw new IllegalArgumentException("executeQuery requires a non-empty params.sql");
             }
-            Object requestedBatchSize = command.getParams().get("batchSize");
+            Object requestedBatchSize = params == null ? null : params.get("batchSize");
             int batchSize = requestedBatchSize == null
                     ? (command.getBatchSize() == null ? 1000 : command.getBatchSize())
-                    : new java.math.BigDecimal(requestedBatchSize.toString()).intValueExact();
+                    : parseBatchSize(requestedBatchSize);
             if (batchSize <= 0) batchSize = 1000;
-            paimonService.executeQueryBatches((String) sql, command.getParams(), connectorContext.getLog(),
+            paimonService.executeQueryBatches((String) sql, params, connectorContext.getLog(),
                     result -> consumer.accept(new ExecuteResult<>().result(result)), batchSize);
         } catch (Throwable throwable) {
             consumer.accept(new ExecuteResult<>().error(throwable));
+        }
+    }
+
+    private static int parseBatchSize(Object value) {
+        try {
+            return new java.math.BigDecimal(value.toString()).intValueExact();
+        } catch (NumberFormatException | ArithmeticException failure) {
+            throw new IllegalArgumentException("Parameter 'batchSize' must be a whole number within the int range; "
+                    + "positive values must not exceed " + Integer.MAX_VALUE + "; got: " + value, failure);
         }
     }
 

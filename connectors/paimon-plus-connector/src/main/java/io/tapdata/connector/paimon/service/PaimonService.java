@@ -3173,10 +3173,16 @@ public class PaimonService implements AutoCloseable {
             throw new IllegalStateException("Paimon row query requires a query plan");
         }
         if (queryPlan == null || queryPlan.legacyRows()) { limits = limits.forLegacyQuery(); }
-        if (queryPlan != null && !queryPlan.legacyRows() && !limits.allowFullScan
+        if (queryPlan != null && !limits.allowFullScan
                 && !queryPlan.hasPruningFilter(paimonTable.partitionKeys(), paimonTable.primaryKeys())) {
-            throw new IllegalArgumentException("Paimon executeQuery requires a filter on a partition key or leading primary key; "
-                    + "enable connection queryAllowFullScan or set params.allowFullScan=true to explicitly allow a potentially full scan");
+            if (paimonTable.partitionKeys().isEmpty() && paimonTable.primaryKeys().isEmpty()) {
+                throw new IllegalArgumentException("Paimon table '" + tableName
+                        + "' has no partition key or primary key, so the key-filter requirement cannot be satisfied; "
+                        + "set params.allowFullScan=true only if a full scan is intended");
+            }
+            throw new IllegalArgumentException("Paimon executeQuery requires a filter on a partition key or leading primary key. "
+                    + "For OR conditions, constrain every branch (or rewrite same-key alternatives as IN); "
+                    + "set params.allowFullScan=true only if a full scan is intended");
         }
         ReadBuilder readBuilder = paimonTable.newReadBuilder();
         if (query.predicate() != null) { readBuilder.withFilter(query.predicate()); }

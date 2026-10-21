@@ -80,8 +80,10 @@ class PaimonQueryPlanTest {
         }
         assertThrows(IllegalArgumentException.class,
                 () -> new PaimonQueryLimits(Collections.singletonMap("queryTimeoutSeconds", "2147483648")));
+        assertTrue(new PaimonQueryLimits(Collections.singletonMap("allowFullScan", "true")).allowFullScan);
+        assertFalse(new PaimonQueryLimits(Collections.singletonMap("allowFullScan", "FALSE")).allowFullScan);
         assertThrows(IllegalArgumentException.class,
-                () -> new PaimonQueryLimits(Collections.singletonMap("allowFullScan", "true")));
+                () -> new PaimonQueryLimits(Collections.singletonMap("allowFullScan", "yes")));
         AtomicLong clock = new AtomicLong();
         PaimonQueryLimits limits = new PaimonQueryLimits(Collections.singletonMap("queryTimeoutSeconds", 1), clock::get);
         limits.check();
@@ -94,10 +96,24 @@ class PaimonQueryPlanTest {
     }
 
     @Test
-    void detectsEligibleKeyFiltersWithoutTreatingOrAsPruning() {
+    void recognizesSafeKeyFiltersAcrossBooleanPredicates() {
         assertTrue(plan("SELECT SUM(amount) FROM orders WHERE region = 'A'")
                 .hasPruningFilter(Collections.singletonList("region"), Collections.emptyList()));
+        assertTrue(plan("SELECT SUM(amount) FROM orders WHERE region = 'A' OR region = 'B'")
+                .hasPruningFilter(Collections.singletonList("region"), Collections.emptyList()));
         assertFalse(plan("SELECT SUM(amount) FROM orders WHERE region = 'A' OR amount > 1")
+                .hasPruningFilter(Collections.singletonList("region"), Collections.emptyList()));
+        assertTrue(plan("SELECT SUM(amount) FROM orders WHERE region = 'A' AND amount > 1")
+                .hasPruningFilter(Collections.singletonList("region"), Collections.emptyList()));
+        assertTrue(plan("SELECT SUM(amount) FROM orders WHERE region IS NULL")
+                .hasPruningFilter(Collections.singletonList("region"), Collections.emptyList()));
+        assertFalse(plan("SELECT SUM(amount) FROM orders WHERE region IS NOT NULL")
+                .hasPruningFilter(Collections.singletonList("region"), Collections.emptyList()));
+        assertFalse(plan("SELECT SUM(amount) FROM orders WHERE NOT (region = 'A')")
+                .hasPruningFilter(Collections.singletonList("region"), Collections.emptyList()));
+        assertTrue(plan("SELECT SUM(amount) FROM orders WHERE region IN ('A', 'B')")
+                .hasPruningFilter(Collections.singletonList("region"), Collections.emptyList()));
+        assertFalse(plan("SELECT SUM(amount) FROM orders WHERE region NOT IN ('A', 'B')")
                 .hasPruningFilter(Collections.singletonList("region"), Collections.emptyList()));
         assertFalse(plan("SELECT SUM(amount) FROM orders WHERE amount > 1")
                 .hasPruningFilter(Collections.singletonList("region"), Collections.emptyList()));

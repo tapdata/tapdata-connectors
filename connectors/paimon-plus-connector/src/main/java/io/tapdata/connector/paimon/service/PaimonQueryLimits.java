@@ -28,10 +28,7 @@ final class PaimonQueryLimits {
         long seconds = nonNegative(values, "queryTimeoutSeconds", 0, Integer.MAX_VALUE);
         timeoutNanos = seconds * 1_000_000_000L;
         Object fullScan = values.get("allowFullScan");
-        if (fullScan != null && !(fullScan instanceof Boolean)) {
-            throw new IllegalArgumentException("Parameter 'allowFullScan' must be a boolean");
-        }
-        allowFullScan = Boolean.TRUE.equals(fullScan);
+        allowFullScan = booleanValue(fullScan);
         this.clock = clock;
         started = clock.getAsLong();
     }
@@ -88,5 +85,13 @@ final class PaimonQueryLimits {
         } catch (NumberFormatException | ArithmeticException failure) {
             throw new IllegalArgumentException("Parameter '" + key + "' must be an integer between 1 and " + max, failure);
         }
+    }
+
+    private static boolean booleanValue(Object raw) {
+        if (raw == null) { return false; }
+        if (raw instanceof Boolean) { return (Boolean) raw; }
+        if ("true".equalsIgnoreCase(raw.toString())) { return true; }
+        if ("false".equalsIgnoreCase(raw.toString())) { return false; }
+        throw new IllegalArgumentException("Parameter 'allowFullScan' must be true or false");
     }
 }

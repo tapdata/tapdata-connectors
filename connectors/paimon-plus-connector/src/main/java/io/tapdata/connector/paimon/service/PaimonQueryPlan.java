@@ -201,6 +201,12 @@ final class PaimonQueryPlan {
             net.sf.jsqlparser.expression.BinaryExpression and = (net.sf.jsqlparser.expression.BinaryExpression) expression;
             return pruningFilter(and.getLeftExpression(), keys) || pruningFilter(and.getRightExpression(), keys);
         }
+        if (expression instanceof net.sf.jsqlparser.expression.operators.conditional.OrExpression) {
+            net.sf.jsqlparser.expression.BinaryExpression or = (net.sf.jsqlparser.expression.BinaryExpression) expression;
+            // Every OR branch must constrain an eligible key; one unconstrained branch
+            // could still read the whole table.
+            return pruningFilter(or.getLeftExpression(), keys) && pruningFilter(or.getRightExpression(), keys);
+        }
         Expression column = null;
         if (expression instanceof net.sf.jsqlparser.expression.operators.relational.EqualsTo
                 || expression instanceof net.sf.jsqlparser.expression.operators.relational.GreaterThan
@@ -216,6 +222,10 @@ final class PaimonQueryPlan {
         } else if (expression instanceof net.sf.jsqlparser.expression.operators.relational.InExpression) {
             net.sf.jsqlparser.expression.operators.relational.InExpression in = (net.sf.jsqlparser.expression.operators.relational.InExpression) expression;
             if (!in.isNot()) { column = in.getLeftExpression(); }
+        } else if (expression instanceof net.sf.jsqlparser.expression.operators.relational.IsNullExpression) {
+            net.sf.jsqlparser.expression.operators.relational.IsNullExpression isNull =
+                    (net.sf.jsqlparser.expression.operators.relational.IsNullExpression) expression;
+            if (!isNull.isNot()) { column = isNull.getLeftExpression(); }
         }
         return column instanceof Column && keys.contains(PaimonSqlQueryParser.unquote(((Column) column).getColumnName()));
     }
@@ -402,15 +412,22 @@ final class PaimonQueryPlan {
                 // Total order: -Infinity < finite values < +Infinity < NaN; signed zeros compare equal.
                 return Double.compare(((Number) left).doubleValue(), ((Number) right).doubleValue());
             }
+            if ((left instanceof Double || left instanceof Float) && (right instanceof Double || right instanceof Float)) {
+                return Double.compare(((Number) left).doubleValue(), ((Number) right).doubleValue());
+            }
             return decimal(left).compareTo(decimal(right));
         }
-        if (left instanceof byte[]) {
+        if (left instanceof byte[] && right instanceof byte[]) {
             byte[] a = (byte[]) left, b = (byte[]) right;
             for (int i = 0; i < Math.min(a.length, b.length); i++) {
                 int order = Integer.compare(a[i] & 0xff, b[i] & 0xff);
                 if (order != 0) { return order; }
             }
             return Integer.compare(a.length, b.length);
+        }
+        if (left instanceof byte[] || right instanceof byte[]) {
+            throw new IllegalArgumentException("incomparable types: " + left.getClass().getName()
+                    + " and " + right.getClass().getName());
         }
         return ((Comparable) left).compareTo(right);
     }
