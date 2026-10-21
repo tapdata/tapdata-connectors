@@ -688,7 +688,7 @@ public class MysqlConnector extends CommonDbConnector {
                                 data.put(columnName, ((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
                                 break;
                             case "DATE":
-                                if (mysqlConfig.getOldVersionTimezone()) {
+                                if (Boolean.TRUE.equals(mysqlConfig.getOldVersionTimezone())) {
                                     data.put(columnName, resultSet.getString(i + 1));
                                 } else if (value instanceof java.sql.Date) {
                                     data.put(columnName, ((java.sql.Date) value).toLocalDate().atStartOfDay());
@@ -698,7 +698,7 @@ public class MysqlConnector extends CommonDbConnector {
                                 break;
                             case "DATETIME":
                                 if (value instanceof LocalDateTime) {
-                                    if (mysqlConfig.getOldVersionTimezone()) {
+                                    if (Boolean.TRUE.equals(mysqlConfig.getOldVersionTimezone())) {
                                         data.put(columnName, ((LocalDateTime) value).toInstant(ZoneOffset.ofTotalSeconds(TimeZone.getDefault().getRawOffset() / 1000)));
                                     } else {
                                         data.put(columnName, ((LocalDateTime) value).minusHours(zoneOffsetHour));
@@ -857,6 +857,7 @@ public class MysqlConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
         mysqlJdbcContext.queryWithStream(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
@@ -886,7 +887,7 @@ public class MysqlConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
         throwNonSupportWhenLightInit();
-        if (mysqlConfig.getHighPerformance()) {
+        if (Boolean.TRUE.equals(mysqlConfig.getHighPerformance())) {
             MysqlReaderV2 mysqlReaderV2 = new MysqlReaderV2(mysqlJdbcContext, tapLogger, dbTimeZone);
             mysqlReaderV2.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
             mysqlReaderV2.startMiner(this::isAlive);
@@ -897,7 +898,7 @@ public class MysqlConnector extends CommonDbConnector {
 
     private void streamReadMultiConnection(TapConnectorContext tapConnectorContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
         throwNonSupportWhenLightInit();
-        if (mysqlConfig.getHighPerformance()) {
+        if (Boolean.TRUE.equals(mysqlConfig.getHighPerformance())) {
             MysqlReaderV2 mysqlReaderV2 = new MysqlReaderV2(mysqlJdbcContext, tapLogger, dbTimeZone);
             mysqlReaderV2.multiInit(connectionConfigWithTables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
             mysqlReaderV2.startMiner(this::isAlive);
@@ -950,7 +951,7 @@ public class MysqlConnector extends CommonDbConnector {
             }
             return this.mysqlJdbcContext.readBinlogPosition();
         }
-        if (mysqlConfig.getHighPerformance()) {
+        if (Boolean.TRUE.equals(mysqlConfig.getHighPerformance())) {
             try (MysqlBinlogPositionUtil ins = new MysqlBinlogPositionUtil(
                     mysqlConfig.getHost(),
                     mysqlConfig.getPort(),
@@ -1023,8 +1024,9 @@ public class MysqlConnector extends CommonDbConnector {
         });
     }
 
+    @Override
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
-        if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
+        if (!jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).isEmpty()) {
             List<String> sqls = new ArrayList<>();
             sqls.add("SET FOREIGN_KEY_CHECKS=0");
             sqls.add("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()));
@@ -1035,8 +1037,9 @@ public class MysqlConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
-        if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
+        if (!jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).isEmpty()) {
             List<String> sqls = new ArrayList<>();
             sqls.add("SET FOREIGN_KEY_CHECKS=0");
             sqls.add("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()));
@@ -1047,6 +1050,7 @@ public class MysqlConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
         List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
         if (EmptyKit.isNotEmpty(constraintList)) {
@@ -1153,6 +1157,7 @@ public class MysqlConnector extends CommonDbConnector {
         jdbcContext.batchExecute(dropConstraintsSql);
     }
 
+    @Override
     protected TapIndex makeTapIndex(String key, List<DataMap> value) {
         TapIndex index = new TapIndex();
         index.setName(key);
@@ -1170,6 +1175,7 @@ public class MysqlConnector extends CommonDbConnector {
         return index;
     }
 
+    @Override
     protected String getCreateIndexSql(TapTable tapTable, TapIndex tapIndex) {
         StringBuilder sb = new StringBuilder("create ");
         char escapeChar = commonDbConfig.getEscapeChar();
@@ -1186,8 +1192,9 @@ public class MysqlConnector extends CommonDbConnector {
         return sb.toString();
     }
 
+    @Override
     protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable, List<TapIndex> indexList) {
-        if (!mysqlConfig.getCreateAutoInc()) return new ArrayList<>();
+        if (!Boolean.TRUE.equals(mysqlConfig.getCreateAutoInc())) return new ArrayList<>();
         String sql = "ALTER TABLE `%s` MODIFY COLUMN `%s` %s AUTO_INCREMENT";
         List<String> uniqueFields = new ArrayList<>();
         List<String> uniqueAutoIncrementFields = new ArrayList<>();
@@ -1234,6 +1241,7 @@ public class MysqlConnector extends CommonDbConnector {
                 });
     }
 
+    @Override
     public ExecuteResult<?> call(String funcName, List<Map<String, Object>> params) {
         if (EmptyKit.isEmpty(funcName)) {
             throw new IllegalArgumentException("procedure/function is null");
@@ -1286,6 +1294,7 @@ public class MysqlConnector extends CommonDbConnector {
         return callableStatement;
     }
 
+    @Override
     protected Object getOutputFromCall(List<JdbcProcedureParam> outList, CallableStatement callableStatement, boolean hasResult) throws Exception {
         if (outList == null || callableStatement == null) {
             return null;
