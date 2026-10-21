@@ -1245,7 +1245,7 @@ public class MysqlConnector extends CommonDbConnector {
         List<JdbcProcedureParam> outList = new ArrayList<>();
 
         try (Connection connection = jdbcContext.getConnection();
-             CallableStatement callableStatement = createCallableStatement(funcName, params, connection, outList)) {
+             CallableStatement callableStatement = createMysqlCallableStatement(funcName, params, connection, outList)) {
             if (callableStatement == null) {
                 throw new RuntimeException("create callableStatement error");
             }
@@ -1258,7 +1258,7 @@ public class MysqlConnector extends CommonDbConnector {
         return executeResult;
     }
 
-    private CallableStatement createCallableStatement(String funcName, List<Map<String, Object>> params, Connection connection, List<JdbcProcedureParam> outList) throws Exception {
+    private CallableStatement createMysqlCallableStatement(String funcName, List<Map<String, Object>> params, Connection connection, List<JdbcProcedureParam> outList) throws Exception {
 
         CallableStatement callableStatement;
         boolean hasReturn = hasReturn(params);
