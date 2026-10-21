@@ -75,15 +75,60 @@ public class MysqlConnectorTest {
         when(resultSet.getMetaData()).thenReturn(metaData);
         when(resultSet.next()).thenReturn(true, false);
         when(statement.getMoreResults()).thenReturn(false);
-        doReturn(convertedRow).when(connector).filterTimeForMysql(resultSet, metaData);
+        doReturn(convertedRow).when(connector).filterTimeForMysql(eq(resultSet), any(ResultSetMetaData.class));
         List<Object> batches = new ArrayList<>();
 
         connector.execute("select created_at from records", batches::add, 10, 8);
 
         verify(statement).setQueryTimeout(8);
         verify(statement).setFetchSize(Integer.MIN_VALUE);
-        verify(connector).filterTimeForMysql(resultSet, metaData);
+        verify(connector).filterTimeForMysql(eq(resultSet), any(ResultSetMetaData.class));
         assertEquals(Collections.singletonList(convertedRow), batches.get(0));
+    }
+
+    @Test
+    void executeKeysRowsBySqlAliasAndKeepsTypeConversion() throws Throwable {
+        MysqlConnector connector = new MysqlConnector();
+        JdbcContext jdbcContext = mock(JdbcContext.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        ResultSetMetaData metaData = mock(ResultSetMetaData.class);
+        ReflectionTestUtils.setField(connector, "jdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(connector, "isAlive", new AtomicBoolean(true));
+        when(jdbcContext.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(statement);
+        String sql = "select id as `key`, created_at as created, value from records";
+        when(statement.execute(sql)).thenReturn(true);
+        when(statement.getResultSet()).thenReturn(resultSet);
+        when(resultSet.getMetaData()).thenReturn(metaData);
+        when(resultSet.next()).thenReturn(true, false);
+        when(statement.getMoreResults()).thenReturn(false);
+        when(metaData.getColumnCount()).thenReturn(3);
+        when(metaData.getColumnName(1)).thenReturn("id");
+        when(metaData.getColumnLabel(1)).thenReturn("key");
+        when(metaData.getColumnTypeName(1)).thenReturn("INT");
+        when(resultSet.getObject(1)).thenReturn(1);
+        when(metaData.getColumnName(2)).thenReturn("created_at");
+        when(metaData.getColumnLabel(2)).thenReturn("created");
+        when(metaData.getColumnTypeName(2)).thenReturn("TIMESTAMP");
+        Timestamp created = Timestamp.valueOf("2026-10-20 12:30:00");
+        when(resultSet.getObject(2)).thenReturn(created);
+        when(resultSet.getString(2)).thenReturn("2026-10-20 12:30:00");
+        when(metaData.getColumnName(3)).thenReturn("value");
+        when(metaData.getColumnLabel(3)).thenReturn("");
+        when(metaData.getColumnTypeName(3)).thenReturn("INT");
+        when(resultSet.getObject(3)).thenReturn(2);
+        List<Object> batches = new ArrayList<>();
+
+        connector.execute(sql, batches::add, 10, 0);
+
+        Map<String, Object> row = (Map<String, Object>) ((List<?>) batches.get(0)).get(0);
+        assertEquals(1, row.get("key"));
+        assertEquals(created.toLocalDateTime().atZone(ZoneOffset.UTC), row.get("created"));
+        assertEquals(2, row.get("value"));
+        assertFalse(row.containsKey("id"));
+        assertFalse(row.containsKey("created_at"));
     }
 
     @Test

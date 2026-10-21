@@ -1236,8 +1236,27 @@ public class MysqlConnector extends CommonDbConnector {
     protected void execute(String sql, Consumer<Object> consumer, int batchSize, int queryTimeoutSeconds) throws Throwable {
         JdbcQueryExecutor.execute(sql, jdbcContext::getConnection, consumer, this::isAlive,
                 batchSize, queryTimeoutSeconds, Integer.MIN_VALUE, resultSet -> {
-                    ResultSetMetaData metaData = resultSet.getMetaData();
+                    ResultSetMetaData metaData = columnLabelMetaData(resultSet.getMetaData());
                     return () -> filterTimeForMysql(resultSet, metaData);
+                });
+    }
+
+    /**
+     * Key command query rows by the SQL output label (alias) instead of the underlying column name,
+     * while keeping the existing MySQL type conversion in filterTimeForMysql.
+     */
+    protected static ResultSetMetaData columnLabelMetaData(ResultSetMetaData metaData) {
+        return (ResultSetMetaData) java.lang.reflect.Proxy.newProxyInstance(
+                MysqlConnector.class.getClassLoader(), new Class<?>[]{ResultSetMetaData.class}, (proxy, method, args) -> {
+                    try {
+                        if ("getColumnName".equals(method.getName()) && args != null && args.length == 1) {
+                            String label = metaData.getColumnLabel((Integer) args[0]);
+                            return EmptyKit.isBlank(label) ? metaData.getColumnName((Integer) args[0]) : label;
+                        }
+                        return method.invoke(metaData, args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        throw e.getCause();
+                    }
                 });
     }
 
