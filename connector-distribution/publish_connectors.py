@@ -72,6 +72,20 @@ def pom_dependencies(pom_path):
             if node.text and "${" not in node.text}
 
 
+def pom_pdk_api_version(pom_contents, inherited_api=None):
+    tree = ET.fromstring(pom_contents)
+    return (tree.findtext("m:properties/m:tapdata.pdk.api.version", namespaces=NS)
+            or inherited_api)
+
+
+def source_file(commit, path):
+    result = subprocess.run(
+        ["git", "show", f"{commit}:{path.as_posix()}"],
+        cwd=ROOT, check=False, text=True, capture_output=True,
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
 def connector_modules():
     connectors_pom = ET.parse(ROOT / "connectors/pom.xml")
     modules = []
@@ -114,12 +128,44 @@ def current_pdk_api_version():
     return value
 
 
+def connector_pdk_api_version(pom):
+    """Return the connector's declared PDK API version or inherited default."""
+    tree = ET.parse(pom)
+    value = tree.findtext("m:properties/m:tapdata.pdk.api.version", namespaces=NS)
+    return value or current_pdk_api_version()
+
+
+def api_generation(pdk_api_version):
+    """Map 2.11 and 2.0.11[-SNAPSHOT] to connector API generation 11."""
+    stable = pdk_api_version.split("-", 1)[0]
+    match = re.fullmatch(r"2\.(?:0\.)?(\d+)", stable)
+    if not match:
+        raise ValueError(
+            f"unsupported PDK API version {pdk_api_version}; expected 2.<n> or 2.0.<n>"
+        )
+    return int(match.group(1))
+
+
 def changed_connectors(base_commit, current_commit):
     result = subprocess.run(
         ["git", "diff", "--name-only", base_commit, current_commit],
         cwd=ROOT, check=True, text=True, capture_output=True,
     )
     changed_paths = [Path(line) for line in result.stdout.splitlines() if line]
+    if Path("connectors/pom.xml") in changed_paths:
+        previous_parent = subprocess.check_output(
+            ["git", "show", f"{base_commit}:connectors/pom.xml"],
+            cwd=ROOT, text=True,
+        )
+        current_parent = (ROOT / "connectors/pom.xml").read_text(encoding="utf-8")
+        api_property = re.compile(
+            r"<tapdata\.pdk\.api\.version>.*?</tapdata\.pdk\.api\.version>", re.DOTALL
+        )
+        if api_property.sub("<tapdata.pdk.api.version>API_VERSION</tapdata.pdk.api.version>",
+                            previous_parent) == api_property.sub(
+                                "<tapdata.pdk.api.version>API_VERSION</tapdata.pdk.api.version>",
+                                current_parent):
+            changed_paths.remove(Path("connectors/pom.xml"))
     if not changed_paths:
         return set()
 
@@ -181,6 +227,26 @@ def changed_connectors(base_commit, current_commit):
     return {artifact for artifact in connector_by_artifact if artifact in impacted_artifacts}
 
 
+def next_connector_version(previous, old_api, new_api):
+    generation = api_generation(new_api)
+    if previous is None:
+        return f"1.{generation}.0"
+
+    old_generation = api_generation(old_api) if old_api else None
+    if old_generation == generation:
+        parts = [int(part) for part in previous.split(".")]
+        if len(parts) != 3 or parts[0] != 1 or parts[1] != generation:
+            # Migrate connector versions created by the previous 1.0.x policy.
+            return f"1.{generation}.0"
+        parts[2] += 1
+        return ".".join(map(str, parts))
+    if old_generation is not None and generation < old_generation:
+        raise ValueError(
+            f"PDK API generation for connector moved backwards: {old_generation} -> {generation}"
+        )
+    return f"1.{generation}.0"
+
+
 def next_patch(version):
     parts = [int(part) for part in version.split(".")]
     if len(parts) < 3:
@@ -201,43 +267,74 @@ def next_bom_version(previous_version, pdk_api_version):
 
 def bom_releases(pom):
     records = []
+    properties = pom.find("m:properties", NS)
     for dependency in pom.findall("m:dependencyManagement/m:dependencies/m:dependency", NS):
         group_id = dependency.findtext("m:groupId", namespaces=NS)
         artifact_id = dependency.findtext("m:artifactId", namespaces=NS)
         version = dependency.findtext("m:version", namespaces=NS)
         if group_id and artifact_id and version:
-            records.append({"groupId": group_id, "artifactId": artifact_id, "version": version})
+            api_version = None
+            if properties is not None:
+                api_version = properties.findtext(
+                    f"m:tapdata.connector.{artifact_id}.pdk.api.version", namespaces=NS
+                )
+            records.append({"groupId": group_id, "artifactId": artifact_id,
+                            "version": version, "pdkApiVersion": api_version})
     return records
 
 
 def discover_releases(previous, source_commit):
-    pdk_api_version = current_pdk_api_version()
     all_connectors = connector_modules()
     previous_by_artifact = {}
     base_commit = None
-    previous_pdk_api_version = None
     if previous:
         _, previous_pom = previous
         properties = previous_pom.find("m:properties", NS)
         if properties is not None:
             base_commit = properties.findtext("m:tapdata.source.commit", namespaces=NS)
-            previous_pdk_api_version = properties.findtext(
-                "m:tapdata.pdk.api.version", namespaces=NS
-            )
         previous_by_artifact = {item["artifactId"]: item for item in bom_releases(previous_pom)}
 
-    # A first release or a PDK API transition needs a complete connector set.
-    if not previous_by_artifact or not base_commit or previous_pdk_api_version != pdk_api_version:
-        selected = {ET.parse(pom).findtext("m:artifactId", namespaces=NS)
-                    for _, pom in all_connectors}
+    current_api_by_artifact = {
+        ET.parse(pom).findtext("m:artifactId", namespaces=NS): connector_pdk_api_version(pom)
+        for _, pom in all_connectors
+    }
+    if base_commit:
+        module_by_artifact = {
+            ET.parse(pom).findtext("m:artifactId", namespaces=NS): module
+            for module, pom in all_connectors
+        }
+        parent_contents = source_file(base_commit, Path("connectors/pom.xml"))
+        parent_api = pom_pdk_api_version(parent_contents) if parent_contents else None
+        for artifact, previous_release in previous_by_artifact.items():
+            if previous_release.get("pdkApiVersion"):
+                continue
+            module = module_by_artifact.get(artifact)
+            if module is None:
+                continue
+            pom_contents = source_file(base_commit, module / "pom.xml") if module else None
+            recovered_api = pom_pdk_api_version(pom_contents, parent_api) if pom_contents else None
+            if not recovered_api:
+                raise RuntimeError(
+                    f"cannot recover the PDK API version for legacy BOM connector {artifact} "
+                    f"from source commit {base_commit}"
+                )
+            previous_release["pdkApiVersion"] = recovered_api
+    current_artifacts = set(current_api_by_artifact)
+    if not previous_by_artifact or not base_commit:
+        selected = current_artifacts
     else:
         selected = changed_connectors(base_commit, source_commit)
-        current_artifacts = {ET.parse(pom).findtext("m:artifactId", namespaces=NS)
-                             for _, pom in all_connectors}
         selected |= current_artifacts - set(previous_by_artifact)
+        # A connector's API generation is independent of other connectors'.
+        selected |= {
+            artifact for artifact, api in current_api_by_artifact.items()
+            if artifact in previous_by_artifact
+            and previous_by_artifact[artifact].get("pdkApiVersion")
+            and api_generation(api) != api_generation(previous_by_artifact[artifact]["pdkApiVersion"])
+        }
 
     if not selected:
-        return [], pdk_api_version, base_commit
+        return [], base_commit
 
     items = []
     module_by_artifact = {}
@@ -248,13 +345,18 @@ def discover_releases(previous, source_commit):
         if artifact_id not in selected:
             continue
         old = previous_by_artifact.get(artifact_id)
-        version = next_patch(old["version"]) if old else "1.0.0"
+        api_version = current_api_by_artifact[artifact_id]
+        version = next_connector_version(
+            old["version"] if old else None,
+            old.get("pdkApiVersion") if old else None,
+            api_version,
+        )
         items.append({
             "module": module.as_posix(),
             "groupId": "io.tapdata",
             "artifactId": artifact_id,
             "version": version,
-            "pdkApiVersion": pdk_api_version,
+            "pdkApiVersion": api_version,
             "publish": True,
         })
     for artifact_id, old in previous_by_artifact.items():
@@ -266,10 +368,10 @@ def discover_releases(previous, source_commit):
                 "groupId": old["groupId"],
                 "artifactId": artifact_id,
                 "version": old["version"],
-                "pdkApiVersion": pdk_api_version,
+                "pdkApiVersion": old.get("pdkApiVersion") or current_api_by_artifact[artifact_id],
                 "publish": False,
             })
-    return items, pdk_api_version, base_commit
+    return items, base_commit
 
 
 def module_metadata(item):
@@ -337,7 +439,7 @@ def deploy(file_path, pom_path, packaging):
 def main():
     source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     previous = latest_bom()
-    items, pdk_api_version, base_commit = discover_releases(previous, source_commit)
+    items, base_commit = discover_releases(previous, source_commit)
     if not items:
         print(f"No connector source changes since {base_commit}; no BOM release is needed.")
         return
@@ -365,7 +467,7 @@ def main():
             modules_to_build.append(str(module))
             set_build_version(module, item["version"])
 
-    bom_version = next_bom_version(previous[0] if previous else None, pdk_api_version)
+    bom_version = next_bom_version(previous[0] if previous else None, current_pdk_api_version())
     print(f"Detected {sum(item['publish'] for item in items)} connector(s) to publish; "
           f"BOM version: {bom_version}")
 
@@ -412,7 +514,6 @@ def main():
         run([
             "python3", "connector-distribution/generate_bom.py",
             "--inventory", str(inventory_path),
-            "--pdk-api-version", pdk_api_version,
             "--bom-version", bom_version,
             "--source-commit", source_commit,
             "--output", str(bom_path),

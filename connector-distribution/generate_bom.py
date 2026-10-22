@@ -31,9 +31,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inventory", required=True, type=Path,
                         help="JSON export of immutable connector releases in Nexus")
-    parser.add_argument("--pdk-api-version", required=True)
     parser.add_argument("--bom-version", required=True,
-                        help="new immutable BOM version, e.g. 2.0.11.20261016.1")
+                        help="new immutable BOM version")
     parser.add_argument("--source-commit", required=True,
                         help="Git commit used as the source baseline for this BOM")
     parser.add_argument("--output", required=True, type=Path)
@@ -62,15 +61,13 @@ def main():
             raise ValueError(f"same Maven coordinate has different SHA-256 values: {coordinate}")
         coordinates[coordinate] = item
 
-        if item["pdkApiVersion"] != args.pdk_api_version:
-            continue
         key = (item["groupId"], item["artifactId"])
         current = latest.get(key)
         if current is None or version_key(item["version"]) > version_key(current["version"]):
             latest[key] = item
 
     if not latest:
-        raise ValueError(f"no releases found for PDK API {args.pdk_api_version}")
+        raise ValueError("inventory contains no connector releases")
 
     project = ET.Element(f"{{{NS}}}project")
     sub(project, "modelVersion", "4.0.0")
@@ -78,10 +75,12 @@ def main():
     sub(project, "artifactId", "connectors-bom")
     sub(project, "version", args.bom_version)
     sub(project, "packaging", "pom")
-    sub(project, "name", f"Connectors for PDK API {args.pdk_api_version}")
+    sub(project, "name", "Tapdata Connectors BOM")
     properties = sub(project, "properties")
     sub(properties, "tapdata.source.commit", args.source_commit)
-    sub(properties, "tapdata.pdk.api.version", args.pdk_api_version)
+    for item in sorted(latest.values(), key=lambda entry: entry["artifactId"]):
+        sub(properties, f"tapdata.connector.{item['artifactId']}.pdk.api.version",
+            item["pdkApiVersion"])
     management = sub(project, "dependencyManagement")
     dependencies = sub(management, "dependencies")
     for key in sorted(latest):
@@ -93,7 +92,7 @@ def main():
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(project).write(args.output, encoding="UTF-8", xml_declaration=True)
-    print(f"Wrote {args.output} with {len(latest)} connector(s) for PDK API {args.pdk_api_version}")
+    print(f"Wrote {args.output} with {len(latest)} connector(s)")
 
 
 if __name__ == "__main__":
