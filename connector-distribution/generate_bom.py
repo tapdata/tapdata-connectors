@@ -34,6 +34,8 @@ def main():
     parser.add_argument("--pdk-api-version", required=True)
     parser.add_argument("--bom-version", required=True,
                         help="new immutable BOM version, e.g. 2.0.11.20261016.1")
+    parser.add_argument("--source-commit", required=True,
+                        help="Git commit used as the source baseline for this BOM")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
@@ -77,6 +79,9 @@ def main():
     sub(project, "version", args.bom_version)
     sub(project, "packaging", "pom")
     sub(project, "name", f"Connectors for PDK API {args.pdk_api_version}")
+    properties = sub(project, "properties")
+    sub(properties, "tapdata.source.commit", args.source_commit)
+    sub(properties, "tapdata.pdk.api.version", args.pdk_api_version)
     management = sub(project, "dependencyManagement")
     dependencies = sub(management, "dependencies")
     for key in sorted(latest):

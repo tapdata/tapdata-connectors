@@ -10,6 +10,7 @@ import tempfile
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -17,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RELEASE_REPO = "https://nexus.tapdata.net/repository/maven-releases/"
 REPOSITORY_ID = "tapdata-releases"
 VERSION_RE = re.compile(r"^\d+(?:\.\d+)*$")
+NS = {"m": "http://maven.apache.org/POM/4.0.0"}
 
 
 def run(command, *, cwd=ROOT):
@@ -47,6 +49,227 @@ def remote_sha256(url):
         if error.code == 404:
             return None
         raise RuntimeError(f"Nexus artifact read failed with HTTP {error.code}: {url}") from error
+
+
+def nexus_read(url):
+    import base64
+    credentials = base64.b64encode(
+        f"{os.environ['NEXUS_USERNAME']}:{os.environ['NEXUS_PASSWORD']}".encode()
+    ).decode()
+    request = urllib.request.Request(url, headers={"Authorization": f"Basic {credentials}"})
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            return response.read()
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise RuntimeError(f"Nexus metadata read failed with HTTP {error.code}: {url}") from error
+
+
+def pom_dependencies(pom_path):
+    tree = ET.parse(pom_path)
+    return {node.text for node in tree.findall(".//m:dependencies/m:dependency/m:artifactId", NS)
+            if node.text and "${" not in node.text}
+
+
+def connector_modules():
+    connectors_pom = ET.parse(ROOT / "connectors/pom.xml")
+    modules = []
+    for node in connectors_pom.findall("m:modules/m:module", NS):
+        if not node.text:
+            continue
+        module = Path("connectors") / node.text.strip()
+        pom = ROOT / module / "pom.xml"
+        if pom.is_file():
+            modules.append((module, pom))
+    if not modules:
+        raise RuntimeError("no connector modules found in connectors/pom.xml")
+    return modules
+
+
+def latest_bom():
+    metadata_url = f"{RELEASE_REPO}io/tapdata/connectors-bom/maven-metadata.xml"
+    body = nexus_read(metadata_url)
+    if body is None:
+        return None
+    tree = ET.fromstring(body)
+    versions = [node.text for node in tree.iter()
+                if node.tag.rsplit("}", 1)[-1] == "version"
+                and node.text and VERSION_RE.fullmatch(node.text)]
+    if not versions:
+        return None
+    version = max(versions, key=lambda value: tuple(int(part) for part in value.split(".")))
+    pom_url = f"{RELEASE_REPO}io/tapdata/connectors-bom/{version}/connectors-bom-{version}.pom"
+    pom = nexus_read(pom_url)
+    if pom is None:
+        raise RuntimeError(f"Nexus metadata lists BOM {version}, but its POM is missing")
+    return version, ET.fromstring(pom)
+
+
+def current_pdk_api_version():
+    tree = ET.parse(ROOT / "connectors/pom.xml")
+    value = tree.findtext("m:properties/m:tapdata.pdk.api.version", namespaces=NS)
+    if not value:
+        raise RuntimeError("could not read PDK API version from connectors/pom.xml")
+    return value
+
+
+def changed_connectors(base_commit, current_commit):
+    result = subprocess.run(
+        ["git", "diff", "--name-only", base_commit, current_commit],
+        cwd=ROOT, check=True, text=True, capture_output=True,
+    )
+    changed_paths = [Path(line) for line in result.stdout.splitlines() if line]
+    if not changed_paths:
+        return set()
+
+    modules = connector_modules()
+    connector_by_artifact = {
+        ET.parse(pom).findtext("m:artifactId", namespaces=NS): (module, pom)
+        for module, pom in modules
+    }
+    all_poms = [pom for pom in ROOT.rglob("pom.xml")
+                if not {".git", "target"}.intersection(pom.parts)]
+    projects = {}
+    for pom in all_poms:
+        try:
+            artifact = ET.parse(pom).findtext("m:artifactId", namespaces=NS)
+        except ET.ParseError:
+            continue
+        if artifact:
+            projects[artifact] = (pom.parent.relative_to(ROOT), pom)
+
+    changed_artifacts = set()
+    global_change = False
+    for path in changed_paths:
+        if path.parts[:1] == ("connectors",) and len(path.parts) > 2:
+            module_name = path.parts[1]
+            for artifact, (module, _) in connector_by_artifact.items():
+                if module.parts[1] == module_name:
+                    changed_artifacts.add(artifact)
+        candidates = [(directory, artifact) for artifact, (directory, _) in projects.items()
+                      if directory.parts and path.parts[:len(directory.parts)] == directory.parts]
+        if candidates:
+            directory, artifact = max(candidates, key=lambda pair: len(pair[0].parts))
+            if artifact not in connector_by_artifact:
+                changed_artifacts.add(artifact)
+            if path.name == "pom.xml":
+                # Maven child projects inherit parent POM properties and
+                # dependency management even when they do not declare a
+                # dependency on the parent artifact.
+                changed_artifacts.update(
+                    child_artifact for child_artifact, (child_directory, _) in projects.items()
+                    if child_directory.parts[:len(directory.parts)] == directory.parts
+                )
+        elif path.name in ("pom.xml", "build.gradle", "settings.gradle"):
+            global_change = True
+
+    connectors_parent_changed = any(path.parts == ("connectors", "pom.xml") for path in changed_paths)
+    if global_change or connectors_parent_changed:
+        return set(connector_by_artifact)
+
+    # Propagate changes through Maven project dependencies until the affected
+    # connector set stops growing.
+    dependency_map = {artifact: pom_dependencies(pom) for artifact, (_, pom) in projects.items()}
+    impacted_artifacts = set(changed_artifacts)
+    while True:
+        newly_impacted = {artifact for artifact, dependencies in dependency_map.items()
+                          if dependencies & impacted_artifacts}
+        if newly_impacted <= impacted_artifacts:
+            break
+        impacted_artifacts.update(newly_impacted)
+    return {artifact for artifact in connector_by_artifact if artifact in impacted_artifacts}
+
+
+def next_patch(version):
+    parts = [int(part) for part in version.split(".")]
+    if len(parts) < 3:
+        parts.append(1)
+    else:
+        parts[-1] += 1
+    return ".".join(map(str, parts))
+
+
+def next_bom_version(previous_version, pdk_api_version):
+    if previous_version:
+        return next_patch(previous_version)
+    pdk_base = pdk_api_version.split("-", 1)[0]
+    if not VERSION_RE.fullmatch(pdk_base):
+        raise ValueError(f"cannot derive initial BOM version from PDK API version {pdk_api_version}")
+    return f"{pdk_base}.{datetime.now(timezone.utc):%Y%m%d}.1"
+
+
+def bom_releases(pom):
+    records = []
+    for dependency in pom.findall("m:dependencyManagement/m:dependencies/m:dependency", NS):
+        group_id = dependency.findtext("m:groupId", namespaces=NS)
+        artifact_id = dependency.findtext("m:artifactId", namespaces=NS)
+        version = dependency.findtext("m:version", namespaces=NS)
+        if group_id and artifact_id and version:
+            records.append({"groupId": group_id, "artifactId": artifact_id, "version": version})
+    return records
+
+
+def discover_releases(previous, source_commit):
+    pdk_api_version = current_pdk_api_version()
+    all_connectors = connector_modules()
+    previous_by_artifact = {}
+    base_commit = None
+    previous_pdk_api_version = None
+    if previous:
+        _, previous_pom = previous
+        properties = previous_pom.find("m:properties", NS)
+        if properties is not None:
+            base_commit = properties.findtext("m:tapdata.source.commit", namespaces=NS)
+            previous_pdk_api_version = properties.findtext(
+                "m:tapdata.pdk.api.version", namespaces=NS
+            )
+        previous_by_artifact = {item["artifactId"]: item for item in bom_releases(previous_pom)}
+
+    # A first release or a PDK API transition needs a complete connector set.
+    if not previous_by_artifact or not base_commit or previous_pdk_api_version != pdk_api_version:
+        selected = {ET.parse(pom).findtext("m:artifactId", namespaces=NS)
+                    for _, pom in all_connectors}
+    else:
+        selected = changed_connectors(base_commit, source_commit)
+        current_artifacts = {ET.parse(pom).findtext("m:artifactId", namespaces=NS)
+                             for _, pom in all_connectors}
+        selected |= current_artifacts - set(previous_by_artifact)
+
+    if not selected:
+        return [], pdk_api_version, base_commit
+
+    items = []
+    module_by_artifact = {}
+    for module, pom in all_connectors:
+        tree = ET.parse(pom)
+        artifact_id = tree.findtext("m:artifactId", namespaces=NS)
+        module_by_artifact[artifact_id] = module.as_posix()
+        if artifact_id not in selected:
+            continue
+        old = previous_by_artifact.get(artifact_id)
+        version = next_patch(old["version"]) if old else "1.0.0"
+        items.append({
+            "module": module.as_posix(),
+            "groupId": "io.tapdata",
+            "artifactId": artifact_id,
+            "version": version,
+            "pdkApiVersion": pdk_api_version,
+            "publish": True,
+        })
+    for artifact_id, old in previous_by_artifact.items():
+        if artifact_id not in selected:
+            if artifact_id not in module_by_artifact:
+                continue
+            items.append({
+                "module": module_by_artifact[artifact_id],
+                "groupId": old["groupId"],
+                "artifactId": artifact_id,
+                "version": old["version"],
+                "pdkApiVersion": pdk_api_version,
+                "publish": False,
+            })
+    return items, pdk_api_version, base_commit
 
 
 def module_metadata(item):
@@ -112,9 +335,12 @@ def deploy(file_path, pom_path, packaging):
 
 
 def main():
-    items = json.loads(os.environ["CONNECTOR_RELEASES"])
-    if not isinstance(items, list) or not items:
-        raise ValueError("releases_json must be a non-empty JSON array")
+    source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    previous = latest_bom()
+    items, pdk_api_version, base_commit = discover_releases(previous, source_commit)
+    if not items:
+        print(f"No connector source changes since {base_commit}; no BOM release is needed.")
+        return
 
     seen = set()
     modules_to_build = []
@@ -139,12 +365,9 @@ def main():
             modules_to_build.append(str(module))
             set_build_version(module, item["version"])
 
-    api_versions = {item["pdkApiVersion"] for item in items}
-    if len(api_versions) != 1:
-        raise ValueError("one BOM can contain only one exact PDK API version")
-    pdk_api_version = api_versions.pop()
-    if not os.environ.get("BOM_VERSION") or not VERSION_RE.fullmatch(os.environ["BOM_VERSION"]):
-        raise ValueError("bom_version must be a new immutable numeric release, e.g. 2.0.11.20261016.1")
+    bom_version = next_bom_version(previous[0] if previous else None, pdk_api_version)
+    print(f"Detected {sum(item['publish'] for item in items)} connector(s) to publish; "
+          f"BOM version: {bom_version}")
 
     if modules_to_build:
         run(["mvn", "-B", "-pl", ",".join(modules_to_build), "-am", "package",
@@ -190,7 +413,8 @@ def main():
             "python3", "connector-distribution/generate_bom.py",
             "--inventory", str(inventory_path),
             "--pdk-api-version", pdk_api_version,
-            "--bom-version", os.environ["BOM_VERSION"],
+            "--bom-version", bom_version,
+            "--source-commit", source_commit,
             "--output", str(bom_path),
         ])
         deploy(bom_path, bom_path, "pom")

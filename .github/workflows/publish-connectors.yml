@@ -3,33 +3,15 @@ name: Publish connector artifacts
 on:
   workflow_dispatch:
     inputs:
-      releases_json:
-        description: >-
-          Complete connector set as JSON. Each item has module, groupId, artifactId,
-          version, pdkApiVersion, and publish (true to build/upload; false to reuse).
-        required: true
-        type: string
-      bom_version:
-        description: New immutable BOM version, e.g. 2.0.11.20261016.1
-        required: true
-        type: string
       source_ref:
         description: Connector branch or tag to publish (defaults to the selected workflow ref)
         required: false
         type: string
   workflow_call:
     inputs:
-      releases_json:
-        description: Complete connector set as a JSON array.
-        required: true
-        type: string
-      bom_version:
-        description: New immutable BOM version.
-        required: true
-        type: string
       source_ref:
         description: Connector branch or tag to publish.
-        required: true
+        required: false
         type: string
     secrets:
       NEXUS_USERNAME:
@@ -41,19 +23,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: connector-publish-${{ inputs.bom_version || github.run_id }}
+  group: connector-publish
   cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     steps:
-      - name: Checkout connector sources
+      - name: Checkout connector sources and history
         uses: actions/checkout@v4
         with:
           repository: tapdata/tapdata-connectors
           ref: ${{ inputs.source_ref || github.ref_name }}
+          fetch-depth: 0
 
       - name: Set up Java and Nexus Maven credentials
         uses: actions/setup-java@v4
@@ -65,10 +48,8 @@ jobs:
           server-username: NEXUS_USERNAME
           server-password: NEXUS_PASSWORD
 
-      - name: Publish selected connector releases and BOM
+      - name: Detect changed connectors, publish releases and generate BOM
         env:
-          CONNECTOR_RELEASES: ${{ inputs.releases_json }}
-          BOM_VERSION: ${{ inputs.bom_version }}
           NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
         run: python3 connector-distribution/publish_connectors.py
