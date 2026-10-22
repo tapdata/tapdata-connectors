@@ -14,9 +14,13 @@ on:
         required: false
         type: string
     secrets:
-      NEXUS_USERNAME:
+      NEXUS_INTERNAL_USERNAME:
         required: true
-      NEXUS_PASSWORD:
+      NEXUS_INTERNAL_PASSWORD:
+        required: true
+      NEXUS_EXTERNAL_USERNAME:
+        required: true
+      NEXUS_EXTERNAL_PASSWORD:
         required: true
 
 permissions:
@@ -28,7 +32,7 @@ concurrency:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CONNECTOR_PUBLISH_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 180
     steps:
       - name: Validate protected workflow and source branches
@@ -79,18 +83,22 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Set up Java and Nexus Maven credentials
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: maven
-          server-id: tapdata-releases
-          server-username: NEXUS_USERNAME
-          server-password: NEXUS_PASSWORD
+
+      - name: Verify publisher recovery tests
+        run: python3 -m unittest discover -s connector-distribution -p 'test_*.py'
 
       - name: Detect changed connectors, publish releases and generate BOM
         env:
-          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
-          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+          NEXUS_INTERNAL_URL: ${{ vars.NEXUS_INTERNAL_URL }}
+          NEXUS_EXTERNAL_URL: ${{ vars.NEXUS_EXTERNAL_URL }}
+          NEXUS_INTERNAL_USERNAME: ${{ secrets.NEXUS_INTERNAL_USERNAME }}
+          NEXUS_INTERNAL_PASSWORD: ${{ secrets.NEXUS_INTERNAL_PASSWORD }}
+          NEXUS_EXTERNAL_USERNAME: ${{ secrets.NEXUS_EXTERNAL_USERNAME }}
+          NEXUS_EXTERNAL_PASSWORD: ${{ secrets.NEXUS_EXTERNAL_PASSWORD }}
         run: python3 connector-distribution/publish_connectors.py

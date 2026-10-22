@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Build selected connector JARs, publish immutable releases, and publish a BOM."""
 
+import base64
 import hashlib
+import http.client
 import json
 import os
 import re
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -15,55 +18,101 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RELEASE_REPO = "https://nexus.tapdata.net/repository/maven-releases/"
-REPOSITORY_ID = "tapdata-releases"
+BATCH_SIZE = 10
+ATTEMPTS = 3
 VERSION_RE = re.compile(r"^\d+(?:\.\d+)*$")
 NS = {"m": "http://maven.apache.org/POM/4.0.0"}
 
 
-def run(command, *, cwd=ROOT):
+def run(command, *, cwd=None):
     print("+", " ".join(str(part) for part in command), flush=True)
-    subprocess.run(command, cwd=cwd, check=True)
+    subprocess.run(command, cwd=cwd or ROOT, check=True)
 
 
-def artifact_url(group_id, artifact_id, version):
+def repositories():
+    targets = []
+    for name in ("INTERNAL", "EXTERNAL"):
+        prefix = f"NEXUS_{name}"
+        url = os.environ[f"{prefix}_URL"].rstrip("/") + "/"
+        if not url.startswith("https://"):
+            raise ValueError(f"{prefix}_URL must use HTTPS")
+        username = os.environ[f"{prefix}_USERNAME"]
+        password = os.environ[f"{prefix}_PASSWORD"]
+        if not username or not password:
+            raise ValueError(f"{prefix} credentials must not be empty")
+        targets.append({"name": name.lower(), "url": url,
+                        "username": username, "password": password})
+    if targets[0]["url"] == targets[1]["url"]:
+        raise ValueError("internal and external Nexus URLs must be distinct")
+    return targets
+
+
+def artifact_url(group_id, artifact_id, version, repo, extension="jar"):
     group_path = group_id.replace(".", "/")
-    return (f"{RELEASE_REPO}{group_path}/{artifact_id}/{version}/"
-            f"{artifact_id}-{version}.jar")
+    return (f"{repo['url']}{group_path}/{artifact_id}/{version}/"
+            f"{artifact_id}-{version}.{extension}")
 
 
-def remote_sha256(url):
-    username = os.environ["NEXUS_USERNAME"]
-    password = os.environ["NEXUS_PASSWORD"]
-    request = urllib.request.Request(url)
-    import base64
-    credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
-    request.add_header("Authorization", f"Basic {credentials}")
-    try:
-        with urllib.request.urlopen(request, timeout=45) as response:
-            digest = hashlib.sha256()
-            while chunk := response.read(1024 * 1024):
-                digest.update(chunk)
-            return digest.hexdigest()
-    except urllib.error.HTTPError as error:
-        if error.code == 404:
-            return None
-        raise RuntimeError(f"Nexus artifact read failed with HTTP {error.code}: {url}") from error
-
-
-def nexus_read(url):
-    import base64
+def request(repo, url, *, data=None, destination=None):
+    """Retry transient failures; only a GET 404 denotes an absent file."""
     credentials = base64.b64encode(
-        f"{os.environ['NEXUS_USERNAME']}:{os.environ['NEXUS_PASSWORD']}".encode()
+        f"{repo['username']}:{repo['password']}".encode()
     ).decode()
-    request = urllib.request.Request(url, headers={"Authorization": f"Basic {credentials}"})
+    for attempt in range(ATTEMPTS):
+        req = urllib.request.Request(url, data=data,
+                                     method="GET" if data is None else "PUT",
+                                     headers={"Authorization": f"Basic {credentials}",
+                                              "Content-Type": "application/octet-stream"})
+        try:
+            with urllib.request.urlopen(req, timeout=45) as response:
+                if destination is None:
+                    return response.read()
+                received = 0
+                with destination.open("wb") as output:
+                    while chunk := response.read(1024 * 1024):
+                        output.write(chunk)
+                        received += len(chunk)
+                expected = response.headers.get("Content-Length")
+                if expected is not None and received != int(expected):
+                    raise http.client.IncompleteRead(b"", int(expected) - received)
+                return True
+        except urllib.error.HTTPError as error:
+            if data is None and error.code == 404:
+                return None
+            if error.code not in (408, 429, 500, 502, 503, 504) or attempt == ATTEMPTS - 1:
+                raise RuntimeError(f"Nexus {repo['name']} HTTP {error.code}: {url}") from error
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError):
+            if attempt == ATTEMPTS - 1:
+                raise
+        time.sleep(2 ** attempt)
+
+
+def nexus_read(url, repo):
+    return request(repo, url)
+
+
+def put_immutable(repo, url, content):
+    existing = nexus_read(url, repo)
+    if existing is not None:
+        if existing != content:
+            raise RuntimeError(f"Immutable file differs in {repo['name']}: {url}")
+        return
     try:
-        with urllib.request.urlopen(request, timeout=45) as response:
-            return response.read()
-    except urllib.error.HTTPError as error:
-        if error.code == 404:
-            return None
-        raise RuntimeError(f"Nexus metadata read failed with HTTP {error.code}: {url}") from error
+        request(repo, url, data=content)
+    except Exception:
+        # PUT may have succeeded even if the response was lost.
+        if nexus_read(url, repo) != content:
+            raise
+    if nexus_read(url, repo) != content:
+        raise RuntimeError(f"Upload verification failed in {repo['name']}: {url}")
+
+
+def upload_file(repo, url, path):
+    content = path.read_bytes()
+    put_immutable(repo, url, content)
+    for algorithm in ("sha1", "sha256"):
+        checksum = hashlib.new(algorithm, content).hexdigest().encode()
+        put_immutable(repo, f"{url}.{algorithm}", checksum)
 
 
 def pom_dependencies(pom_path):
@@ -87,21 +136,21 @@ def connector_modules():
     return modules
 
 
-def bom_url(version):
-    return f"{RELEASE_REPO}io/tapdata/connectors-bom/{version}/connectors-bom-{version}.pom"
+def bom_url(version, repo):
+    return artifact_url("io.tapdata", "connectors-bom", version, repo, "pom")
 
 
-def ensure_bom_available(version):
-    if nexus_read(bom_url(version)) is not None:
+def ensure_bom_available(version, repo):
+    if nexus_read(bom_url(version, repo), repo) is not None:
         raise RuntimeError(
-            f"BOM io.tapdata:connectors-bom:{version} already exists in Nexus; "
-            "stopping before connector builds or uploads. Refresh the latest BOM and retry."
+            f"BOM io.tapdata:connectors-bom:{version} already exists in {repo['name']}; "
+            "stopping before connector builds or uploads."
         )
 
 
-def latest_bom():
-    metadata_url = f"{RELEASE_REPO}io/tapdata/connectors-bom/maven-metadata.xml"
-    body = nexus_read(metadata_url)
+def latest_bom(repo):
+    metadata_url = f"{repo['url']}io/tapdata/connectors-bom/maven-metadata.xml"
+    body = nexus_read(metadata_url, repo)
     if body is None:
         return None
     tree = ET.fromstring(body)
@@ -111,10 +160,64 @@ def latest_bom():
     if not versions:
         return None
     version = max(versions, key=lambda value: tuple(int(part) for part in value.split(".")))
-    pom = nexus_read(bom_url(version))
+    pom = nexus_read(bom_url(version, repo), repo)
     if pom is None:
         raise RuntimeError(f"Nexus metadata lists BOM {version}, but its POM is missing")
     return version, ET.fromstring(pom)
+
+
+def plan_url(base_version, repo):
+    return artifact_url("io.tapdata", "connector-release-plan", base_version or "bootstrap",
+                        repo, "json")
+
+
+def release_plan(targets, source_commit):
+    latest = [latest_bom(repo) for repo in targets]
+    key = lambda entry: tuple(map(int, entry[0].split("."))) if entry else ()
+    previous = min(latest, key=key)
+    base_version = previous[0] if previous else None
+    saved = [nexus_read(plan_url(base_version, repo), repo) for repo in targets]
+    bodies = [body for body in saved if body is not None]
+    if bodies:
+        if any(body != bodies[0] for body in bodies):
+            raise RuntimeError("Nexus environments contain different release plans")
+        plan = json.loads(bodies[0])
+        if plan["baseVersion"] != base_version:
+            raise RuntimeError("Release plan baseline does not match Nexus")
+        if plan["sourceCommit"] != source_commit:
+            # A protected branch may advance between attempts. Finish the pinned
+            # release before considering the newer changes on a subsequent run.
+            subprocess.run(["git", "merge-base", "--is-ancestor", plan["sourceCommit"], source_commit],
+                           cwd=ROOT, check=True)
+            print(f"Resuming pinned source {plan['sourceCommit']} before {source_commit}")
+        for entry in latest:
+            if entry and entry[0] not in (base_version, plan["bomVersion"]):
+                raise RuntimeError("Unexpected BOM divergence between Nexus environments")
+    else:
+        if key(latest[0]) != key(latest[1]):
+            raise RuntimeError("Nexus BOM baselines differ without a saved release plan")
+        if latest[0] and ET.tostring(latest[0][1]) != ET.tostring(latest[1][1]):
+            raise RuntimeError("The same BOM version differs between Nexus environments")
+        items, base_commit = discover_releases(previous, source_commit)
+        if not items:
+            # The final metadata PUT may have succeeded while its checksum PUT
+            # failed. Repair that tail even when both latest BOMs already advanced.
+            for repo in targets:
+                repair_metadata_checksums(repo)
+            print(f"No connector source changes since {base_commit}; no BOM release is needed.")
+            return None
+        version = next_bom_version(base_version, current_pdk_api_version())
+        for repo in targets:
+            ensure_bom_available(version, repo)
+        plan = {"sourceCommit": source_commit, "baseVersion": base_version,
+                "bomVersion": version, "items": items}
+    # Persist on BOTH targets before any build or connector upload. The plan is
+    # immutable and keyed by the previous BOM, so a new source cannot silently
+    # reuse coordinates left behind by an interrupted release.
+    content = json.dumps(plan, sort_keys=True, indent=2).encode()
+    for repo in targets:
+        put_immutable(repo, plan_url(base_version, repo), content)
+    return plan
 
 
 def current_pdk_api_version():
@@ -421,104 +524,161 @@ def set_build_version(module, version):
     tree.write(pom_path, encoding="UTF-8", xml_declaration=True)
 
 
-def deploy(file_path, pom_path, packaging):
-    run([
-        "mvn", "-B", "org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file",
-        f"-Dfile={file_path}", f"-DpomFile={pom_path}", f"-Dpackaging={packaging}",
-        f"-DrepositoryId={REPOSITORY_ID}", f"-Durl={RELEASE_REPO}",
-    ])
+def sync_connector(item, targets, temp, *, jar=None):
+    """Use an existing remote JAR as canonical; repair missing files on either side."""
+    existing = []
+    for repo in targets:
+        path = temp / f"{item['artifactId']}-{repo['name']}.jar"
+        url = artifact_url(item["groupId"], item["artifactId"], item["version"], repo)
+        if request(repo, url, destination=path) is not None:
+            existing.append(path)
+    if existing:
+        canonical = existing[0]
+        digest = hashlib.sha256(canonical.read_bytes()).hexdigest()
+        if any(hashlib.sha256(path.read_bytes()).hexdigest() != digest for path in existing[1:]):
+            raise RuntimeError(f"Immutable JAR differs between Nexus environments: {item['artifactId']}")
+        if jar and hashlib.sha256(jar.read_bytes()).hexdigest() != digest:
+            print(f"::warning::SHA-256 mismatch for {item['artifactId']}:{item['version']}; "
+                  "reusing Nexus bytes in both environments.")
+    elif jar:
+        canonical = jar
+        digest = hashlib.sha256(jar.read_bytes()).hexdigest()
+    else:
+        return None
+    pom = temp / f"{item['artifactId']}.pom"
+    write_artifact_pom(pom, item)
+    for repo in targets:
+        upload_file(repo, artifact_url(item["groupId"], item["artifactId"], item["version"], repo), canonical)
+        upload_file(repo, artifact_url(item["groupId"], item["artifactId"], item["version"], repo, "pom"), pom)
+    for path in existing:
+        path.unlink()
+    return {**{key: item[key] for key in ("groupId", "artifactId", "version", "pdkApiVersion")},
+            "sha256": digest}
 
 
-def main():
-    source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    previous = latest_bom()
-    items, base_commit = discover_releases(previous, source_commit)
-    if not items:
-        print(f"No connector source changes since {base_commit}; no BOM release is needed.")
+def repair_metadata_checksums(repo):
+    url = f"{repo['url']}io/tapdata/connectors-bom/maven-metadata.xml"
+    content = nexus_read(url, repo)
+    if content is None:
         return
+    for algorithm in ("sha1", "sha256"):
+        checksum = hashlib.new(algorithm, content).hexdigest().encode()
+        existing = nexus_read(f"{url}.{algorithm}", repo)
+        if existing is None or existing.strip().lower() != checksum:
+            request(repo, f"{url}.{algorithm}", data=checksum)
+        actual = nexus_read(f"{url}.{algorithm}", repo)
+        if actual is None or actual.strip().lower() != checksum:
+            raise RuntimeError(f"BOM metadata checksum verification failed in {repo['name']}")
 
-    bom_version = next_bom_version(previous[0] if previous else None, current_pdk_api_version())
-    ensure_bom_available(bom_version)
 
+def update_bom_metadata(repo, version):
+    url = f"{repo['url']}io/tapdata/connectors-bom/maven-metadata.xml"
+    body = nexus_read(url, repo)
+    metadata = ET.fromstring(body) if body else ET.Element("metadata")
+    if body is None:
+        ET.SubElement(metadata, "groupId").text = "io.tapdata"
+        ET.SubElement(metadata, "artifactId").text = "connectors-bom"
+    versioning = metadata.find("versioning")
+    if versioning is None:
+        versioning = ET.SubElement(metadata, "versioning")
+    versions = versioning.find("versions")
+    if versions is None:
+        versions = ET.SubElement(versioning, "versions")
+    values = {node.text for node in versions.findall("version")}
+    if version not in values:
+        ET.SubElement(versions, "version").text = version
+    newest = max(values | {version}, key=lambda v: tuple(map(int, v.split("."))))
+    for tag, value in (("latest", newest), ("release", newest),
+                       ("lastUpdated", datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"))):
+        node = versioning.find(tag)
+        if node is None:
+            node = ET.SubElement(versioning, tag)
+        node.text = value
+    content = ET.tostring(metadata, encoding="UTF-8", xml_declaration=True)
+    request(repo, url, data=content)
+    repair_metadata_checksums(repo)
+    actual = nexus_read(url, repo)
+    if actual is None or version not in [n.text for n in ET.fromstring(actual).findall("versioning/versions/version")]:
+        raise RuntimeError(f"BOM metadata update failed in {repo['name']}")
+
+
+def publish_plan(plan, targets, temp):
+    items = plan["items"]
     seen = set()
-    modules_to_build = []
     for item in items:
-        required = ("module", "groupId", "artifactId", "version", "pdkApiVersion", "publish")
-        if not isinstance(item, dict) or any(key not in item for key in required):
-            raise ValueError(f"each release needs {', '.join(required)}")
-        if any(not isinstance(item[key], str) or not item[key] for key in required[:-1]):
-            raise ValueError("module, coordinates, version, and PDK API version must be non-empty strings")
-        if item["groupId"] != "io.tapdata":
-            raise ValueError("this workflow only publishes io.tapdata connectors")
-        if not VERSION_RE.fullmatch(item["version"]):
-            raise ValueError(f"connector version must be an immutable numeric release: {item['version']}")
-        if not isinstance(item["publish"], bool):
-            raise ValueError(f"publish must be true or false for {item['artifactId']}")
         module, _ = module_metadata(item)
         coordinate = (item["groupId"], item["artifactId"])
-        if coordinate in seen:
-            raise ValueError(f"duplicate connector in release set: {coordinate}")
+        if coordinate in seen or item["groupId"] != "io.tapdata":
+            raise ValueError(f"invalid or duplicate coordinate: {coordinate}")
         seen.add(coordinate)
+        next_connector_version(item["version"], item["pdkApiVersion"], item["pdkApiVersion"])
         if item["publish"]:
-            modules_to_build.append(str(module))
             set_build_version(module, item["version"])
 
-    print(f"Detected {sum(item['publish'] for item in items)} connector(s) to publish; "
-          f"BOM version: {bom_version}")
-
-    if modules_to_build:
-        run(["mvn", "-B", "-pl", ",".join(modules_to_build), "-am", "package",
-             "-DskipTests", "-DskipITs"])
-
     inventory = {"releases": []}
-    with tempfile.TemporaryDirectory(prefix="connector-release-") as temp_dir:
-        temp = Path(temp_dir)
-        for item in items:
-            jar_url = artifact_url(item["groupId"], item["artifactId"], item["version"])
-            if item["publish"]:
+    selected = [item for item in items if item["publish"]]
+    for start in range(0, len(selected), BATCH_SIZE):
+        batch = selected[start:start + BATCH_SIZE]
+        print(f"Batch {start // BATCH_SIZE + 1}: {len(batch)} connector(s)", flush=True)
+        pending = []
+        for item in batch:
+            record = sync_connector(item, targets, temp)
+            if record is None:
+                pending.append(item)
+            else:
+                inventory["releases"].append(record)
+        if pending:
+            run(["mvn", "-B", "-pl", ",".join(item["module"] for item in pending),
+                 "-am", "clean", "package", "-DskipTests", "-DskipITs"])
+            for item in pending:
                 module = ROOT / item["module"]
                 jars = [p for p in (module / "target").glob("*.jar")
                         if not p.name.startswith("original-")
                         and not p.name.endswith(("-sources.jar", "-javadoc.jar"))]
                 if len(jars) != 1:
-                    raise RuntimeError(f"expected one shaded connector JAR in {module / 'target'}, found {len(jars)}")
-                jar = jars[0]
-                digest = hashlib.sha256(jar.read_bytes()).hexdigest()
-                existing_digest = remote_sha256(jar_url)
-                if existing_digest is not None:
-                    if existing_digest.lower() != digest.lower():
-                        print(
-                            f"::warning::SHA-256 mismatch for existing release "
-                            f"{item['artifactId']}:{item['version']}; keeping the Nexus artifact "
-                            f"(local={digest}, Nexus={existing_digest})."
-                        )
-                    digest = existing_digest
-                    print(f"Reuse existing release: {item['artifactId']}:{item['version']}")
-                else:
-                    pom = temp / f"{item['artifactId']}-{item['version']}.pom"
-                    write_artifact_pom(pom, item)
-                    deploy(jar, pom, "jar")
-            else:
-                digest = remote_sha256(jar_url)
-                if digest is None:
-                    raise RuntimeError(f"reused release is missing from Nexus: {item['artifactId']}:{item['version']}")
-                print(f"Reuse existing release: {item['artifactId']}:{item['version']}")
-
-            record = {key: item[key] for key in ("groupId", "artifactId", "version", "pdkApiVersion")}
-            record["sha256"] = digest
+                    raise RuntimeError(f"expected one shaded JAR in {module / 'target'}, found {len(jars)}")
+                inventory["releases"].append(sync_connector(item, targets, temp, jar=jars[0]))
+    for item in items:
+        if not item["publish"]:
+            record = sync_connector(item, targets, temp)
+            if record is None:
+                raise RuntimeError(f"reused release missing from both Nexus environments: {item['artifactId']}")
             inventory["releases"].append(record)
 
-        inventory_path = temp / "nexus-connector-releases.json"
-        inventory_path.write_text(json.dumps(inventory, indent=2), encoding="utf-8")
-        bom_path = temp / "connectors-bom.pom"
-        run([
-            "python3", "connector-distribution/generate_bom.py",
-            "--inventory", str(inventory_path),
-            "--bom-version", bom_version,
-            "--source-commit", source_commit,
-            "--output", str(bom_path),
-        ])
-        deploy(bom_path, bom_path, "pom")
+    inventory_path = temp / "nexus-connector-releases.json"
+    inventory_path.write_text(json.dumps(inventory, indent=2), encoding="utf-8")
+    bom = temp / "connectors-bom.pom"
+    run(["python3", "connector-distribution/generate_bom.py", "--inventory", str(inventory_path),
+         "--bom-version", plan["bomVersion"], "--source-commit", plan["sourceCommit"],
+         "--output", str(bom)])
+    # Both environments have every JAR and connector POM before publishing BOMs.
+    for repo in targets:
+        upload_file(repo, bom_url(plan["bomVersion"], repo), bom)
+    for repo in targets:
+        update_bom_metadata(repo, plan["bomVersion"])
+    print(f"Published BOM {plan['bomVersion']} to both Nexus environments.")
+
+
+def main():
+    global ROOT
+    targets = repositories()
+    source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    plan = release_plan(targets, source_commit)
+    if plan is None:
+        return
+    with tempfile.TemporaryDirectory(prefix="connector-release-") as temp_dir:
+        temp = Path(temp_dir)
+        original_root = ROOT
+        # Build in an isolated checkout: local POM edits never affect the caller,
+        # and retries keep using the plan's source even if the branch advanced.
+        checkout = temp / "source"
+        run(["git", "worktree", "add", "--detach", str(checkout), plan["sourceCommit"]])
+        ROOT = checkout
+        try:
+            publish_plan(plan, targets, temp)
+        finally:
+            ROOT = original_root
+            run(["git", "worktree", "remove", "--force", str(checkout)])
 
 
 if __name__ == "__main__":
