@@ -87,6 +87,18 @@ def connector_modules():
     return modules
 
 
+def bom_url(version):
+    return f"{RELEASE_REPO}io/tapdata/connectors-bom/{version}/connectors-bom-{version}.pom"
+
+
+def ensure_bom_available(version):
+    if nexus_read(bom_url(version)) is not None:
+        raise RuntimeError(
+            f"BOM io.tapdata:connectors-bom:{version} already exists in Nexus; "
+            "stopping before connector builds or uploads. Refresh the latest BOM and retry."
+        )
+
+
 def latest_bom():
     metadata_url = f"{RELEASE_REPO}io/tapdata/connectors-bom/maven-metadata.xml"
     body = nexus_read(metadata_url)
@@ -99,8 +111,7 @@ def latest_bom():
     if not versions:
         return None
     version = max(versions, key=lambda value: tuple(int(part) for part in value.split(".")))
-    pom_url = f"{RELEASE_REPO}io/tapdata/connectors-bom/{version}/connectors-bom-{version}.pom"
-    pom = nexus_read(pom_url)
+    pom = nexus_read(bom_url(version))
     if pom is None:
         raise RuntimeError(f"Nexus metadata lists BOM {version}, but its POM is missing")
     return version, ET.fromstring(pom)
@@ -426,6 +437,9 @@ def main():
         print(f"No connector source changes since {base_commit}; no BOM release is needed.")
         return
 
+    bom_version = next_bom_version(previous[0] if previous else None, current_pdk_api_version())
+    ensure_bom_available(bom_version)
+
     seen = set()
     modules_to_build = []
     for item in items:
@@ -449,7 +463,6 @@ def main():
             modules_to_build.append(str(module))
             set_build_version(module, item["version"])
 
-    bom_version = next_bom_version(previous[0] if previous else None, current_pdk_api_version())
     print(f"Detected {sum(item['publish'] for item in items)} connector(s) to publish; "
           f"BOM version: {bom_version}")
 

@@ -47,6 +47,13 @@ later releases increment its final numeric segment; the first BOM uses the
 default PDK API base version, UTC date, and `.1` (for example,
 `2.0.11.20261022.1`).
 
+Before changing local POMs, building connectors, or uploading artifacts, CI
+checks the planned BOM version's exact POM URL in Nexus. An existing BOM aborts
+the release; only HTTP 404 allows it to continue. Authentication, server, and
+network failures stop the release as well. This detects conflicts even if Nexus
+metadata has not yet listed the version. The preflight check does not reserve
+the version, so Nexus must still reject concurrent redeployment.
+
 CI builds only selected connectors, checks the Nexus SHA-256 for each
 immutable coordinate, and reuses an existing artifact without uploading again.
 If its bytes differ from the local build, CI emits a warning and records the
