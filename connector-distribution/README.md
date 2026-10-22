@@ -10,15 +10,21 @@ full connector set.
 
 `.github/workflows/publish-connectors.yml` can be started with
 `workflow_dispatch` or called with `workflow_call`. The only optional input is
-`source_ref`; when omitted, CI uses the selected workflow ref. Configure the
-`NEXUS_USERNAME` and `NEXUS_PASSWORD` Actions secrets.
+`source_ref`; when omitted, CI uses the selected workflow branch. Both the
+workflow branch (including a reusable workflow's own branch), the caller branch,
+and the source branch must be protected in `tapdata/tapdata-connectors`.
+Tags, commit refs, and unprotected branches are rejected before checkout or
+Nexus credential setup. CI resolves the validated source branch to a commit SHA
+and checks out that exact commit. Configure the `NEXUS_USERNAME` and
+`NEXUS_PASSWORD` Actions secrets.
 
 The first run publishes all connector modules. Each connector starts at
 `2.<api-generation>.0` (for example, PDK API `2.11` or `2.0.11-SNAPSHOT`
 maps to connector version `2.11.0`). CI records each connector's PDK API
 version and the checked out Git commit inside the generated BOM. Later runs
-compare that commit with the selected source ref. Existing `1.x` releases are
-migrated to `2.<api-generation>.0` the next time the workflow publishes.
+compare that commit with the selected source ref. Previous BOMs must use this
+version scheme and record the source commit and each connector's PDK API version;
+there is no migration support for earlier formats.
 
 ## Change detection and versions
 
@@ -42,9 +48,10 @@ default PDK API base version, UTC date, and `.1` (for example,
 `2.0.11.20261022.1`).
 
 CI builds only selected connectors, checks the Nexus SHA-256 for each
-immutable coordinate, and skips an upload when the bytes already match. It
-fails if a coordinate exists with different bytes or if a reused connector
-artifact is missing. It then generates and deploys a BOM containing every
+immutable coordinate, and reuses an existing artifact without uploading again.
+If its bytes differ from the local build, CI emits a warning and records the
+Nexus artifact's SHA-256 in the inventory. A missing reused connector artifact
+still fails the workflow. It then generates and deploys a BOM containing every
 connector's exact version. The source commit and each connector's PDK API
 version are stored as BOM properties so future runs can find the comparison
 baseline. The source POMs in Git are not changed. Nexus must prevent

@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Connector branch or tag to publish (defaults to the selected workflow ref)
+        description: Protected connector branch to publish (defaults to the selected workflow branch)
         required: false
         type: string
   workflow_call:
     inputs:
       source_ref:
-        description: Connector branch or tag to publish.
+        description: Protected connector branch to publish.
         required: false
         type: string
     secrets:
@@ -31,12 +31,53 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
+      - name: Validate protected workflow and source branches
+        id: source
+        uses: actions/github-script@v7
+        env:
+          SOURCE_REF: ${{ inputs.source_ref || github.ref }}
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+        with:
+          script: |
+            const repository = 'tapdata/tapdata-connectors';
+            if (context.repo.owner + '/' + context.repo.repo !== repository ||
+                !context.ref.startsWith('refs/heads/')) {
+              throw new Error('Publishing must run from a repository branch.');
+            }
+            const getProtectedBranch = async (ref) => {
+              const branch = ref.replace(/^refs\/heads\//, '');
+              if (!branch || branch.startsWith('refs/')) {
+                throw new Error('Only protected branches may publish; tags and commit refs are not accepted.');
+              }
+              const { data } = await github.rest.repos.getBranch({
+                owner: 'tapdata', repo: 'tapdata-connectors', branch,
+              });
+              if (data.name !== branch || !data.protected) {
+                throw new Error(`Branch ${branch} is not protected.`);
+              }
+              return data.commit.sha;
+            };
+            // Also validate the reusable workflow's own ref, not just its caller.
+            const prefix = `${repository}/.github/workflows/publish-connectors.yml@`;
+            if (!process.env.WORKFLOW_REF.startsWith(prefix)) {
+              throw new Error('Unexpected publishing workflow repository or path.');
+            }
+            const workflowRef = process.env.WORKFLOW_REF.slice(prefix.length);
+            if (!workflowRef.startsWith('refs/heads/')) {
+              throw new Error('The publishing workflow must use a protected branch ref.');
+            }
+            await getProtectedBranch(workflowRef);
+            await getProtectedBranch(context.ref);
+            const sha = await getProtectedBranch(process.env.SOURCE_REF);
+            core.setOutput('sha', sha);
+
       - name: Checkout connector sources and history
         uses: actions/checkout@v4
         with:
           repository: tapdata/tapdata-connectors
-          ref: ${{ inputs.source_ref || github.ref_name }}
+          ref: ${{ steps.source.outputs.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Java and Nexus Maven credentials
         uses: actions/setup-java@v4

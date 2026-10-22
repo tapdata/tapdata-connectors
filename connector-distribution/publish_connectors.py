@@ -72,20 +72,6 @@ def pom_dependencies(pom_path):
             if node.text and "${" not in node.text}
 
 
-def pom_pdk_api_version(pom_contents, inherited_api=None):
-    tree = ET.fromstring(pom_contents)
-    return (tree.findtext("m:properties/m:tapdata.pdk.api.version", namespaces=NS)
-            or inherited_api)
-
-
-def source_file(commit, path):
-    result = subprocess.run(
-        ["git", "show", f"{commit}:{path.as_posix()}"],
-        cwd=ROOT, check=False, text=True, capture_output=True,
-    )
-    return result.stdout if result.returncode == 0 else None
-
-
 def connector_modules():
     connectors_pom = ET.parse(ROOT / "connectors/pom.xml")
     modules = []
@@ -245,13 +231,6 @@ def next_connector_version(previous, old_api, new_api):
         raise ValueError(
             f"PDK API generation for connector moved backwards: {old_generation} -> {generation}"
         )
-    if parts[0] == 1:
-        if parts[1] != old_generation:
-            raise ValueError(
-                f"previous connector version {previous} does not match PDK API generation {old_generation}"
-            )
-        # Migrate connector versions created by the previous 1.x policy.
-        return f"2.{generation}.0"
     if parts[0] != 2 or parts[1] != old_generation:
         raise ValueError(
             f"previous connector version {previous} does not match PDK API generation {old_generation}"
@@ -297,6 +276,9 @@ def bom_releases(pom):
                 api_version = properties.findtext(
                     f"m:tapdata.connector.{artifact_id}.pdk.api.version", namespaces=NS
                 )
+            if not api_version:
+                raise ValueError(f"previous BOM is missing PDK API version for {artifact_id}")
+            next_connector_version(version, api_version, api_version)
             records.append({"groupId": group_id, "artifactId": artifact_id,
                             "version": version, "pdkApiVersion": api_version})
     return records
@@ -317,27 +299,8 @@ def discover_releases(previous, source_commit):
         ET.parse(pom).findtext("m:artifactId", namespaces=NS): connector_pdk_api_version(pom)
         for _, pom in all_connectors
     }
-    if base_commit:
-        module_by_artifact = {
-            ET.parse(pom).findtext("m:artifactId", namespaces=NS): module
-            for module, pom in all_connectors
-        }
-        parent_contents = source_file(base_commit, Path("connectors/pom.xml"))
-        parent_api = pom_pdk_api_version(parent_contents) if parent_contents else None
-        for artifact, previous_release in previous_by_artifact.items():
-            if previous_release.get("pdkApiVersion"):
-                continue
-            module = module_by_artifact.get(artifact)
-            if module is None:
-                continue
-            pom_contents = source_file(base_commit, module / "pom.xml") if module else None
-            recovered_api = pom_pdk_api_version(pom_contents, parent_api) if pom_contents else None
-            if not recovered_api:
-                raise RuntimeError(
-                    f"cannot recover the PDK API version for legacy BOM connector {artifact} "
-                    f"from source commit {base_commit}"
-                )
-            previous_release["pdkApiVersion"] = recovered_api
+    if previous and not base_commit:
+        raise ValueError("previous BOM is missing tapdata.source.commit")
     current_artifacts = set(current_api_by_artifact)
     if not previous_by_artifact or not base_commit:
         selected = current_artifacts
@@ -350,13 +313,6 @@ def discover_releases(previous, source_commit):
             if artifact in previous_by_artifact
             and previous_by_artifact[artifact].get("pdkApiVersion")
             and api_generation(api) != api_generation(previous_by_artifact[artifact]["pdkApiVersion"])
-        }
-        # Move every connector in an existing 1.x BOM to the aligned 2.x scheme.
-        selected |= {
-            artifact for artifact, release in previous_by_artifact.items()
-            if artifact in current_artifacts
-            and VERSION_RE.fullmatch(release["version"])
-            and int(release["version"].split(".", 1)[0]) == 1
         }
 
     if not selected:
@@ -394,7 +350,7 @@ def discover_releases(previous, source_commit):
                 "groupId": old["groupId"],
                 "artifactId": artifact_id,
                 "version": old["version"],
-                "pdkApiVersion": old.get("pdkApiVersion") or current_api_by_artifact[artifact_id],
+                "pdkApiVersion": old["pdkApiVersion"],
                 "publish": False,
             })
     return items, base_commit
@@ -518,8 +474,13 @@ def main():
                 existing_digest = remote_sha256(jar_url)
                 if existing_digest is not None:
                     if existing_digest.lower() != digest.lower():
-                        raise RuntimeError(f"immutable coordinate already exists with different bytes: {item['artifactId']}:{item['version']}")
-                    print(f"Skip unchanged release: {item['artifactId']}:{item['version']}")
+                        print(
+                            f"::warning::SHA-256 mismatch for existing release "
+                            f"{item['artifactId']}:{item['version']}; keeping the Nexus artifact "
+                            f"(local={digest}, Nexus={existing_digest})."
+                        )
+                    digest = existing_digest
+                    print(f"Reuse existing release: {item['artifactId']}:{item['version']}")
                 else:
                     pom = temp / f"{item['artifactId']}-{item['version']}.pom"
                     write_artifact_pom(pom, item)
