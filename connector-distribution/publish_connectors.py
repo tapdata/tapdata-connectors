@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build selected connector JARs, publish immutable releases, and publish a BOM."""
 
+import argparse
 import base64
 import hashlib
 import http.client
@@ -10,6 +11,7 @@ import os
 import re
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -523,7 +525,11 @@ def module_metadata(item):
     module = Path(item["module"])
     if module.is_absolute() or ".." in module.parts or module.parts[:1] != ("connectors",):
         raise ValueError(f"module must be a connector path under connectors/: {module}")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", item["artifactId"]):
+        raise ValueError("invalid connector artifactId")
     pom_path = ROOT / module / "pom.xml"
+    if not pom_path.resolve().is_relative_to(ROOT.resolve()):
+        raise ValueError("connector POM escapes source checkout")
     if not pom_path.is_file():
         raise ValueError(f"connector POM not found: {module}/pom.xml")
     tree = ET.parse(pom_path)
@@ -535,7 +541,7 @@ def module_metadata(item):
     if not pdk_api_version:
         connectors_pom = ET.parse(ROOT / "connectors/pom.xml")
         pdk_api_version = connectors_pom.findtext("m:properties/m:tapdata.pdk.api.version", namespaces=ns)
-    if pdk_api_version != item["pdkApiVersion"]:
+    if item["publish"] and pdk_api_version != item["pdkApiVersion"]:
         raise ValueError(
             f"PDK API version for {item['artifactId']} is {pdk_api_version}, "
             f"not the manifest value {item['pdkApiVersion']}"
@@ -651,7 +657,7 @@ def update_bom_metadata(repo, version):
         raise RuntimeError(f"BOM metadata update failed in {repo['name']}")
 
 
-def publish_plan(plan, targets, temp, artifacts_path, scripts_dir):
+def publish_plan(plan, targets, temp, artifacts_path, scripts_dir, *, batch_index=None, finalize=False):
     items = plan["items"]
     seen = set()
     for item in items:
@@ -666,6 +672,8 @@ def publish_plan(plan, targets, temp, artifacts_path, scripts_dir):
 
     inventory = {"releases": []}
     selected = [item for item in items if item["publish"]]
+    if batch_index is not None:
+        selected = batch_items(plan, batch_index)
     for start in range(0, len(selected), BATCH_SIZE):
         batch = selected[start:start + BATCH_SIZE]
         print(f"Batch {start // BATCH_SIZE + 1}: {len(batch)} connector(s)", flush=True)
@@ -680,13 +688,17 @@ def publish_plan(plan, targets, temp, artifacts_path, scripts_dir):
             # Expect pre-built artifacts from the credential-free build phase
             for item in pending:
                 # Look for JARs in the artifacts directory instead of ROOT
-                artifact_target = artifacts_path / item["module"] / "target"
+                artifact_target = artifacts_path / item["artifactId"]
                 jars = [p for p in artifact_target.glob("*.jar")
                         if not p.name.startswith("original-")
                         and not p.name.endswith(("-sources.jar", "-javadoc.jar"))]
+                if finalize:
+                    raise RuntimeError(f"release missing before BOM publication: {item['artifactId']}")
                 if len(jars) != 1:
                     raise RuntimeError(f"expected one shaded JAR in {artifact_target}, found {len(jars)}")
                 inventory["releases"].append(sync_connector(item, targets, temp, jar=jars[0]))
+    if batch_index is not None:
+        return
     for item in items:
         if not item["publish"]:
             record = sync_connector(item, targets, temp)
@@ -698,8 +710,8 @@ def publish_plan(plan, targets, temp, artifacts_path, scripts_dir):
     inventory_path.write_text(json.dumps(inventory, indent=2), encoding="utf-8")
     bom = temp / "connectors-bom.pom"
     # Execute generate_bom.py from trusted scripts directory to prevent credential leakage
-    trusted_bom_script = Path(scripts_dir) / "connector-distribution" / "generate_bom.py"
-    run(["python3", str(trusted_bom_script), "--inventory", str(inventory_path),
+    trusted_bom_script = Path(scripts_dir).resolve() / "connector-distribution" / "generate_bom.py"
+    run([sys.executable, "-I", str(trusted_bom_script), "--inventory", str(inventory_path),
          "--bom-version", plan["bomVersion"], "--source-commit", plan["sourceCommit"],
          "--output", str(bom)])
     # Both environments have every JAR and connector POM before publishing BOMs.
@@ -710,51 +722,98 @@ def publish_plan(plan, targets, temp, artifacts_path, scripts_dir):
     print(f"Published BOM {plan['bomVersion']} to both Nexus environments.")
 
 
-def main():
+def batch_items(plan, index):
+    selected = [item for item in plan["items"] if item["publish"]]
+    if index < 0 or index >= max(1, (len(selected) + BATCH_SIZE - 1) // BATCH_SIZE):
+        raise ValueError("invalid batch index")
+    return selected[index * BATCH_SIZE:(index + 1) * BATCH_SIZE]
+
+
+def verify_saved_plan(plan, targets):
+    for repo in targets:
+        body = nexus_read(plan_url(plan["baseVersion"], repo), repo)
+        if body is None or json.loads(body) != plan:
+            raise RuntimeError("local release plan differs from immutable Nexus plan")
+
+
+def main(source_dir=None, plan_path="release_plan.json"):
     global ROOT
-    if len(sys.argv) > 1:
-        # Plan mode: analyze source and generate release_plan.json
-        source_dir = sys.argv[1]
+    if source_dir is not None:
         ROOT = Path(source_dir).resolve()
     targets = repositories()
     source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     plan = release_plan(targets, source_commit)
+    plan_file = Path(plan_path)
     if plan is None:
-        return
-
-    # Write the plan for the separate build step
-    plan_file = Path("release_plan.json")
+        plan_file.unlink(missing_ok=True)
+        return None
     plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
     print(f"Release plan written to {plan_file}")
-    print(f"Run build and upload steps separately to isolate credentials from build execution.")
+    return plan
 
 
-def upload_artifacts(source_dir=".", artifacts_dir="build-output", scripts_dir="scripts"):
-    """Upload pre-built artifacts with credentials. Never executes source-controlled code."""
+def prepare_batch(plan_path, batch_index, output):
+    plan = json.loads(Path(plan_path).read_text())
+    targets = repositories()
+    verify_saved_plan(plan, targets)
+    pending = []
+    for item in batch_items(plan, batch_index):
+        present = False
+        for repo in targets:
+            url = artifact_url(item["groupId"], item["artifactId"], item["version"], repo)
+            if nexus_read(url, repo) is not None:
+                present = True
+        if not present:
+            pending.append(item)
+    Path(output).write_text(json.dumps({**plan, "items": pending}, indent=2))
+
+
+def upload_artifacts(source_dir=".", artifacts_dir="build-output", scripts_dir=None,
+                     *, plan_path="release_plan.json", batch_index=None, finalize=False):
+    """Upload in a fresh runner; only trusted scripts execute with credentials."""
     global ROOT
     ROOT = Path(source_dir).resolve()
     artifacts_path = Path(artifacts_dir).resolve()
-
+    scripts_dir = Path(scripts_dir).resolve() if scripts_dir else Path(__file__).resolve().parents[1]
     targets = repositories()
-    plan_file = Path("release_plan.json")
-    if not plan_file.exists():
-        raise RuntimeError("release_plan.json not found. Run the plan step first.")
-
-    plan = json.loads(plan_file.read_text(encoding="utf-8"))
-
+    plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
+    verify_saved_plan(plan, targets)
     with tempfile.TemporaryDirectory(prefix="connector-release-") as temp_dir:
         temp = Path(temp_dir)
         original_root = ROOT
-        # Create an isolated worktree for POM reading only (no building)
         checkout = temp / "source"
         run(["git", "worktree", "add", "--detach", str(checkout), plan["sourceCommit"]], cwd=ROOT)
         ROOT = checkout
         try:
-            publish_plan(plan, targets, temp, artifacts_path, scripts_dir)
+            publish_plan(plan, targets, temp, artifacts_path, scripts_dir,
+                         batch_index=batch_index, finalize=finalize)
         finally:
             ROOT = original_root
             run(["git", "worktree", "remove", "--force", str(checkout)], cwd=ROOT)
 
 
+def cli():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("mode", choices=["plan", "prepare", "upload", "finalize"])
+    parser.add_argument("--source", default="source")
+    parser.add_argument("--plan", default="release_plan.json")
+    parser.add_argument("--artifacts", default="build-output")
+    parser.add_argument("--batch", type=int)
+    parser.add_argument("--output", default="build-request.json")
+    args = parser.parse_args()
+    if args.mode == "plan":
+        plan = main(args.source, args.plan)
+        count = sum(item["publish"] for item in plan["items"]) if plan else 0
+        batches = list(range(max(1, (count + BATCH_SIZE - 1) // BATCH_SIZE))) if plan else []
+        if os.environ.get("GITHUB_OUTPUT"):
+            with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+                output.write("batches=" + json.dumps(batches) + "\n")
+    elif args.mode == "prepare":
+        prepare_batch(args.plan, args.batch, args.output)
+    else:
+        upload_artifacts(args.source, args.artifacts, plan_path=args.plan,
+                         batch_index=args.batch, finalize=args.mode == "finalize")
+
+
 if __name__ == "__main__":
-    main()
+    cli()

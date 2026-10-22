@@ -11,8 +11,11 @@ full connector set.
 `.github/workflows/publish-connectors.yml` can be started with
 `workflow_dispatch` or called with `workflow_call`. The only optional input is
 `source_ref`; when omitted, CI uses the selected workflow branch. Both the
-workflow branch (including a reusable workflow's own branch), the caller branch,
-and the source branch must be protected in `tapdata/tapdata-connectors`.
+workflow and caller must run on the explicitly trusted, protected `develop`
+branch in `tapdata/tapdata-connectors`. The source may be any protected branch
+in that repository. The reusable batch workflow independently checks the caller,
+branch protection, and that each pinned commit belongs to its validated branch
+history (scripts from `develop`, source from the selected source branch).
 Tags, commit refs, and unprotected branches are rejected before checkout or
 Nexus credential setup. CI resolves the validated source branch to a commit SHA
 and checks out that exact commit.
@@ -62,6 +65,18 @@ external IP blank, ensure its DNS/hosts resolves `nexus.tapdata.net` to the publ
 installation (remove the internal hosts override from that runner). Alternatively,
 set `NEXUS_EXTERNAL_CONNECT_IP` to a stable public IP to pin both destinations.
 
+Publishing scripts are checked out from a pinned commit of protected `develop`,
+where this workflow is installed. Planning, batch preparation, upload, and BOM
+publication run separately from Maven. Each batch builds on a disposable
+GitHub-hosted `ubuntu-latest` runner without Nexus secrets; the upload job checks
+out the trusted scripts again. Source builds never execute on the internal Nexus
+runner. The build runner needs access to the Maven dependencies used for packaging.
+
+The immutable release plan travels directly from the planning job to upload jobs
+by its Actions artifact ID. Upload also compares it to the saved plan in **both**
+Nexus installations before making changes. Build output is downloaded into a
+separate data directory and is never imported or executed as Python code.
+
 The first run publishes all connector modules. Each connector starts at
 `2.<api-generation>.0` (for example, PDK API `2.11` or `2.0.11-SNAPSHOT`
 maps to connector version `2.11.0`). CI records each connector's PDK API
@@ -101,6 +116,8 @@ the version, so Nexus must still reject concurrent redeployment.
 ## Batches and retry recovery
 
 A release processes selected connectors in serial batches of **at most 10**.
+Each batch prepares its missing-JAR list, builds without credentials, then uploads
+to both repositories in a separate job before the next batch starts.
 For 23 selected connectors the batches are 10, 10, and 3. There is one complete
 BOM for the release, published after every connector JAR and POM is present in
 both environments. A single workflow run continues through all batches; the

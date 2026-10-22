@@ -14,7 +14,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import publish_connectors as publisher
+import build_connectors as builder
 
 
 class Nexus:
@@ -143,17 +146,29 @@ class PublishingTests(unittest.TestCase):
         modules = command[command.index('-pl') + 1].split(',')
         self.builds.append(modules)
         self.build_sources.append(subprocess.check_output(
-            ['git', 'rev-parse', 'HEAD'], cwd=publisher.ROOT, text=True).strip())
+            ['git', 'rev-parse', 'HEAD'], cwd=kwargs['cwd'], text=True).strip())
         for name in modules:
-            target = publisher.ROOT / name / 'target'
+            target = Path(kwargs['cwd']) / name / 'target'
             target.mkdir(exist_ok=True)
             (target / 'connector.jar').write_bytes(f'build-{len(self.builds)}-{name}'.encode())
 
     def publish(self):
+        plan_file = Path(self.temp.name) / 'release_plan.json'
+        artifacts = Path(self.temp.name) / 'artifacts'
         with patch.object(publisher, 'repositories', return_value=self.targets), \
-                patch.object(publisher, 'run', side_effect=self.fake_run), \
+                patch.object(builder, 'run', side_effect=self.fake_run), \
                 contextlib.redirect_stdout(io.StringIO()):
-            publisher.main()
+            plan = publisher.main(self.root, plan_file)
+            if plan is None:
+                return
+            count = sum(item['publish'] for item in plan['items'])
+            for index in range(max(1, (count + publisher.BATCH_SIZE - 1) // publisher.BATCH_SIZE)):
+                request = Path(self.temp.name) / 'request.json'
+                publisher.prepare_batch(plan_file, index, request)
+                shutil.rmtree(artifacts, ignore_errors=True)
+                builder.build(request, self.root, artifacts)
+                publisher.upload_artifacts(self.root, artifacts, plan_path=plan_file, batch_index=index)
+            publisher.upload_artifacts(self.root, artifacts, plan_path=plan_file, finalize=True)
 
     def assert_replicated(self):
         left, right = self.nexuses
@@ -303,6 +318,69 @@ class PublishingTests(unittest.TestCase):
         self.publish()
         self.assertEqual([len(batch) for batch in self.builds], [10, 10, 1])
         self.assert_replicated()
+
+    def test_same_generation_parent_spelling_change_preserves_reused_api(self):
+        self.seed(2)
+        pom = self.root / 'connectors/pom.xml'
+        pom.write_text(pom.read_text().replace('2.0.11', '2.0.11-SNAPSHOT'))
+        self.git('add', '.')
+        self.git('commit', '-qm', 'initial snapshot API')
+        self.publish()
+        pom.write_text(pom.read_text().replace('2.0.11-SNAPSHOT', '2.0.11'))
+        (self.root / 'connectors/c00/source.txt').write_text('updated')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'same generation and connector update')
+        self.publish()
+        releases = {i['artifactId']: i for i in publisher.bom_releases(publisher.latest_bom(self.targets[0])[1])}
+        self.assertEqual(releases['c00']['version'], '2.11.1')
+        self.assertEqual(releases['c01']['version'], '2.11.0')
+        self.assertEqual(releases['c01']['pdkApiVersion'], '2.0.11-SNAPSHOT')
+        self.assert_replicated()
+
+    def test_cross_generation_parent_change_rebuilds_inherited_connectors(self):
+        self.seed(2)
+        self.publish()
+        pom = self.root / 'connectors/pom.xml'
+        pom.write_text(pom.read_text().replace('2.0.11', '2.0.12'))
+        self.git('add', '.')
+        self.git('commit', '-qm', 'API generation upgrade')
+        self.publish()
+        releases = publisher.bom_releases(publisher.latest_bom(self.targets[0])[1])
+        self.assertEqual({i['version'] for i in releases}, {'2.12.0'})
+        self.assertEqual(len(self.builds[-1]), 2)
+
+    def test_upload_rejects_tampered_plan_before_any_put(self):
+        self.seed(1)
+        plan = publisher.release_plan(self.targets, self.git('rev-parse', 'HEAD'))
+        plan['items'][0]['version'] = '2.11.99'
+        plan_file = Path(self.temp.name) / 'tampered.json'
+        plan_file.write_text(json.dumps(plan))
+        count = [len(n.puts) for n in self.nexuses]
+        with patch.object(publisher, 'repositories', return_value=self.targets):
+            with self.assertRaisesRegex(RuntimeError, 'differs from immutable'):
+                publisher.upload_artifacts(self.root, plan_path=plan_file)
+        self.assertEqual([len(n.puts) for n in self.nexuses], count)
+
+    def test_build_rejects_path_traversal_and_oversized_batch_before_maven(self):
+        self.seed(1)
+        path = Path(self.temp.name) / 'build-plan.json'
+        item = {'module': 'connectors/../../outside', 'artifactId': 'x', 'publish': True}
+        with patch.object(builder, 'run') as run:
+            for items, message in [([item], 'invalid connector module'), ([item] * 11, 'at most 10')]:
+                path.write_text(json.dumps({'items': items}))
+                with self.assertRaisesRegex(ValueError, message):
+                    builder.build(path, self.root, Path(self.temp.name) / 'output')
+            run.assert_not_called()
+
+    def test_finalize_never_publishes_bom_if_a_jar_is_missing(self):
+        self.seed(1)
+        plan = publisher.release_plan(self.targets, self.git('rev-parse', 'HEAD'))
+        path = Path(self.temp.name) / 'plan.json'
+        path.write_text(json.dumps(plan))
+        with patch.object(publisher, 'repositories', return_value=self.targets):
+            with self.assertRaisesRegex(RuntimeError, 'missing before BOM'):
+                publisher.upload_artifacts(self.root, plan_path=path, finalize=True)
+        self.assertFalse(any('/connectors-bom/' in p for n in self.nexuses for p in n.puts))
 
     def test_existing_jar_is_canonical_and_missing_pom_is_repaired(self):
         item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
