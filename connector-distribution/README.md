@@ -14,11 +14,11 @@ full connector set.
 `NEXUS_USERNAME` and `NEXUS_PASSWORD` Actions secrets.
 
 The first run publishes all connector modules. Each connector starts at
-`1.<api-generation>.0` (for example, PDK API `2.11` or `2.0.11-SNAPSHOT`
-maps to connector version `1.11.0`). CI records each connector's PDK API
+`2.<api-generation>.0` (for example, PDK API `2.11` or `2.0.11-SNAPSHOT`
+maps to connector version `2.11.0`). CI records each connector's PDK API
 version and the checked out Git commit inside the generated BOM. Later runs
-compare that commit with the selected source ref. A run with no affected
-connector changes exits without publishing.
+compare that commit with the selected source ref. Existing `1.x` releases are
+migrated to `2.<api-generation>.0` the next time the workflow publishes.
 
 ## Change detection and versions
 
@@ -30,9 +30,9 @@ conservatively select all connectors. Documentation and workflow-only changes
 do not create a connector release.
 
 Each selected connector gets a version based on its own PDK API generation.
-Within the same generation, the patch number increments (`1.11.0` becomes
-`1.11.1`). When that connector moves to a higher PDK API generation, its
-version starts at `1.<new-generation>.0` (`1.11.3` becomes `1.12.0`). The
+Within the same generation, the patch number increments (`2.11.0` becomes
+`2.11.1`). When that connector moves to a higher PDK API generation, its
+version starts at `2.<new-generation>.0` (`2.11.3` becomes `2.12.0`). The
 accepted API spellings are `2.<n>` and `2.0.<n>`; for example, `2.11` and
 `2.0.11-SNAPSHOT` both map to generation `11`. Unsupported formats and API
 generation downgrades fail the workflow. Unchanged connectors retain their

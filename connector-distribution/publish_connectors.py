@@ -230,21 +230,36 @@ def changed_connectors(base_commit, current_commit):
 def next_connector_version(previous, old_api, new_api):
     generation = api_generation(new_api)
     if previous is None:
-        return f"1.{generation}.0"
+        return f"2.{generation}.0"
+
+    if not VERSION_RE.fullmatch(previous):
+        raise ValueError(f"invalid previous connector version: {previous}")
+    parts = [int(part) for part in previous.split(".")]
+    if len(parts) != 3:
+        raise ValueError(f"previous connector version must have three numeric parts: {previous}")
 
     old_generation = api_generation(old_api) if old_api else None
-    if old_generation == generation:
-        parts = [int(part) for part in previous.split(".")]
-        if len(parts) != 3 or parts[0] != 1 or parts[1] != generation:
-            # Migrate connector versions created by the previous 1.0.x policy.
-            return f"1.{generation}.0"
-        parts[2] += 1
-        return ".".join(map(str, parts))
-    if old_generation is not None and generation < old_generation:
+    if old_generation is None:
+        raise ValueError(f"cannot validate previous connector version {previous} without its PDK API version")
+    if generation < old_generation:
         raise ValueError(
             f"PDK API generation for connector moved backwards: {old_generation} -> {generation}"
         )
-    return f"1.{generation}.0"
+    if parts[0] == 1:
+        if parts[1] != old_generation:
+            raise ValueError(
+                f"previous connector version {previous} does not match PDK API generation {old_generation}"
+            )
+        # Migrate connector versions created by the previous 1.x policy.
+        return f"2.{generation}.0"
+    if parts[0] != 2 or parts[1] != old_generation:
+        raise ValueError(
+            f"previous connector version {previous} does not match PDK API generation {old_generation}"
+        )
+    if old_generation == generation:
+        parts[2] += 1
+        return ".".join(map(str, parts))
+    return f"2.{generation}.0"
 
 
 def next_patch(version):
@@ -273,6 +288,10 @@ def bom_releases(pom):
         artifact_id = dependency.findtext("m:artifactId", namespaces=NS)
         version = dependency.findtext("m:version", namespaces=NS)
         if group_id and artifact_id and version:
+            if not VERSION_RE.fullmatch(version):
+                raise ValueError(
+                    f"invalid connector version in previous BOM for {artifact_id}: {version}"
+                )
             api_version = None
             if properties is not None:
                 api_version = properties.findtext(
@@ -331,6 +350,13 @@ def discover_releases(previous, source_commit):
             if artifact in previous_by_artifact
             and previous_by_artifact[artifact].get("pdkApiVersion")
             and api_generation(api) != api_generation(previous_by_artifact[artifact]["pdkApiVersion"])
+        }
+        # Move every connector in an existing 1.x BOM to the aligned 2.x scheme.
+        selected |= {
+            artifact for artifact, release in previous_by_artifact.items()
+            if artifact in current_artifacts
+            and VERSION_RE.fullmatch(release["version"])
+            and int(release["version"].split(".", 1)[0]) == 1
         }
 
     if not selected:
