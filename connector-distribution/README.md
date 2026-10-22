@@ -1,10 +1,8 @@
 # Connector distribution
 
-This directory contains the connector release workflow and documents how Tapstate
-consumes connector artifacts from Nexus through a PDK-specific BOM. Maven
-consumes exact versions from the BOM. The release workflow selects the newest
-connector releases built against the requested PDK API and generates a
-new, immutable BOM.
+This directory contains the connector release workflow. It selects connector
+releases built against the requested PDK API and generates a new, immutable
+BOM with exact connector versions.
 
 ## Current develop branch values
 
@@ -36,9 +34,6 @@ snapshot coordinates.
    `connectors-bom:<bom-version>` POM and deploys it to Nexus. The BOM
    version is never overwritten. A new connector release creates a new BOM;
    unchanged connector JARs are simply referenced again.
-4. Tapstate imports the BOM matching its PDK API and declares the connectors it
-   needs without versions. Updating Tapstate's BOM version is the explicit
-   action that adopts a newer connector set.
 
 `generate_bom.py` implements the selection and POM generation step. CI can
 export the immutable releases and their POM metadata from Nexus into a JSON
@@ -68,10 +63,6 @@ the immutable BOM versions and contents come from the release inventory.
 
 - `generate_bom.py`: generates the immutable BOM POM from published release
   metadata; CI supplies the inventory and output path.
-- `tapstate-consumer/pom.xml`: Tapstate consumer POM. Supply a published BOM
-  version with `-Dconnectors.bom.version=<version>`; connector dependencies
-  remain versionless.
-
 ## Artifact publishing workflow
 
 `.github/workflows/publish-connectors.yml` is the separate artifact publishing
