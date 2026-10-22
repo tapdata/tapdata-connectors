@@ -651,7 +651,7 @@ def update_bom_metadata(repo, version):
         raise RuntimeError(f"BOM metadata update failed in {repo['name']}")
 
 
-def publish_plan(plan, targets, temp):
+def publish_plan(plan, targets, temp, artifacts_path):
     items = plan["items"]
     seen = set()
     for item in items:
@@ -679,12 +679,13 @@ def publish_plan(plan, targets, temp):
         if pending:
             # Expect pre-built artifacts from the credential-free build phase
             for item in pending:
-                module = ROOT / item["module"]
-                jars = [p for p in (module / "target").glob("*.jar")
+                # Look for JARs in the artifacts directory instead of ROOT
+                artifact_target = artifacts_path / item["module"] / "target"
+                jars = [p for p in artifact_target.glob("*.jar")
                         if not p.name.startswith("original-")
                         and not p.name.endswith(("-sources.jar", "-javadoc.jar"))]
                 if len(jars) != 1:
-                    raise RuntimeError(f"expected one shaded JAR in {module / 'target'}, found {len(jars)}")
+                    raise RuntimeError(f"expected one shaded JAR in {artifact_target}, found {len(jars)}")
                 inventory["releases"].append(sync_connector(item, targets, temp, jar=jars[0]))
     for item in items:
         if not item["publish"]:
@@ -709,6 +710,10 @@ def publish_plan(plan, targets, temp):
 
 def main():
     global ROOT
+    if len(sys.argv) > 1:
+        # Plan mode: analyze source and generate release_plan.json
+        source_dir = sys.argv[1]
+        ROOT = Path(source_dir).resolve()
     targets = repositories()
     source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     plan = release_plan(targets, source_commit)
@@ -722,9 +727,12 @@ def main():
     print(f"Run build and upload steps separately to isolate credentials from build execution.")
 
 
-def upload_artifacts():
+def upload_artifacts(source_dir=".", artifacts_dir="build-output"):
     """Upload pre-built artifacts with credentials. Never executes source-controlled code."""
     global ROOT
+    ROOT = Path(source_dir).resolve()
+    artifacts_path = Path(artifacts_dir).resolve()
+
     targets = repositories()
     plan_file = Path("release_plan.json")
     if not plan_file.exists():
@@ -735,16 +743,15 @@ def upload_artifacts():
     with tempfile.TemporaryDirectory(prefix="connector-release-") as temp_dir:
         temp = Path(temp_dir)
         original_root = ROOT
-        # Build in an isolated checkout: local POM edits never affect the caller,
-        # and retries keep using the plan's source even if the branch advanced.
+        # Create an isolated worktree for POM reading only (no building)
         checkout = temp / "source"
-        run(["git", "worktree", "add", "--detach", str(checkout), plan["sourceCommit"]])
+        run(["git", "worktree", "add", "--detach", str(checkout), plan["sourceCommit"]], cwd=ROOT)
         ROOT = checkout
         try:
-            publish_plan(plan, targets, temp)
+            publish_plan(plan, targets, temp, artifacts_path)
         finally:
             ROOT = original_root
-            run(["git", "worktree", "remove", "--force", str(checkout)])
+            run(["git", "worktree", "remove", "--force", str(checkout)], cwd=ROOT)
 
 
 if __name__ == "__main__":

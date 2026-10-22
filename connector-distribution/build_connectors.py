@@ -30,11 +30,14 @@ def set_build_version(module, version):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: build_connectors.py <release_plan.json>", file=sys.stderr)
+    if len(sys.argv) < 3:
+        print("Usage: build_connectors.py <release_plan.json> <source_dir> <output_dir>", file=sys.stderr)
         sys.exit(1)
 
     plan_path = Path(sys.argv[1])
+    source_dir = Path(sys.argv[2]).resolve()
+    output_dir = Path(sys.argv[3]).resolve()
+
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
 
     modules_to_build = [item for item in plan["items"] if item["publish"]]
@@ -47,7 +50,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="connector-build-") as temp_dir:
         temp = Path(temp_dir)
         checkout = temp / "source"
-        run(["git", "worktree", "add", "--detach", str(checkout), plan["sourceCommit"]])
+        run(["git", "worktree", "add", "--detach", str(checkout), plan["sourceCommit"]], cwd=source_dir)
 
         try:
             # Set versions in the isolated checkout
@@ -69,10 +72,10 @@ def main():
             run(["mvn", "-B", "-pl", ",".join(item["module"] for item in modules_to_build),
                  "-am", "clean", "package", "-DskipTests", "-DskipITs"], cwd=checkout)
 
-            # Copy built JARs back to the original working directory
+            # Copy built JARs to the output directory
             for item in modules_to_build:
                 source_target = checkout / item["module"] / "target"
-                dest_target = ROOT / item["module"] / "target"
+                dest_target = output_dir / item["module"] / "target"
                 dest_target.mkdir(parents=True, exist_ok=True)
 
                 for jar in source_target.glob("*.jar"):
@@ -83,7 +86,7 @@ def main():
 
             print("Build complete.")
         finally:
-            run(["git", "worktree", "remove", "--force", str(checkout)])
+            run(["git", "worktree", "remove", "--force", str(checkout)], cwd=source_dir)
 
 
 if __name__ == "__main__":

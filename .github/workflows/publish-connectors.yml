@@ -75,12 +75,22 @@ jobs:
             const sha = await getProtectedBranch(process.env.SOURCE_REF);
             core.setOutput('sha', sha);
 
+      - name: Checkout trusted publishing scripts from main
+        uses: actions/checkout@v4
+        with:
+          repository: tapdata/tapdata-connectors
+          ref: main
+          sparse-checkout: connector-distribution/
+          path: scripts
+          persist-credentials: false
+
       - name: Checkout connector sources and history
         uses: actions/checkout@v4
         with:
           repository: tapdata/tapdata-connectors
           ref: ${{ steps.source.outputs.sha }}
           fetch-depth: 0
+          path: source
           persist-credentials: false
 
       - name: Set up Java
@@ -91,7 +101,7 @@ jobs:
           cache: maven
 
       - name: Verify publisher recovery tests
-        run: python3 -m unittest discover -s connector-distribution -p 'test_*.py'
+        run: python3 -m unittest discover -s scripts/connector-distribution -p 'test_*.py'
 
       - name: Generate release plan (read-only Nexus access)
         env:
@@ -103,12 +113,12 @@ jobs:
           NEXUS_INTERNAL_PASSWORD: ${{ secrets.NEXUS_INTERNAL_PASSWORD }}
           NEXUS_EXTERNAL_USERNAME: ${{ secrets.NEXUS_EXTERNAL_USERNAME }}
           NEXUS_EXTERNAL_PASSWORD: ${{ secrets.NEXUS_EXTERNAL_PASSWORD }}
-        run: python3 connector-distribution/publish_connectors.py
+        run: python3 scripts/connector-distribution/publish_connectors.py source
 
       - name: Build connector artifacts (no credentials in environment)
         run: |
           if [ -f release_plan.json ]; then
-            python3 connector-distribution/build_connectors.py release_plan.json
+            python3 scripts/connector-distribution/build_connectors.py release_plan.json source build-output
           else
             echo "No release plan generated; skipping build."
           fi
@@ -127,7 +137,7 @@ jobs:
         run: |
           python3 -c "
           import sys
-          sys.path.insert(0, 'connector-distribution')
+          sys.path.insert(0, 'scripts/connector-distribution')
           from publish_connectors import upload_artifacts
-          upload_artifacts()
+          upload_artifacts('source', 'build-output')
           "
