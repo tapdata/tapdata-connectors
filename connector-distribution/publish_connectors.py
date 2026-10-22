@@ -677,8 +677,7 @@ def publish_plan(plan, targets, temp):
             else:
                 inventory["releases"].append(record)
         if pending:
-            run(["mvn", "-B", "-pl", ",".join(item["module"] for item in pending),
-                 "-am", "clean", "package", "-DskipTests", "-DskipITs"])
+            # Expect pre-built artifacts from the credential-free build phase
             for item in pending:
                 module = ROOT / item["module"]
                 jars = [p for p in (module / "target").glob("*.jar")
@@ -715,6 +714,24 @@ def main():
     plan = release_plan(targets, source_commit)
     if plan is None:
         return
+
+    # Write the plan for the separate build step
+    plan_file = Path("release_plan.json")
+    plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+    print(f"Release plan written to {plan_file}")
+    print(f"Run build and upload steps separately to isolate credentials from build execution.")
+
+
+def upload_artifacts():
+    """Upload pre-built artifacts with credentials. Never executes source-controlled code."""
+    global ROOT
+    targets = repositories()
+    plan_file = Path("release_plan.json")
+    if not plan_file.exists():
+        raise RuntimeError("release_plan.json not found. Run the plan step first.")
+
+    plan = json.loads(plan_file.read_text(encoding="utf-8"))
+
     with tempfile.TemporaryDirectory(prefix="connector-release-") as temp_dir:
         temp = Path(temp_dir)
         original_root = ROOT

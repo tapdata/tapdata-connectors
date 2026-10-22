@@ -93,7 +93,7 @@ jobs:
       - name: Verify publisher recovery tests
         run: python3 -m unittest discover -s connector-distribution -p 'test_*.py'
 
-      - name: Detect changed connectors, publish releases and generate BOM
+      - name: Generate release plan (read-only Nexus access)
         env:
           NEXUS_INTERNAL_URL: ${{ vars.NEXUS_INTERNAL_URL }}
           NEXUS_EXTERNAL_URL: ${{ vars.NEXUS_EXTERNAL_URL }}
@@ -104,3 +104,30 @@ jobs:
           NEXUS_EXTERNAL_USERNAME: ${{ secrets.NEXUS_EXTERNAL_USERNAME }}
           NEXUS_EXTERNAL_PASSWORD: ${{ secrets.NEXUS_EXTERNAL_PASSWORD }}
         run: python3 connector-distribution/publish_connectors.py
+
+      - name: Build connector artifacts (no credentials in environment)
+        run: |
+          if [ -f release_plan.json ]; then
+            python3 connector-distribution/build_connectors.py release_plan.json
+          else
+            echo "No release plan generated; skipping build."
+          fi
+
+      - name: Upload artifacts to Nexus (credentials isolated from build)
+        if: hashFiles('release_plan.json') != ''
+        env:
+          NEXUS_INTERNAL_URL: ${{ vars.NEXUS_INTERNAL_URL }}
+          NEXUS_EXTERNAL_URL: ${{ vars.NEXUS_EXTERNAL_URL }}
+          NEXUS_INTERNAL_CONNECT_IP: ${{ vars.NEXUS_INTERNAL_CONNECT_IP }}
+          NEXUS_EXTERNAL_CONNECT_IP: ${{ vars.NEXUS_EXTERNAL_CONNECT_IP }}
+          NEXUS_INTERNAL_USERNAME: ${{ secrets.NEXUS_INTERNAL_USERNAME }}
+          NEXUS_INTERNAL_PASSWORD: ${{ secrets.NEXUS_INTERNAL_PASSWORD }}
+          NEXUS_EXTERNAL_USERNAME: ${{ secrets.NEXUS_EXTERNAL_USERNAME }}
+          NEXUS_EXTERNAL_PASSWORD: ${{ secrets.NEXUS_EXTERNAL_PASSWORD }}
+        run: |
+          python3 -c "
+          import sys
+          sys.path.insert(0, 'connector-distribution')
+          from publish_connectors import upload_artifacts
+          upload_artifacts()
+          "
