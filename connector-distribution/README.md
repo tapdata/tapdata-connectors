@@ -23,20 +23,44 @@ Configure these repository/organization Actions variables and secrets:
 | --- | --- | --- |
 | Variable | `NEXUS_INTERNAL_URL` | Full internal Maven releases repository URL, ending in `/repository/maven-releases/` |
 | Variable | `NEXUS_EXTERNAL_URL` | Full external Maven releases repository URL |
+| Variable | `NEXUS_INTERNAL_CONNECT_IP` | Optional internal TCP destination IP; e.g. `192.168.1.184` |
+| Variable | `NEXUS_EXTERNAL_CONNECT_IP` | Optional external TCP destination IP; blank uses normal DNS/hosts resolution |
 | Variable | `CONNECTOR_PUBLISH_RUNNER` | Optional runner label; defaults to `ubuntu-latest` |
 | Secret | `NEXUS_INTERNAL_USERNAME`, `NEXUS_INTERNAL_PASSWORD` | Internal repository credentials |
 | Secret | `NEXUS_EXTERNAL_USERNAME`, `NEXUS_EXTERNAL_PASSWORD` | External repository credentials |
 
 Reusable workflow callers pass all four secrets explicitly (or use
 `secrets: inherit`); URLs and the runner label come from the caller repository's
-Actions variables. Both URLs must be distinct HTTPS endpoints for Maven **hosted
-release** repositories. The selected runner must reach both environments;
+Actions variables. Both URLs must be HTTPS endpoints for Maven **hosted
+release** repositories. Identical URLs are supported when the connection IP
+settings differ. The selected runner must reach both environments;
 configure a self-hosted runner label if GitHub-hosted runners cannot reach the
-internal Nexus. If the same hostname resolves to different installations on
-separate networks, provide distinct reachable endpoints before using this
-single-runner workflow. Credentials need read/upload access, including Maven
+internal Nexus. Credentials need read/upload access, including Maven
 metadata updates. Nexus must allow the custom `json` extension used by release
 plans. CI deliberately fails if either environment is unavailable.
+
+For two independent Nexus installations sharing `nexus.tapdata.net`, set:
+
+```text
+NEXUS_INTERNAL_URL=https://nexus.tapdata.net/repository/maven-releases/
+NEXUS_EXTERNAL_URL=https://nexus.tapdata.net/repository/maven-releases/
+NEXUS_INTERNAL_CONNECT_IP=192.168.1.184
+NEXUS_EXTERNAL_CONNECT_IP=
+```
+
+Internal requests connect directly to `192.168.1.184` using the URL's port,
+while retaining `nexus.tapdata.net` for HTTP Host, TLS SNI, and certificate
+verification. IPv4 and IPv6 literals are accepted; hostnames and port suffixes
+are rejected. This setting applies to all plan, artifact, checksum, and metadata
+reads/writes, including retries. It does not modify global DNS or hosts files.
+Pinned requests bypass environment HTTP(S) proxies and reject redirects; use the
+final repository URL. Each installation needs a certificate trusted by the runner
+and valid for the URL hostname; certificate verification remains enabled.
+
+Use a runner that can reach both the public Nexus and `192.168.1.184`. With the
+external IP blank, ensure its DNS/hosts resolves `nexus.tapdata.net` to the public
+installation (remove the internal hosts override from that runner). Alternatively,
+set `NEXUS_EXTERNAL_CONNECT_IP` to a stable public IP to pin both destinations.
 
 The first run publishes all connector modules. Each connector starts at
 `2.<api-generation>.0` (for example, PDK API `2.11` or `2.0.11-SNAPSHOT`

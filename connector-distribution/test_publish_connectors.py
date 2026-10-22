@@ -18,7 +18,7 @@ import publish_connectors as publisher
 
 
 class Nexus:
-    def __init__(self):
+    def __init__(self, *, host='127.0.0.1', port=0, tls_context=None):
         self.files = {}
         self.puts = []
         self.fail_path = None
@@ -27,6 +27,7 @@ class Nexus:
         self.commit_before_failure = False
         self.truncate_path = None
         self.truncate_count = 0
+        self.hosts = []
         nexus = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -34,6 +35,7 @@ class Nexus:
                 pass
 
             def do_GET(self):
+                nexus.hosts.append(self.headers.get('Host'))
                 if self.headers.get('Authorization') != 'Basic dGVzdDp0ZXN0':
                     self.send_error(401)
                     return
@@ -52,6 +54,7 @@ class Nexus:
                     self.wfile.write(content)
 
             def do_PUT(self):
+                nexus.hosts.append(self.headers.get('Host'))
                 if self.headers.get('Authorization') != 'Basic dGVzdDp0ZXN0':
                     self.send_error(401)
                     return
@@ -70,11 +73,13 @@ class Nexus:
                 self.send_response(201)
                 self.end_headers()
 
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        self.server = ThreadingHTTPServer((host, port), Handler)
+        if tls_context is not None:
+            self.server.socket = tls_context.wrap_socket(self.server.socket, server_side=True)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.repo = {'name': str(self.server.server_port),
-                     'url': f'http://127.0.0.1:{self.server.server_port}/repository/releases/',
+                     'url': f'http://{host}:{self.server.server_port}/repository/releases/',
                      'username': 'test', 'password': 'test'}
 
     def close(self):

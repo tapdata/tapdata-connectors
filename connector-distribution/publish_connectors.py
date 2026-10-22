@@ -4,14 +4,17 @@
 import base64
 import hashlib
 import http.client
+import ipaddress
 import json
 import os
 import re
+import socket
 import subprocess
 import tempfile
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,17 +37,63 @@ def repositories():
     for name in ("INTERNAL", "EXTERNAL"):
         prefix = f"NEXUS_{name}"
         url = os.environ[f"{prefix}_URL"].rstrip("/") + "/"
-        if not url.startswith("https://"):
-            raise ValueError(f"{prefix}_URL must use HTTPS")
+        parsed = urllib.parse.urlsplit(url)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
+                or parsed.password is not None or parsed.query or parsed.fragment):
+            raise ValueError(f"{prefix}_URL must be an HTTPS repository URL without credentials, query or fragment")
+        parsed.port  # Validate port before any requests or uploads.
+        connect_ip = os.environ.get(f"{prefix}_CONNECT_IP", "").strip()
+        if connect_ip:
+            connect_ip = str(ipaddress.ip_address(connect_ip))
         username = os.environ[f"{prefix}_USERNAME"]
         password = os.environ[f"{prefix}_PASSWORD"]
         if not username or not password:
             raise ValueError(f"{prefix} credentials must not be empty")
         targets.append({"name": name.lower(), "url": url,
-                        "username": username, "password": password})
-    if targets[0]["url"] == targets[1]["url"]:
-        raise ValueError("internal and external Nexus URLs must be distinct")
+                        "username": username, "password": password,
+                        "connect_ip": connect_ip})
+    if (targets[0]["url"], targets[0]["connect_ip"]) == (targets[1]["url"], targets[1]["connect_ip"]):
+        raise ValueError("internal and external Nexus targets must have distinct URLs or connection IPs")
     return targets
+
+
+class PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Change only the TCP destination; retain the URL host for TLS and HTTP."""
+
+    def __init__(self, host, *, connect_ip, **kwargs):
+        super().__init__(host, **kwargs)
+        self._create_connection = lambda address, timeout, source_address=None: socket.create_connection(
+            (connect_ip, address[1]), timeout, source_address)
+
+
+class PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, connect_ip):
+        super().__init__()
+        self.connect_ip = connect_ip
+
+    def https_open(self, req):
+        def connection(host, **kwargs):
+            return PinnedHTTPSConnection(host, connect_ip=self.connect_ip, **kwargs)
+        return self.do_open(connection, req, context=self._context)
+
+
+class RejectRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, "Nexus redirects are not allowed", headers, fp)
+
+
+def open_request(repo, req):
+    if not repo.get("connect_ip"):
+        return urllib.request.urlopen(req, timeout=45)
+    # Never let a proxy or redirect route a pinned request to another installation.
+    target = urllib.parse.urlsplit(repo["url"])
+    requested = urllib.parse.urlsplit(req.full_url)
+    if (requested.scheme, requested.hostname, requested.port or 443) != (
+            target.scheme, target.hostname, target.port or 443):
+        raise ValueError("Pinned Nexus request must retain the configured HTTPS origin")
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), PinnedHTTPSHandler(repo["connect_ip"]), RejectRedirects())
+    return opener.open(req, timeout=45)
 
 
 def artifact_url(group_id, artifact_id, version, repo, extension="jar"):
@@ -64,7 +113,7 @@ def request(repo, url, *, data=None, destination=None):
                                      headers={"Authorization": f"Basic {credentials}",
                                               "Content-Type": "application/octet-stream"})
         try:
-            with urllib.request.urlopen(req, timeout=45) as response:
+            with open_request(repo, req) as response:
                 if destination is None:
                     return response.read()
                 received = 0
