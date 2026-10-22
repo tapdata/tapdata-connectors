@@ -125,7 +125,7 @@ def main():
         if any(not isinstance(item[key], str) or not item[key] for key in required[:-1]):
             raise ValueError("module, coordinates, version, and PDK API version must be non-empty strings")
         if item["groupId"] != "io.tapdata":
-            raise ValueError("this demo only publishes io.tapdata connectors")
+            raise ValueError("this workflow only publishes io.tapdata connectors")
         if not VERSION_RE.fullmatch(item["version"]):
             raise ValueError(f"connector version must be an immutable numeric release: {item['version']}")
         if not isinstance(item["publish"], bool):
@@ -187,7 +187,7 @@ def main():
         inventory_path.write_text(json.dumps(inventory, indent=2), encoding="utf-8")
         bom_path = temp / "connectors-bom.pom"
         run([
-            "python3", "connector-distribution-demo/generate_bom.py",
+            "python3", "connector-distribution/generate_bom.py",
             "--inventory", str(inventory_path),
             "--pdk-api-version", pdk_api_version,
             "--bom-version", os.environ["BOM_VERSION"],

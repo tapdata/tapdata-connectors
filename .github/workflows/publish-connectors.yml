@@ -71,4 +71,4 @@ jobs:
           BOM_VERSION: ${{ inputs.bom_version }}
           NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
-        run: python3 connector-distribution-demo/publish_connectors.py
+        run: python3 connector-distribution/publish_connectors.py
