@@ -139,5 +139,5 @@ jobs:
           import sys
           sys.path.insert(0, 'scripts/connector-distribution')
           from publish_connectors import upload_artifacts
-          upload_artifacts('source', 'build-output')
+          upload_artifacts('source', 'build-output', 'scripts')
           "

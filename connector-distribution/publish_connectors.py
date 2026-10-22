@@ -651,7 +651,7 @@ def update_bom_metadata(repo, version):
         raise RuntimeError(f"BOM metadata update failed in {repo['name']}")
 
 
-def publish_plan(plan, targets, temp, artifacts_path):
+def publish_plan(plan, targets, temp, artifacts_path, scripts_dir):
     items = plan["items"]
     seen = set()
     for item in items:
@@ -697,7 +697,9 @@ def publish_plan(plan, targets, temp, artifacts_path):
     inventory_path = temp / "nexus-connector-releases.json"
     inventory_path.write_text(json.dumps(inventory, indent=2), encoding="utf-8")
     bom = temp / "connectors-bom.pom"
-    run(["python3", "connector-distribution/generate_bom.py", "--inventory", str(inventory_path),
+    # Execute generate_bom.py from trusted scripts directory to prevent credential leakage
+    trusted_bom_script = Path(scripts_dir) / "connector-distribution" / "generate_bom.py"
+    run(["python3", str(trusted_bom_script), "--inventory", str(inventory_path),
          "--bom-version", plan["bomVersion"], "--source-commit", plan["sourceCommit"],
          "--output", str(bom)])
     # Both environments have every JAR and connector POM before publishing BOMs.
@@ -727,7 +729,7 @@ def main():
     print(f"Run build and upload steps separately to isolate credentials from build execution.")
 
 
-def upload_artifacts(source_dir=".", artifacts_dir="build-output"):
+def upload_artifacts(source_dir=".", artifacts_dir="build-output", scripts_dir="scripts"):
     """Upload pre-built artifacts with credentials. Never executes source-controlled code."""
     global ROOT
     ROOT = Path(source_dir).resolve()
@@ -748,7 +750,7 @@ def upload_artifacts(source_dir=".", artifacts_dir="build-output"):
         run(["git", "worktree", "add", "--detach", str(checkout), plan["sourceCommit"]], cwd=ROOT)
         ROOT = checkout
         try:
-            publish_plan(plan, targets, temp, artifacts_path)
+            publish_plan(plan, targets, temp, artifacts_path, scripts_dir)
         finally:
             ROOT = original_root
             run(["git", "worktree", "remove", "--force", str(checkout)], cwd=ROOT)
