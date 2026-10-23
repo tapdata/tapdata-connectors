@@ -1,0 +1,171 @@
+name: Publish connector artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Protected connector branch to publish (defaults to the selected workflow branch)
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Protected connector branch to publish.
+        required: false
+        type: string
+    secrets:
+      NEXUS_INTERNAL_USERNAME:
+        required: true
+      NEXUS_INTERNAL_PASSWORD:
+        required: true
+      NEXUS_EXTERNAL_USERNAME:
+        required: true
+      NEXUS_EXTERNAL_PASSWORD:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connector-publish
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ${{ vars.CONNECTOR_PUBLISH_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      source_branch: ${{ steps.source.outputs.branch }}
+      scripts_sha: ${{ steps.source.outputs.scripts_sha }}
+      batches: ${{ steps.plan.outputs.batches }}
+      plan_id: ${{ steps.artifact.outputs.artifact-id }}
+    steps:
+      - name: Validate protected workflow and source branches
+        id: source
+        uses: actions/github-script@v7
+        env:
+          SOURCE_REF: ${{ inputs.source_ref || github.ref }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        with:
+          script: |
+            const repository = 'tapdata/tapdata-connectors';
+            if (context.repo.owner + '/' + context.repo.repo !== repository ||
+                !context.ref.startsWith('refs/heads/')) {
+              throw new Error('Publishing must run from a repository branch.');
+            }
+            const getProtectedBranch = async (ref) => {
+              const branch = ref.replace(/^refs\/heads\//, '');
+              if (!branch || branch.startsWith('refs/')) {
+                throw new Error('Only protected source branches may publish.');
+              }
+              const { data } = await github.rest.repos.getBranch({
+                owner: 'tapdata', repo: 'tapdata-connectors', branch,
+              });
+              if (data.name !== branch || !data.protected) {
+                throw new Error(`Branch ${branch} is not protected.`);
+              }
+              return data.commit.sha;
+            };
+            // Also validate the reusable workflow's own ref, not just its caller.
+            const prefix = `${repository}/.github/workflows/`;
+            if (!process.env.WORKFLOW_REF.startsWith(prefix)) {
+              throw new Error('Unexpected publishing workflow repository or path.');
+            }
+            const workflowRef = process.env.WORKFLOW_REF.split('@').pop();
+            if (workflowRef !== 'refs/heads/develop' || context.ref !== 'refs/heads/develop') {
+              throw new Error('Publishing workflows and callers must run on trusted develop.');
+            }
+            const scriptsSha = await getProtectedBranch(workflowRef);
+            core.setOutput('scripts_sha', scriptsSha);
+            await getProtectedBranch(context.ref);
+            const sha = await getProtectedBranch(process.env.SOURCE_REF);
+            core.setOutput('sha', sha);
+            core.setOutput('branch', process.env.SOURCE_REF.replace(/^refs\/heads\//, ''));
+
+      - uses: actions/checkout@v4
+        with:
+          repository: tapdata/tapdata-connectors
+          ref: ${{ steps.source.outputs.scripts_sha }}
+          path: scripts
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: tapdata/tapdata-connectors
+          ref: ${{ steps.source.outputs.sha }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify publisher recovery tests
+        run: python3 -I -m unittest discover -s scripts/connector-distribution -p 'test_*.py'
+      - name: Persist release plan in both Nexus installations
+        id: plan
+        env:
+          NEXUS_INTERNAL_URL: ${{ vars.NEXUS_INTERNAL_URL }}
+          NEXUS_EXTERNAL_URL: ${{ vars.NEXUS_EXTERNAL_URL }}
+          NEXUS_INTERNAL_CONNECT_IP: ${{ vars.NEXUS_INTERNAL_CONNECT_IP }}
+          NEXUS_EXTERNAL_CONNECT_IP: ${{ vars.NEXUS_EXTERNAL_CONNECT_IP }}
+          NEXUS_INTERNAL_USERNAME: ${{ secrets.NEXUS_INTERNAL_USERNAME }}
+          NEXUS_INTERNAL_PASSWORD: ${{ secrets.NEXUS_INTERNAL_PASSWORD }}
+          NEXUS_EXTERNAL_USERNAME: ${{ secrets.NEXUS_EXTERNAL_USERNAME }}
+          NEXUS_EXTERNAL_PASSWORD: ${{ secrets.NEXUS_EXTERNAL_PASSWORD }}
+        run: python3 -I scripts/connector-distribution/publish_connectors.py plan --source source
+      - uses: actions/upload-artifact@v4
+        id: artifact
+        if: steps.plan.outputs.batches != '[]'
+        with:
+          name: release-plan
+          path: release_plan.json
+          if-no-files-found: error
+          overwrite: true
+
+  batches:
+    needs: plan
+    if: needs.plan.outputs.batches != '[]'
+    strategy:
+      max-parallel: 1
+      matrix:
+        batch: ${{ fromJSON(needs.plan.outputs.batches) }}
+    uses: ./.github/workflows/connector-publish-batch.yml
+    with:
+      batch: ${{ matrix.batch }}
+      source_sha: ${{ needs.plan.outputs.source_sha }}
+      source_branch: ${{ needs.plan.outputs.source_branch }}
+      scripts_sha: ${{ needs.plan.outputs.scripts_sha }}
+      plan_id: ${{ needs.plan.outputs.plan_id }}
+    secrets: inherit
+
+  finalize:
+    needs: [plan, batches]
+    runs-on: ${{ vars.CONNECTOR_PUBLISH_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tapdata/tapdata-connectors
+          ref: ${{ needs.plan.outputs.scripts_sha }}
+          path: scripts
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: tapdata/tapdata-connectors
+          ref: ${{ needs.plan.outputs.source_sha }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.plan.outputs.plan_id }}
+          merge-multiple: true
+          path: release
+      - name: Verify complete inventory and publish BOM to both installations
+        env:
+          NEXUS_INTERNAL_URL: ${{ vars.NEXUS_INTERNAL_URL }}
+          NEXUS_EXTERNAL_URL: ${{ vars.NEXUS_EXTERNAL_URL }}
+          NEXUS_INTERNAL_CONNECT_IP: ${{ vars.NEXUS_INTERNAL_CONNECT_IP }}
+          NEXUS_EXTERNAL_CONNECT_IP: ${{ vars.NEXUS_EXTERNAL_CONNECT_IP }}
+          NEXUS_INTERNAL_USERNAME: ${{ secrets.NEXUS_INTERNAL_USERNAME }}
+          NEXUS_INTERNAL_PASSWORD: ${{ secrets.NEXUS_INTERNAL_PASSWORD }}
+          NEXUS_EXTERNAL_USERNAME: ${{ secrets.NEXUS_EXTERNAL_USERNAME }}
+          NEXUS_EXTERNAL_PASSWORD: ${{ secrets.NEXUS_EXTERNAL_PASSWORD }}
+        run: python3 -I scripts/connector-distribution/publish_connectors.py finalize --source source --plan release/release_plan.json
