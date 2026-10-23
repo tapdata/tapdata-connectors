@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss>
+  <channel>
+    <item><info><title>first</title><tag>A</tag><tag>B</tag></info></item>
+    <item><info><title>second</title><tag>C</tag></info></item>
+  </channel>
+</rss>

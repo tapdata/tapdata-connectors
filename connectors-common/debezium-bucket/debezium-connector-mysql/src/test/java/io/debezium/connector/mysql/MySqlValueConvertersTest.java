@@ -9,6 +9,7 @@ import static org.fest.assertions.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.Month;
@@ -39,6 +40,13 @@ public class MySqlValueConvertersTest {
     private static final TemporalAdjuster ADJUSTER = MySqlValueConverters::adjustTemporal;
     private static final byte[] INVALID_JSON = { 2, 1, 0, 91, 0, 0, 7, 0, 2, 0, 84, 0, 18, 0, 4, 0, 22, 0, 6, 0, 12, 28,
             0, 0, 47, 0, 116, 121, 112, 101 };
+
+    @Test
+    public void shouldPreserveSignWhenNegativeTimeHasZeroHours() {
+        assertEquals(Duration.ofNanos(-1_000), MySqlValueConverters.stringToDuration("-00:00:00.000001"));
+        assertEquals(Duration.ofSeconds(-1), MySqlValueConverters.stringToDuration("-00:00:01"));
+        assertEquals(Duration.ofMinutes(-1), MySqlValueConverters.stringToDuration("-00:01:00"));
+    }
 
     @Test
     public void shouldAdjustLocalDateWithTwoDigitYears() {

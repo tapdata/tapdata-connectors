@@ -4,6 +4,7 @@ import io.tapdata.common.dml.NormalWriteRecorder;
 import io.tapdata.common.dml.WritePolicyEnum;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -53,7 +54,7 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
         preparedStatement.clearParameters();
         int pos = 1;
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            preparedStatement.setObject(pos++, MysqlUtil.toJdbcValue(filterValue(after.get(key), columnTypeMap.get(key))));
         }
     }
 
@@ -83,7 +84,7 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
         preparedStatement.clearParameters();
         int pos = 1;
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            preparedStatement.setObject(pos++, MysqlUtil.toJdbcValue(filterValue(after.get(key), columnTypeMap.get(key))));
         }
     }
 
@@ -116,7 +117,7 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
         preparedStatement.clearParameters();
         int pos = 1;
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(all.get(key), columnTypeMap.get(key)));
+            preparedStatement.setObject(pos++, MysqlUtil.toJdbcValue(filterValue(all.get(key), columnTypeMap.get(key))));
         }
     }
 
@@ -127,11 +128,16 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
                 + after.keySet().stream().map(k -> quoteAndEscape(k) + "=values(" + quoteAndEscape(k) + ")").collect(Collectors.joining(", "));
     }
 
+    @Override
+    protected String object2String(Object value) {
+        return MysqlUtil.object2String(value);
+    }
+
     protected Object filterValue(Object value, String dataType) {
         if (dataType.startsWith("char")) {
             return StringKit.trimTailBlank(value);
         }
-        return value;
+        return MysqlUtil.toJdbcValue(value);
     }
 
     @Override

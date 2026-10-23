@@ -69,78 +69,84 @@ public class ExcelConnector extends FileConnector {
             return;
         }
         long lastModified = file.getLastModified();
-        storage.readFile(fileOffset.getPath(), is -> {
-            try (
-                    Workbook wb = WorkbookFactory.create(is, excelConfig.getExcelPassword())
-            ) {
-                FormulaEvaluator formulaEvaluator = wb.getCreationHelper().createFormulaEvaluator();
-                DataFormatter dataFormatter = new DataFormatter();
-                List<Integer> sheetNumbers = EmptyKit.isEmpty(excelConfig.getSheetNum()) ? ExcelUtil.getAllSheetNumber(wb.getNumberOfSheets()) : excelConfig.getSheetNum();
-                List<Integer> sheets = sheetNumbers.stream().filter(n -> n >= fileOffset.getSheetNum()).collect(Collectors.toList());
-                for (int i = 0; isAlive() && i < sheets.size(); i++) {
-                    Sheet sheet = wb.getSheetAt(sheets.get(i) - 1);
-                    List<CellRangeAddress> mergedList = sheet.getMergedRegions();
-                    int lastMergedRow = mergedList.stream().map(CellRangeAddressBase::getLastRow).max(Comparator.naturalOrder()).orElse(-1);
-                    Map<CellRangeAddress, Cell> mergedDataMap = ExcelUtil.getMergedDataMap(sheet);
-                    fileOffset.setSheetNum(sheets.get(i));
-                    fileOffset.setDataLine(excelConfig.getDataStartLine());
-                    Map<Integer, CellType> cellTypeMap = new HashMap<>();
-                    for (int j = fileOffset.getDataLine() - 1; isAlive() && j <= sheet.getLastRowNum(); j++) {
-                        Row row = sheet.getRow(j);
-                        if (EmptyKit.isNull(row)) {
-                            break;
-                        }
-                        Map<String, Object> after = new HashMap<>();
-                        if (j > lastMergedRow) {
-                            for (int k = excelConfig.getFirstColumn() - 1; k < excelConfig.getLastColumn(); k++) {
-                                Cell cell = row.getCell(k);
-                                checkCellType(k, cell, cellTypeMap);
-                                String fieldName = (String) headers[k - excelConfig.getFirstColumn() + 1];
-                                String fieldType = CellValueConvert.getFieldDataType(tapTable, fieldName);
-                                Object val;
-                                if (excelConfig.getJustString()) {
-                                    Object cellValue = ExcelUtil.getCellValue(cell, formulaEvaluator);
-                                    Object displayValue = ExcelUtil.getCellDisplayValue(cell, formulaEvaluator, dataFormatter);
-                                    val = CellValueConvert.parseValue(cellValue, displayValue, fieldType);
-                                } else {
-                                    Object cellValue = ExcelUtil.getCellValue(cell, formulaEvaluator);
-                                    val = CellValueConvert.parseOriginValue(cellValue, fieldType);
-                                }
-                                after.put(fieldName, val);
+        String filePath = fileOffset.getPath();
+        try {
+            storage.readFile(filePath, is -> {
+                try (
+                        Workbook wb = WorkbookFactory.create(is, excelConfig.getExcelPassword())
+                ) {
+                    FormulaEvaluator formulaEvaluator = wb.getCreationHelper().createFormulaEvaluator();
+                    DataFormatter dataFormatter = new DataFormatter();
+                    List<Integer> sheetNumbers = EmptyKit.isEmpty(excelConfig.getSheetNum()) ? ExcelUtil.getAllSheetNumber(wb.getNumberOfSheets()) : excelConfig.getSheetNum();
+                    List<Integer> sheets = sheetNumbers.stream().filter(n -> n >= fileOffset.getSheetNum()).collect(Collectors.toList());
+                    for (int i = 0; isAlive() && i < sheets.size(); i++) {
+                        Sheet sheet = wb.getSheetAt(sheets.get(i) - 1);
+                        List<CellRangeAddress> mergedList = sheet.getMergedRegions();
+                        int lastMergedRow = mergedList.stream().map(CellRangeAddressBase::getLastRow).max(Comparator.naturalOrder()).orElse(-1);
+                        Map<CellRangeAddress, Cell> mergedDataMap = ExcelUtil.getMergedDataMap(sheet);
+                        fileOffset.setSheetNum(sheets.get(i));
+                        fileOffset.setDataLine(excelConfig.getDataStartLine());
+                        Map<Integer, CellType> cellTypeMap = new HashMap<>();
+                        for (int j = fileOffset.getDataLine() - 1; isAlive() && j <= sheet.getLastRowNum(); j++) {
+                            Row row = sheet.getRow(j);
+                            if (EmptyKit.isNull(row)) {
+                                break;
                             }
-                        } else {
-                            for (int k = excelConfig.getFirstColumn() - 1; k < excelConfig.getLastColumn(); k++) {
-                                Cell cell = row.getCell(k);
-                                checkCellType(k, cell, cellTypeMap);
-                                String fieldName = (String) headers[k - excelConfig.getFirstColumn() + 1];
-                                String fieldType = CellValueConvert.getFieldDataType(tapTable, fieldName);
-                                Object val;
-                                if (excelConfig.getJustString()) {
-                                    Object cellValue = ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, cell, formulaEvaluator);
-                                    Object displayValue = ExcelUtil.getMergedCellDisplayValue(mergedList, mergedDataMap, cell, formulaEvaluator, dataFormatter);
-                                    val = CellValueConvert.parseValue(cellValue, displayValue, CellValueConvert.getFieldDataType(tapTable, fieldName));
-                                } else {
-                                    Object cellValue = ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, cell, formulaEvaluator);
-                                    val = CellValueConvert.parseOriginValue(cellValue, fieldType);
+                            Map<String, Object> after = new HashMap<>();
+                            if (j > lastMergedRow) {
+                                for (int k = excelConfig.getFirstColumn() - 1; k < excelConfig.getLastColumn(); k++) {
+                                    Cell cell = row.getCell(k);
+                                    checkCellType(k, cell, cellTypeMap);
+                                    String fieldName = (String) headers[k - excelConfig.getFirstColumn() + 1];
+                                    String fieldType = CellValueConvert.getFieldDataType(tapTable, fieldName);
+                                    Object val;
+                                    if (excelConfig.getJustString()) {
+                                        Object cellValue = ExcelUtil.getCellValue(cell, formulaEvaluator);
+                                        Object displayValue = ExcelUtil.getCellDisplayValue(cell, formulaEvaluator, dataFormatter);
+                                        val = CellValueConvert.parseValue(cellValue, displayValue, fieldType);
+                                    } else {
+                                        Object cellValue = ExcelUtil.getCellValue(cell, formulaEvaluator);
+                                        val = CellValueConvert.parseOriginValue(cellValue, fieldType);
+                                    }
+                                    after.put(fieldName, val);
                                 }
-                                after.put(fieldName, val);
+                            } else {
+                                for (int k = excelConfig.getFirstColumn() - 1; k < excelConfig.getLastColumn(); k++) {
+                                    Cell cell = row.getCell(k);
+                                    checkCellType(k, cell, cellTypeMap);
+                                    String fieldName = (String) headers[k - excelConfig.getFirstColumn() + 1];
+                                    String fieldType = CellValueConvert.getFieldDataType(tapTable, fieldName);
+                                    Object val;
+                                    if (excelConfig.getJustString()) {
+                                        Object cellValue = ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, cell, formulaEvaluator);
+                                        Object displayValue = ExcelUtil.getMergedCellDisplayValue(mergedList, mergedDataMap, cell, formulaEvaluator, dataFormatter);
+                                        val = CellValueConvert.parseValue(cellValue, displayValue, CellValueConvert.getFieldDataType(tapTable, fieldName));
+                                    } else {
+                                        Object cellValue = ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, cell, formulaEvaluator);
+                                        val = CellValueConvert.parseOriginValue(cellValue, fieldType);
+                                    }
+                                    after.put(fieldName, val);
+                                }
                             }
-                        }
-                        TapRecordEvent recordEvent = insertRecordEvent(after, tapTable.getId()).referenceTime(lastModified);
-                        addEventInfo(recordEvent, lastModified, fileOffset);
-                        tapEvents.get().add(recordEvent);
-                        if (tapEvents.get().size() == eventBatchSize) {
-                            fileOffset.setDataLine(fileOffset.getDataLine() + eventBatchSize);
-                            fileOffset.setPath(fileOffset.getPath());
-                            eventsOffsetConsumer.accept(tapEvents.get(), fileOffset);
-                            tapEvents.set(list());
+                            TapRecordEvent recordEvent = insertRecordEvent(after, tapTable.getId()).referenceTime(lastModified);
+                            addEventInfo(recordEvent, lastModified, fileOffset);
+                            tapEvents.get().add(recordEvent);
+                            if (tapEvents.get().size() == eventBatchSize) {
+                                fileOffset.setDataLine(fileOffset.getDataLine() + eventBatchSize);
+                                fileOffset.setPath(fileOffset.getPath());
+                                eventsOffsetConsumer.accept(tapEvents.get(), fileOffset);
+                                tapEvents.set(list());
+                            }
                         }
                     }
+                } catch (IOException e) {
+                    tapLogger.warn("Reading file {} occurs error: {}, skip it", fileOffset.getPath(), e.getMessage());
                 }
-            } catch (IOException e) {
-                TapLogger.warn(TAG, String.format("Reading file %s occurs error, skip it", fileOffset.getPath()), e);
-            }
-        });
+            });
+        } catch (Exception e) {
+            tapLogger.warn(String.format("Reading Excel source occurs error, table: %s, path: %s", tapTable.getId(), filePath));
+            throw e;
+        }
     }
 
     private void checkCellType(Integer col, Cell cell, Map<Integer, CellType> cellTypeMap) {
@@ -202,27 +208,36 @@ public class ExcelConnector extends FileConnector {
 
     @Override
     public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
-        initConnection(connectionContext);
-        if (EmptyKit.isBlank(fileConfig.getModelName())) {
-            return;
+        Throwable failure = null;
+        try {
+            initConnection(connectionContext);
+            if (EmptyKit.isBlank(fileConfig.getModelName())) {
+                return;
+            }
+            TapTable tapTable = table(fileConfig.getModelName());
+            ConcurrentMap<String, TapFile> excelFileMap = getFilteredFiles();
+            ExcelSchema excelSchema = new ExcelSchema((ExcelConfig) fileConfig, storage);
+            Map<String, Object> sample;
+            //excel has column header
+            if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
+                sample = excelSchema.sampleFixedFileData(excelFileMap);
+            } else //analyze every excel file
+            {
+                sample = excelSchema.sampleEveryFileData(excelFileMap);
+            }
+            if (EmptyKit.isEmpty(sample)) {
+                throw new RuntimeException("Load schema from excel files error: no headers and contents!");
+            }
+            makeTapTable(tapTable, sample, fileConfig.getJustString());
+            consumer.accept(Collections.singletonList(tapTable));
+        } catch (Throwable throwable) {
+            failure = throwable;
+        } finally {
+            failure = destroyStorage(failure);
+            if (failure != null) {
+                throw failure;
+            }
         }
-        TapTable tapTable = table(fileConfig.getModelName());
-        ConcurrentMap<String, TapFile> excelFileMap = getFilteredFiles();
-        ExcelSchema excelSchema = new ExcelSchema((ExcelConfig) fileConfig, storage);
-        Map<String, Object> sample;
-        //excel has column header
-        if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
-            sample = excelSchema.sampleFixedFileData(excelFileMap);
-        } else //analyze every excel file
-        {
-            sample = excelSchema.sampleEveryFileData(excelFileMap);
-        }
-        if (EmptyKit.isEmpty(sample)) {
-            throw new RuntimeException("Load schema from excel files error: no headers and contents!");
-        }
-        makeTapTable(tapTable, sample, fileConfig.getJustString());
-        consumer.accept(Collections.singletonList(tapTable));
-        storage.destroy();
     }
 
     @Override

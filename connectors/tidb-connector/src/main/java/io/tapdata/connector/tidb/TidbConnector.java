@@ -182,6 +182,7 @@ public class TidbConnector extends CommonDbConnector {
                 .withDatabase(tidbConfig.getDatabase());
         try (ProcessHandler handler = ProcessHandler.of(info, consumer)) {
             handler.doActivity();
+            consumer.streamReadStarted();
             doWait(handler);
         } catch (Exception e) {
             throw new CoreException("TiCDC execute failed, message: {}", e.getMessage(), e);
@@ -420,4 +421,3 @@ public class TidbConnector extends CommonDbConnector {
         }
     }
 }
-

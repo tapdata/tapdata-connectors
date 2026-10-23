@@ -469,7 +469,7 @@
         17
       ],
       "fixed": false,
-      "to": "TapNumber"
+      "to": "TapDouble"
     },
     "DECFLOAT": {
       "precision": [
@@ -608,5 +608,4 @@
     }
   }
 }
-
 

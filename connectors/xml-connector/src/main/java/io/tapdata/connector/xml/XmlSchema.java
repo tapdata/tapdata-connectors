@@ -34,8 +34,21 @@ public class XmlSchema extends FileSchema {
                 saxReader.read(reader);
             } catch (StopException ignored) {
             } catch (Exception e) {
-                TapLogger.error(TAG, "read xml file error!", e);
+                if (!hasStopException(e)) {
+                    TapLogger.error(TAG, "read xml file error!", e);
+                }
             }
         });
+    }
+
+    private boolean hasStopException(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof StopException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }

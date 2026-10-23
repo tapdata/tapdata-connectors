@@ -111,7 +111,7 @@ The connector supports multiple storage backends:
 **Precision and compatibility notes**:
 - `INT` and `INTEGER` both create Paimon `INT` columns. Existing columns previously created as STRING remain unchanged and numeric CDC values continue to be stringified against the physical target schema.
 - Integer writes are exact: fractional and out-of-range values fail instead of being truncated.
-- Bare `DECIMAL` keeps the connector default `DECIMAL(38,10)`. Paimon applies `HALF_UP` when scaling decimal values and precision overflow fails the write.
+- Bare `DECIMAL` keeps the connector default `DECIMAL(38,10)`. Values must fit the physical column's precision and scale exactly: precision overflow or a scale reduction that would change the value fails the write. The connector does not apply `HALF_UP` rounding. For `DECIMAL(5,2)`, `1.235` is rejected, while `1.2300` is accepted as `1.23` because removing trailing zeros preserves its value.
 - Bare `TIME` creates `TIME(3)`. `TIME(0)` through `TIME(3)` are supported; higher declared or incoming precision is rejected to prevent silent loss.
 
 ## Building
@@ -122,6 +122,48 @@ mvn clean package
 ```
 
 The connector JAR will be generated in `target/` and copied to `../dist/`.
+
+## Local S3 Tests (RustFS)
+
+Local S3 compatibility tests use **`rustfs/rustfs:1.0.1`**. From the repository root,
+with Docker running and Maven using JDK 17 or newer (`mvn -version`):
+
+```bash
+# Run the RustFS integration tests.
+./scripts/run-paimon-s3-test.sh
+
+# Run all connector tests, including the RustFS tests.
+./scripts/run-paimon-s3-test.sh '*'
+
+# Run a selected test or method; additional arguments are passed to Maven.
+./scripts/run-paimon-s3-test.sh 'PaimonRustFsIntegrationTest#conditionalWritesMustHaveOneWinnerAndRejectStaleEtag' -o
+```
+
+The script starts a disposable RustFS container, publishes the S3 API on a random
+`127.0.0.1` port, waits for `/health/ready`, and supplies local test credentials.
+Each test creates a unique bucket. The container and its anonymous data/log volumes
+are removed on exit, including when Maven fails. Existing object storage is not used.
+No MinIO image or additional Java test dependency is required.
+
+`PaimonRustFsIntegrationTest` verifies connector insert/update/delete and reads after
+reopening with both `s3://` and `s3a://` warehouse inputs. The current connector
+resolves both to Hadoop S3A; a separate native Paimon Catalog test explicitly uses
+`s3://` and verifies commit/read/reopen. The suite also covers concurrent conditional
+creation (`If-None-Match: *`) and stale ETag rejection (`If-Match`, HTTP 412).
+The existing localhost HTTP contract tests still verify signed request headers.
+Ordinary `mvn test` does not require Docker; the additional RustFS tests are enabled
+only by `PAIMON_RUSTFS_TEST=true`, with `PAIMON_S3_ENDPOINT`,
+`PAIMON_S3_ACCESS_KEY`, and `PAIMON_S3_SECRET_KEY` supplied by the script.
+
+On macOS with jEnv, an invocation can select an installed ARM64 JDK 17 without
+changing the global Java setting:
+
+```bash
+JENV_VERSION=system JAVA_HOME="$(/usr/libexec/java_home -v 17 -a arm64)" \
+  ./scripts/run-paimon-s3-test.sh
+```
+
+RustFS container configuration follows the [official Docker documentation](https://docs.rustfs.com/en/installation/container/docker).
 
 ## Dependencies
 

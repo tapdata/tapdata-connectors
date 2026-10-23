@@ -631,7 +631,7 @@
     },
     "Float32[($precision,$scale)]": {
       "queryOnly": true,
-      "to": "TapNumber",
+      "to": "TapFloat",
       "name": "float",
       "precision": [
         1,
@@ -645,8 +645,7 @@
       "fixed": false
     },
     "Float64": {
-      "queryOnly": true,
-      "to": "TapNumber",
+      "to": "TapDouble",
       "precision": [
         0,
         30
@@ -655,6 +654,20 @@
         0,
         30
       ],
+      "fixed": false
+    },
+    "Float32": {
+      "to": "TapFloat",
+      "name": "float",
+      "precision": [
+        1,
+        7
+      ],
+      "scale": [
+        0,
+        7
+      ],
+      "unsigned": "unsigned",
       "fixed": false
     },
     "Decimal[($precision,$scale)]": {

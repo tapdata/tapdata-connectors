@@ -49,9 +49,15 @@ public class FileStreamConnector extends FileConnector {
         after.put("file_path", path);
         after.put("file_size", size);
         after.put("last_modified", lastModified);
-        after.put("file_data", storage.readFile(fileOffset.getPath()));
-        TapRecordEvent tapEvent = insertRecordEvent(after, "file").referenceTime(lastModified);
-        eventsOffsetConsumer.accept(Collections.singletonList(tapEvent), fileOffset);
+        // file_data is borrowed by the event consumer.  The consumer may close it
+        // itself, but it must finish consuming the event before returning.  The
+        // try-with-resources below is the producer-side safety net that releases
+        // FTP/SFTP storage permits when a consumer leaves the stream open.
+        try (InputStream fileData = storage.readFile(fileOffset.getPath())) {
+            after.put("file_data", fileData);
+            TapRecordEvent tapEvent = insertRecordEvent(after, "file").referenceTime(lastModified);
+            eventsOffsetConsumer.accept(Collections.singletonList(tapEvent), fileOffset);
+        }
     }
 
     @Override

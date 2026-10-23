@@ -702,11 +702,11 @@
     },
     "float": {
       "bit": 32,
-      "to": "TapNumber"
+      "to": "TapFloat"
     },
     "double": {
       "bit": 64,
-      "to": "TapNumber"
+      "to": "TapDouble"
     },
     "decimal[($precision,$scale)]": {
       "bit": 128,

@@ -99,6 +99,9 @@ Paimon 数据库名称（默认：default）
 
 `INT` 和 `INTEGER` 都创建 Paimon `INT`。不带参数的 `DECIMAL` 使用 `DECIMAL(38,10)`；
 不带参数的 `TIME` 使用 `TIME(3)`，仅支持 0-3 位精度，包含亚毫秒精度的输入会被拒绝。
+
+DECIMAL 值必须精确符合物理列的 precision 和 scale。精度溢出或缩减小数位数会改变数值时，写入失败；连接器不会执行 `HALF_UP` 舍入。例如，写入 `DECIMAL(5,2)` 时，`1.235` 会被拒绝，`1.2300` 则可作为 `1.23` 写入，因为去除尾随零不会改变数值。
+
 连接器不会自动迁移已有目标列：历史 STRING 列仍按实际物理类型写入，原生 Paimon
 ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 JSON 写入 STRING 列。
 
@@ -131,6 +134,16 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 J
 - 增加批量大小以提高吞吐量
 - 为工作负载使用适当的存储后端
 - 考虑启用 Paimon 的压缩功能
+
+### 磁盘临时目录
+
+`diskTmpDir` 必须填写本机绝对路径，例如 `/data/tapdata/paimon-tmp`。
+多个目录可用逗号分隔；目录项两侧的空白会被去除，空目录项会被拒绝。
+禁止填写相对路径、URI 或 Paimon 表属性（例如 `'write-buffer-size' = '128mb'`）。
+连接、任务节点及表级覆盖配置均需检查；表级配置可覆盖全局目录。
+非法配置会在创建 Catalog 和执行临时目录清理之前报错，不会自动回退到工作目录。
+默认值仍为 `/tmp`；显式置空时使用 `java.io.tmpdir`，该系统属性缺失或为空时使用 `/tmp`。
+已有的相对路径配置需要改成绝对路径。该修复不会自动搬迁或删除历史错误目录。
 
 ## 参考资料
 

@@ -13,6 +13,7 @@ import org.apache.paimon.utils.Pair;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.math.RoundingMode;
 import java.util.Locale;
 
 /** Converts Tap CDC schema types to the connector's Paimon storage contract. */
@@ -390,8 +391,16 @@ public final class PaimonDataTypeConverter {
             throw failure("DECIMAL target requires a Number or numeric string");
         }
 
-        Decimal converted =
-                Decimal.fromBigDecimal(source, targetType.getPrecision(), targetType.getScale());
+        if (source.signum() != 0 && (long) source.precision() - source.scale()
+                > targetType.getPrecision() - targetType.getScale()) {
+            throw failure("DECIMAL precision overflow");
+        }
+        if (source.stripTrailingZeros().scale() > targetType.getScale()) {
+            throw failure("DECIMAL value exceeds target scale; rounding would change the value");
+        }
+        // Paimon rounds HALF_UP by default. Reject loss before delegating to the native value.
+        Decimal converted = Decimal.fromBigDecimal(source.setScale(targetType.getScale(), RoundingMode.UNNECESSARY),
+                targetType.getPrecision(), targetType.getScale());
         if (converted == null) {
             throw failure("DECIMAL precision overflow after applying target scale");
         }
