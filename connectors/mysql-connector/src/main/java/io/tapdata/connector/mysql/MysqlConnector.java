@@ -85,6 +85,37 @@ import java.util.stream.Collectors;
  **/
 @TapConnectorClass("mysql-spec.json")
 public class MysqlConnector extends CommonDbConnector {
+    private final ThreadLocal<Boolean> transactionActive = ThreadLocal.withInitial(() -> false);
+
+    @Override
+    protected void beginTransaction(TapConnectorContext connectorContext) {
+        transactionActive.set(true);
+        // Keep the legacy flag for existing subclass write overrides. This writer uses thread-local state.
+        isTransaction = true;
+    }
+
+    @Override
+    protected void commitTransaction(TapConnectorContext connectorContext) throws Throwable {
+        finishTransaction(true);
+    }
+
+    @Override
+    protected void rollbackTransaction(TapConnectorContext connectorContext) throws Throwable {
+        finishTransaction(false);
+    }
+
+    private void finishTransaction(boolean commit) throws SQLException {
+        try (Connection connection = transactionConnectionMap.remove(Thread.currentThread().getName())) {
+            if (connection != null && !connection.isClosed()) {
+                if (commit) connection.commit();
+                else connection.rollback();
+            }
+        } finally {
+            transactionActive.remove();
+            isTransaction = false;
+        }
+    }
+
 
     protected MysqlJdbcContextV2 mysqlJdbcContext;
     protected MysqlConfig mysqlConfig;
@@ -582,7 +613,7 @@ public class MysqlConnector extends CommonDbConnector {
             updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
         }
         NormalRecordWriter mysqlRecordWriter;
-        if (isTransaction) {
+        if (Boolean.TRUE.equals(transactionActive.get())) {
             String threadName = Thread.currentThread().getName();
             Connection connection;
             if (transactionConnectionMap.containsKey(threadName)) {
