@@ -88,6 +88,37 @@ import static io.tapdata.pdk.apis.entity.ConnectionOptions.DDL_DROP_FIELD_EVENT;
  */
 @TapConnectorClass("spec_postgres.json")
 public class PostgresConnector extends CommonDbConnector {
+    private final ThreadLocal<Boolean> transactionActive = ThreadLocal.withInitial(() -> false);
+
+    @Override
+    protected void beginTransaction(TapConnectorContext connectorContext) {
+        transactionActive.set(true);
+        // Keep the legacy flag for existing subclass write overrides. This writer uses thread-local state.
+        isTransaction = true;
+    }
+
+    @Override
+    protected void commitTransaction(TapConnectorContext connectorContext) throws Throwable {
+        finishTransaction(true);
+    }
+
+    @Override
+    protected void rollbackTransaction(TapConnectorContext connectorContext) throws Throwable {
+        finishTransaction(false);
+    }
+
+    private void finishTransaction(boolean commit) throws SQLException {
+        try (Connection connection = transactionConnectionMap.remove(Thread.currentThread().getName())) {
+            if (connection != null && !connection.isClosed()) {
+                if (commit) connection.commit();
+                else connection.rollback();
+            }
+        } finally {
+            transactionActive.remove();
+            isTransaction = false;
+        }
+    }
+
     protected PostgresConfig postgresConfig;
     protected PostgresJdbcContext postgresJdbcContext;
     private PostgresTest postgresTest;
@@ -679,7 +710,7 @@ public class PostgresConnector extends CommonDbConnector {
             deleteDmlPolicy = ConnectionOptions.DML_DELETE_POLICY_IGNORE_ON_NON_EXISTS;
         }
         NormalRecordWriter postgresRecordWriter;
-        if (isTransaction) {
+        if (Boolean.TRUE.equals(transactionActive.get())) {
             String threadName = Thread.currentThread().getName();
             Connection connection;
             if (transactionConnectionMap.containsKey(threadName)) {
