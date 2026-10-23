@@ -81,3 +81,7 @@ SELECT host，user，Grant_ priv，Super_ priv FROM mysql.user where user='usern
 UPDATE mysql.user SET Grant_ priv='Y' WHERE user='username'；
 FLUSH PRIVILEGES；
 ```
+
+### 自訂 SQL 命令超時
+
+`execute` / `executeQuery` 命令參數：`sql` 為 SQL；`batchSize` 為 int 範圍內整數，預設 1000，零或負數使用預設值；`queryTimeoutSeconds` 為 0..2147483647 的整數秒。省略或 0 不設定期限，負數、小數及溢位值會報錯。正值透過 JDBC `Statement.setQueryTimeout` 生效；驅動不支援時明確報錯，若接受無期限執行才設為 0。MySQL 命令查詢使用串流讀取（`fetchSize=Integer.MIN_VALUE`）；Connector/J 的取消計時綁定在語句執行階段，因此逾時僅約束 `execute()`，不約束之後逐行拉取結果的時間。若逐行讀取也需要上限，請配合 `batchSize`、任務取消以及伺服器端 `socketTimeout`/`net_read_timeout`。
