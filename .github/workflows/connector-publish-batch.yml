@@ -124,8 +124,10 @@ jobs:
 
   build:
     needs: prepare
-    # Source builds run on disposable GitHub-hosted VMs, never on a Nexus runner.
-    runs-on: ubuntu-latest
+    # Use the configured runner so clean connector builds can reach the same
+    # internal Maven mirror and cached native dependencies as the IT runners.
+    # This job still receives no Nexus publishing secrets.
+    runs-on: ${{ vars.CONNECTOR_PUBLISH_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 180
     outputs:
       artifacts_id: ${{ steps.jars.outputs.artifact-id }}
