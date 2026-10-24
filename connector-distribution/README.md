@@ -11,14 +11,19 @@ full connector set.
 `.github/workflows/publish-connectors.yml` can be started with
 `workflow_dispatch` or called with `workflow_call`. The only optional input is
 `source_ref`; when omitted, CI uses the selected workflow branch. Both the
-workflow and caller must run on the explicitly trusted, protected `develop`
-branch in `tapdata/tapdata-connectors`. The source may be any protected branch
-in that repository. The reusable batch workflow independently checks the caller,
+workflow and caller must run on the explicitly trusted, protected `main` or
+`develop` branch in `tapdata/tapdata-connectors`. The source may be any protected
+branch in that repository. The reusable batch workflow independently checks the caller,
 branch protection, and that each pinned commit belongs to its validated branch
-history (scripts from `develop`, source from the selected source branch).
+history (scripts from the workflow branch, source from the selected source branch).
 Tags, commit refs, and unprotected branches are rejected before checkout or
 Nexus credential setup. CI resolves the validated source branch to a commit SHA
 and checks out that exact commit.
+
+For a manual release, select **main** (or **develop**) in the Actions **Run workflow**
+branch selector. Leave `source_ref` blank to release that branch, or enter a
+protected source branch such as `develop`. Changing `source_ref` alone does not
+change the branch that supplies the workflow and publishing scripts.
 
 Configure these repository/organization Actions variables and secrets:
 
@@ -31,6 +36,14 @@ Configure these repository/organization Actions variables and secrets:
 | Variable | `CONNECTOR_PUBLISH_RUNNER` | Optional runner label; defaults to `ubuntu-latest` |
 | Secret | `NEXUS_INTERNAL_USERNAME`, `NEXUS_INTERNAL_PASSWORD` | Internal repository credentials |
 | Secret | `NEXUS_EXTERNAL_USERNAME`, `NEXUS_EXTERNAL_PASSWORD` | External repository credentials |
+
+The planning job validates these settings before source checkout and recovery tests.
+If settings are missing or blank, it lists all missing names without printing values.
+Configuration validation does not test Nexus connectivity or upload permissions.
+Set them under **Settings → Secrets and variables → Actions**, using the Variables
+and Secrets tabs respectively, or organization settings accessible to this repository.
+These jobs do not select a GitHub Environment, so Environment-only settings are not
+available. A missing URL is a configuration error, not an HTTPS server error.
 
 Reusable workflow callers pass all four secrets explicitly (or use
 `secrets: inherit`); URLs and the runner label come from the caller repository's
@@ -65,9 +78,9 @@ external IP blank, ensure its DNS/hosts resolves `nexus.tapdata.net` to the publ
 installation (remove the internal hosts override from that runner). Alternatively,
 set `NEXUS_EXTERNAL_CONNECT_IP` to a stable public IP to pin both destinations.
 
-Publishing scripts are checked out from a pinned commit of protected `develop`,
-where this workflow is installed. Planning, batch preparation, upload, and BOM
-publication run separately from Maven. Each batch builds on a disposable
+Publishing scripts are checked out from a pinned commit of the protected workflow
+branch (`main` or `develop`), where this workflow is installed. Planning, batch
+preparation, upload, and BOM publication run separately from Maven. Each batch builds on a disposable
 GitHub-hosted `ubuntu-latest` runner without Nexus secrets; the upload job checks
 out the trusted scripts again. Source builds never execute on the internal Nexus
 runner. The build runner needs access to the Maven dependencies used for packaging.

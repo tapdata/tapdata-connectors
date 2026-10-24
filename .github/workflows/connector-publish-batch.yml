@@ -44,16 +44,30 @@ jobs:
         with:
           script: |
             const repository = 'tapdata/tapdata-connectors';
+            const trustedRefs = new Set(['refs/heads/main', 'refs/heads/develop']);
+            const workflowRef = process.env.CALLER_WORKFLOW.split('@').pop();
             if (context.repo.owner + '/' + context.repo.repo !== repository ||
-                context.ref !== 'refs/heads/develop' ||
+                !trustedRefs.has(context.ref) ||
                 !process.env.CALLER_WORKFLOW.startsWith(repository + '/.github/workflows/') ||
-                !process.env.CALLER_WORKFLOW.endsWith('@refs/heads/develop')) {
-              throw new Error('Only workflows on the trusted develop branch may publish.');
+                !trustedRefs.has(workflowRef)) {
+              throw new Error('Only workflows on trusted main or develop may publish.');
             }
             const { data: branch } = await github.rest.repos.getBranch({
-              owner: 'tapdata', repo: 'tapdata-connectors', branch: 'develop',
+              owner: 'tapdata', repo: 'tapdata-connectors',
+              branch: workflowRef.replace(/^refs\/heads\//, ''),
             });
-            if (!branch.protected) throw new Error('develop must be protected.');
+            if (branch.name !== workflowRef.replace(/^refs\/heads\//, '') || !branch.protected) {
+              throw new Error('Publishing workflow branch must be protected.');
+            }
+            if (context.ref !== workflowRef) {
+              const { data: caller } = await github.rest.repos.getBranch({
+                owner: 'tapdata', repo: 'tapdata-connectors',
+                branch: context.ref.replace(/^refs\/heads\//, ''),
+              });
+              if (caller.name !== context.ref.replace(/^refs\/heads\//, '') || !caller.protected) {
+                throw new Error('Caller branch must be protected.');
+              }
+            }
             const sourceBranch = process.env.SOURCE_BRANCH;
             if (!sourceBranch || sourceBranch.startsWith('refs/')) throw new Error('Expected a source branch name.');
             const { data: source } = await github.rest.repos.getBranch({

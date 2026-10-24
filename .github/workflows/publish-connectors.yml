@@ -73,8 +73,9 @@ jobs:
               throw new Error('Unexpected publishing workflow repository or path.');
             }
             const workflowRef = process.env.WORKFLOW_REF.split('@').pop();
-            if (workflowRef !== 'refs/heads/develop' || context.ref !== 'refs/heads/develop') {
-              throw new Error('Publishing workflows and callers must run on trusted develop.');
+            const trustedRefs = new Set(['refs/heads/main', 'refs/heads/develop']);
+            if (!trustedRefs.has(workflowRef) || !trustedRefs.has(context.ref)) {
+              throw new Error('Publishing workflows and callers must run on trusted main or develop.');
             }
             const scriptsSha = await getProtectedBranch(workflowRef);
             core.setOutput('scripts_sha', scriptsSha);
@@ -89,6 +90,17 @@ jobs:
           ref: ${{ steps.source.outputs.scripts_sha }}
           path: scripts
           persist-credentials: false
+      - name: Validate Nexus configuration
+        env:
+          NEXUS_INTERNAL_URL: ${{ vars.NEXUS_INTERNAL_URL }}
+          NEXUS_EXTERNAL_URL: ${{ vars.NEXUS_EXTERNAL_URL }}
+          NEXUS_INTERNAL_CONNECT_IP: ${{ vars.NEXUS_INTERNAL_CONNECT_IP }}
+          NEXUS_EXTERNAL_CONNECT_IP: ${{ vars.NEXUS_EXTERNAL_CONNECT_IP }}
+          NEXUS_INTERNAL_USERNAME: ${{ secrets.NEXUS_INTERNAL_USERNAME }}
+          NEXUS_INTERNAL_PASSWORD: ${{ secrets.NEXUS_INTERNAL_PASSWORD }}
+          NEXUS_EXTERNAL_USERNAME: ${{ secrets.NEXUS_EXTERNAL_USERNAME }}
+          NEXUS_EXTERNAL_PASSWORD: ${{ secrets.NEXUS_EXTERNAL_PASSWORD }}
+        run: python3 -I scripts/connector-distribution/publish_connectors.py validate-config
       - uses: actions/checkout@v4
         with:
           repository: tapdata/tapdata-connectors
