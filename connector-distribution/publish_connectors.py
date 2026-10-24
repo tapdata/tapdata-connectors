@@ -35,6 +35,16 @@ def run(command, *, cwd=None):
 
 
 def repositories():
+    required = [f"NEXUS_{name}_{suffix}"
+                for name in ("INTERNAL", "EXTERNAL")
+                for suffix in ("URL", "USERNAME", "PASSWORD")]
+    missing = [key for key in required if not os.environ.get(key, "").strip()]
+    if missing:
+        raise ValueError(
+            "Missing Actions configuration: " + ", ".join(missing) +
+            ". Configure *_URL under Settings > Secrets and variables > Actions > Variables "
+            "and *_USERNAME/*_PASSWORD under Secrets (or grant repository access to "
+            "organization configuration). Publishing jobs do not select an Environment.")
     targets = []
     for name in ("INTERNAL", "EXTERNAL"):
         prefix = f"NEXUS_{name}"
@@ -794,14 +804,20 @@ def upload_artifacts(source_dir=".", artifacts_dir="build-output", scripts_dir=N
 
 def cli():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["plan", "prepare", "upload", "finalize"])
+    parser.add_argument("mode", choices=["validate-config", "plan", "prepare", "upload", "finalize"])
     parser.add_argument("--source", default="source")
     parser.add_argument("--plan", default="release_plan.json")
     parser.add_argument("--artifacts", default="build-output")
     parser.add_argument("--batch", type=int)
     parser.add_argument("--output", default="build-request.json")
     args = parser.parse_args()
-    if args.mode == "plan":
+    if args.mode == "validate-config":
+        try:
+            repositories()
+        except ValueError as error:
+            parser.exit(1, str(error) + "\n")
+        print("Nexus configuration is complete and valid; connectivity is not checked.")
+    elif args.mode == "plan":
         plan = main(args.source, args.plan)
         count = sum(item["publish"] for item in plan["items"]) if plan else 0
         batches = list(range(max(1, (count + BATCH_SIZE - 1) // BATCH_SIZE))) if plan else []

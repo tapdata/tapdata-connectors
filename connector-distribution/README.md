@@ -37,6 +37,14 @@ Configure these repository/organization Actions variables and secrets:
 | Secret | `NEXUS_INTERNAL_USERNAME`, `NEXUS_INTERNAL_PASSWORD` | Internal repository credentials |
 | Secret | `NEXUS_EXTERNAL_USERNAME`, `NEXUS_EXTERNAL_PASSWORD` | External repository credentials |
 
+The planning job validates these settings before source checkout and recovery tests.
+If settings are missing or blank, it lists all missing names without printing values.
+Configuration validation does not test Nexus connectivity or upload permissions.
+Set them under **Settings → Secrets and variables → Actions**, using the Variables
+and Secrets tabs respectively, or organization settings accessible to this repository.
+These jobs do not select a GitHub Environment, so Environment-only settings are not
+available. A missing URL is a configuration error, not an HTTPS server error.
+
 Reusable workflow callers pass all four secrets explicitly (or use
 `secrets: inherit`); URLs and the runner label come from the caller repository's
 Actions variables. Both URLs must be HTTPS endpoints for Maven **hosted

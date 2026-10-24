@@ -23,6 +23,27 @@ class RepositoryConfigurationTests(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
+    def test_missing_configuration_lists_all_required_names(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, 'Missing Actions configuration') as failure:
+                publisher.repositories()
+        for name in ('INTERNAL', 'EXTERNAL'):
+            for suffix in ('URL', 'USERNAME', 'PASSWORD'):
+                self.assertIn(f'NEXUS_{name}_{suffix}', str(failure.exception))
+        self.assertNotIn('CONNECT_IP', str(failure.exception))
+
+    def test_empty_configuration_names_only_without_secret_values(self):
+        os.environ['NEXUS_INTERNAL_URL'] = '  '
+        os.environ['NEXUS_EXTERNAL_PASSWORD'] = ''
+        os.environ['NEXUS_INTERNAL_PASSWORD'] = 'private-test-value'
+        with self.assertRaises(ValueError) as failure:
+            publisher.repositories()
+        message = str(failure.exception)
+        self.assertIn('NEXUS_INTERNAL_URL', message)
+        self.assertIn('NEXUS_EXTERNAL_PASSWORD', message)
+        self.assertNotIn('private-test-value', message)
+        self.assertNotIn('NEXUS_INTERNAL_PASSWORD', message)
+
     def test_same_url_with_internal_pin_and_external_dns(self):
         os.environ['NEXUS_INTERNAL_CONNECT_IP'] = '192.168.1.184'
         internal, external = publisher.repositories()
