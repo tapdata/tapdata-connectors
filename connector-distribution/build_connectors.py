@@ -90,8 +90,17 @@ def build(plan_path, source_dir, output_dir):
                 target = checkout / item["module"] / "target"
                 jars = [p for p in target.glob("*.jar") if not p.name.startswith("original-")
                         and not p.name.endswith(("-sources.jar", "-javadoc.jar"))]
+                # Assembly-based connectors produce both Maven's thin
+                # artifactId-version.jar and the distributable
+                # artifactId-vversion-timestamp.jar. Prefer the latter; shade
+                # based connectors generally leave just one candidate.
+                distribution_prefix = f"{item['artifactId']}-v{item['version']}-"
+                distribution_jars = [p for p in jars if p.name.startswith(distribution_prefix)]
+                if len(distribution_jars) == 1:
+                    jars = distribution_jars
                 if len(jars) != 1:
-                    raise RuntimeError(f"expected one shaded JAR in {target}, found {len(jars)}")
+                    names = ", ".join(sorted(p.name for p in jars)) or "none"
+                    raise RuntimeError(f"expected one distributable JAR in {target}, found {len(jars)}: {names}")
                 destination = output_dir / item["artifactId"]
                 destination.mkdir()
                 shutil.copyfile(jars[0], destination / "connector.jar")
