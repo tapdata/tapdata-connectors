@@ -150,7 +150,21 @@ jobs:
           artifact-ids: ${{ needs.prepare.outputs.request_id }}
           merge-multiple: true
           path: request
+      - name: Use the preinstalled JDK 17 on the configured self-hosted runner
+        if: vars.CONNECTOR_PUBLISH_RUNNER != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          java_home=/usr/java/jdk-17.0.12
+          [[ -x "$java_home/bin/java" ]] || {
+            echo "::error::Expected preinstalled JDK 17 at $java_home" >&2
+            exit 1
+          }
+          echo "JAVA_HOME=$java_home" >> "$GITHUB_ENV"
+          echo "$java_home/bin" >> "$GITHUB_PATH"
+          "$java_home/bin/java" -version
       - uses: actions/setup-java@v4
+        if: vars.CONNECTOR_PUBLISH_RUNNER == ''
         with:
           distribution: temurin
           java-version: '17'
