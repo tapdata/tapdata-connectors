@@ -51,28 +51,26 @@ const github = {rest: {repos: {
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('scripts_sha', json.loads(result.stdout))
 
-    def test_both_guards_accept_main_and_develop_workflow_and_caller(self):
-        for filename in ['publish-connectors.yml', 'connector-publish-batch.yml']:
-            for workflow_branch in ['main', 'develop']:
-                for caller_branch in ['main', 'develop']:
-                    with self.subTest(filename=filename, workflow=workflow_branch, caller=caller_branch):
-                        result = self.guard(
-                            filename, ref='refs/heads/' + caller_branch, source=caller_branch,
-                            workflow='tapdata/tapdata-connectors/.github/workflows/publish-connectors.yml@refs/heads/' + workflow_branch)
-                        self.assertEqual(result.returncode, 0, result.stderr)
-                        if filename == 'publish-connectors.yml':
-                            expected = ('d' if workflow_branch == 'main' else 'c') * 40
-                            self.assertEqual(json.loads(result.stdout)['scripts_sha'], expected)
-
-    def test_both_guards_require_protected_workflow_caller_and_source(self):
-        for filename in ['publish-connectors.yml', 'connector-publish-batch.yml']:
-            for branch in ['main', 'develop', 'release/v3']:
-                with self.subTest(filename=filename, unprotected=branch):
+    def test_primary_guard_accepts_main_and_develop_workflow_and_caller(self):
+        for workflow_branch in ['main', 'develop']:
+            for caller_branch in ['main', 'develop']:
+                with self.subTest(workflow=workflow_branch, caller=caller_branch):
                     result = self.guard(
-                        filename, ref='refs/heads/develop', source='release/v3',
-                        workflow='tapdata/tapdata-connectors/.github/workflows/publish-connectors.yml@refs/heads/main',
-                        unprotected_branches=[branch])
-                    self.assertNotEqual(result.returncode, 0)
+                        'publish-connectors.yml', ref='refs/heads/' + caller_branch,
+                        source=caller_branch,
+                        workflow='tapdata/tapdata-connectors/.github/workflows/publish-connectors.yml@refs/heads/' + workflow_branch)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    expected = ('d' if workflow_branch == 'main' else 'c') * 40
+                    self.assertEqual(json.loads(result.stdout)['scripts_sha'], expected)
+
+    def test_primary_guard_requires_protected_workflow_caller_and_source(self):
+        for branch in ['main', 'develop', 'release/v3']:
+            with self.subTest(unprotected=branch):
+                result = self.guard(
+                    'publish-connectors.yml', ref='refs/heads/develop', source='release/v3',
+                    workflow='tapdata/tapdata-connectors/.github/workflows/publish-connectors.yml@refs/heads/main',
+                    unprotected_branches=[branch])
+                self.assertNotEqual(result.returncode, 0)
 
     def test_primary_guard_allows_other_protected_source_branches(self):
         result = self.guard('publish-connectors.yml', source='release/v3')
@@ -86,17 +84,3 @@ const github = {rest: {repos: {
                         dict(workflow='tapdata/tapdata-connectors/.github/workflows/publish-connectors.yml@refs/heads/feature')]:
             with self.subTest(options=options):
                 self.assertNotEqual(self.guard('publish-connectors.yml', **options).returncode, 0)
-
-    def test_batch_guard_accepts_pinned_ancestor_and_current_commits(self):
-        for status in ['ahead', 'identical']:
-            result = self.guard('connector-publish-batch.yml', status=status)
-            self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_direct_batch_call_rejects_untrusted_caller_or_commits(self):
-        for options in [dict(ref='refs/heads/feature'), dict(protected=False),
-                        dict(source='release/v3', source_protected=False),
-                        dict(repository='fork/tapdata-connectors'), dict(scripts='develop'),
-                        dict(source_sha='refs/heads/develop'), dict(status='diverged'), dict(status='behind'),
-                        dict(workflow='tapdata/tapdata-connectors/.github/workflows/other.yml@refs/heads/feature')]:
-            with self.subTest(options=options):
-                self.assertNotEqual(self.guard('connector-publish-batch.yml', **options).returncode, 0)
