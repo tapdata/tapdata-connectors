@@ -37,8 +37,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 /**
  * Paimon Connector for Tapdata
@@ -50,6 +53,10 @@ import java.util.function.Consumer;
 public class PaimonConnector extends ConnectorBase {
 
     private static final String TAG = PaimonConnector.class.getSimpleName();
+    private static final Pattern CALENDAR_DATE_TEXT =
+            Pattern.compile("(?:\\d{8}|\\d{4}-\\d{2}-\\d{2}"
+                    + "(?:[Tt]\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,9})?)?"
+                    + "(?:[Zz]|[+-]\\d{2}:\\d{2}(?::\\d{2})?)?)?)");
     
     private PaimonConfig paimonConfig;
     private PaimonService paimonService;
@@ -280,17 +287,26 @@ public class PaimonConnector extends ConnectorBase {
             return null;
         }
         Object origin = tapDateValue.getOriginValue();
-        // SQL Date and date text carry a calendar date, not a UTC instant. Converting their
-        // epoch milliseconds also introduces java.sql.Date's pre-1582 calendar cutover.
+        // SQL Date and date text carry a calendar date, not a UTC instant.
         if (origin instanceof java.sql.Date) {
             return Math.toIntExact(((java.sql.Date) origin).toLocalDate().toEpochDay());
         }
         if (origin instanceof CharSequence) {
-            try {
-                return Math.toIntExact(LocalDate.parse(origin.toString()).toEpochDay());
-            } catch (RuntimeException e) {
-                throw temporalConversionFailure("TapDate", "DATE", origin, "invalid calendar date");
+            String text = origin.toString().trim().replace('/', '-').replace(' ', 'T');
+            if (CALENDAR_DATE_TEXT.matcher(text).matches()) {
+                DateTimeFormatter formatter = text.length() == 8 ? DateTimeFormatter.BASIC_ISO_DATE
+                        : text.length() == 10 ? DateTimeFormatter.ISO_LOCAL_DATE
+                        : DateTimeFormatter.ISO_DATE_TIME;
+                try {
+                    LocalDate date = LocalDate.parse(text, formatter);
+                    return date.getYear() == 0 ? null : Math.toIntExact(date.toEpochDay());
+                } catch (DateTimeParseException e) {
+                    // Zero dates and invalid calendar/time fields cannot be represented by DATE.
+                    return null;
+                }
             }
+            // Custom source formats may already have a valid normalized DateTime.
+            // Preserve the existing fallback instead of rejecting their original text.
         }
         Long seconds = tapDateValue.getValue().getSeconds();
         if (seconds == null) {
