@@ -31,10 +31,20 @@ def rewrite_reactor_versions(checkout, items):
             raise ValueError("connector POM escapes checkout")
         tree = ET.parse(pom)
         version = tree.find("m:version", NS)
+        original_version = version.text if version is not None else tree.findtext("m:parent/m:version", namespaces=NS)
+        if not original_version:
+            raise ValueError(f"connector POM needs a project or parent version: {pom}")
         if version is None:
-            raise ValueError("connector POM needs a direct project version")
-        replacements[(item["groupId"], item["artifactId"], version.text)] = item["version"]
-        version.text = item["version"]
+            root = tree.getroot()
+            artifact_id = root.find("m:artifactId", NS)
+            if artifact_id is None:
+                raise ValueError(f"connector POM needs a direct artifactId: {pom}")
+            version = ET.Element(f"{{{NS['m']}}}version")
+            version.text = item["version"]
+            root.insert(list(root).index(artifact_id) + 1, version)
+        else:
+            version.text = item["version"]
+        replacements[(item["groupId"], item["artifactId"], original_version)] = item["version"]
         trees[pom] = tree
         dirty.add(pom)
     # Also update consumers outside the batch: -am can add them through other
