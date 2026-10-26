@@ -584,7 +584,11 @@ def set_build_version(module, version):
     tree = ET.parse(pom_path)
     version_node = tree.find("m:version", ns)
     if version_node is None:
-        raise ValueError(f"connector POM needs a direct project version: {module}/pom.xml")
+        artifact_id = tree.find("m:artifactId", ns)
+        if artifact_id is None:
+            raise ValueError(f"connector POM needs a direct artifactId: {module}/pom.xml")
+        version_node = ET.Element(f"{{{ns['m']}}}version")
+        tree.getroot().insert(list(tree.getroot()).index(artifact_id) + 1, version_node)
     version_node.text = version
     tree.write(pom_path, encoding="UTF-8", xml_declaration=True)
 
