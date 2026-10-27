@@ -120,6 +120,15 @@
             <version>${mockito.version}</version>
         </dependency>
 
+        <!-- mockito-core 把 objenesis 声明为 runtime 作用域，而 exec:java -Pnew 使用 compile
+             classpath，导致 PdkContextFactory 调用 Mockito.mock() 时 NoClassDefFoundError:
+             org/objenesis/ObjenesisStd。此處顯式提升為 compile 作用域使文檔中的命令可直接執行。 -->
+        <dependency>
+            <groupId>org.objenesis</groupId>
+            <artifactId>objenesis</artifactId>
+            <version>3.3</version>
+        </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
