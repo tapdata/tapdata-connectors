@@ -26,15 +26,19 @@ public class MarkdownReportGenerator implements ReportGenerator {
             w.println();
             w.println("## Summary");
             w.println();
-            w.println("| Scenario | DataSource | Total Records | Throughput (rec/s) | Avg Latency (ms) | P99 Latency (ms) | P999 Latency (ms) | Max Latency (ms) | Errors |");
-            w.println("|---|---|---:|---:|---:|---:|---:|---:|---:|");
+            w.println("| Scenario | DataSource | Total Records | Throughput (rec/s) | Avg Latency (ms) | P50 Latency (ms) | P90 Latency (ms) | P95 Latency (ms) | P99 Latency (ms) | P999 Latency (ms) | Max Latency (ms) | Errors |");
+            w.println("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
             for (ScenarioResult r : report.getResults()) {
-                w.printf("| %s | %s | %,d | %,.0f | %.2f | %.2f | %.2f | %.2f | %d |%n",
+                w.printf("| %s | %s | %,d | %,.0f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %d |%n",
                     r.getScenarioName(), r.getDataSourceType(), r.getTotalRecords(),
                     r.getThroughputPerSec(), r.getAvgLatencyMs(),
+                    r.getP50LatencyMs(), r.getP90LatencyMs(), r.getP95LatencyMs(),
                     r.getP99LatencyMs(), r.getP999LatencyMs(), r.getMaxLatencyMs(),
                     r.getErrorCount());
             }
+            w.println();
+            w.println("> Latency percentile resolution: 0.1 ms below 100 ms, 1 ms below 1000 ms, 10 ms above.");
+            w.println("> Reported percentiles are bucket upper bounds (conservative, never optimistic).");
             w.println();
             w.println("## Detail");
             w.println();
@@ -46,9 +50,15 @@ public class MarkdownReportGenerator implements ReportGenerator {
                 w.printf("- **Throughput**: %,.2f records/sec%n", r.getThroughputPerSec());
                 w.printf("- **Avg latency**: %.2f ms%n", r.getAvgLatencyMs());
                 w.printf("- **P50 latency**: %.2f ms%n", r.getP50LatencyMs());
+                w.printf("- **P90 latency**: %.2f ms%n", r.getP90LatencyMs());
+                w.printf("- **P95 latency**: %.2f ms%n", r.getP95LatencyMs());
                 w.printf("- **P99 latency**: %.2f ms%n", r.getP99LatencyMs());
                 w.printf("- **P999 latency**: %.2f ms%n", r.getP999LatencyMs());
                 w.printf("- **Max latency**: %.2f ms%n", r.getMaxLatencyMs());
+                if (r.getBatchP99LatencyMs() > 0) {
+                    w.printf("- **Batch-level latency (per write call)**: p50=%.2f ms, p95=%.2f ms, p99=%.2f ms%n",
+                        r.getBatchP50LatencyMs(), r.getBatchP95LatencyMs(), r.getBatchP99LatencyMs());
+                }
                 w.printf("- **Errors**: %d%n", r.getErrorCount());
                 if (r.getErrorMessage() != null) {
                     w.printf("- **Error message**: %s%n", r.getErrorMessage());

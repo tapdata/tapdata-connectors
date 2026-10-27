@@ -111,6 +111,8 @@ public class MixedScenario implements BenchmarkScenario {
             .setThroughputPerSec(elapsedMs > 0 ? written.get() * 1000.0 / elapsedMs : 0)
             .setAvgLatencyMs(latTracker.avg())
             .setP50LatencyMs(latTracker.p50())
+            .setP90LatencyMs(latTracker.p90())
+            .setP95LatencyMs(latTracker.p95())
             .setP99LatencyMs(latTracker.p99())
             .setP999LatencyMs(latTracker.p999())
             .setMaxLatencyMs(latTracker.max())

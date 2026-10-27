@@ -41,6 +41,8 @@ public class WriteScenario implements BenchmarkScenario {
 
         ThroughputTracker tpTracker    = new ThroughputTracker();
         LatencyTracker    latTracker   = new LatencyTracker();
+        // 批次級延遲（每次 write 調用的完整耗時）；latTracker 記錄的是攤薄到單條事件的份額。
+        LatencyTracker    batchLatTracker = new LatencyTracker();
         AtomicLong        totalWritten = new AtomicLong(0);
         AtomicLong        totalErrors  = new AtomicLong(0);
 
@@ -71,6 +73,7 @@ public class WriteScenario implements BenchmarkScenario {
                     WriteResult wr = client.write(batch);
                     double batchLatencyMs = (System.nanoTime() - t0) / 1_000_000.0;
                     latTracker.record(batchLatencyMs / batchSz);
+                    batchLatTracker.record(batchLatencyMs);
                     tpTracker.record(batchSz);
                     totalWritten.addAndGet(wr.getTotalWritten());
                     totalErrors.addAndGet(wr.getErrorCount());
@@ -91,9 +94,14 @@ public class WriteScenario implements BenchmarkScenario {
             .setThroughputPerSec(elapsedMs > 0 ? totalWritten.get() * 1000.0 / elapsedMs : 0)
             .setAvgLatencyMs(latTracker.avg())
             .setP50LatencyMs(latTracker.p50())
+            .setP90LatencyMs(latTracker.p90())
+            .setP95LatencyMs(latTracker.p95())
             .setP99LatencyMs(latTracker.p99())
             .setP999LatencyMs(latTracker.p999())
             .setMaxLatencyMs(latTracker.max())
+            .setBatchP50LatencyMs(batchLatTracker.p50())
+            .setBatchP95LatencyMs(batchLatTracker.p95())
+            .setBatchP99LatencyMs(batchLatTracker.p99())
             .setErrorCount(totalErrors.get());
     }
 }
