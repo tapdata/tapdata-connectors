@@ -72,12 +72,24 @@ class LatencyTrackerTest {
     }
 
     @Test
-    @DisplayName("values above the histogram ceiling land in the last bucket")
-    void overflowIsClamped() {
+    @DisplayName("overflow percentiles include the observed maximum")
+    void overflowPercentilesIncludeObservedMaximum() {
+        LatencyTracker belowCeiling = new LatencyTracker();
+        for (int i = 0; i < 100; i++) belowCeiling.record(19_999.0);
+        assertEquals(19_999.0, belowCeiling.p99(), 1e-6);
+        assertEquals(belowCeiling.max(), belowCeiling.p99(), 1e-6);
+
         LatencyTracker t = new LatencyTracker();
         for (int i = 0; i < 100; i++) t.record(60_000.0);
         assertEquals(100, t.count());
-        assertTrue(t.p99() > 0);
+        assertEquals(60_000.0, t.p50(), 1e-6);
+        assertEquals(60_000.0, t.p99(), 1e-6);
+        assertEquals(60_000.0, t.p999(), 1e-6);
         assertEquals(60_000.0, t.max(), 1e-6);
+
+        LatencyTracker mixed = new LatencyTracker();
+        for (int i = 0; i < 990; i++) mixed.record(5.0);
+        for (int i = 0; i < 10; i++) mixed.record(60_000.0);
+        assertEquals(60_000.0, mixed.p999(), 1e-6);
     }
 }

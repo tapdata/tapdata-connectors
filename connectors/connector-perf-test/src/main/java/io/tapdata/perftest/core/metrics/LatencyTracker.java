@@ -102,6 +102,9 @@ public class LatencyTracker {
             if (cumul >= target) {
                 double upper = upperBoundOf(i);
                 double observedMax = maxMs;
+                // The final bucket spans both the range below the ceiling and overflow, so its
+                // fixed bound cannot represent both. Use the observed maximum as its bound.
+                if (i == BUCKETS - 1) return observedMax;
                 // The bucket that contains the maximum sample would otherwise report an upper
                 // bound slightly above the true maximum; clamp so no percentile exceeds max().
                 return observedMax > 0 && upper > observedMax ? observedMax : upper;
