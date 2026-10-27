@@ -1,6 +1,11 @@
 package io.tapdata.connector.paimon.service;
 
 import io.tapdata.connector.paimon.config.PaimonConfig;
+import io.tapdata.connector.paimon.PaimonConnector;
+import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.pdk.apis.entity.TapExecuteCommand;
+import io.tapdata.pdk.apis.entity.ExecuteResult;
+import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -16,6 +21,8 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,7 +44,7 @@ import static org.mockito.Mockito.when;
 class PaimonServiceExecuteQueryIntegrationTest {
 
     private static final String DATABASE = "default";
-    private static final String TABLE = "execute_query_orders";
+    private static final String TABLE = "DRSRedemptions";
 
     @TempDir
     Path tempDir;
@@ -109,6 +116,229 @@ class PaimonServiceExecuteQueryIntegrationTest {
         } finally {
             service.close();
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"UTC", "Asia/Shanghai", "America/Los_Angeles"})
+    void realPaimonSelectStarPreservesTemporalJavaTypes(String zone) throws Exception {
+        java.util.TimeZone previous = java.util.TimeZone.getDefault();
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone(zone));
+        PaimonService service = null;
+        try {
+            service = new PaimonService(config(), mock(Log.class));
+            service.init();
+            Catalog catalog = catalog(service);
+            catalog.createDatabase(DATABASE, true);
+            Identifier id = Identifier.create(DATABASE, "temporal_values");
+            catalog.createTable(id, Schema.newBuilder().column("id", DataTypes.INT())
+                    .column("d", DataTypes.DATE()).column("t", DataTypes.TIME(3))
+                    .column("ts", DataTypes.TIMESTAMP(3))
+                    .column("ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))
+                    .primaryKey("id").option("bucket", "1").build(), false);
+            org.apache.paimon.table.sink.BatchWriteBuilder builder = catalog.getTable(id).newBatchWriteBuilder();
+            java.time.LocalDate date = java.time.LocalDate.of(2026, 4, 2);
+            java.time.LocalDateTime timestamp = date.atTime(12, 34, 56);
+            try (org.apache.paimon.table.sink.BatchTableWrite writer = builder.newWrite();
+                 org.apache.paimon.table.sink.BatchTableCommit commit = builder.newCommit()) {
+                writer.write(org.apache.paimon.data.GenericRow.of(1, (int) date.toEpochDay(), 45_296_000,
+                        org.apache.paimon.data.Timestamp.fromLocalDateTime(timestamp),
+                        org.apache.paimon.data.Timestamp.fromInstant(timestamp.toInstant(java.time.ZoneOffset.UTC))));
+                commit.commit(writer.prepareCommit());
+            }
+            Map<String, Object> row = castRows(service.executeQuery("SELECT * FROM temporal_values", mock(Log.class))).get(0);
+            assertEquals(java.sql.Date.class, row.get("d").getClass());
+            assertEquals(date.toEpochDay() * 86400000L, ((java.sql.Date) row.get("d")).getTime());
+            assertEquals(java.time.LocalDate.of(1970, 1, 1).atTime(12, 34, 56), row.get("t"));
+            assertEquals(timestamp, row.get("ts"));
+            assertEquals(timestamp.atZone(java.time.ZoneOffset.UTC), row.get("ltz"));
+        } finally {
+            try { if (service != null) { service.close(); } }
+            finally { java.util.TimeZone.setDefault(previous); }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"UTC", "Asia/Shanghai", "America/Los_Angeles"})
+    void executesCustomerDateAggregationOnRealPaimonWithProjectionAndFiltering(String zone) throws Throwable {
+        java.util.TimeZone previous = java.util.TimeZone.getDefault();
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone(zone));
+            executeCustomerDateAggregation();
+        } finally {
+            java.util.TimeZone.setDefault(previous);
+        }
+    }
+
+    private void executeCustomerDateAggregation() throws Throwable {
+        PaimonConfig config = config();
+        PaimonService service = new PaimonService(config, mock(Log.class));
+        try {
+            service.init();
+            Catalog catalog = catalog(service);
+            catalog.createDatabase(DATABASE, true);
+            catalog.createTable(Identifier.create(DATABASE, TABLE), Schema.newBuilder()
+                    .column("id", DataTypes.INT())
+                    .column("CreationTime", DataTypes.TIMESTAMP(3))
+                    .column("TransactionDatetime", DataTypes.TIMESTAMP(3))
+                    .column("TotalValues", DataTypes.DECIMAL(20, 2))
+                    .column("PointsAfterRedemption", DataTypes.DECIMAL(20, 2))
+                    .column("op", DataTypes.STRING())
+                    .column("unused_payload", DataTypes.STRING())
+                    .primaryKey("id")
+                    .option("bucket", "1").option("write-buffer-size", "8mb").build(), false);
+            TapTable tapTable = new TapTable(TABLE)
+                    .add(new TapField("id", "INT").primaryKeyPos(1))
+                    .add(new TapField("CreationTime", "TIMESTAMP"))
+                    .add(new TapField("TransactionDatetime", "TIMESTAMP"))
+                    .add(new TapField("TotalValues", "DECIMAL(20,2)"))
+                    .add(new TapField("PointsAfterRedemption", "DECIMAL(20,2)"))
+                    .add(new TapField("op", "STRING"))
+                    .add(new TapField("unused_payload", "STRING"));
+            service.writeRecords(Arrays.asList(
+                    redemption(1, "2025-01-02 23:59:59", "2025-01-01 00:00:00", "0.10", "1.10", "i"),
+                    redemption(2, "2025-01-02 00:00:01", "2025-02-01 00:00:00", "0.20", null, "u"),
+                    redemption(3, "2025-01-01 12:00:00", "2025-07-01 00:00:00", "3.00", "4.00", "i"),
+                    redemption(4, "2025-01-01 12:00:00", "2025-07-01 00:00:00.001", "900.00", "900.00", "i"),
+                    redemption(5, "2025-01-02 12:00:00", "2025-03-01 00:00:00", "900.00", "900.00", "d"),
+                    redemption(6, null, "2025-03-01 00:00:00", null, null, "i"),
+                    redemption(7, "2025-01-02 12:00:00", "2025-03-01 00:00:00", "900.00", "900.00", null)),
+                    tapTable, context());
+            String sql = "SELECT CAST(CreationTime AS DATE), COUNT(*), SUM(TotalValues), SUM(PointsAfterRedemption) "
+                    + "FROM DRSRedemptions "
+                    + "WHERE TransactionDatetime BETWEEN '2025-01-01 00:00:00' AND '2025-07-01 00:00:00' "
+                    + "AND op <> 'd' GROUP BY CAST(CreationTime AS DATE) ORDER BY CAST(CreationTime AS DATE)";
+            // Non-key filters are allowed by default; administrators can still opt into the key gate.
+            config.setQueryAllowFullScan(false);
+            assertThrows(IllegalArgumentException.class, () -> service.executeQuery(sql, mock(Log.class)));
+            config.setQueryAllowFullScan(true);
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("allowFullScan", true);
+            List<Map<String, Object>> rows = castRows(service.executeQuery(sql, params, mock(Log.class)));
+            assertEquals(3, rows.size());
+            assertEquals(null, rows.get(0).get("CAST(CreationTime AS DATE)"));
+            assertEquals(1L, rows.get(0).get("COUNT(*)"));
+            assertEquals(null, rows.get(0).get("SUM(TotalValues)"));
+            assertEquals(java.time.LocalDate.of(2025, 1, 1), rows.get(1).get("CAST(CreationTime AS DATE)"));
+            assertEquals(1L, rows.get(1).get("COUNT(*)"));
+            assertEquals(new java.math.BigDecimal("3.00"), rows.get(1).get("SUM(TotalValues)"));
+            assertEquals(java.time.LocalDate.of(2025, 1, 2), rows.get(2).get("CAST(CreationTime AS DATE)"));
+            assertEquals(2L, rows.get(2).get("COUNT(*)"));
+            assertEquals(new java.math.BigDecimal("0.30"), rows.get(2).get("SUM(TotalValues)"));
+            assertEquals(new java.math.BigDecimal("1.10"), rows.get(2).get("SUM(PointsAfterRedemption)"));
+
+            PaimonConnector connector = new PaimonConnector();
+            java.lang.reflect.Field serviceField = PaimonConnector.class.getDeclaredField("paimonService");
+            serviceField.setAccessible(true);
+            serviceField.set(connector, service);
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+            Map<String, Object> commandParams = new LinkedHashMap<>(params);
+            commandParams.put("sql", sql);
+            java.util.List<ExecuteResult> callbacks = new java.util.ArrayList<>();
+            functions.getExecuteCommandFunction().execute(context(),
+                    TapExecuteCommand.create().command("executeQuery").params(commandParams), callbacks::add);
+            assertEquals(1, callbacks.size());
+            assertEquals(null, callbacks.get(0).getError());
+            assertEquals(rows, callbacks.get(0).getResult());
+            callbacks.clear();
+            commandParams.put("maxScanRows", 1);
+            functions.getExecuteCommandFunction().execute(context(),
+                    TapExecuteCommand.create().command("executeQuery").params(commandParams), callbacks::add);
+            assertEquals(1, callbacks.size());
+            org.junit.jupiter.api.Assertions.assertTrue(callbacks.get(0).getError() instanceof IllegalStateException);
+            assertEquals(null, callbacks.get(0).getResult());
+
+            // Predicate column id is absent from the output projection.
+            List<Map<String, Object>> grouped = castRows(service.executeQuery(
+                    "SELECT op, COUNT(*) AS n, COUNT(TotalValues) AS present, AVG(TotalValues) AS mean "
+                            + "FROM " + TABLE + " WHERE id BETWEEN 1 AND 3 GROUP BY op ORDER BY op DESC", mock(Log.class)));
+            assertEquals(2, grouped.size());
+            assertEquals("u", grouped.get(0).get("op"));
+            assertEquals(1L, grouped.get(0).get("present"));
+            assertEquals(0, new java.math.BigDecimal("0.20").compareTo((java.math.BigDecimal) grouped.get(0).get("mean")));
+            assertEquals(2L, grouped.get(1).get("n"));
+            List<Map<String, Object>> empty = castRows(service.executeQuery(
+                    "SELECT COUNT(*) AS n, SUM(TotalValues) AS total FROM " + TABLE + " WHERE id < 0", mock(Log.class)));
+            assertEquals(0L, empty.get(0).get("n"));
+            assertEquals(null, empty.get(0).get("total"));
+
+            params.put("maxScanRows", 1);
+            assertThrows(IllegalStateException.class, () -> service.executeQuery(sql, params, mock(Log.class)));
+            params.remove("maxScanRows");
+            params.put("maxGroups", 1);
+            assertThrows(IllegalStateException.class, () -> service.executeQuery(sql, params, mock(Log.class)));
+            params.remove("maxGroups");
+            params.put("maxResultRows", 1);
+            assertThrows(IllegalStateException.class, () -> service.executeQuery(sql, params, mock(Log.class)));
+            // Limit failures release reader/batch resources and allow subsequent commands.
+            params.remove("maxResultRows");
+            assertEquals(rows, service.executeQuery(sql, params, mock(Log.class)));
+            config.load(Collections.singletonMap("queryAllowFullScan", true));
+            assertEquals(rows, service.executeQuery(sql, mock(Log.class)));
+        } finally { service.close(); }
+    }
+
+    @Test
+    void queryRowLimitBelongsToCallerAndExplicitConnectorLimitsStillApply() throws Throwable {
+        PaimonService service = new PaimonService(config(), mock(Log.class));
+        try {
+            service.init();
+            Catalog catalog = catalog(service);
+            catalog.createDatabase(DATABASE, true);
+            catalog.createTable(Identifier.create(DATABASE, TABLE), Schema.newBuilder()
+                    .column("id", DataTypes.INT()).primaryKey("id").option("bucket", "1")
+                    .option("write-buffer-size", "8mb").build(), false);
+            TapTable table = new TapTable(TABLE).add(new TapField("id", "INT").primaryKeyPos(1));
+            List<TapRecordEvent> input = new java.util.ArrayList<>();
+            for (int i = 0; i < 2005; i++) { input.add(cdcInsert(map("id", i))); }
+            service.writeRecords(input, table, context());
+            assertEquals(2005, castRows(service.executeQuery("SELECT * FROM " + TABLE, mock(Log.class))).size());
+            assertEquals(2005L, service.executeQuery("SELECT COUNT(1) FROM " + TABLE, mock(Log.class)));
+            assertEquals(2005, castRows(service.executeQuery("SELECT id FROM " + TABLE, mock(Log.class))).size());
+            assertEquals(2005, castRows(service.executeQuery(
+                    "SELECT id, COUNT(*) AS n FROM " + TABLE + " GROUP BY id ORDER BY id", mock(Log.class))).size());
+            List<Map<String, Object>> total = castRows(service.executeQuery(
+                    "SELECT SUM(id) AS total FROM " + TABLE, mock(Log.class)));
+            assertEquals(new java.math.BigDecimal("2009010"), total.get(0).get("total"));
+
+            // Existing executeCommand contract: no new limit/cancellation parameter is required.
+            PaimonConnector connector = new PaimonConnector();
+            java.lang.reflect.Field serviceField = PaimonConnector.class.getDeclaredField("paimonService");
+            serviceField.setAccessible(true);
+            serviceField.set(connector, service);
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+            java.util.concurrent.atomic.AtomicInteger delivered = new java.util.concurrent.atomic.AtomicInteger();
+            RuntimeException stop = new RuntimeException("engine stopped at row 1001");
+            assertEquals(stop, assertThrows(RuntimeException.class, () ->
+                    functions.getExecuteCommandFunction().execute(context(), TapExecuteCommand.create()
+                            .command("executeQuery").params(map("sql", "SELECT id FROM " + TABLE, "batchSize", 1001)), result -> {
+                        if (result.getError() != null) throw (RuntimeException) result.getError();
+                        delivered.addAndGet(((List<?>) result.getResult()).size());
+                        throw stop;
+                    })));
+            assertEquals(1001, delivered.get());
+            // Consumer cancellation released ingress and readers, allowing another real-table query.
+            assertEquals(2005L, service.executeQuery("SELECT COUNT(1) FROM " + TABLE, mock(Log.class)));
+            List<ExecuteResult> batches = new java.util.ArrayList<>();
+            functions.getExecuteCommandFunction().execute(context(), TapExecuteCommand.create()
+                    .command("executeQuery").params(map("sql", "SELECT id FROM " + TABLE, "batchSize", 400)), batches::add);
+            assertEquals(6, batches.size());
+            assertEquals(400, ((List<?>) batches.get(0).getResult()).size());
+            assertEquals(5, ((List<?>) batches.get(5).getResult()).size());
+            assertThrows(IllegalStateException.class, () -> service.executeQueryBatches("SELECT id FROM " + TABLE,
+                    Collections.singletonMap("maxResultRows", 1000), mock(Log.class), ignored -> {}, 400));
+            assertThrows(IllegalStateException.class, () -> service.executeQuery("SELECT * FROM " + TABLE,
+                    Collections.singletonMap("maxResultRows", 1000), mock(Log.class)));
+        } finally { service.close(); }
+    }
+
+    private TapInsertRecordEvent redemption(int id, String created, String transaction, String total, String points, String op) {
+        return cdcInsert(map("id", id, "CreationTime", created == null ? null : timestamp(created),
+                "TransactionDatetime", timestamp(transaction),
+                "TotalValues", total == null ? null : new java.math.BigDecimal(total),
+                "PointsAfterRedemption", points == null ? null : new java.math.BigDecimal(points),
+                "op", op, "unused_payload", "not projected"));
     }
 
     private PaimonConfig config() throws Exception {
@@ -184,6 +414,9 @@ class PaimonServiceExecuteQueryIntegrationTest {
     }
 
     private java.sql.Timestamp timestamp(String value) {
-        return java.sql.Timestamp.valueOf(value);
+        // writeRecords receives codec output encoded as epoch time. Build that same
+        // representation explicitly; valueOf would shift fixtures with the JVM timezone.
+        return java.sql.Timestamp.from(java.time.LocalDateTime.parse(value.replace(' ', 'T'))
+                .toInstant(java.time.ZoneOffset.UTC));
     }
 }

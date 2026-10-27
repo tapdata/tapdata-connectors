@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -67,6 +68,18 @@ class CsvValueConverterTest {
                 CsvValueConverter.parse("8/8/2024", CsvValueConverter.DATE));
         assertEquals(LocalDate.of(2024, 8, 8),
                 CsvValueConverter.parse("8-8-2024", CsvValueConverter.DATE));
+    }
+
+    @Test
+    void parseDateTimeKeepsWallClockValueForFormatsWithoutOffset() {
+        // "dd-MM-yyyy HH:mm:ss" 不匹配 FLEXIBLE_DATETIME，走 determineDateFormat 分支
+        assertEquals(LocalDateTime.of(2024, 5, 17, 12, 30, 45),
+                CsvValueConverter.parse("17-05-2024 12:30:45", CsvValueConverter.DATETIME));
+        // FLEXIBLE_DATETIME 分支：不带时区的墙钟值按本地 LocalDateTime 返回
+        assertEquals(LocalDateTime.of(2024, 6, 17, 12, 30, 45),
+                CsvValueConverter.parse("2024-06-17 12:30:45", CsvValueConverter.DATETIME));
+        assertEquals(LocalDateTime.of(2024, 6, 17, 12, 30, 45),
+                CsvValueConverter.parse("2024-06-17T12:30:45", CsvValueConverter.DATETIME));
     }
 
     @Test

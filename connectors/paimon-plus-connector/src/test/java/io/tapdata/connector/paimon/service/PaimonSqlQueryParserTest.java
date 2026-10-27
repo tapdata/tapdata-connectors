@@ -95,12 +95,38 @@ class PaimonSqlQueryParserTest {
                 "INSERT INTO orders VALUES (1, 'A', NULL)",
                 "DELETE FROM orders WHERE id = 1",
                 "SELECT * FROM orders JOIN other ON orders.id = other.id WHERE orders.id = 1",
-                "SELECT * FROM orders WHERE id = 1 ORDER BY id",
                 "SELECT * FROM orders WHERE id = 1 LIMIT 1",
                 "SELECT * FROM orders WHERE id = (SELECT id FROM other)",
+                "SELECT SUM(id) FROM orders HAVING SUM(id) > 1",
+                "SELECT SUM(DISTINCT id) FROM orders",
+                "SELECT SUM(category) FROM orders",
+                "SELECT id, SUM(id) FROM orders",
+                "SELECT SUM(id) OVER () FROM orders",
+                "SELECT id + 1 FROM orders",
+                "SELECT * FROM orders WHERE other.orders.id = 1",
+                "SELECT FIRST 2 * FROM orders",
+                "SELECT * INTO other FROM orders",
+                "SELECT * FROM other.orders",
+                "SELECT * FROM orders; DELETE FROM orders",
                 "CALL refresh_table('orders')",
                 "CREATE TABLE other (id INT)")
                 .forEach(sql -> assertThrows(IllegalArgumentException.class,
                         () -> PaimonSqlQueryParser.parse(sql, ROW_TYPE), sql));
+    }
+
+    @Test
+    void reportsUnrepresentableIntegerLiteralsAsSuchInsteadOfSyntaxErrors() {
+        Stream.of("SELECT * FROM orders WHERE id = 1.5",
+                "SELECT * FROM orders WHERE id < 3000000000",
+                "SELECT * FROM orders WHERE id BETWEEN 1 AND 2147483648")
+                .forEach(sql -> {
+                    IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                            () -> PaimonSqlQueryParser.parse(sql, ROW_TYPE), sql);
+                    String message = failure.getMessage();
+                    assertTrue(message.contains("is not representable as"), message);
+                    assertTrue(message.contains("integer columns accept only whole numbers"), message);
+                    // The real cause must not be hidden behind a generic syntax error.
+                    assertFalse(message.contains("invalid SELECT syntax"), message);
+                });
     }
 }

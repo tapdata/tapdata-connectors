@@ -104,6 +104,11 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // snapshot.expire.execution-mode 或 Paimon file-operation.thread-num。
     private Integer asyncCommitConcurrency = DEFAULT_ASYNC_COMMIT_CONCURRENCY;
 
+    // Custom SQL may scan all files when predicates cannot prune partitions or the leading PK.
+    private Boolean queryAllowFullScan = true;
+    public Boolean getQueryAllowFullScan() { return !Boolean.FALSE.equals(queryAllowFullScan); }
+    public void setQueryAllowFullScan(Boolean value) { queryAllowFullScan = value; }
+
     // Service 停止预算；不是 Paimon 内核参数。超时不能作为删除 Spill 的证据。
     private Integer stopTimeoutSeconds = 180;
     private Integer finalCompactionTimeoutSeconds = 120;

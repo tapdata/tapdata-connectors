@@ -4,6 +4,7 @@ import com.mysql.cj.exceptions.StatementIsClosedException;
 import io.debezium.type.TapIllegalDate;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.JdbcProcedureParam;
+import io.tapdata.common.JdbcQueryExecutor;
 import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.common.ddl.type.DDLParserType;
 import io.tapdata.common.dml.NormalRecordWriter;
@@ -718,7 +719,7 @@ public class MysqlConnector extends CommonDbConnector {
                                 data.put(columnName, ((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
                                 break;
                             case "DATE":
-                                if (mysqlConfig.getOldVersionTimezone()) {
+                                if (Boolean.TRUE.equals(mysqlConfig.getOldVersionTimezone())) {
                                     data.put(columnName, resultSet.getString(i + 1));
                                 } else if (value instanceof java.sql.Date) {
                                     data.put(columnName, ((java.sql.Date) value).toLocalDate().atStartOfDay());
@@ -728,7 +729,7 @@ public class MysqlConnector extends CommonDbConnector {
                                 break;
                             case "DATETIME":
                                 if (value instanceof LocalDateTime) {
-                                    if (mysqlConfig.getOldVersionTimezone()) {
+                                    if (Boolean.TRUE.equals(mysqlConfig.getOldVersionTimezone())) {
                                         data.put(columnName, ((LocalDateTime) value).toInstant(ZoneOffset.ofTotalSeconds(TimeZone.getDefault().getRawOffset() / 1000)));
                                     } else {
                                         data.put(columnName, ((LocalDateTime) value).minusHours(zoneOffsetHour));
@@ -887,6 +888,7 @@ public class MysqlConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
         mysqlJdbcContext.queryWithStream(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
@@ -916,7 +918,7 @@ public class MysqlConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
         throwNonSupportWhenLightInit();
-        if (mysqlConfig.getHighPerformance()) {
+        if (Boolean.TRUE.equals(mysqlConfig.getHighPerformance())) {
             MysqlReaderV2 mysqlReaderV2 = new MysqlReaderV2(mysqlJdbcContext, tapLogger, dbTimeZone);
             mysqlReaderV2.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
             mysqlReaderV2.startMiner(this::isAlive);
@@ -927,7 +929,7 @@ public class MysqlConnector extends CommonDbConnector {
 
     private void streamReadMultiConnection(TapConnectorContext tapConnectorContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
         throwNonSupportWhenLightInit();
-        if (mysqlConfig.getHighPerformance()) {
+        if (Boolean.TRUE.equals(mysqlConfig.getHighPerformance())) {
             MysqlReaderV2 mysqlReaderV2 = new MysqlReaderV2(mysqlJdbcContext, tapLogger, dbTimeZone);
             mysqlReaderV2.multiInit(connectionConfigWithTables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
             mysqlReaderV2.startMiner(this::isAlive);
@@ -980,7 +982,7 @@ public class MysqlConnector extends CommonDbConnector {
             }
             return this.mysqlJdbcContext.readBinlogPosition();
         }
-        if (mysqlConfig.getHighPerformance()) {
+        if (Boolean.TRUE.equals(mysqlConfig.getHighPerformance())) {
             try (MysqlBinlogPositionUtil ins = new MysqlBinlogPositionUtil(
                     mysqlConfig.getHost(),
                     mysqlConfig.getPort(),
@@ -1053,8 +1055,9 @@ public class MysqlConnector extends CommonDbConnector {
         });
     }
 
+    @Override
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
-        if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
+        if (!jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).isEmpty()) {
             List<String> sqls = new ArrayList<>();
             sqls.add("SET FOREIGN_KEY_CHECKS=0");
             sqls.add("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()));
@@ -1065,8 +1068,9 @@ public class MysqlConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
-        if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
+        if (!jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).isEmpty()) {
             List<String> sqls = new ArrayList<>();
             sqls.add("SET FOREIGN_KEY_CHECKS=0");
             sqls.add("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()));
@@ -1077,6 +1081,7 @@ public class MysqlConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
         List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
         if (EmptyKit.isNotEmpty(constraintList)) {
@@ -1183,6 +1188,7 @@ public class MysqlConnector extends CommonDbConnector {
         jdbcContext.batchExecute(dropConstraintsSql);
     }
 
+    @Override
     protected TapIndex makeTapIndex(String key, List<DataMap> value) {
         TapIndex index = new TapIndex();
         index.setName(key);
@@ -1200,6 +1206,7 @@ public class MysqlConnector extends CommonDbConnector {
         return index;
     }
 
+    @Override
     protected String getCreateIndexSql(TapTable tapTable, TapIndex tapIndex) {
         StringBuilder sb = new StringBuilder("create ");
         char escapeChar = commonDbConfig.getEscapeChar();
@@ -1216,8 +1223,9 @@ public class MysqlConnector extends CommonDbConnector {
         return sb.toString();
     }
 
+    @Override
     protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable, List<TapIndex> indexList) {
-        if (!mysqlConfig.getCreateAutoInc()) return new ArrayList<>();
+        if (!Boolean.TRUE.equals(mysqlConfig.getCreateAutoInc())) return new ArrayList<>();
         String sql = "ALTER TABLE `%s` MODIFY COLUMN `%s` %s AUTO_INCREMENT";
         List<String> uniqueFields = new ArrayList<>();
         List<String> uniqueAutoIncrementFields = new ArrayList<>();
@@ -1250,37 +1258,40 @@ public class MysqlConnector extends CommonDbConnector {
         return exportEventSql(writeRecorder, connectorContext, tapEvent, table);
     }
 
+    @Override
     protected void execute(String sql, Consumer<Object> consumer, int batchSize) throws Throwable {
-        try (Connection connection = jdbcContext.getConnection();
-             Statement sqlStatement = connection.createStatement()) {
-            sqlStatement.setFetchSize(Integer.MIN_VALUE);
-            boolean hasResult = sqlStatement.execute(sql);
-            if (!hasResult) {
-                consumer.accept((long) sqlStatement.getUpdateCount());
-            } else {
-                while (isAlive() && hasResult) {
-                    try (ResultSet resultSet = sqlStatement.getResultSet()) {
-                        List<Map<String, Object>> list = TapSimplify.list();
-                        ResultSetMetaData metaData = resultSet.getMetaData();
-                        while (isAlive() && resultSet.next()) {
-                            Map<String, Object> dataMap = filterTimeForMysql(resultSet, metaData);
-                            list.add(dataMap);
-                            if (list.size() == batchSize) {
-                                consumer.accept(list);
-                                list = TapSimplify.list();
-                            }
-                        }
-                        if (EmptyKit.isNotEmpty(list)) {
-                            consumer.accept(list);
-                        }
-                    }
-                    hasResult = sqlStatement.getMoreResults();
-                }
-            }
-            connection.commit();
-        }
+        execute(sql, consumer, batchSize, 0);
     }
 
+    @Override
+    protected void execute(String sql, Consumer<Object> consumer, int batchSize, int queryTimeoutSeconds) throws Throwable {
+        JdbcQueryExecutor.execute(sql, jdbcContext::getConnection, consumer, this::isAlive,
+                batchSize, queryTimeoutSeconds, Integer.MIN_VALUE, resultSet -> {
+                    ResultSetMetaData metaData = columnLabelMetaData(resultSet.getMetaData());
+                    return () -> filterTimeForMysql(resultSet, metaData);
+                });
+    }
+
+    /**
+     * Key command query rows by the SQL output label (alias) instead of the underlying column name,
+     * while keeping the existing MySQL type conversion in filterTimeForMysql.
+     */
+    protected static ResultSetMetaData columnLabelMetaData(ResultSetMetaData metaData) {
+        return (ResultSetMetaData) java.lang.reflect.Proxy.newProxyInstance(
+                MysqlConnector.class.getClassLoader(), new Class<?>[]{ResultSetMetaData.class}, (proxy, method, args) -> {
+                    try {
+                        if ("getColumnName".equals(method.getName()) && args != null && args.length == 1) {
+                            String label = metaData.getColumnLabel((Integer) args[0]);
+                            return EmptyKit.isBlank(label) ? metaData.getColumnName((Integer) args[0]) : label;
+                        }
+                        return method.invoke(metaData, args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
+    }
+
+    @Override
     public ExecuteResult<?> call(String funcName, List<Map<String, Object>> params) {
         if (EmptyKit.isEmpty(funcName)) {
             throw new IllegalArgumentException("procedure/function is null");
@@ -1292,7 +1303,7 @@ public class MysqlConnector extends CommonDbConnector {
         List<JdbcProcedureParam> outList = new ArrayList<>();
 
         try (Connection connection = jdbcContext.getConnection();
-             CallableStatement callableStatement = createCallableStatement(funcName, params, connection, outList)) {
+             CallableStatement callableStatement = createMysqlCallableStatement(funcName, params, connection, outList)) {
             if (callableStatement == null) {
                 throw new RuntimeException("create callableStatement error");
             }
@@ -1305,7 +1316,7 @@ public class MysqlConnector extends CommonDbConnector {
         return executeResult;
     }
 
-    private CallableStatement createCallableStatement(String funcName, List<Map<String, Object>> params, Connection connection, List<JdbcProcedureParam> outList) throws Exception {
+    private CallableStatement createMysqlCallableStatement(String funcName, List<Map<String, Object>> params, Connection connection, List<JdbcProcedureParam> outList) throws Exception {
 
         CallableStatement callableStatement;
         boolean hasReturn = hasReturn(params);
@@ -1333,6 +1344,7 @@ public class MysqlConnector extends CommonDbConnector {
         return callableStatement;
     }
 
+    @Override
     protected Object getOutputFromCall(List<JdbcProcedureParam> outList, CallableStatement callableStatement, boolean hasResult) throws Exception {
         if (outList == null || callableStatement == null) {
             return null;

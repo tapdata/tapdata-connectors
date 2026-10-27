@@ -37,28 +37,9 @@ public class SqlExecuteCommandFunction {
 
     @Deprecated
     private static void executeCommand(SqlExecutor sqlExecutor, TapExecuteCommand tapExecuteCommand, TapSupplier<Connection> connectionSupplier, Consumer<ExecuteResult> executeResultConsumer) {
-        ExecuteResult<?> executeResult;
-        try {
-            Map<String, Object> params = tapExecuteCommand.getParams();
-            String command = tapExecuteCommand.getCommand();
-            switch (command) {
-                case "execute":
-                case "executeQuery":
-                    String sql = (String) params.get("sql");
-                    executeResult = sqlExecutor.execute(sql, connectionSupplier);
-                    break;
-                case "call":
-                    String funcName = (String) params.get("funcName");
-                    List<Map<String, Object>> callParams = (List<Map<String, Object>>) params.get("params");
-                    executeResult = sqlExecutor.call(funcName, callParams, connectionSupplier);
-                    break;
-                default:
-                    executeResult = new ExecuteResult<>().error(new IllegalArgumentException("Not supported command: " + command));
-            }
-        } catch (Exception e) {
-            executeResult = new ExecuteResult<>().error(e);
-        }
-        executeResultConsumer.accept(executeResult);
+        // Keep the deprecated entry point on the same code path so queryTimeoutSeconds and batchSize
+        // are honored; legacy callers have no cancellation supplier, so the command never cancels.
+        executeCommand(sqlExecutor, tapExecuteCommand, connectionSupplier, () -> true, executeResultConsumer);
     }
 
     public static void executeCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, TapSupplier<Connection> connectionSupplier, Supplier<Boolean> aliveSupplier, Consumer<ExecuteResult> executeResultConsumer) {
@@ -73,8 +54,11 @@ public class SqlExecuteCommandFunction {
                 case "execute":
                 case "executeQuery":
                     String sql = (String) params.get("sql");
-                    int batchSize = params.get("batchSize") != null ? (int) params.get("batchSize") : 1000;
-                    sqlExecutor.execute(sql, connectionSupplier, list -> executeResultConsumer.accept(new ExecuteResult().result(list)), aliveSupplier, batchSize);
+                    int batchSize = SqlCommandParams.getInteger(params, "batchSize", 1000);
+                    int queryTimeoutSeconds = SqlCommandParams.getQueryTimeoutSeconds(params);
+                    sqlExecutor.execute(sql, connectionSupplier,
+                            list -> executeResultConsumer.accept(new ExecuteResult().result(list)),
+                            aliveSupplier, batchSize, queryTimeoutSeconds);
                     break;
                 case "call":
                     String funcName = (String) params.get("funcName");

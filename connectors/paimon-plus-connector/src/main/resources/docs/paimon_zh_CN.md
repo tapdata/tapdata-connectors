@@ -107,7 +107,7 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 J
 
 ## 限制
 
-1. **读取操作**: 此连接器目前仅支持写入操作。不支持读取和 CDC 操作。
+1. **读取操作**: 不支持 CDC 和流式读取；只读临时查询请使用 `executeQuery`（见下文）。
 2. **索引**: Paimon 不支持传统索引。仅支持主键。
 3. **模型变更**: 不支持运行时动态模型变更。
 
@@ -149,3 +149,73 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 J
 
 - [Apache Paimon 文档](https://paimon.apache.org/)
 - [Paimon GitHub 仓库](https://github.com/apache/paimon)
+
+## 自定义 SQL 查询校验（executeCommand）
+
+`executeCommand` 的 `executeQuery` 命令支持以下单表只读子集，复用 Paimon Core 和 JSqlParser，不引入 Flink、Spark 或其他 SQL 引擎：
+
+- `SELECT *`、普通列投影、列别名。
+- `COUNT(*)`、`COUNT(1)`、`COUNT(col)`、`SUM`、`MIN`、`MAX`、`AVG`；不支持 DISTINCT 聚合。`SUM/AVG` 只接受数值列，DECIMAL 全程使用 BigDecimal；AVG 按 DECIMAL128 精度舍入。空输入的 COUNT 为 0，其余聚合为 NULL；分组查询的空输入返回空结果集。
+- 多列 `GROUP BY`，以及 `CAST(timestamp_column AS DATE)` 日期投影、分组。日期转换仅接受 DATE 或无时区 TIMESTAMP，不隐式选择时区。
+- 按已选择的表达式、别名、列序号 `ORDER BY`，支持 ASC/DESC、NULLS FIRST/LAST；默认 ASC 时 NULL 在前、DESC 时 NULL 在后。排序需要把结果行缓存在内存中，受 `maxBufferedRows` 限制：超过限制整次失败，不会返回截断或未排序的结果。
+- 原有 WHERE 子集：列与常量比较、BETWEEN、IN、IS NULL、有限的 LIKE、AND/OR/NOT。整型列只接受列范围内的整数字面量；小数或超范围字面量会以 `literal ... is not representable as ...` 明确报错，不会被静默截断，也不会被误报为语法错误。WHERE 下推至 Paimon，并由 reader 精确执行；读取投影保留 SELECT、GROUP BY、WHERE 所需的列。
+
+不支持 JOIN、通用子查询、WITH、UNION、HAVING、窗口函数、通用算术表达式、分页、表别名或带数据库/schema 前缀的表名。不支持的语法明确报错，不会静默忽略。历史 `COUNT(1) FROM (SELECT * ...)` 计数包装继续支持，历史直接 COUNT(1) 和计数包装仍返回 Long；其他查询返回 `List<Map<String,Object>>`，建议为所有表达式指定唯一别名。
+
+客户示例可写成以下形式；SQL Server 源端也使用相同的四个别名，避免两种驱动对未命名表达式返回不同字段名：
+
+```sql
+SELECT CAST(CreationTime AS DATE) AS creation_date,
+       COUNT(*) AS row_count,
+       SUM(TotalValues) AS total_values,
+       SUM(PointsAfterRedemption) AS points_after_redemption
+FROM DRSRedemptions
+WHERE TransactionDatetime BETWEEN '2025-01-01 00:00:00' AND '2025-07-01 00:00:00'
+  AND op <> 'd'
+GROUP BY CAST(CreationTime AS DATE)
+ORDER BY CAST(CreationTime AS DATE)
+```
+
+### 执行限制
+
+投影、聚合、排序查询默认允许非键过滤和全表扫描。需要限制时，可将连接配置 `queryAllowFullScan=false`，或在命令中设置布尔值 `allowFullScan=false`，启用分区列或前导主键过滤要求。命令参数优先；直接/包装 `COUNT(1)` 不受该键过滤要求影响。键过滤要求也适用于历史无排序 `SELECT *`。`AND` 中任意一个条件约束键即可；`OR` 的每个分支都必须约束键。相同键的多个等值条件可改写为 `IN`；`IS NULL` 可用于键过滤，`NOT` 与否定形式不计作键过滤。非键查询若确实要全表扫描，再显式设为 `true`。支持的 WHERE 会下推，但 SQL 写了过滤条件并不保证文件裁剪。
+
+自定义校验的 1000 行上限由引擎负责，跨回调累计查询结果行数，在第 1001 行报错并丢弃全部部分结果。`executeCommand` 使用已有的 `batchSize` 和结果回调分批返回无排序投影；回调抛出异常会停止读取并关闭资源。聚合和排序需要完成扫描后才能返回最终结果，不会把聚合输入明细限制为 1000 行。带 `ORDER BY` 的查询会把结果行缓存在内存中，上限为 `maxBufferedRows`；聚合按组保存状态，上限为 `maxGroups`；带 `ORDER BY` 的聚合查询会把每组物化为一行后排序，同时受两个上限约束。直接调用连接器可返回超过 1000 行；流式调用方若收到后续错误，必须丢弃之前收到的批次。
+
+`executeQuery` 命令参数（与 `sql` 一起放在 `params`）：
+
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `queryTimeoutSeconds` | 0 | 整数秒，范围 0..2147483647（与 JDBC 上界一致）；省略或 0 不设超时，正值在 catalog/规划/批次/行/排序/结果阶段检查协作式截止时间 |
+| `maxScanRows` | 10000000 | 最多处理 N 行，若 reader 还有下一行则命令失败；**不是底层文件物理扫描行数** |
+| `maxGroups` | 100000 | 最大聚合分组数，按组保存状态，不缓存全部明细行 |
+| `maxResultRows` | 默认不设校验行数上限 | 最大结果行数；失败时应丢弃已收到的批次 |
+| `maxBufferedRows` | 100000 | 带 `ORDER BY` 的查询必须缓存全部结果行后才能排序，缓存超过 N 行整次失败；带 `ORDER BY` 的聚合查询也会按组缓存一行并受此限制；无排序投影按 `batchSize` 流式返回，不受此限制 |
+| `allowFullScan` | 连接配置，默认 true | 布尔值或 `"true"`/`"false"` 字符串；是否允许没有上述键过滤的查询 |
+
+行数与分组数参数必须是范围内的正整数；超时接受 0 到 2147483647 的整数秒（JDBC 参数兼容上界，0 明确表示关闭，不必填写大数模拟无限制）。负数、小数、溢出值均拒绝。任一限制触发，整次命令失败，调用方应丢弃已收到的批次。reader 和 batch 在异常路径也会释放。日志记录计划 splits 数、投影列数、reader 交付行数、有效行数、分组数和耗时。
+
+存在键过滤只表示可能裁剪，不保证实际裁剪。非键过滤、宽范围过滤仍可能读取大量文件；聚合成本取决于过滤后行数和分组数。行数、分组数限制不等于精确的内存字节上限。超时不能强制中断已阻塞的 Paimon/文件系统 I/O，也不能代替存储端 I/O 超时；不会启动超时后仍在后台继续扫描的查询线程。需要用客户表布局、存储和代表性数据评估吞吐及裁剪效果。
+
+### 返回类型与数值边界
+
+直接及历史包装 `COUNT(1)` 返回单个 `Long`；其他查询返回 `List<Map<String,Object>>`。SQL NULL 返回 Java null。普通列投影（含 SELECT *）及 MIN/MAX 保持连接器原有类型：
+
+| SQL 值或表达式 | Java 值 |
+| --- | --- |
+| BOOLEAN；TINYINT / SMALLINT / INT / BIGINT | Boolean；Byte / Short / Integer / Long |
+| FLOAT / DOUBLE / DECIMAL | Float / Double / BigDecimal |
+| CHAR / VARCHAR；BINARY / VARBINARY | String；byte[] |
+| DATE 列 | java.sql.Date，毫秒值为 epoch-day × 86400000（历史行为；文本显示取决于 JVM 时区） |
+| TIME 列 | 锚定 1970-01-01 的 LocalDateTime |
+| 无时区 TIMESTAMP | LocalDateTime |
+| 本地时区 TIMESTAMP | UTC ZonedDateTime |
+| CAST(column AS DATE) | LocalDate |
+| COUNT；SUM / AVG | Long；BigDecimal |
+| MIN / MAX | 与参数列类型相同；CAST AS DATE 参数返回 LocalDate |
+
+SUM/AVG 对所有数值类型返回 BigDecimal，AVG 使用 DECIMAL128 舍入。SUM/AVG 遇到 NaN 或正负无穷会明确报数据错误，调用方应丢弃已收到的批次。MIN/MAX 和 ORDER BY 的顺序为 -Infinity < 有限数值 < +Infinity < NaN；正负零相等。`GROUP BY` 同样把正负零归入同一分组，所有 NaN 也归入同一分组。COUNT 和普通投影允许上述浮点特殊值。
+
+不支持选择或在表达式中引用 ARRAY/MAP/MULTISET/ROW 列；含复杂列的表请显式列出标量列。ORDER BY 未加引号的别名忽略大小写，带引号的别名精确匹配；当前 JSqlParser 4.4 不接受标识符内部双写双引号的语法。WHERE 比较支持列在左右任一侧；DATE(column) 不受支持，请使用 CAST(column AS DATE)。
+
+截止时间与耗时在生命周期准入完成后开始计算，包含 catalog、规划、读取、排序及结果构建。排序取消时丢弃内部缓冲，不发布部分排序结果。

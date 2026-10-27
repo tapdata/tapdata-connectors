@@ -292,8 +292,11 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.7.0</version>
                 <configuration>
-                    <source>${java.version}</source>
-                    <target>${java.version}</target>
+                    <!-- <release> validates production code against the Java 8 API surface; source/target
+                         alone would let Java 9+ calls compile and fail only at runtime. -->
+                    <release>${java.version}</release>
+                    <!-- Existing integration tests use Java 11 APIs; production stays Java 8. -->
+                    <testRelease>11</testRelease>
                 </configuration>
             </plugin>
             <!--            <plugin>-->
@@ -348,14 +351,6 @@
                         </configuration>
                     </execution>
                 </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <source>11</source>
-                    <target>11</target>
-                </configuration>
             </plugin>
         </plugins>
     </build>

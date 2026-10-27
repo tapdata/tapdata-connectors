@@ -5,24 +5,35 @@ import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.JdbcContext;
+import io.tapdata.common.ddl.type.DDLParserType;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
+import io.tapdata.connector.mysql.util.MysqlBinlogPositionUtil;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
+import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
+import io.tapdata.entity.schema.TapIndex;
+import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapNumber;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
+import io.tapdata.pdk.apis.entity.ExecuteResult;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
+import io.tapdata.pdk.apis.functions.connector.source.ConnectionConfigWithTables;
 import io.tapdata.utils.UnitTestUtils;
 import org.junit.jupiter.api.*;
+import org.mockito.ArgumentCaptor;
+import org.mockito.MockedConstruction;
 import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -30,6 +41,9 @@ import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.CallableStatement;
+import java.sql.Connection;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -37,11 +51,101 @@ import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 public class MysqlConnectorTest {
+    @Test
+    void executeWithTimeoutUsesMysqlStreamingAndConversionPath() throws Throwable {
+        MysqlConnector connector = Mockito.spy(new MysqlConnector());
+        JdbcContext jdbcContext = mock(JdbcContext.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        ResultSetMetaData metaData = mock(ResultSetMetaData.class);
+        Map<String, Object> convertedRow = Collections.singletonMap("created_at", "mysql-value");
+        ReflectionTestUtils.setField(connector, "jdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(connector, "isAlive", new AtomicBoolean(true));
+        when(jdbcContext.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(statement);
+        when(statement.execute("select created_at from records")).thenReturn(true);
+        when(statement.getResultSet()).thenReturn(resultSet);
+        when(resultSet.getMetaData()).thenReturn(metaData);
+        when(resultSet.next()).thenReturn(true, false);
+        when(statement.getMoreResults()).thenReturn(false);
+        doReturn(convertedRow).when(connector).filterTimeForMysql(eq(resultSet), any(ResultSetMetaData.class));
+        List<Object> batches = new ArrayList<>();
+
+        connector.execute("select created_at from records", batches::add, 10, 8);
+
+        verify(statement).setQueryTimeout(8);
+        verify(statement).setFetchSize(Integer.MIN_VALUE);
+        verify(connector).filterTimeForMysql(eq(resultSet), any(ResultSetMetaData.class));
+        assertEquals(Collections.singletonList(convertedRow), batches.get(0));
+    }
+
+    @Test
+    void executeKeysRowsBySqlAliasAndKeepsTypeConversion() throws Throwable {
+        MysqlConnector connector = new MysqlConnector();
+        JdbcContext jdbcContext = mock(JdbcContext.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        ResultSetMetaData metaData = mock(ResultSetMetaData.class);
+        ReflectionTestUtils.setField(connector, "jdbcContext", jdbcContext);
+        ReflectionTestUtils.setField(connector, "isAlive", new AtomicBoolean(true));
+        when(jdbcContext.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(statement);
+        String sql = "select id as `key`, created_at as created, value from records";
+        when(statement.execute(sql)).thenReturn(true);
+        when(statement.getResultSet()).thenReturn(resultSet);
+        when(resultSet.getMetaData()).thenReturn(metaData);
+        when(resultSet.next()).thenReturn(true, false);
+        when(statement.getMoreResults()).thenReturn(false);
+        when(metaData.getColumnCount()).thenReturn(3);
+        when(metaData.getColumnName(1)).thenReturn("id");
+        when(metaData.getColumnLabel(1)).thenReturn("key");
+        when(metaData.getColumnTypeName(1)).thenReturn("INT");
+        when(resultSet.getObject(1)).thenReturn(1);
+        when(metaData.getColumnName(2)).thenReturn("created_at");
+        when(metaData.getColumnLabel(2)).thenReturn("created");
+        when(metaData.getColumnTypeName(2)).thenReturn("TIMESTAMP");
+        Timestamp created = Timestamp.valueOf("2026-10-20 12:30:00");
+        when(resultSet.getObject(2)).thenReturn(created);
+        when(resultSet.getString(2)).thenReturn("2026-10-20 12:30:00");
+        when(metaData.getColumnName(3)).thenReturn("value");
+        when(metaData.getColumnLabel(3)).thenReturn("");
+        when(metaData.getColumnTypeName(3)).thenReturn("INT");
+        when(resultSet.getObject(3)).thenReturn(2);
+        List<Object> batches = new ArrayList<>();
+
+        connector.execute(sql, batches::add, 10, 0);
+
+        Map<String, Object> row = (Map<String, Object>) ((List<?>) batches.get(0)).get(0);
+        assertEquals(1, row.get("key"));
+        assertEquals(created.toLocalDateTime().atZone(ZoneOffset.UTC), row.get("created"));
+        assertEquals(2, row.get("value"));
+        assertFalse(row.containsKey("id"));
+        assertFalse(row.containsKey("created_at"));
+    }
+
+    @Test
+    void omittedAndZeroTimeoutKeepMysqlStreamingWithoutSettingJdbcTimeout() throws Throwable {
+        MysqlConnector connector = new MysqlConnector();
+        JdbcContext jdbc = mock(JdbcContext.class);
+        Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
+        ReflectionTestUtils.setField(connector, "jdbcContext", jdbc);
+        when(jdbc.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(statement);
+        connector.execute("select 1", ignored -> {}, 10);
+        connector.execute("select 1", ignored -> {}, 10, 0);
+        verify(statement, never()).setQueryTimeout(anyInt());
+        verify(statement, times(2)).setFetchSize(Integer.MIN_VALUE);
+    }
+
     @Test
     void discoverSchemaMarksInformationSchemaViewAsView() throws SQLException {
         MysqlConnector connector = new MysqlConnector();
@@ -391,6 +495,179 @@ public class MysqlConnectorTest {
             MysqlBinlogPosition actualData = ReflectionTestUtils.invokeMethod(mysqlConnector, "timestampToStreamOffset",
                     tapConnectorContext, null);
             Assertions.assertTrue(actualData.getPosition() == position);
+        }
+    }
+
+    /**
+     * 覆盖分支上新增/改动行（Sonar New Code）的执行路径，避免 New Code 覆盖率不达标。
+     */
+    @Nested
+    class NewCodeCoverageTest {
+
+        private MysqlConnector connector;
+        private JdbcContext jdbcContext;
+        private MysqlConfig mysqlConfig;
+
+        @BeforeEach
+        void setUp() {
+            connector = new MysqlConnector();
+            jdbcContext = mock(JdbcContext.class);
+            mysqlConfig = mock(MysqlConfig.class);
+            ReflectionTestUtils.setField(connector, "jdbcContext", jdbcContext);
+            ReflectionTestUtils.setField(connector, "mysqlConfig", mysqlConfig);
+            ReflectionTestUtils.setField(connector, "commonDbConfig", new MysqlConfig());
+            ReflectionTestUtils.setField(connector, "tapLogger", mock(Log.class));
+            ReflectionTestUtils.setField(connector, "isAlive", new AtomicBoolean(true));
+        }
+
+        @Test
+        void clearTableCoversExistingAndMissingTableBranches() throws SQLException {
+            TapClearTableEvent clearEvent = new TapClearTableEvent();
+            clearEvent.setTableId("t1");
+            when(jdbcContext.queryAllTables(anyList()))
+                    .thenReturn(Collections.singletonList(DataMap.create()))
+                    .thenReturn(Collections.emptyList());
+
+            connector.clearTable(mock(TapConnectorContext.class), clearEvent);
+            connector.clearTable(mock(TapConnectorContext.class), clearEvent);
+
+            ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
+            verify(jdbcContext, times(1)).batchExecute(captor.capture());
+            assertEquals("truncate table `t1`", captor.getValue().get(1));
+        }
+
+        @Test
+        void dropTableCoversExistingAndMissingTableBranches() throws SQLException {
+            TapDropTableEvent dropEvent = new TapDropTableEvent();
+            dropEvent.setTableId("t1");
+            when(jdbcContext.queryAllTables(anyList()))
+                    .thenReturn(Collections.singletonList(DataMap.create()))
+                    .thenReturn(Collections.emptyList());
+
+            connector.dropTable(mock(TapConnectorContext.class), dropEvent);
+            connector.dropTable(mock(TapConnectorContext.class), dropEvent);
+
+            ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
+            verify(jdbcContext, times(1)).batchExecute(captor.capture());
+            assertEquals("drop table `t1`", captor.getValue().get(1));
+        }
+
+        @Test
+        void getAfterUniqueAutoIncrementFieldsCoversCreateAutoIncBranches() {
+            TapTable table = new TapTable("t1");
+            table.add(new TapField("id", "int").autoInc(true).isPrimaryKey(true));
+            table.add(new TapField("code", "varchar").autoInc(true).isPrimaryKey(false));
+            TapIndex uniqueIndex = new TapIndex().name("uk_code").unique(true)
+                    .indexField(new TapIndexField().name("code"));
+
+            when(mysqlConfig.getCreateAutoInc()).thenReturn(false);
+            assertTrue(connector.getAfterUniqueAutoIncrementFields(table, Collections.singletonList(uniqueIndex)).isEmpty());
+
+            when(mysqlConfig.getCreateAutoInc()).thenReturn(true);
+            List<String> sqls = connector.getAfterUniqueAutoIncrementFields(table, Collections.singletonList(uniqueIndex));
+            assertEquals(Collections.singletonList("ALTER TABLE `t1` MODIFY COLUMN `code` varchar AUTO_INCREMENT"), sqls);
+        }
+
+        @Test
+        void callExecutesCallableStatementWithoutParams() throws Exception {
+            Connection connection = mock(Connection.class);
+            CallableStatement callableStatement = mock(CallableStatement.class);
+            when(jdbcContext.getConnection()).thenReturn(connection);
+            when(connection.prepareCall("{call demo_proc()}")).thenReturn(callableStatement);
+            when(callableStatement.execute()).thenReturn(false);
+
+            ExecuteResult<?> result = connector.call("demo_proc", Collections.emptyList());
+
+            assertNull(result.getError());
+            verify(connection).prepareCall("{call demo_proc()}");
+            // createMysqlCallableStatement 与 call 各设置一次
+            verify(callableStatement, times(2)).setFetchSize(Integer.MIN_VALUE);
+            verify(callableStatement).execute();
+        }
+
+        @Test
+        void streamReadCoversHighPerformanceAndBinlogBranches() throws Throwable {
+            MysqlJdbcContextV2 mysqlJdbcContext = mock(MysqlJdbcContextV2.class);
+            MysqlReader mysqlReader = mock(MysqlReader.class);
+            ReflectionTestUtils.setField(connector, "mysqlJdbcContext", mysqlJdbcContext);
+            ReflectionTestUtils.setField(connector, "mysqlReader", mysqlReader);
+            ReflectionTestUtils.setField(connector, "dbTimeZone", java.util.TimeZone.getDefault());
+            TapConnectorContext tapConnectorContext = mock(TapConnectorContext.class);
+            StreamReadConsumer consumer = mock(StreamReadConsumer.class);
+
+            when(mysqlConfig.getHighPerformance()).thenReturn(true);
+            try (MockedConstruction<MysqlReaderV2> readerV2 = mockConstruction(MysqlReaderV2.class)) {
+                ReflectionTestUtils.invokeMethod(connector, "streamRead",
+                        tapConnectorContext, Collections.singletonList("t1"), null, 10, consumer);
+                assertEquals(1, readerV2.constructed().size());
+                MysqlReaderV2 constructed = readerV2.constructed().get(0);
+                verify(constructed).init(Collections.singletonList("t1"), null, null, 10, consumer);
+                verify(constructed).startMiner(any());
+            }
+
+            when(mysqlConfig.getHighPerformance()).thenReturn(false);
+            ReflectionTestUtils.invokeMethod(connector, "streamRead",
+                    tapConnectorContext, Collections.singletonList("t1"), null, 10, consumer);
+            verify(mysqlReader).readBinlog(tapConnectorContext, Collections.singletonList("t1"), null, 10,
+                    DDLParserType.MYSQL_CCJ_SQL_PARSER, consumer, null);
+        }
+
+        @Test
+        void streamReadMultiConnectionCoversHighPerformanceAndBinlogBranches() throws Throwable {
+            MysqlJdbcContextV2 mysqlJdbcContext = mock(MysqlJdbcContextV2.class);
+            MysqlReader mysqlReader = mock(MysqlReader.class);
+            ReflectionTestUtils.setField(connector, "mysqlJdbcContext", mysqlJdbcContext);
+            ReflectionTestUtils.setField(connector, "mysqlReader", mysqlReader);
+            ReflectionTestUtils.setField(connector, "dbTimeZone", java.util.TimeZone.getDefault());
+            TapConnectorContext tapConnectorContext = mock(TapConnectorContext.class);
+            StreamReadConsumer consumer = mock(StreamReadConsumer.class);
+
+            ConnectionConfigWithTables configWithTables = mock(ConnectionConfigWithTables.class);
+            when(configWithTables.getConnectionConfig()).thenReturn(DataMap.create(Collections.singletonMap("database", "db1")));
+            when(configWithTables.getTables()).thenReturn(Collections.singletonList("t1"));
+            List<ConnectionConfigWithTables> connectionConfigs = Collections.singletonList(configWithTables);
+
+            when(mysqlConfig.getHighPerformance()).thenReturn(true);
+            try (MockedConstruction<MysqlReaderV2> readerV2 = mockConstruction(MysqlReaderV2.class)) {
+                ReflectionTestUtils.invokeMethod(connector, "streamReadMultiConnection",
+                        tapConnectorContext, connectionConfigs, null, 10, consumer);
+                assertEquals(1, readerV2.constructed().size());
+                MysqlReaderV2 constructed = readerV2.constructed().get(0);
+                verify(constructed).multiInit(connectionConfigs, null, null, 10, consumer);
+                verify(constructed).startMiner(any());
+            }
+            // highPerformance 分支不会提前 return，仍会走一次 binlog 读取
+            verify(mysqlReader, times(1)).readBinlog(any(), any(), any(), any(), anyInt(), any(), any(), any());
+
+            clearInvocations(mysqlReader);
+            when(mysqlConfig.getHighPerformance()).thenReturn(false);
+            ReflectionTestUtils.invokeMethod(connector, "streamReadMultiConnection",
+                    tapConnectorContext, connectionConfigs, null, 10, consumer);
+            verify(mysqlReader, times(1)).readBinlog(any(), any(), any(), any(), anyInt(), any(), any(), any());
+        }
+
+        @Test
+        void timestampToStreamOffsetUsesBinlogPositionUtilWhenHighPerformanceEnabled() throws Throwable {
+            when(mysqlConfig.getHighPerformance()).thenReturn(true);
+            MysqlBinlogPosition expected = new MysqlBinlogPosition();
+            expected.setPosition(2048L);
+            try (MockedConstruction<MysqlBinlogPositionUtil> positionUtil =
+                         mockConstruction(MysqlBinlogPositionUtil.class, (mock, context) ->
+                                 when(mock.findByLessTimestamp(1700000000000L, true)).thenReturn(expected))) {
+                Object offset = ReflectionTestUtils.invokeMethod(connector, "timestampToStreamOffset",
+                        mock(TapConnectorContext.class), Long.valueOf(1700000000000L));
+
+                assertSame(expected, offset);
+                assertEquals(1, positionUtil.constructed().size());
+            }
+        }
+
+        @Test
+        void timestampToStreamOffsetReturnsStartTimeWhenHighPerformanceDisabled() throws Throwable {
+            when(mysqlConfig.getHighPerformance()).thenReturn(false);
+            Object offset = ReflectionTestUtils.invokeMethod(connector, "timestampToStreamOffset",
+                    mock(TapConnectorContext.class), Long.valueOf(1700000000000L));
+            assertEquals(1700000000000L, offset);
         }
     }
 }

@@ -85,7 +85,8 @@ final class PaimonSqlQueryParser {
             }
 
             PlainSelect outer = (PlainSelect) body;
-            if (isCountQuery(outer)) {
+            if (isCountQuery(outer) && outer.getGroupBy() == null
+                    && outer.getOrderByElements() == null) {
                 if (outer.getFromItem() instanceof SubSelect) {
                     return parseCountWrapper(outer, rowType);
                 }
@@ -132,16 +133,11 @@ final class PaimonSqlQueryParser {
     }
 
     private static ParsedQuery parseRows(PlainSelect select, RowType rowType) {
-        validatePlainSelect(select);
-        List<SelectItem> items = select.getSelectItems();
-        if (items == null || items.size() != 1 || !(items.get(0) instanceof AllColumns)) {
-            throw unsupported("only SELECT * is supported");
-        }
-
         Table table = requireTable(select.getFromItem());
-        PredicateBuilder builder = new PredicateBuilder(rowType);
+        PaimonQueryPlan plan = PaimonQueryPlan.parse(select, rowType, table.getName());
         return new ParsedQuery(table.getName(), false,
-                parseOptionalPredicate(select.getWhere(), table.getName(), rowType, builder));
+                parseOptionalPredicate(select.getWhere(), table.getName(), rowType, new PredicateBuilder(rowType)),
+                plan);
     }
 
     private static ParsedQuery parseCountWrapper(PlainSelect outer, RowType rowType) {
@@ -161,8 +157,13 @@ final class PaimonSqlQueryParser {
         }
 
         PlainSelect inner = (PlainSelect) body;
-        ParsedQuery query = parseRows(inner, rowType);
-        return new ParsedQuery(query.tableName(), true, query.predicate());
+        validatePlainSelect(inner);
+        if (inner.getSelectItems().size() != 1 || !(inner.getSelectItems().get(0) instanceof AllColumns)) {
+            throw unsupported("COUNT wrapper requires SELECT *");
+        }
+        Table table = requireTable(inner.getFromItem());
+        return new ParsedQuery(table.getName(), true, parseOptionalPredicate(inner.getWhere(),
+                table.getName(), rowType, new PredicateBuilder(rowType)));
     }
 
     private static ParsedQuery parseDirectCount(PlainSelect select, RowType rowType) {
@@ -185,7 +186,10 @@ final class PaimonSqlQueryParser {
         }
         Function function = (Function) expression;
         if (!"COUNT".equalsIgnoreCase(function.getName()) || function.isDistinct()
-                || function.isAllColumns() || function.getParameters() == null) {
+                || function.isAllColumns() || function.getParameters() == null
+                || function.isUnique() || function.isIgnoreNulls() || function.getAttribute() != null
+                || function.getKeep() != null || function.getNamedParameters() != null
+                || function.getOrderByElements() != null) {
             return false;
         }
         List<Expression> parameters = function.getParameters().getExpressions();
@@ -202,19 +206,30 @@ final class PaimonSqlQueryParser {
         }
     }
 
-    private static void validatePlainSelect(PlainSelect select) {
+    static void validatePlainSelect(PlainSelect select) {
+        validatePlainSelect(select, false);
+    }
+
+    static void validatePlainSelect(PlainSelect select, boolean groupingAndOrdering) {
         if (select.getJoins() != null && !select.getJoins().isEmpty()) {
             throw unsupported("JOIN is not supported");
         }
-        if (select.getGroupBy() != null || select.getHaving() != null) {
+        if ((!groupingAndOrdering && select.getGroupBy() != null) || select.getHaving() != null) {
             throw unsupported("GROUP BY and HAVING are not supported");
         }
-        if (select.getOrderByElements() != null && !select.getOrderByElements().isEmpty()) {
+        if (!groupingAndOrdering && select.getOrderByElements() != null && !select.getOrderByElements().isEmpty()) {
             throw unsupported("ORDER BY is not supported");
         }
         if (select.getLimit() != null || select.getOffset() != null || select.getFetch() != null
-                || select.getTop() != null || select.getSkip() != null) {
+                || select.getTop() != null || select.getSkip() != null || select.getFirst() != null) {
             throw unsupported("pagination is not supported");
+        }
+        if (select.getIntoTables() != null || select.getOracleHierarchical() != null
+                || select.getKsqlWindow() != null || select.isEmitChanges() || select.getForXmlPath() != null
+                || select.getWithIsolation() != null || select.getOptimizeFor() != null
+                || select.getMySqlSqlCalcFoundRows() || select.getOracleHint() != null
+                || select.getMySqlSqlCacheFlag() != null || select.getMySqlHintStraightJoin()) {
+            throw unsupported("SELECT modifiers are not supported");
         }
         if (select.getDistinct() != null || select.isForUpdate()) {
             throw unsupported("DISTINCT and FOR UPDATE are not supported");
@@ -226,10 +241,24 @@ final class PaimonSqlQueryParser {
             throw unsupported("only one physical table is supported");
         }
         Table table = (Table) fromItem;
-        if (table.getAlias() != null) {
-            throw unsupported("table aliases are not supported");
+        if (table.getAlias() != null || table.getPivot() != null || table.getUnPivot() != null
+                || table.getIndexHint() != null || table.getSqlServerHints() != null) {
+            throw unsupported("table aliases, pivots and hints are not supported");
         }
+        if (table.getSchemaName() != null || table.getDatabase() != null && table.getDatabase().getDatabaseName() != null) {
+            throw unsupported("qualified table names are not supported; use the configured database");
+        }
+        table.setName(unquote(table.getName()));
         return table;
+    }
+
+    static String unquote(String name) {
+        if (name != null && name.length() >= 2 && ((name.startsWith("\"") && name.endsWith("\""))
+                || (name.startsWith("`") && name.endsWith("`")) || (name.startsWith("[") && name.endsWith("]")))) {
+            String delimiter = name.startsWith("[") ? "]" : name.substring(0, 1);
+            return name.substring(1, name.length() - 1).replace(delimiter + delimiter, delimiter);
+        }
+        return name;
     }
 
     private static Predicate parsePredicate(Expression expression, String tableName, RowType rowType,
@@ -278,8 +307,10 @@ final class PaimonSqlQueryParser {
 
     private static Predicate parseComparison(BinaryExpression expression, String tableName,
                                              RowType rowType, PredicateBuilder builder) {
-        int index = fieldIndex(expression.getLeftExpression(), tableName, rowType, builder);
-        Object value = typedLiteral(rowType.getTypeAt(index), expression.getRightExpression());
+        boolean reversed = !(expression.getLeftExpression() instanceof Column)
+                && expression.getRightExpression() instanceof Column;
+        int index = fieldIndex(reversed ? expression.getRightExpression() : expression.getLeftExpression(), tableName, rowType, builder);
+        Object value = typedLiteral(rowType.getTypeAt(index), reversed ? expression.getLeftExpression() : expression.getRightExpression());
         if (expression instanceof EqualsTo) {
             return builder.equal(index, value);
         }
@@ -287,15 +318,15 @@ final class PaimonSqlQueryParser {
             return builder.notEqual(index, value);
         }
         if (expression instanceof GreaterThan) {
-            return builder.greaterThan(index, value);
+            return reversed ? builder.lessThan(index, value) : builder.greaterThan(index, value);
         }
         if (expression instanceof GreaterThanEquals) {
-            return builder.greaterOrEqual(index, value);
+            return reversed ? builder.lessOrEqual(index, value) : builder.greaterOrEqual(index, value);
         }
         if (expression instanceof MinorThan) {
-            return builder.lessThan(index, value);
+            return reversed ? builder.greaterThan(index, value) : builder.lessThan(index, value);
         }
-        return builder.lessOrEqual(index, value);
+        return reversed ? builder.greaterOrEqual(index, value) : builder.lessOrEqual(index, value);
     }
 
     private static Predicate parseOptionalPredicate(Expression expression, String tableName, RowType rowType,
@@ -375,7 +406,7 @@ final class PaimonSqlQueryParser {
         return expression.isNot() ? builder.notIn(index, values) : builder.in(index, values);
     }
 
-    private static int fieldIndex(Expression expression, String tableName, RowType rowType,
+    static int fieldIndex(Expression expression, String tableName, RowType rowType,
                                   PredicateBuilder builder) {
         if (!(expression instanceof Column)) {
             throw unsupported("a predicate must compare a table column with a literal");
@@ -383,10 +414,10 @@ final class PaimonSqlQueryParser {
         Column column = (Column) expression;
         Table qualifier = column.getTable();
         if (qualifier != null && qualifier.getName() != null
-                && !qualifier.getName().equals(tableName)) {
+                && (!unquote(qualifier.getName()).equals(tableName) || qualifier.getSchemaName() != null)) {
             throw unsupported("column belongs to another table: " + column);
         }
-        int index = builder.indexOf(column.getColumnName());
+        int index = builder.indexOf(unquote(column.getColumnName()));
         if (index < 0) {
             throw unsupported("unknown column: " + column.getColumnName());
         }
@@ -401,7 +432,7 @@ final class PaimonSqlQueryParser {
             return ((LongValue) expression).getValue();
         }
         if (expression instanceof DoubleValue) {
-            return ((DoubleValue) expression).getValue();
+            return new BigDecimal(expression.toString());
         }
         if (expression instanceof DateValue) {
             return ((DateValue) expression).getValue();
@@ -420,9 +451,6 @@ final class PaimonSqlQueryParser {
             }
             if (value instanceof Long) {
                 return -((Long) value);
-            }
-            if (value instanceof Double) {
-                return -((Double) value);
             }
             if (value instanceof BigDecimal) {
                 return ((BigDecimal) value).negate();
@@ -462,7 +490,52 @@ final class PaimonSqlQueryParser {
                         + ": " + text, e);
             }
         }
-        return PredicateBuilder.convertJavaObject(type, literal(expression));
+        return convertLiteral(type, literal(expression));
+    }
+
+    private static Object convertLiteral(org.apache.paimon.types.DataType type, Object value) {
+        String root = type.getTypeRoot().name();
+        if (value instanceof Number) {
+            BigDecimal number = value instanceof BigDecimal ? (BigDecimal) value : new BigDecimal(value.toString());
+            switch (root) {
+                // Integer columns only take whole numbers inside the column range. Anything else is
+                // rejected with a dedicated message: wrapping or rounding would silently change the
+                // predicate, and reporting it as "invalid SELECT syntax" would hide the real cause.
+                case "TINYINT": value = narrow(number, type, Byte.MIN_VALUE, Byte.MAX_VALUE); break;
+                case "SMALLINT": value = narrow(number, type, Short.MIN_VALUE, Short.MAX_VALUE); break;
+                case "INTEGER": value = narrow(number, type, Integer.MIN_VALUE, Integer.MAX_VALUE); break;
+                case "BIGINT": value = narrow(number, type, Long.MIN_VALUE, Long.MAX_VALUE); break;
+                default: break;
+            }
+        }
+        if (value instanceof String) {
+            if ("TIMESTAMP_WITHOUT_TIME_ZONE".equals(root)) {
+                String text = ((String) value).trim();
+                value = java.sql.Timestamp.valueOf(text.length() == 10 ? text + " 00:00:00" : text);
+            } else if ("DATE".equals(root)) {
+                value = java.sql.Date.valueOf((String) value);
+            }
+        }
+        return PredicateBuilder.convertJavaObject(type, value);
+    }
+
+    /**
+     * Converts a numeric literal to the column's integer type without rounding or wrapping.
+     * Fractional or out-of-range literals are reported explicitly instead of being truncated.
+     */
+    private static Object narrow(BigDecimal number, org.apache.paimon.types.DataType type, long min, long max) {
+        try {
+            switch (type.getTypeRoot().name()) {
+                case "TINYINT": return number.byteValueExact();
+                case "SMALLINT": return number.shortValueExact();
+                case "INTEGER": return number.intValueExact();
+                default: return number.longValueExact();
+            }
+        } catch (ArithmeticException failure) {
+            throw unsupported("literal " + number.toPlainString() + " is not representable as "
+                    + type.asSQLString() + "; integer columns accept only whole numbers between "
+                    + min + " and " + max + ", use a CAST or compare with a different column", failure);
+        }
     }
 
     private static Object castLiteral(CastExpression expression) {
@@ -521,12 +594,20 @@ final class PaimonSqlQueryParser {
         private final String tableName;
         private final boolean countQuery;
         private final Predicate predicate;
+        private final PaimonQueryPlan plan;
 
         private ParsedQuery(String tableName, boolean countQuery, Predicate predicate) {
+            this(tableName, countQuery, predicate, null);
+        }
+
+        private ParsedQuery(String tableName, boolean countQuery, Predicate predicate, PaimonQueryPlan plan) {
+            this.plan = plan;
             this.tableName = tableName;
             this.countQuery = countQuery;
             this.predicate = predicate;
         }
+
+        PaimonQueryPlan plan() { return plan; }
 
         String tableName() {
             return tableName;
