@@ -1209,8 +1209,13 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 batchSize, queryTimeoutSeconds, batchSize > 0 ? batchSize : 1000, resultSet -> {
                     String[] columnNames = DbKit.getColumnsFromResultSet(resultSet).toArray(new String[0]);
                     String[] columnTypes = DbKit.getColumnTypesFromResultSet(resultSet).toArray(new String[0]);
-                    return () -> filterData(resultSet, columnNames, columnTypes);
+                    return () -> filterQueryData(resultSet, columnNames, columnTypes);
                 });
+    }
+
+    /** Query-result conversion may differ from the legacy snapshot/CDC representation. */
+    protected DataMap filterQueryData(ResultSet resultSet, String[] fields, String[] columnTypes) throws SQLException {
+        return filterData(resultSet, fields, columnTypes);
     }
 
     public ExecuteResult<?> call(String funcName, List<Map<String, Object>> params) {
