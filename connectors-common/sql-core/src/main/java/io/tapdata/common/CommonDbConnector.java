@@ -1215,7 +1215,16 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     /** Query-result conversion may differ from the legacy snapshot/CDC representation. */
     protected DataMap filterQueryData(ResultSet resultSet, String[] fields, String[] columnTypes) throws SQLException {
-        return filterData(resultSet, fields, columnTypes);
+        DataMap row = new DataMap();
+        for (int i = 0; i < fields.length; i++) {
+            row.putAll(filterQueryColumnData(resultSet, fields[i], columnTypes[i]));
+        }
+        return row;
+    }
+
+    /** Converts one query result column; connectors can specialize types without copying the row loop. */
+    protected DataMap filterQueryColumnData(ResultSet resultSet, String field, String columnType) throws SQLException {
+        return filterData(resultSet, new String[]{field}, new String[]{columnType});
     }
 
     public ExecuteResult<?> call(String funcName, List<Map<String, Object>> params) {

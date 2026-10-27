@@ -1939,21 +1939,18 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     @Override
-    protected DataMap filterQueryData(ResultSet resultSet, String[] fields, String[] columnTypes) throws SQLException {
-        DataMap row = new DataMap();
-        for (int i = 0; i < fields.length; i++) {
-            if ("timestamptz".equalsIgnoreCase(columnTypes[i])
-                    || "timestamp with time zone".equalsIgnoreCase(columnTypes[i])) {
-                // JDBC Timestamp carries an instant for timestamptz, in both timezone modes.
-                // Do not reconstruct it from wall-clock fields or the JVM raw offset (DST).
-                Timestamp timestamp = resultSet.getTimestamp(fields[i]);
-                row.put(fields[i], timestamp == null ? null : timestamp.toInstant());
-            } else {
-                // Preserve existing conversion for timezone-free timestamp, money, etc.
-                row.putAll(filterData(resultSet, new String[]{fields[i]}, new String[]{columnTypes[i]}));
-            }
+    protected DataMap filterQueryColumnData(ResultSet resultSet, String field, String columnType) throws SQLException {
+        if ("timestamptz".equalsIgnoreCase(columnType)
+                || "timestamp with time zone".equalsIgnoreCase(columnType)) {
+            // JDBC Timestamp carries an instant for timestamptz, in both timezone modes.
+            // Do not reconstruct it from wall-clock fields or the JVM raw offset (DST).
+            Timestamp timestamp = resultSet.getTimestamp(field);
+            DataMap row = new DataMap();
+            row.put(field, timestamp == null ? null : timestamp.toInstant());
+            return row;
         }
-        return row;
+        // Preserve existing conversion for timezone-free timestamp, money, etc.
+        return super.filterQueryColumnData(resultSet, field, columnType);
     }
 
     protected DataMap filterData(ResultSet resultSet, String[] fields, String[] columnTypes) throws SQLException {
