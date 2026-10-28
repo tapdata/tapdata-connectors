@@ -597,6 +597,10 @@
             {
               "label": "${ascii}",
               "value": "ascii"
+            },
+            {
+              "label": "${custom}",
+              "value": "custom"
             }
           ]
         },
@@ -611,13 +615,13 @@
           "apiServerKey": "separator",
           "x-index": 16,
           "required": true,
-          "default": "0x",
+          "default": "",
           "x-reactions": [
             {
               "dependencies": [".separatorType"],
               "fulfill": {
                 "state": {
-                  "display": "{{$deps[0] === 'ascii' ? \"visible\":\"hidden\"}}"
+                  "display": "{{$deps[0] === 'ascii' || $deps[0] === 'custom' ? \"visible\":\"hidden\"}}"
                 }
               }
             }
@@ -733,7 +737,7 @@
       "fileNameExpression": "File Name Expression",
       "offStandard": "Off Standard CSV",
       "lineExpression": "Expression Each Line",
-      "separator": "Separator(single-character)",
+      "separator": "Separator (1-5 characters)",
       "separatorType": "Separator Type",
       "quoteChar": "Quote Character(single-character)",
       "lineEnd": "Line End",
@@ -753,13 +757,14 @@
       "fileNameExpressionTooltip": "When CSV is used as the target for writing, it is allowed to write to multiple files simultaneously. The file content can be categorized and split using field values and date formats, and saved with corresponding file names. For example: tap_\\${record.id}_\\${date:yyyyMMdd}.csv ",
       "offStandardTooltip": "Non standard CSV format text files that can be customized to collect file content through regular expression matching and used in conjunction with line expressions",
       "lineExpressionTooltip": "Regular expressions that can match each column of fields. When unfamiliar with usage, file data demos can be provided for customer service assistance",
-      "separatorTooltip": "Separator (ASCII), hexadecimal number starting with 0x",
+      "separatorTooltip": "Enter 1 to 5 characters. Use \\t for a tab; line breaks are not allowed.",
       "lineEndTooltip": "Line break separator (ASCII), hexadecimal number starting with 0x",
       "quoteCharTooltip": "Column quotation marks (single character), each column of data will be wrapped around that character",
       "tab": "Tab",
       "comma": "Comma",
       "space": "Space",
       "ascii": "ASCII",
+      "custom": "Custom",
       "enter": "Enter"
     },
     "zh_CN": {
@@ -801,7 +806,7 @@
       "fileNameExpression": "文件名表达式",
       "offStandard": "非标准CSV格式",
       "lineExpression": "行表达式",
-      "separator": "列间隔符（ASCII）",
+      "separator": "列间隔符（1至5个字符）",
       "separatorType": "列间隔符类型",
       "quoteChar": "列引号（单字符）",
       "lineEnd": "换行符",
@@ -821,13 +826,14 @@
       "fileNameExpressionTooltip": "CSV作为目标写入时，允许向多个文件同时写入，文件内容可以用字段值和日期格式作归类分割，并以对应的文件名保存。例如：tap_\\${record.id}_\\${date:yyyyMMdd}.csv",
       "offStandardTooltip": "非标准CSV格式的文本文件，可以通过正则表达式匹配定制化采集文件内容，配合行表达式使用",
       "lineExpressionTooltip": "能匹配每列字段的正则表达式，当不熟悉使用方式时，可以给出文件数据demo求助客服",
-      "separatorTooltip": "列间隔符（ASCII），0x开头的16进制数值",
+      "separatorTooltip": "输入 1 至 5 个字符；制表符可输入 \\t，不允许换行符。",
       "lineEndTooltip": "换行间隔符（ASCII），0x开头的16进制数值",
       "quoteCharTooltip": "列引号（单字符），每列数据将会以该字符包绕",
       "tab": "制表符",
       "comma": "逗号",
       "space": "空格",
       "ascii": "ASCII",
+      "custom": "自定义",
       "enter": "Enter换行"
     },
     "zh_TW": {
@@ -869,7 +875,7 @@
       "fileNameExpression": "檔名運算式",
       "offStandard": "非標準CSV格式",
       "lineExpression": "行運算式",
-      "separator": "列間隔符（單字元）",
+      "separator": "列間隔符（1至5個字元）",
       "separatorType": "列間隔符類型",
       "quoteChar": "列引號（單字元）",
       "lineEnd": "分行符號",
@@ -889,13 +895,14 @@
       "fileNameExpressionTooltip": "CSV作為目標寫入時，允許向多個檔案同時寫入，檔案內容可以用欄位值和日期格式作歸類分割，並以對應的檔名保存。例如：tap_\\${record.id}_\\${date:yyyyMMdd}.csv",
       "offStandardTooltip": "非標準CSV格式的文字檔，可以通過規則運算式匹配定制化採集檔案內容，配合行運算式使用",
       "lineExpressionTooltip": "能匹配每列欄位的規則運算式，當不熟悉使用管道時，可以給出檔案數據demo求助客服",
-      "separatorTooltip": "列間隔符（ASCII），0x開頭的16進位數值",
+      "separatorTooltip": "輸入 1 至 5 個字元；定位字元可輸入 \\t，不允許換行字元。",
       "lineEndTooltip": "換行間隔符（ASCII），0x開頭的16進位數值",
       "quoteCharTooltip": "列引號（單字元），每列數據將會以該字元包繞",
       "tab": "定位字元",
       "comma": "逗號",
       "space": "空格",
       "ascii": "ASCII",
+      "custom": "自訂",
       "enter": "Enter換行"
     }
   },

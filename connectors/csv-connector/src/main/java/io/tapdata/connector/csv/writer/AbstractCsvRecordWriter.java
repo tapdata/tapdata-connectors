@@ -111,7 +111,7 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
                     csvFileWriter.init();
                 } else {
                     csvFileWriter = new CsvFileWriter(storage, getNewCacheFileName(csvFileWriter.getPath()), fileConfig.getFileEncoding());
-                    csvFileWriter.setRule(csvConfig.getSeparator().replaceAll("\\[", "").replaceAll("]", "").charAt(0),
+                    csvFileWriter.setRule(csvConfig.getSeparator(),
                             EmptyKit.isBlank(csvConfig.getQuoteChar()) ? '\0' : csvConfig.getQuoteChar().charAt(0), csvConfig.getLineEnd());
                     csvFileWriter.init();
                     fileWriterMap.put(uniquePath, csvFileWriter);
@@ -119,7 +119,7 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
             }
         } else {
             csvFileWriter = new CsvFileWriter(storage, uniquePath, fileConfig.getFileEncoding());
-            csvFileWriter.setRule(csvConfig.getSeparator().replaceAll("\\[", "").replaceAll("]", "").charAt(0),
+            csvFileWriter.setRule(csvConfig.getSeparator(),
                     EmptyKit.isBlank(csvConfig.getQuoteChar()) ? '\0' : csvConfig.getQuoteChar().charAt(0), csvConfig.getLineEnd());
             csvFileWriter.init();
             fileWriterMap.put(uniquePath, csvFileWriter);
@@ -163,7 +163,7 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
                 storage.readFile(file.getPath(), inputStream -> {
                     try (
                             Reader reader = new InputStreamReader(inputStream, fileConfig.getFileEncoding());
-                            CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(new CustomCsvParser(((CsvConfig) fileConfig).getSeparator().charAt(0))).build()
+                            CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(new CustomCsvParser(((CsvConfig) fileConfig).getSeparator())).build()
                     ) {
                         String[] data;
                         while ((data = csvReader.readNext()) != null) {

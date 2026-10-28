@@ -178,6 +178,57 @@ public class CsvConnectorIT {
     }
 
     @Test
+    @DisplayName("reads and writes records with a custom multi-character separator")
+    void shouldRoundTripCustomMultiCharacterSeparator() throws Throwable {
+        FileITSupport.Fixture source = FileITSupport.fixture("csv", "1.csv");
+        resources.add(source);
+        Files.write(source.directory().resolve("1.csv"),
+                "ID||Name||Age\n1||\"Alice || guest\"||35\n".getBytes(StandardCharsets.UTF_8));
+        DataMap sourceConfig = FileITSupport.config(source.directory(), "csv_it")
+                .kv("separatorType", "custom")
+                .kv("separator", "||");
+        CsvConnector sourceConnector = new CsvConnector();
+        FileITSupport.Session sourceSession = FileITSupport.open(sourceConnector, "csv", sourceConfig);
+        resources.add(sourceSession);
+        FileITSupport.Events sourceEvents = new FileITSupport.Events();
+        TapTable table = csvTable();
+
+        sourceSession.functions.getBatchReadFunction().batchRead(sourceSession.nodeContext, table, null, 10, sourceEvents::accept);
+
+        assertEquals(1, sourceEvents.events().size());
+        Map<String, Object> sourceRow = ((TapInsertRecordEvent) sourceEvents.events().get(0)).getAfter();
+        assertEquals("Alice || guest", sourceRow.get("Name"));
+
+        Path output = Files.createTempDirectory("csv-connector-it-custom-write-");
+        resources.add(cleanup(output));
+        DataMap writeConfig = FileITSupport.config(source.directory(), "csv_it")
+                .kv("separatorType", "custom")
+                .kv("separator", "||")
+                .kv("writeFilePath", output.toAbsolutePath().toString())
+                .kv("fileNameExpression", "roundtrip.csv");
+        CsvConnector writeConnector = new CsvConnector();
+        FileITSupport.Session writeSession = FileITSupport.open(writeConnector, "csv", writeConfig);
+        resources.add(writeSession);
+        AtomicReference<WriteListResult<TapRecordEvent>> writeResult = new AtomicReference<>();
+        writeSession.functions.getWriteRecordFunction().writeRecord(writeSession.nodeContext,
+                Collections.singletonList(new TapInsertRecordEvent().init().table(table.getId()).after(sourceRow)),
+                table, writeResult::set);
+        assertEquals(1L, writeResult.get().getInsertedCount());
+
+        DataMap roundTripConfig = FileITSupport.config(output, "csv_it")
+                .kv("separatorType", "custom")
+                .kv("separator", "||");
+        CsvConnector roundTripConnector = new CsvConnector();
+        FileITSupport.Session roundTripSession = FileITSupport.open(roundTripConnector, "csv", roundTripConfig);
+        resources.add(roundTripSession);
+        FileITSupport.Events roundTripEvents = new FileITSupport.Events();
+        roundTripSession.functions.getBatchReadFunction().batchRead(roundTripSession.nodeContext, table, null, 10, roundTripEvents::accept);
+
+        assertEquals(1, roundTripEvents.events().size());
+        assertEquals("Alice || guest", ((TapInsertRecordEvent) roundTripEvents.events().get(0)).getAfter().get("Name"));
+    }
+
+    @Test
     @DisplayName("reads CSV rows and returns a resumable file offset")
     void shouldBatchReadRows() throws Throwable {
         FileITSupport.Fixture fixture = FileITSupport.fixture("csv", "1.csv");

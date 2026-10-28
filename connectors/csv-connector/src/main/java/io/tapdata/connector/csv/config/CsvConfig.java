@@ -20,6 +20,7 @@ public class CsvConfig extends FileConfig {
 
     public CsvConfig load(Map<String, Object> map) {
         super.load(map);
+        String configuredSeparator = separator;
         switch (separatorType) {
             case "\\t":
                 separator = "\t";
@@ -28,11 +29,15 @@ public class CsvConfig extends FileConfig {
                 separator = " ";
                 break;
             case "ascii":
-                separator = "" + (char) Integer.parseInt(separator.startsWith("0x") ? separator.substring(2) : separator, 16);
+                separator = "" + (char) Integer.parseInt(configuredSeparator.startsWith("0x") ? configuredSeparator.substring(2) : configuredSeparator, 16);
+                break;
+            case "custom":
+                separator = "\\t".equals(configuredSeparator) ? "\t" : configuredSeparator;
                 break;
             default:
                 separator = ",";
         }
+        validateSeparator(separator);
         switch (lineEndType) {
             case " ":
                 lineEnd = " ";
@@ -44,6 +49,18 @@ public class CsvConfig extends FileConfig {
                 lineEnd = "\n";
         }
         return this;
+    }
+
+    public static void validateSeparator(String separator) {
+        if (separator == null || separator.isEmpty()) {
+            throw new IllegalArgumentException("CSV separator cannot be empty");
+        }
+        if (separator.length() > 5) {
+            throw new IllegalArgumentException("CSV separator cannot be longer than 5 characters");
+        }
+        if (separator.indexOf('\r') >= 0 || separator.indexOf('\n') >= 0) {
+            throw new IllegalArgumentException("CSV separator cannot contain a line break");
+        }
     }
 
     public Boolean getOffStandard() {

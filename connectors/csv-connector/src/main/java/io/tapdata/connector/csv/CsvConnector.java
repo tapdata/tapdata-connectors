@@ -226,7 +226,7 @@ public class CsvConnector extends FileConnector {
         storage.readFile(fileOffset.getPath(), is -> {
             try (
                     Reader reader = new InputStreamReader(is, fileConfig.getFileEncoding());
-                    CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(new CustomCsvParser(((CsvConfig) fileConfig).getSeparator().charAt(0))).build()
+                    CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(new CustomCsvParser(((CsvConfig) fileConfig).getSeparator())).build()
             ) {
                 String[] headers;
                 if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
