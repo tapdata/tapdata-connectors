@@ -1040,7 +1040,7 @@
         "ddlTriggerEnable": {
           "type": "boolean",
           "title": "${ddlTriggerEnable}",
-          "default": true,
+          "default": false,
           "x-index": 24,
           "x-decorator": "FormItem",
           "x-component": "Switch",
