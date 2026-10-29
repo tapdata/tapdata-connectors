@@ -1,6 +1,8 @@
 package io.tapdata.connector.csv.config;
 
+import com.opencsv.CustomCsvParser;
 import io.tapdata.common.FileConfig;
+import io.tapdata.kit.EmptyKit;
 
 import java.util.Map;
 
@@ -89,6 +91,16 @@ public class CsvConfig extends FileConfig {
 
     public String getQuoteChar() {
         return quoteChar;
+    }
+
+    /** Resolve disabled quoting consistently for every reader and writer. */
+    public char getQuoteCharacter() {
+        return EmptyKit.isBlank(quoteChar) ? '\0' : quoteChar.charAt(0);
+    }
+
+    /** Each file needs its own parser because quoted records can span lines. */
+    public CustomCsvParser createParser() {
+        return new CustomCsvParser(separator, getQuoteCharacter());
     }
 
     public void setQuoteChar(String quoteChar) {
