@@ -119,6 +119,8 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 //如果完全没事件， 就需要从当前时间开始watch
                 if (offset instanceof Integer) {
                     changeStream = streamDatabase.watch(pipeline, RawBsonDocument.class).startAtOperationTime(new BsonTimestamp((Integer) offset, 0)).fullDocument(fullDocumentOption);
+                } else if (offset instanceof BsonTimestamp) {
+                    changeStream = streamDatabase.watch(pipeline, RawBsonDocument.class).startAtOperationTime((BsonTimestamp) offset).fullDocument(fullDocumentOption);
                 } else {
                     changeStream = streamDatabase.watch(pipeline, RawBsonDocument.class).startAfter((BsonDocument) offset).fullDocument(fullDocumentOption);
                 }
@@ -451,7 +453,16 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     @Override
     public Object streamOffset(Long offsetStartTime) {
         if (null == offsetStartTime) {
-            offsetStartTime = MongodbUtil.mongodbServerTimestamp(mongoDatabase);
+            Document result = mongoDatabase.runCommand(new Document("isMaster", 1));
+            Document clusterTime = result.get("$clusterTime", Document.class);
+            Object timestamp = clusterTime == null ? null : clusterTime.get("clusterTime");
+            if (timestamp instanceof BsonTimestamp) {
+                // startAtOperationTime is inclusive; advance one logical tick to exclude
+                // the captured boundary while keeping subsequent changes in the same second.
+                return new BsonTimestamp(((BsonTimestamp) timestamp).getValue() + 1);
+            }
+            Date serverDate = timestamp instanceof Date ? (Date) timestamp : result.getDate("localTime");
+            offsetStartTime = serverDate == null ? 0L : serverDate.getTime();
         }
         return (int) (offsetStartTime / 1000);
     }
