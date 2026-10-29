@@ -95,8 +95,11 @@ class RejectRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def open_request(repo, req):
+    # Large connector JARs need more time to send than metadata reads. This is
+    # a socket inactivity timeout, not a limit on the whole release operation.
+    timeout = 600 if req.get_method() == "PUT" else 45
     if not repo.get("connect_ip"):
-        return urllib.request.urlopen(req, timeout=45)
+        return urllib.request.urlopen(req, timeout=timeout)
     # Never let a proxy or redirect route a pinned request to another installation.
     target = urllib.parse.urlsplit(repo["url"])
     requested = urllib.parse.urlsplit(req.full_url)
@@ -105,7 +108,7 @@ def open_request(repo, req):
         raise ValueError("Pinned Nexus request must retain the configured HTTPS origin")
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({}), PinnedHTTPSHandler(repo["connect_ip"]), RejectRedirects())
-    return opener.open(req, timeout=45)
+    return opener.open(req, timeout=timeout)
 
 
 def artifact_url(group_id, artifact_id, version, repo, extension="jar"):

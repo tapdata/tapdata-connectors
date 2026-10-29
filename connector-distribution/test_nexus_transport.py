@@ -5,11 +5,28 @@ import ssl
 import tempfile
 import unittest
 import urllib.error
+import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
 import publish_connectors as publisher
 from test_publish_connectors import Nexus
+
+
+class RequestTimeoutTests(unittest.TestCase):
+    def test_upload_timeout_for_dns_and_pinned_routes(self):
+        for pinned in (False, True):
+            for method, timeout in (("GET", 45), ("PUT", 600)):
+                with self.subTest(pinned=pinned, method=method):
+                    repo = {'url': 'https://nexus.example/repository/releases/'}
+                    if pinned:
+                        repo['connect_ip'] = '127.0.0.1'
+                    req = urllib.request.Request(repo['url'] + 'connector.jar', method=method)
+                    with patch.object(publisher.urllib.request, 'urlopen') as direct, \
+                         patch.object(publisher.urllib.request, 'build_opener') as factory:
+                        publisher.open_request(repo, req)
+                        transport = factory.return_value.open if pinned else direct
+                        transport.assert_called_once_with(req, timeout=timeout)
 
 
 class RepositoryConfigurationTests(unittest.TestCase):
