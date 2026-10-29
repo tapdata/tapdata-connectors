@@ -83,6 +83,8 @@ public class CustomCsvParser implements ICSVParser {
                     continue;
                 }
                 if (inQuotes || !fieldContainsNonWhitespace) {
+                    // Ignore whitespace before an opening quote, as OpenCSV does.
+                    if (!inQuotes) field.setLength(0);
                     inQuotes = !inQuotes;
                     i++;
                     continue;
@@ -122,15 +124,30 @@ public class CustomCsvParser implements ICSVParser {
         for (int i = 0; i < values.length; i++) {
             if (i > 0) line.append(separator);
             String value = values[i] == null ? "" : values[i];
-            boolean quote = applyQuotesToAll || value.contains(separator) || value.indexOf(quoteChar) >= 0
+            boolean quote = applyQuotesToAll || value.contains(separator) || hasDelimiterPrefixSuffix(value)
+                    || value.indexOf(quoteChar) >= 0
                     || value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0;
             if (quote && quoteChar != NULL_CHARACTER) {
-                line.append(quoteChar).append(value.replace(String.valueOf(quoteChar), String.valueOf(quoteChar) + quoteChar)).append(quoteChar);
+                line.append(quoteChar);
+                for (int j = 0; j < value.length(); j++) {
+                    char current = value.charAt(j);
+                    if (current == quoteChar || current == DEFAULT_ESCAPE_CHARACTER) line.append(current);
+                    line.append(current);
+                }
+                line.append(quoteChar);
             } else {
                 line.append(value);
             }
         }
         return line.toString();
+    }
+
+    private boolean hasDelimiterPrefixSuffix(String value) {
+        // Quoting a partial delimiter suffix prevents a delimiter from starting inside the value.
+        for (int length = 1; length < separator.length() && length <= value.length(); length++) {
+            if (value.regionMatches(value.length() - length, separator, 0, length)) return true;
+        }
+        return false;
     }
 
     @Override

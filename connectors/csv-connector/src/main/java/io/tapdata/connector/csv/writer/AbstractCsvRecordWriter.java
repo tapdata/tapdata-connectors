@@ -167,7 +167,8 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
                 storage.readFile(file.getPath(), inputStream -> {
                     try (
                             Reader reader = new InputStreamReader(inputStream, fileConfig.getFileEncoding());
-                            CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(new CustomCsvParser(((CsvConfig) fileConfig).getSeparator())).build()
+                            CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(new CustomCsvParser(csvConfig.getSeparator(),
+                                    EmptyKit.isBlank(csvConfig.getQuoteChar()) ? '\0' : csvConfig.getQuoteChar().charAt(0))).build()
                     ) {
                         String[] data;
                         while ((data = csvReader.readNext()) != null) {
