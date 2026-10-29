@@ -159,6 +159,10 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
         try (
                 CsvFileWriter localCsvFileWriter = new CsvFileWriter(localStorage, coreLocalFilePath, fileConfig.getFileEncoding())
         ) {
+            CsvConfig csvConfig = (CsvConfig) fileConfig;
+            localCsvFileWriter.setRule(csvConfig.getSeparator(),
+                    EmptyKit.isBlank(csvConfig.getQuoteChar()) ? '\0' : csvConfig.getQuoteChar().charAt(0), csvConfig.getLineEnd());
+            localCsvFileWriter.init();
             for (TapFile file : cacheFilesPath) {
                 storage.readFile(file.getPath(), inputStream -> {
                     try (

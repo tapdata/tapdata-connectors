@@ -61,6 +61,7 @@ public class CustomCsvParser implements ICSVParser {
 
         List<String> fields = new ArrayList<>();
         StringBuilder field = new StringBuilder();
+        boolean fieldContainsNonWhitespace = false;
         boolean inQuotes = false;
         String input = pendingText.toString();
         for (int i = 0; i < input.length();) {
@@ -69,6 +70,7 @@ public class CustomCsvParser implements ICSVParser {
                 char escaped = input.charAt(i + 1);
                 if (escaped == quoteChar || escaped == DEFAULT_ESCAPE_CHARACTER) {
                     field.append(escaped);
+                    fieldContainsNonWhitespace |= !Character.isWhitespace(escaped);
                     i += 2;
                     continue;
                 }
@@ -76,10 +78,11 @@ public class CustomCsvParser implements ICSVParser {
             if (quoteChar != NULL_CHARACTER && current == quoteChar) {
                 if (inQuotes && i + 1 < input.length() && input.charAt(i + 1) == quoteChar) {
                     field.append(quoteChar);
+                    fieldContainsNonWhitespace = true;
                     i += 2;
                     continue;
                 }
-                if (inQuotes || field.length() == 0) {
+                if (inQuotes || !fieldContainsNonWhitespace) {
                     inQuotes = !inQuotes;
                     i++;
                     continue;
@@ -88,10 +91,12 @@ public class CustomCsvParser implements ICSVParser {
             if (!inQuotes && input.startsWith(separator, i)) {
                 fields.add(field.toString());
                 field.setLength(0);
+                fieldContainsNonWhitespace = false;
                 i += separator.length();
                 continue;
             }
             field.append(current);
+            fieldContainsNonWhitespace |= !Character.isWhitespace(current);
             i++;
         }
         pending = inQuotes;
