@@ -17,6 +17,9 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.Arguments;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -175,6 +178,106 @@ public class CsvConnectorIT {
         assertEquals(2, capture.events().size());
         assertEquals("Tab Alice", ((TapInsertRecordEvent) capture.events().get(0)).getAfter().get("Name"));
         assertEquals(35, ((Number) ((TapInsertRecordEvent) capture.events().get(0)).getAfter().get("Age")).intValue());
+    }
+
+    static Stream<String> quoteCharacters() {
+        return Stream.of("\"", "'", "", null, " ");
+    }
+
+    static Stream<Arguments> quoteConfigurations() {
+        return quoteCharacters()
+                .flatMap(quote -> Stream.of(false, true)
+                        .map(explicitHeader -> Arguments.of(quote, explicitHeader)));
+    }
+
+    @ParameterizedTest(name = "quote={0}, explicitHeader={1}")
+    @MethodSource("quoteConfigurations")
+    @DisplayName("uses configured quotes for source reads and both schema sampling paths")
+    void shouldReadAndSampleConfiguredQuotes(String quote, boolean explicitHeader) throws Throwable {
+        FileITSupport.Fixture fixture = FileITSupport.fixture("csv", "1.csv");
+        resources.add(fixture);
+        boolean quotesEnabled = quote != null && !quote.trim().isEmpty();
+        String name = quotesEnabled ? "Alice || guest\n'hi' \"there\" \\ end" : "\"35\"";
+        String encodedName = quotesEnabled
+                ? quote + name.replace("\\", "\\\\").replace(quote, quote + quote) + quote : name;
+        String header = quotesEnabled ? "ID||" + quote + "Name" + quote + "||Age" : "ID||Name||Age";
+        Files.write(fixture.directory().resolve("1.csv"),
+                ((explicitHeader ? "" : header + "\n") + "1||" + encodedName + "||35\n").getBytes(StandardCharsets.UTF_8));
+        DataMap config = FileITSupport.config(fixture.directory(), "csv_it")
+                .kv("separatorType", "custom").kv("separator", "||").kv("quoteChar", quote);
+        if (explicitHeader) config.kv("header", "ID,Name,Age").kv("headerLine", 0).kv("dataStartLine", 1);
+        CsvConnector connector = new CsvConnector();
+        FileITSupport.Session session = FileITSupport.open(connector, "csv", config);
+        resources.add(session);
+        List<TapTable> discovered = new ArrayList<>();
+        connector.discoverSchema(session.nodeContext, Collections.singletonList("csv_it"), 10, discovered::addAll);
+        assertEquals(1, discovered.size());
+        TapTable table = discovered.get(0);
+        assertEquals(3, table.getNameFieldMap().size());
+        assertNotNull(table.getNameFieldMap().get("Name"));
+        assertEquals("STRING", table.getNameFieldMap().get("Name").getDataType());
+        assertEquals("INTEGER", table.getNameFieldMap().get("Age").getDataType());
+        FileITSupport.Events capture = new FileITSupport.Events();
+        session.functions.getBatchReadFunction().batchRead(session.nodeContext, table, null, 10, capture::accept);
+        assertEquals(1, capture.events().size());
+        Map<String, Object> row = ((TapInsertRecordEvent) capture.events().get(0)).getAfter();
+        assertEquals(name, row.get("Name"));
+        assertEquals(35, ((Number) row.get("Age")).intValue());
+    }
+
+    @ParameterizedTest(name = "quote={0}")
+    @MethodSource("quoteCharacters")
+    @DisplayName("reads and writes records with a custom multi-character separator")
+    void shouldRoundTripCustomMultiCharacterSeparator(String quote) throws Throwable {
+        FileITSupport.Fixture source = FileITSupport.fixture("csv", "1.csv");
+        resources.add(source);
+        boolean quotesEnabled = quote != null && !quote.trim().isEmpty();
+        String name = quotesEnabled ? "Alice || guest" : "\"35\"";
+        String encodedName = quotesEnabled ? quote + name + quote : name;
+        Files.write(source.directory().resolve("1.csv"),
+                ("ID||Name||Age\n1||" + encodedName + "||35\n").getBytes(StandardCharsets.UTF_8));
+        DataMap sourceConfig = FileITSupport.config(source.directory(), "csv_it")
+                .kv("separatorType", "custom")
+                .kv("separator", "||").kv("quoteChar", quote);
+        CsvConnector sourceConnector = new CsvConnector();
+        FileITSupport.Session sourceSession = FileITSupport.open(sourceConnector, "csv", sourceConfig);
+        resources.add(sourceSession);
+        FileITSupport.Events sourceEvents = new FileITSupport.Events();
+        TapTable table = csvTable();
+
+        sourceSession.functions.getBatchReadFunction().batchRead(sourceSession.nodeContext, table, null, 10, sourceEvents::accept);
+
+        assertEquals(1, sourceEvents.events().size());
+        Map<String, Object> sourceRow = ((TapInsertRecordEvent) sourceEvents.events().get(0)).getAfter();
+        assertEquals(name, sourceRow.get("Name"));
+
+        Path output = Files.createTempDirectory("csv-connector-it-custom-write-");
+        resources.add(cleanup(output));
+        DataMap writeConfig = FileITSupport.config(source.directory(), "csv_it")
+                .kv("separatorType", "custom")
+                .kv("separator", "||").kv("quoteChar", quote)
+                .kv("writeFilePath", output.toAbsolutePath().toString())
+                .kv("fileNameExpression", "roundtrip.csv");
+        CsvConnector writeConnector = new CsvConnector();
+        FileITSupport.Session writeSession = FileITSupport.open(writeConnector, "csv", writeConfig);
+        resources.add(writeSession);
+        AtomicReference<WriteListResult<TapRecordEvent>> writeResult = new AtomicReference<>();
+        writeSession.functions.getWriteRecordFunction().writeRecord(writeSession.nodeContext,
+                Collections.singletonList(new TapInsertRecordEvent().init().table(table.getId()).after(sourceRow)),
+                table, writeResult::set);
+        assertEquals(1L, writeResult.get().getInsertedCount());
+
+        DataMap roundTripConfig = FileITSupport.config(output, "csv_it")
+                .kv("separatorType", "custom")
+                .kv("separator", "||").kv("quoteChar", quote);
+        CsvConnector roundTripConnector = new CsvConnector();
+        FileITSupport.Session roundTripSession = FileITSupport.open(roundTripConnector, "csv", roundTripConfig);
+        resources.add(roundTripSession);
+        FileITSupport.Events roundTripEvents = new FileITSupport.Events();
+        roundTripSession.functions.getBatchReadFunction().batchRead(roundTripSession.nodeContext, table, null, 10, roundTripEvents::accept);
+
+        assertEquals(1, roundTripEvents.events().size());
+        assertEquals(name, ((TapInsertRecordEvent) roundTripEvents.events().get(0)).getAfter().get("Name"));
     }
 
     @Test

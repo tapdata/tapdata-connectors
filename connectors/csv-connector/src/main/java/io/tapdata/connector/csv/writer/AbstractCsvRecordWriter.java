@@ -2,7 +2,6 @@ package io.tapdata.connector.csv.writer;
 
 import com.opencsv.CSVReader;
 import com.opencsv.CSVReaderBuilder;
-import com.opencsv.CustomCsvParser;
 import io.tapdata.common.AbstractFileRecordWriter;
 import io.tapdata.connector.csv.config.CsvConfig;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
@@ -111,16 +110,16 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
                     csvFileWriter.init();
                 } else {
                     csvFileWriter = new CsvFileWriter(storage, getNewCacheFileName(csvFileWriter.getPath()), fileConfig.getFileEncoding());
-                    csvFileWriter.setRule(csvConfig.getSeparator().replaceAll("\\[", "").replaceAll("]", "").charAt(0),
-                            EmptyKit.isBlank(csvConfig.getQuoteChar()) ? '\0' : csvConfig.getQuoteChar().charAt(0), csvConfig.getLineEnd());
+                    csvFileWriter.setRule(csvConfig.getSeparator(),
+                            csvConfig.getQuoteCharacter(), csvConfig.getLineEnd());
                     csvFileWriter.init();
                     fileWriterMap.put(uniquePath, csvFileWriter);
                 }
             }
         } else {
             csvFileWriter = new CsvFileWriter(storage, uniquePath, fileConfig.getFileEncoding());
-            csvFileWriter.setRule(csvConfig.getSeparator().replaceAll("\\[", "").replaceAll("]", "").charAt(0),
-                    EmptyKit.isBlank(csvConfig.getQuoteChar()) ? '\0' : csvConfig.getQuoteChar().charAt(0), csvConfig.getLineEnd());
+            csvFileWriter.setRule(csvConfig.getSeparator(),
+                    csvConfig.getQuoteCharacter(), csvConfig.getLineEnd());
             csvFileWriter.init();
             fileWriterMap.put(uniquePath, csvFileWriter);
         }
@@ -159,11 +158,15 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
         try (
                 CsvFileWriter localCsvFileWriter = new CsvFileWriter(localStorage, coreLocalFilePath, fileConfig.getFileEncoding())
         ) {
+            CsvConfig csvConfig = (CsvConfig) fileConfig;
+            localCsvFileWriter.setRule(csvConfig.getSeparator(),
+                    csvConfig.getQuoteCharacter(), csvConfig.getLineEnd());
+            localCsvFileWriter.init();
             for (TapFile file : cacheFilesPath) {
                 storage.readFile(file.getPath(), inputStream -> {
                     try (
                             Reader reader = new InputStreamReader(inputStream, fileConfig.getFileEncoding());
-                            CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(new CustomCsvParser(((CsvConfig) fileConfig).getSeparator().charAt(0))).build()
+                            CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(csvConfig.createParser()).build()
                     ) {
                         String[] data;
                         while ((data = csvReader.readNext()) != null) {
