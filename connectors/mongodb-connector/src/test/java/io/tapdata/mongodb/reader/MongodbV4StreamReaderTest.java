@@ -1,6 +1,22 @@
 package io.tapdata.mongodb.reader;
 
 import com.mongodb.MongoException;
+import com.mongodb.MongoInterruptedException;
+import com.mongodb.ReadConcern;
+import com.mongodb.client.ChangeStreamIterable;
+import com.mongodb.client.model.changestream.FullDocument;
+import io.tapdata.mongodb.entity.MongoCdcOffset;
+import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.context.TapConnectorContext;
+import org.bson.BsonDocument;
+import org.bson.BsonString;
+import org.bson.BsonTimestamp;
+import org.bson.RawBsonDocument;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.Arguments;
+import java.util.Date;
+import java.util.stream.Stream;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoDatabase;
 import io.tapdata.exception.TapCodeException;
@@ -27,6 +43,110 @@ import static org.mockito.Mockito.*;
  **/
 @DisplayName("Class MongodbV4StreamReader Test")
 class MongodbV4StreamReaderTest {
+    @Test
+    void shouldStartAfterExactCapturedTimestamp() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongodbV4StreamReader reader = new MongodbV4StreamReader();
+        ReflectionTestUtils.setField(reader, "mongoDatabase", database);
+        BsonTimestamp captured = new BsonTimestamp(1784769971, 1016);
+        when(database.runCommand(new Document("isMaster", 1))).thenReturn(
+                new Document("$clusterTime", new Document("clusterTime", captured)));
+
+        BsonTimestamp start = (BsonTimestamp) reader.streamOffset(null);
+        Assertions.assertEquals(new BsonTimestamp(captured.getTime(), 1017), start);
+        // Old inserts and the captured boundary must not be replayed, while the
+        // immediately following operation in the same second must remain visible.
+        for (int inc = 1006; inc <= 1016; inc++) {
+            Assertions.assertTrue(new BsonTimestamp(captured.getTime(), inc).compareTo(start) < 0);
+        }
+        Assertions.assertEquals(0, new BsonTimestamp(captured.getTime(), 1017).compareTo(start));
+        Assertions.assertEquals(start, MongoCdcOffset.fromOffset(new MongoCdcOffset(null, start).toOffset()).getCdcOffset());
+    }
+
+    @Test
+    void shouldCarryIncrementOverflowToNextSecond() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongodbV4StreamReader reader = new MongodbV4StreamReader();
+        ReflectionTestUtils.setField(reader, "mongoDatabase", database);
+        when(database.runCommand(any())).thenReturn(new Document("$clusterTime",
+                new Document("clusterTime", new BsonTimestamp(1784769971, -1))));
+        Assertions.assertEquals(new BsonTimestamp(1784769972, 0), reader.streamOffset(null));
+    }
+
+    static Stream<Arguments> serverTimeFallbacks() {
+        return Stream.of(
+                Arguments.of(new Document("localTime", new Date(1784769971123L)), 1784769971),
+                Arguments.of(new Document("localTime", new Date(1000L)).append("$clusterTime",
+                        new Document("clusterTime", new Date(1784769971123L))), 1784769971),
+                Arguments.of(new Document(), 0));
+    }
+
+    @ParameterizedTest
+    @MethodSource("serverTimeFallbacks")
+    void shouldPreserveServerTimeFallback(Document response, int expected) {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongodbV4StreamReader reader = new MongodbV4StreamReader();
+        ReflectionTestUtils.setField(reader, "mongoDatabase", database);
+        when(database.runCommand(any())).thenReturn(response);
+        Assertions.assertEquals(expected, reader.streamOffset(null));
+        verify(database, times(1)).runCommand(new Document("isMaster", 1));
+    }
+
+    @Test
+    void shouldPreserveExplicitStartTime() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongodbV4StreamReader reader = new MongodbV4StreamReader();
+        ReflectionTestUtils.setField(reader, "mongoDatabase", database);
+        Assertions.assertEquals(1784769971, reader.streamOffset(1784769971123L));
+        verifyNoInteractions(database);
+    }
+
+    static Stream<Arguments> readOffsets() {
+        return Stream.of(
+                Arguments.of(new BsonTimestamp(1784769971, 1017)),
+                Arguments.of(1784769971),
+                Arguments.of(new BsonDocument("_data", new BsonString("resume-token"))),
+                Arguments.of((Object) null));
+    }
+
+    @ParameterizedTest
+    @MethodSource("readOffsets")
+    @SuppressWarnings("unchecked")
+    void shouldApplyCompatibleReadOffset(Object offset) throws Exception {
+        MongoDatabase database = mock(MongoDatabase.class);
+        ChangeStreamIterable<RawBsonDocument> stream = mock(ChangeStreamIterable.class, RETURNS_SELF);
+        MongodbV4StreamReader reader = new MongodbV4StreamReader();
+        AtomicBoolean running = new AtomicBoolean(true);
+        ReflectionTestUtils.setField(reader, "mongoDatabase", database);
+        ReflectionTestUtils.setField(reader, "mongodbConfig", new MongodbConfig());
+        ReflectionTestUtils.setField(reader, "running", running);
+        ReflectionTestUtils.setField(reader, "concurrentProcessor", mock(SimpleConcurrentProcessorImpl.class));
+        when(database.withReadConcern(ReadConcern.MAJORITY)).thenReturn(database);
+        when(database.watch(anyList(), eq(RawBsonDocument.class))).thenReturn(stream);
+        // Stop at cursor creation, after all resume options have been applied.
+        when(stream.cursor()).thenAnswer(invocation -> {
+            running.set(false);
+            throw new MongoInterruptedException("Stopped for test", new InterruptedException());
+        });
+        reader.read(mock(TapConnectorContext.class), Arrays.asList("test"), offset, 10,
+                mock(StreamReadConsumer.class));
+
+        if (offset instanceof BsonTimestamp) {
+            verify(stream).startAtOperationTime((BsonTimestamp) offset);
+            verify(stream, never()).startAfter(any());
+        } else if (offset instanceof Integer) {
+            verify(stream).startAtOperationTime(new BsonTimestamp((Integer) offset, 0));
+            verify(stream, never()).startAfter(any());
+        } else if (offset instanceof BsonDocument) {
+            verify(stream).startAfter((BsonDocument) offset);
+            verify(stream, never()).startAtOperationTime(any());
+        } else {
+            verify(stream, never()).startAfter(any());
+            verify(stream, never()).startAtOperationTime(any());
+        }
+        verify(stream).fullDocument(FullDocument.DEFAULT);
+    }
+
 	@Test
 	void testOnDestroy() {
 		MongoClient mongoClient = mock(MongoClient.class);
