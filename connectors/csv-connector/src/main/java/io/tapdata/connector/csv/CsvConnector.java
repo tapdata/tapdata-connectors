@@ -228,26 +228,41 @@ public class CsvConnector extends FileConnector {
                     CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(((CsvConfig) fileConfig).createParser()).build()
             ) {
                 String[] headers;
+                String[] firstData = null;
+                int consumedRecords = 0;
                 if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
                     headers = fileConfig.getHeader().split(",");
                 } else {
                     if (fileConfig.getHeaderLine() > 0) {
                         csvReader.skip(fileConfig.getHeaderLine() - 1);
                         headers = csvReader.readNext();
+                        consumedRecords = fileConfig.getHeaderLine();
                     } else {
                         csvReader.skip(fileConfig.getDataStartLine() - 1);
-                        String[] data = csvReader.readNext();
-                        headers = new String[data.length];
+                        firstData = csvReader.readNext();
+                        if (firstData == null) {
+                            return;
+                        }
+                        consumedRecords = fileConfig.getDataStartLine();
+                        headers = new String[firstData.length];
                         for (int j = 0; j < headers.length; j++) {
                             headers[j] = "column" + (j + 1);
                         }
                     }
                 }
                 if (EmptyKit.isNotEmpty(headers)) {
-                    csvReader.skip(fileOffset.getDataLine() - 2 - csvReader.getSkipLines());
-                    String[] data;
+                    // The inferred row is already consumed, but still belongs to the initial read.
+                    if (firstData != null && fileOffset.getDataLine() > consumedRecords) {
+                        firstData = null;
+                    }
+                    csvReader.skip(Math.max(0, fileOffset.getDataLine() - 1 - consumedRecords));
                     int blankSkip = 0;
-                    while (isAlive() && (data = csvReader.readNext()) != null) {
+                    while (isAlive()) {
+                        String[] data = firstData != null ? firstData : csvReader.readNext();
+                        firstData = null;
+                        if (data == null) {
+                            break;
+                        }
                         Map<String, Object> after = new HashMap<>();
                         putIntoMap(after, headers, data, dataTypeMap);
                         if (after.entrySet().stream().allMatch(v -> EmptyKit.isNull(v.getValue()))) {
@@ -285,29 +300,40 @@ public class CsvConnector extends FileConnector {
                     BufferedReader bufferedReader = new BufferedReader(reader)
             ) {
                 String[] headers;
-                int skip = 0;
+                String[] firstData = null;
+                int consumedRecords = 0;
                 if (EmptyKit.isNotBlank(fileConfig.getHeader())) {
                     headers = fileConfig.getHeader().split(",");
                 } else {
                     if (fileConfig.getHeaderLine() > 0) {
                         skipRead(bufferedReader, fileConfig.getHeaderLine() - 1);
-                        skip += fileConfig.getHeaderLine() - 1;
                         headers = offStandardFilter.filter(bufferedReader.readLine());
+                        consumedRecords = fileConfig.getHeaderLine();
                     } else {
                         skipRead(bufferedReader, fileConfig.getDataStartLine() - 1);
-                        skip += fileConfig.getDataStartLine() - 1;
-                        String[] data = offStandardFilter.filter(bufferedReader.readLine());
-                        headers = new String[data.length];
+                        firstData = offStandardFilter.filter(bufferedReader.readLine());
+                        if (firstData == null) {
+                            return;
+                        }
+                        consumedRecords = fileConfig.getDataStartLine();
+                        headers = new String[firstData.length];
                         for (int j = 0; j < headers.length; j++) {
                             headers[j] = "column" + (j + 1);
                         }
                     }
                 }
                 if (EmptyKit.isNotEmpty(headers)) {
-                    skipRead(bufferedReader, fileOffset.getDataLine() - 2 - skip);
-                    String[] data;
+                    if (firstData != null && fileOffset.getDataLine() > consumedRecords) {
+                        firstData = null;
+                    }
+                    skipRead(bufferedReader, Math.max(0, fileOffset.getDataLine() - 1 - consumedRecords));
                     int blankSkip = 0;
-                    while (isAlive() && (data = offStandardFilter.filter(bufferedReader.readLine())) != null) {
+                    while (isAlive()) {
+                        String[] data = firstData != null ? firstData : offStandardFilter.filter(bufferedReader.readLine());
+                        firstData = null;
+                        if (data == null) {
+                            break;
+                        }
                         Map<String, Object> after = new HashMap<>();
                         putIntoMap(after, headers, data, dataTypeMap);
                         if (after.entrySet().stream().allMatch(v -> EmptyKit.isNull(v.getValue()))) {

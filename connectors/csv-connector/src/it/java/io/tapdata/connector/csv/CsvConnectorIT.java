@@ -1,6 +1,7 @@
 package io.tapdata.connector.csv;
 
 import io.tapdata.connector.it.FileITSupport;
+import io.tapdata.common.FileOffset;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
@@ -135,11 +136,96 @@ public class CsvConnectorIT {
 
         session.functions.getBatchReadFunction().batchRead(session.nodeContext, csvTable(), null, 10, capture::accept);
 
-        assertEquals(3, capture.events().size());
-        Map<String, Object> shortRow = ((TapInsertRecordEvent) capture.events().get(1)).getAfter();
+        assertEquals(2, capture.events().size());
+        Map<String, Object> shortRow = ((TapInsertRecordEvent) capture.events().get(0)).getAfter();
         assertEquals("Short", shortRow.get("Name"));
         assertTrue(shortRow.containsKey("Age"));
         assertNull(shortRow.get("Age"));
+    }
+
+    static Stream<Arguments> readPositions() {
+        return Stream.of(false, true).flatMap(offStandard -> Stream.of(
+                Arguments.of(offStandard, 0, 1, false),
+                Arguments.of(offStandard, 0, 3, false),
+                Arguments.of(offStandard, 0, 1, true),
+                Arguments.of(offStandard, 0, 3, true),
+                Arguments.of(offStandard, 1, 2, false),
+                Arguments.of(offStandard, 1, 4, false),
+                Arguments.of(offStandard, 3, 4, false)));
+    }
+
+    @ParameterizedTest(name = "offStandard={0}, headerLine={1}, dataStartLine={2}, explicitHeader={3}")
+    @MethodSource("readPositions")
+    @DisplayName("reads from the configured record and resumes without lost or repeated rows")
+    void shouldReadFromConfiguredPosition(boolean offStandard, int headerLine,
+                                          int dataStartLine, boolean explicitHeader) throws Throwable {
+        FileITSupport.Fixture fixture = FileITSupport.fixture("csv", "1.csv");
+        resources.add(fixture);
+        StringBuilder contents = new StringBuilder();
+        for (int line = 1; line < headerLine; line++) contents.append("ignored\n");
+        if (headerLine > 0) contents.append("\"ID\",\"Name\",\"Age\"\n");
+        for (int id = 1; id <= 3; id++) {
+            // Standard CSV positions count records, even when a quoted value spans lines.
+            contents.append("\"").append(id).append("\",\"")
+                    .append(offStandard ? "Name" : "Name\ncontinued")
+                    .append("\",\"35\"\n");
+        }
+        Files.write(fixture.directory().resolve("1.csv"), contents.toString().getBytes(StandardCharsets.UTF_8));
+        DataMap config = FileITSupport.config(fixture.directory(), "csv_it")
+                .kv("headerLine", headerLine).kv("dataStartLine", dataStartLine)
+                .kv("offStandard", offStandard).kv("lineExpression", "\"([^\"]*)\"");
+        if (explicitHeader) config.kv("header", "ID,Name,Age");
+        CsvConnector connector = new CsvConnector();
+        FileITSupport.Session session = FileITSupport.open(connector, "csv", config);
+        resources.add(session);
+        boolean inferred = headerLine == 0 && !explicitHeader;
+        TapTable table = inferred ? new TapTable("csv_it")
+                .add(new TapField("column1", "INTEGER"))
+                .add(new TapField("column2", "STRING"))
+                .add(new TapField("column3", "INTEGER")) : csvTable();
+        String idField = inferred ? "column1" : "ID";
+        List<Integer> expected = new ArrayList<>();
+        for (int id = Math.max(1, dataStartLine - headerLine); id <= 3; id++) expected.add(id);
+        List<Integer> actual = new ArrayList<>();
+        List<FileOffset> offsets = new ArrayList<>();
+        session.functions.getBatchReadFunction().batchRead(session.nodeContext, table, null, 1, (batch, offset) -> {
+            batch.forEach(event -> actual.add(((Number) ((TapInsertRecordEvent) event).getAfter().get(idField)).intValue()));
+            FileOffset current = (FileOffset) offset;
+            offsets.add(new FileOffset(current.getPath(), current.getDataLine()));
+        });
+        assertEquals(expected, actual);
+        assertEquals(dataStartLine + 1, offsets.get(0).getDataLine());
+        FileITSupport.Events resumed = new FileITSupport.Events();
+        session.functions.getBatchReadFunction().batchRead(session.nodeContext, table, offsets.get(0), 10, resumed::accept);
+        List<Integer> resumedIds = new ArrayList<>();
+        resumed.events().forEach(event -> resumedIds.add(((Number) ((TapInsertRecordEvent) event).getAfter().get(idField)).intValue()));
+        assertEquals(expected.subList(1, expected.size()), resumedIds);
+        FileITSupport.Events atEnd = new FileITSupport.Events();
+        session.functions.getBatchReadFunction().batchRead(session.nodeContext, table,
+                offsets.get(offsets.size() - 1), 10, atEnd::accept);
+        assertTrue(atEnd.events().isEmpty());
+    }
+
+    @ParameterizedTest
+    @MethodSource("emptyFileModes")
+    @DisplayName("returns no records when headerless column inference reaches EOF")
+    void shouldReadEmptyHeaderlessFile(boolean offStandard) throws Throwable {
+        FileITSupport.Fixture fixture = FileITSupport.fixture("csv", "1.csv");
+        resources.add(fixture);
+        Files.write(fixture.directory().resolve("1.csv"), new byte[0]);
+        CsvConnector connector = new CsvConnector();
+        FileITSupport.Session session = FileITSupport.open(connector, "csv",
+                FileITSupport.config(fixture.directory(), "csv_it").kv("headerLine", 0)
+                        .kv("dataStartLine", 1).kv("offStandard", offStandard)
+                        .kv("lineExpression", "\"([^\"]*)\""));
+        resources.add(session);
+        FileITSupport.Events capture = new FileITSupport.Events();
+        session.functions.getBatchReadFunction().batchRead(session.nodeContext, csvTable(), null, 10, capture::accept);
+        assertTrue(capture.events().isEmpty());
+    }
+
+    static Stream<Boolean> emptyFileModes() {
+        return Stream.of(false, true);
     }
 
     @Test
