@@ -9,8 +9,8 @@ full connector set.
 ## Running the release
 
 `.github/workflows/publish-connectors.yml` can be started with
-`workflow_dispatch` or called with `workflow_call`. The only optional input is
-`source_ref`; when omitted, CI uses the selected workflow branch. Both the
+`workflow_dispatch` or called with `workflow_call`. The `source_ref` input
+defaults to the selected workflow branch; enterprise inputs are described below. Both the
 workflow and caller must run on the explicitly trusted, protected `main` or
 `develop` branch in `tapdata/tapdata-connectors`. The source may be any protected
 branch in that repository. The reusable batch workflow independently checks the caller,
@@ -26,6 +26,45 @@ protected source branch such as `develop`. Changing `source_ref` alone does not
 change the branch that supplies the workflow and publishing scripts.
 
 Configure these repository/organization Actions variables and secrets:
+
+### Include enterprise connectors
+
+Enable `include_enterprise` when starting this same workflow to publish both
+repositories, sequentially on the configured runner. Existing callers default to
+OSS only. Set `enterprise_source_ref` to a protected branch in
+`tapdata/tapdata-connectors-enterprise`; if blank it follows `source_ref`, or the
+selected workflow branch. The enterprise branch is validated independently and
+its exact commit is pinned before checkout. Publishing scripts always come from
+the protected OSS workflow branch, never from the enterprise source checkout.
+
+Add the Actions Secret `CONNECTOR_ENTERPRISE_READ_TOKEN` to this repository (or
+an organization secret accessible here). Use a token with read access to repository
+contents and metadata for `tapdata/tapdata-connectors-enterprise` and the public
+OSS repository. The default `GITHUB_TOKEN` cannot read a different private repo.
+Reusable callers must pass this secret or use `secrets: inherit`. Do not put a
+token in workflow inputs. The token is scoped to validation and source checkout,
+is not persisted by checkout, and is not passed to Maven.
+
+Both distributions use the existing internal/external Nexus settings. Enterprise
+JARs retain their declared `io.tapdata:<artifactId>` coordinates and use the same
+PDK-based version rules and batches of at most ten. Their full inventory is
+published as `io.tapdata:connectors-enterprise-bom`, with independent metadata and
+`io.tapdata:connector-enterprise-release-plan` recovery plans. OSS continues to use
+`connectors-bom` and `connector-release-plan`. A failed or resumed enterprise
+release does not advance the OSS baseline (or vice versa). Initial enterprise
+publication builds every connector declared in its `connectors/pom.xml`.
+
+Example reusable invocation inputs:
+
+```yaml
+with:
+  source_ref: main
+  include_enterprise: true
+  enterprise_source_ref: main
+secrets: inherit
+```
+
+### Nexus settings
 
 | Kind | Name | Purpose |
 | --- | --- | --- |

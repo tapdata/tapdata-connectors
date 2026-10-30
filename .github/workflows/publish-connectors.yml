@@ -7,13 +7,31 @@ on:
         description: Protected connector branch to publish (defaults to the selected workflow branch)
         required: false
         type: string
+      include_enterprise:
+        description: Also publish closed-source connectors
+        required: false
+        type: boolean
+        default: false
+      enterprise_source_ref:
+        description: Protected enterprise branch (defaults to source_ref or workflow branch)
+        required: false
+        type: string
   workflow_call:
     inputs:
       source_ref:
         description: Protected connector branch to publish.
         required: false
         type: string
+      include_enterprise:
+        required: false
+        type: boolean
+        default: false
+      enterprise_source_ref:
+        required: false
+        type: string
     secrets:
+      CONNECTOR_ENTERPRISE_READ_TOKEN:
+        required: false
       NEXUS_INTERNAL_USERNAME:
         required: true
       NEXUS_INTERNAL_PASSWORD:
@@ -36,27 +54,45 @@ jobs:
   publish:
     runs-on: ${{ vars.CONNECTOR_PUBLISH_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 480
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        distribution: ${{ inputs.include_enterprise && fromJSON('["opensource","enterprise"]') || fromJSON('["opensource"]') }}
+    name: Publish ${{ matrix.distribution }} connectors
+    env:
+      CONNECTOR_DISTRIBUTION: ${{ matrix.distribution }}
     steps:
       - name: Validate protected workflow and source branches
         id: source
         uses: actions/github-script@v7
         env:
-          SOURCE_REF: ${{ inputs.source_ref || github.ref }}
+          SOURCE_REF: ${{ matrix.distribution == 'enterprise' && (inputs.enterprise_source_ref || inputs.source_ref || github.ref) || inputs.source_ref || github.ref }}
+          SOURCE_REPOSITORY: ${{ matrix.distribution == 'enterprise' && 'tapdata-connectors-enterprise' || 'tapdata-connectors' }}
+          ENTERPRISE_READ_TOKEN: ${{ secrets.CONNECTOR_ENTERPRISE_READ_TOKEN }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
         with:
+          github-token: ${{ matrix.distribution == 'enterprise' && secrets.CONNECTOR_ENTERPRISE_READ_TOKEN || github.token }}
           script: |
             const repository = 'tapdata/tapdata-connectors';
             if (context.repo.owner + '/' + context.repo.repo !== repository ||
                 !context.ref.startsWith('refs/heads/')) {
               throw new Error('Publishing must run from a repository branch.');
             }
-            const getProtectedBranch = async (ref) => {
+            const sourceRepository = process.env.SOURCE_REPOSITORY || 'tapdata-connectors';
+            if (!['tapdata-connectors', 'tapdata-connectors-enterprise'].includes(sourceRepository)) {
+              throw new Error('Unexpected source repository.');
+            }
+            if (sourceRepository === 'tapdata-connectors-enterprise' && !process.env.ENTERPRISE_READ_TOKEN) {
+              throw new Error('CONNECTOR_ENTERPRISE_READ_TOKEN is required to read the private enterprise repository.');
+            }
+            const getProtectedBranch = async (ref, repo = 'tapdata-connectors') => {
               const branch = ref.replace(/^refs\/heads\//, '');
               if (!branch || branch.startsWith('refs/')) {
                 throw new Error('Only protected source branches may publish.');
               }
               const { data } = await github.rest.repos.getBranch({
-                owner: 'tapdata', repo: 'tapdata-connectors', branch,
+                owner: 'tapdata', repo, branch,
               });
               if (data.name !== branch || !data.protected) {
                 throw new Error(`Branch ${branch} is not protected.`);
@@ -76,7 +112,7 @@ jobs:
             const scriptsSha = await getProtectedBranch(workflowRef);
             core.setOutput('scripts_sha', scriptsSha);
             await getProtectedBranch(context.ref);
-            const sha = await getProtectedBranch(process.env.SOURCE_REF);
+            const sha = await getProtectedBranch(process.env.SOURCE_REF, sourceRepository);
             core.setOutput('sha', sha);
             core.setOutput('branch', process.env.SOURCE_REF.replace(/^refs\/heads\//, ''));
 
@@ -100,8 +136,9 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          repository: tapdata/tapdata-connectors
+          repository: ${{ matrix.distribution == 'enterprise' && 'tapdata/tapdata-connectors-enterprise' || 'tapdata/tapdata-connectors' }}
           ref: ${{ steps.source.outputs.sha }}
+          token: ${{ matrix.distribution == 'enterprise' && secrets.CONNECTOR_ENTERPRISE_READ_TOKEN || github.token }}
           path: source
           fetch-depth: 0
           persist-credentials: false
