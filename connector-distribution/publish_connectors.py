@@ -200,20 +200,34 @@ def connector_modules():
     return modules
 
 
+def distribution_artifact(kind):
+    distribution = os.environ.get("CONNECTOR_DISTRIBUTION", "opensource")
+    if distribution not in ("opensource", "enterprise"):
+        raise ValueError("CONNECTOR_DISTRIBUTION must be opensource or enterprise")
+    return {
+        "bom": "connectors-enterprise-bom" if distribution == "enterprise" else "connectors-bom",
+        "plan": "connector-enterprise-release-plan" if distribution == "enterprise" else "connector-release-plan",
+    }[kind]
+
+
+def bom_metadata_url(repo):
+    return f"{repo['url']}io/tapdata/{distribution_artifact('bom')}/maven-metadata.xml"
+
+
 def bom_url(version, repo):
-    return artifact_url("io.tapdata", "connectors-bom", version, repo, "pom")
+    return artifact_url("io.tapdata", distribution_artifact("bom"), version, repo, "pom")
 
 
 def ensure_bom_available(version, repo):
     if nexus_read(bom_url(version, repo), repo) is not None:
         raise RuntimeError(
-            f"BOM io.tapdata:connectors-bom:{version} already exists in {repo['name']}; "
+            f"BOM io.tapdata:{distribution_artifact('bom')}:{version} already exists in {repo['name']}; "
             "stopping before connector builds or uploads."
         )
 
 
 def latest_bom(repo):
-    metadata_url = f"{repo['url']}io/tapdata/connectors-bom/maven-metadata.xml"
+    metadata_url = bom_metadata_url(repo)
     body = nexus_read(metadata_url, repo)
     if body is None:
         return None
@@ -231,7 +245,7 @@ def latest_bom(repo):
 
 
 def plan_url(base_version, repo):
-    return artifact_url("io.tapdata", "connector-release-plan", base_version or "bootstrap",
+    return artifact_url("io.tapdata", distribution_artifact("plan"), base_version or "bootstrap",
                         repo, "json")
 
 
@@ -629,7 +643,7 @@ def sync_connector(item, targets, temp, *, jar=None):
 
 
 def repair_metadata_checksums(repo):
-    url = f"{repo['url']}io/tapdata/connectors-bom/maven-metadata.xml"
+    url = bom_metadata_url(repo)
     content = nexus_read(url, repo)
     if content is None:
         return
@@ -644,12 +658,12 @@ def repair_metadata_checksums(repo):
 
 
 def update_bom_metadata(repo, version):
-    url = f"{repo['url']}io/tapdata/connectors-bom/maven-metadata.xml"
+    url = bom_metadata_url(repo)
     body = nexus_read(url, repo)
     metadata = ET.fromstring(body) if body else ET.Element("metadata")
     if body is None:
         ET.SubElement(metadata, "groupId").text = "io.tapdata"
-        ET.SubElement(metadata, "artifactId").text = "connectors-bom"
+        ET.SubElement(metadata, "artifactId").text = distribution_artifact("bom")
     versioning = metadata.find("versioning")
     if versioning is None:
         versioning = ET.SubElement(metadata, "versioning")
@@ -730,7 +744,7 @@ def publish_plan(plan, targets, temp, artifacts_path, scripts_dir, *, batch_inde
     trusted_bom_script = Path(scripts_dir).resolve() / "connector-distribution" / "generate_bom.py"
     run([sys.executable, "-I", str(trusted_bom_script), "--inventory", str(inventory_path),
          "--bom-version", plan["bomVersion"], "--source-commit", plan["sourceCommit"],
-         "--output", str(bom)])
+         "--artifact-id", distribution_artifact("bom"), "--output", str(bom)])
     # Both environments have every JAR and connector POM before publishing BOMs.
     for repo in targets:
         upload_file(repo, bom_url(plan["bomVersion"], repo), bom)

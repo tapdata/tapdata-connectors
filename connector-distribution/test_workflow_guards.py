@@ -31,6 +31,8 @@ const options = JSON.parse(process.argv[1]);
 const [owner, repo] = options.repository.split('/');
 const context = {repo: {owner, repo}, ref: options.ref};
 process.env.SOURCE_REF = options.source;
+process.env.SOURCE_REPOSITORY = options.source_repository || 'tapdata-connectors';
+process.env.ENTERPRISE_READ_TOKEN = options.enterprise_token || '';
 process.env.SOURCE_BRANCH = options.source;
 process.env.WORKFLOW_REF = options.workflow;
 process.env.CALLER_WORKFLOW = options.workflow;
@@ -39,7 +41,7 @@ process.env.SOURCE_SHA = options.source_sha;
 const outputs = {};
 const core = {setOutput: (key, value) => outputs[key] = value};
 const github = {rest: {repos: {
-  getBranch: async ({branch}) => ({data: {name: branch, protected: options.protected && !options.unprotected_branches.includes(branch) && (branch !== options.source || options.source_protected), commit: {sha: (branch === 'main' ? 'd' : 'c').repeat(40)}}}),
+  getBranch: async ({branch, repo}) => ({data: {name: branch, protected: options.protected && !(repo === 'tapdata-connectors-enterprise' && options.enterprise_protected === false) && !options.unprotected_branches.includes(branch) && (branch !== options.source || options.source_protected), commit: {sha: (repo === 'tapdata-connectors-enterprise' ? 'e' : branch === 'main' ? 'd' : 'c').repeat(40)}}}),
   compareCommits: async () => ({data: {status: options.status}}),
 }}};
 (async () => {__GUARD_BODY__})().then(() => console.log(JSON.stringify(outputs))).catch(e => {console.error(e.message); process.exitCode=1;});
@@ -50,6 +52,20 @@ const github = {rest: {repos: {
         result = self.guard('publish-connectors.yml')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('scripts_sha', json.loads(result.stdout))
+
+    def test_enterprise_source_uses_its_own_protected_branch_and_commit(self):
+        options = dict(source_repository='tapdata-connectors-enterprise', enterprise_token='test-token')
+        result = self.guard('publish-connectors.yml', **options)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['sha'], 'e' * 40)
+        self.assertEqual(json.loads(result.stdout)['scripts_sha'], 'c' * 40)
+        result = self.guard('publish-connectors.yml', **options, enterprise_protected=False)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_enterprise_missing_token_and_unknown_repository_fail_closed(self):
+        for repository in ['tapdata-connectors-enterprise', 'other-repository']:
+            result = self.guard('publish-connectors.yml', source_repository=repository)
+            self.assertNotEqual(result.returncode, 0)
 
     def test_primary_guard_accepts_main_and_develop_workflow_and_caller(self):
         for workflow_branch in ['main', 'develop']:

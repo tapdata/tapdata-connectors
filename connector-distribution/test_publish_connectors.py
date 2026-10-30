@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -96,6 +97,11 @@ class Nexus:
 
 class PublishingTests(unittest.TestCase):
     def setUp(self):
+        # CI runs this suite in both distribution legs. Each fixture starts with
+        # OSS coordinates; enterprise cases explicitly override this baseline.
+        distribution = patch.dict(os.environ, {'CONNECTOR_DISTRIBUTION': 'opensource'})
+        distribution.start()
+        self.addCleanup(distribution.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / 'repo'
         self.root.mkdir()
@@ -188,6 +194,49 @@ class PublishingTests(unittest.TestCase):
         self.publish()
         self.assertEqual([len(n.puts) for n in self.nexuses], count)
         self.assertEqual(len(self.builds), 3)
+
+    def test_enterprise_plan_bom_metadata_and_resume_are_isolated(self):
+        self.seed(1)
+        # An existing OSS BOM/plan must not become the enterprise baseline.
+        oss_metadata = '/repository/releases/io/tapdata/connectors-bom/maven-metadata.xml'
+        oss_plan = '/repository/releases/io/tapdata/connector-release-plan/bootstrap/connector-release-plan-bootstrap.json'
+        for nexus in self.nexuses:
+            nexus.files[oss_metadata] = b'OSS metadata must remain untouched'
+            nexus.files[oss_plan] = b'OSS plan must remain untouched'
+        with patch.dict(os.environ, {'CONNECTOR_DISTRIBUTION': 'enterprise'}):
+            self.publish()
+            self.assert_replicated()
+            for nexus in self.nexuses:
+                version, bom = publisher.latest_bom(nexus.repo)
+                self.assertEqual(bom.findtext('m:artifactId', namespaces=publisher.NS), 'connectors-enterprise-bom')
+                self.assertIn('/connectors-enterprise-bom/', publisher.bom_url(version, nexus.repo))
+                self.assertIn('/connector-enterprise-release-plan/', publisher.plan_url(None, nexus.repo))
+                self.assertEqual(nexus.files[oss_metadata], b'OSS metadata must remain untouched')
+                self.assertEqual(nexus.files[oss_plan], b'OSS plan must remain untouched')
+            puts = [len(n.puts) for n in self.nexuses]
+            self.publish()
+            self.assertEqual([len(n.puts) for n in self.nexuses], puts)
+            self.assertEqual(len(self.builds), 1)
+
+    def test_enterprise_partial_upload_resumes_original_source(self):
+        source = self.seed(2)
+        external = self.nexuses[1]
+        external.fail_path = external.path('c01', '2.11.0', 'pom')
+        external.fail_count = 1
+        with patch.dict(os.environ, {'CONNECTOR_DISTRIBUTION': 'enterprise'}):
+            with self.assertRaisesRegex(RuntimeError, 'HTTP 403'):
+                self.publish()
+            self.assertTrue(all(publisher.latest_bom(n.repo) is None for n in self.nexuses))
+            (self.root / 'connectors/c00/source.txt').write_text('newer source')
+            self.git('add', '.')
+            self.git('commit', '-qm', 'advance enterprise source')
+            self.publish()
+            self.assertTrue(all(sha == source for sha in self.build_sources))
+            self.assertEqual(len(self.builds), 1)
+            self.assert_replicated()
+            for nexus in self.nexuses:
+                bom = publisher.latest_bom(nexus.repo)[1]
+                self.assertEqual(bom.findtext('m:properties/m:tapdata.source.commit', namespaces=publisher.NS), source)
 
     def test_last_metadata_checksum_failure_is_repaired_even_when_no_source_changes(self):
         self.seed(1)
