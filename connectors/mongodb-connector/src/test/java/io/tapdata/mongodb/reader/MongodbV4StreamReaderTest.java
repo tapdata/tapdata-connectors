@@ -16,6 +16,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.Arguments;
 import java.util.Date;
+import java.util.Map;
+import io.tapdata.pdk.core.api.impl.JsonParserImpl;
+import io.tapdata.pdk.core.api.impl.serialize.ObjectSerializableImplV2;
 import java.util.stream.Stream;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoDatabase;
@@ -52,7 +55,8 @@ class MongodbV4StreamReaderTest {
         when(database.runCommand(new Document("isMaster", 1))).thenReturn(
                 new Document("$clusterTime", new Document("clusterTime", captured)));
 
-        BsonTimestamp start = (BsonTimestamp) reader.streamOffset(null);
+        Object offset = reader.streamOffset(null);
+        BsonTimestamp start = operationTime(offset);
         Assertions.assertEquals(new BsonTimestamp(captured.getTime(), 1017), start);
         // Old inserts and the captured boundary must not be replayed, while the
         // immediately following operation in the same second must remain visible.
@@ -60,7 +64,7 @@ class MongodbV4StreamReaderTest {
             Assertions.assertTrue(new BsonTimestamp(captured.getTime(), inc).compareTo(start) < 0);
         }
         Assertions.assertEquals(0, new BsonTimestamp(captured.getTime(), 1017).compareTo(start));
-        Assertions.assertEquals(start, MongoCdcOffset.fromOffset(new MongoCdcOffset(null, start).toOffset()).getCdcOffset());
+        Assertions.assertEquals(offset, MongoCdcOffset.fromOffset(new MongoCdcOffset(null, offset).toOffset()).getCdcOffset());
     }
 
     @Test
@@ -70,7 +74,7 @@ class MongodbV4StreamReaderTest {
         ReflectionTestUtils.setField(reader, "mongoDatabase", database);
         when(database.runCommand(any())).thenReturn(new Document("$clusterTime",
                 new Document("clusterTime", new BsonTimestamp(1784769971, -1))));
-        Assertions.assertEquals(new BsonTimestamp(1784769972, 0), reader.streamOffset(null));
+        Assertions.assertEquals(new BsonTimestamp(1784769972, 0), operationTime(reader.streamOffset(null)));
     }
 
     static Stream<Arguments> serverTimeFallbacks() {
@@ -101,9 +105,35 @@ class MongodbV4StreamReaderTest {
         verifyNoInteractions(database);
     }
 
+    private static BsonTimestamp operationTime(Object offset) {
+        Map<?, ?> value = (Map<?, ?>) offset;
+        return new BsonTimestamp(((Number) value.get("seconds")).intValue(),
+                ((Number) value.get("inc")).intValue());
+    }
+
+    private static Object persistedOperationTime(BsonTimestamp captured) {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongodbV4StreamReader reader = new MongodbV4StreamReader();
+        ReflectionTestUtils.setField(reader, "mongoDatabase", database);
+        when(database.runCommand(any())).thenReturn(new Document("$clusterTime",
+                new Document("clusterTime", captured)));
+        Object offset = reader.streamOffset(null);
+        ObjectSerializableImplV2 serializer = new ObjectSerializableImplV2();
+        ReflectionTestUtils.setField(serializer, "jsonParser", new JsonParserImpl());
+        Object restored = serializer.toObject(serializer.fromObject(new MongoCdcOffset(null, offset).toOffset()));
+        Object restoredCdc = MongoCdcOffset.fromOffset(restored).getCdcOffset();
+        Assertions.assertEquals(offset, restoredCdc);
+        Assertions.assertEquals(new BsonTimestamp(captured.getValue() + 1), operationTime(restoredCdc));
+        return restoredCdc;
+    }
+
     static Stream<Arguments> readOffsets() {
         return Stream.of(
                 Arguments.of(new BsonTimestamp(1784769971, 1017)),
+                Arguments.of(persistedOperationTime(new BsonTimestamp(1784769971, 1016))),
+                Arguments.of(persistedOperationTime(new BsonTimestamp(1784769971, -2))),
+                Arguments.of(persistedOperationTime(new BsonTimestamp(1784769971, -1))),
+                Arguments.of(persistedOperationTime(new BsonTimestamp(-2, 1016))),
                 Arguments.of(1784769971),
                 Arguments.of(new BsonDocument("_data", new BsonString("resume-token"))),
                 Arguments.of((Object) null));
@@ -131,7 +161,10 @@ class MongodbV4StreamReaderTest {
         reader.read(mock(TapConnectorContext.class), Arrays.asList("test"), offset, 10,
                 mock(StreamReadConsumer.class));
 
-        if (offset instanceof BsonTimestamp) {
+        if (offset instanceof Map && !(offset instanceof BsonDocument)) {
+            verify(stream).startAtOperationTime(operationTime(offset));
+            verify(stream, never()).startAfter(any());
+        } else if (offset instanceof BsonTimestamp) {
             verify(stream).startAtOperationTime((BsonTimestamp) offset);
             verify(stream, never()).startAfter(any());
         } else if (offset instanceof Integer) {
