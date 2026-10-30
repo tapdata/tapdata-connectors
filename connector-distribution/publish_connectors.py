@@ -4,6 +4,9 @@
 import argparse
 import base64
 import hashlib
+import io
+import signal
+from contextlib import contextmanager
 import http.client
 import ipaddress
 import json
@@ -25,6 +28,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BATCH_SIZE = 10
 ATTEMPTS = 3
+REQUEST_TOTAL_TIMEOUT = 600
+PROGRESS_INTERVAL = 10
 VERSION_RE = re.compile(r"^\d+(?:\.\d+)*$")
 NS = {"m": "http://maven.apache.org/POM/4.0.0"}
 
@@ -117,7 +122,50 @@ def artifact_url(group_id, artifact_id, version, repo, extension="jar"):
             f"{artifact_id}-{version}.{extension}")
 
 
+class RequestDeadlineExceeded(RuntimeError):
+    """A transfer exceeded its wall-clock budget, including retries."""
+
+
+@contextmanager
+def transfer_deadline(label):
+    # Publishing runs in the main thread on Linux CI. Unlike socket timeouts,
+    # SIGALRM also bounds DNS, TLS, uploads, and continuously trickling reads.
+    started = time.monotonic()
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+
+    def expired(*_):
+        raise RequestDeadlineExceeded(f"{label} exceeded {REQUEST_TOTAL_TIMEOUT}s total transfer limit")
+
+    signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, REQUEST_TOTAL_TIMEOUT)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer[0]:
+            signal.setitimer(signal.ITIMER_REAL,
+                             max(0.001, previous_timer[0] - (time.monotonic() - started)),
+                             previous_timer[1])
+
+
 def request(repo, url, *, data=None, destination=None):
+    method = "GET" if data is None else "PUT"
+    label = f"Nexus {repo['name']} {method} {urllib.parse.urlsplit(url).path}"
+    started = time.monotonic()
+    print(f"{label}: start" + (f" ({len(data)} bytes)" if data is not None else ""), flush=True)
+    try:
+        with transfer_deadline(label):
+            result = _request(repo, url, data=data, destination=destination)
+    except Exception as error:
+        print(f"{label}: failed after {time.monotonic() - started:.1f}s ({type(error).__name__})", flush=True)
+        raise
+    print(f"{label}: {'not found' if result is None else 'complete'} in {time.monotonic() - started:.1f}s", flush=True)
+    return result
+
+
+def _request(repo, url, *, data=None, destination=None):
     """Retry transient failures; only a GET 404 denotes an absent file."""
     credentials = base64.b64encode(
         f"{repo['username']}:{repo['password']}".encode()
@@ -129,17 +177,21 @@ def request(repo, url, *, data=None, destination=None):
                                               "Content-Type": "application/octet-stream"})
         try:
             with open_request(repo, req) as response:
-                if destination is None:
-                    return response.read()
                 received = 0
-                with destination.open("wb") as output:
-                    while chunk := response.read(1024 * 1024):
+                last_progress = time.monotonic()
+                expected = response.headers.get("Content-Length")
+                output = destination.open("wb") if destination is not None else io.BytesIO()
+                with output:
+                    while chunk := response.read1(64 * 1024):
                         output.write(chunk)
                         received += len(chunk)
-                expected = response.headers.get("Content-Length")
-                if expected is not None and received != int(expected):
-                    raise http.client.IncompleteRead(b"", int(expected) - received)
-                return True
+                        if time.monotonic() - last_progress >= PROGRESS_INTERVAL:
+                            print(f"Nexus {repo['name']} {req.get_method()} {urllib.parse.urlsplit(url).path}: "
+                                  f"{received}/{expected or '?'} bytes received", flush=True)
+                            last_progress = time.monotonic()
+                    if expected is not None and received != int(expected):
+                        raise http.client.IncompleteRead(b"", int(expected) - received)
+                    return output.getvalue() if destination is None else True
         except urllib.error.HTTPError as error:
             if data is None and error.code == 404:
                 return None
@@ -148,6 +200,8 @@ def request(repo, url, *, data=None, destination=None):
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError):
             if attempt == ATTEMPTS - 1:
                 raise
+        print(f"Nexus {repo['name']} {req.get_method()} {urllib.parse.urlsplit(url).path}: "
+              f"retry {attempt + 2}/{ATTEMPTS}", flush=True)
         time.sleep(2 ** attempt)
 
 
@@ -174,6 +228,10 @@ def put_immutable(repo, url, content):
 def upload_file(repo, url, path):
     content = path.read_bytes()
     put_immutable(repo, url, content)
+    upload_checksums(repo, url, content)
+
+
+def upload_checksums(repo, url, content):
     for algorithm in ("sha1", "sha256"):
         checksum = hashlib.new(algorithm, content).hexdigest().encode()
         put_immutable(repo, f"{url}.{algorithm}", checksum)
@@ -612,12 +670,15 @@ def set_build_version(module, version):
 
 def sync_connector(item, targets, temp, *, jar=None):
     """Use an existing remote JAR as canonical; repair missing files on either side."""
+    print(f"Verify connector {item['artifactId']}:{item['version']}", flush=True)
     existing = []
+    verified_repos = set()
     for repo in targets:
         path = temp / f"{item['artifactId']}-{repo['name']}.jar"
         url = artifact_url(item["groupId"], item["artifactId"], item["version"], repo)
         if request(repo, url, destination=path) is not None:
             existing.append(path)
+            verified_repos.add(repo['name'])
     if existing:
         canonical = existing[0]
         digest = hashlib.sha256(canonical.read_bytes()).hexdigest()
@@ -634,7 +695,13 @@ def sync_connector(item, targets, temp, *, jar=None):
     pom = temp / f"{item['artifactId']}.pom"
     write_artifact_pom(pom, item)
     for repo in targets:
-        upload_file(repo, artifact_url(item["groupId"], item["artifactId"], item["version"], repo), canonical)
+        url = artifact_url(item["groupId"], item["artifactId"], item["version"], repo)
+        if repo['name'] in verified_repos:
+            # This JAR was just read and compared in full. Only repair sidecars;
+            # do not download the same immutable JAR again in put_immutable.
+            upload_checksums(repo, url, canonical.read_bytes())
+        else:
+            upload_file(repo, url, canonical)
         upload_file(repo, artifact_url(item["groupId"], item["artifactId"], item["version"], repo, "pom"), pom)
     for path in existing:
         path.unlink()

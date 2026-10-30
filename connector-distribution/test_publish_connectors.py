@@ -25,6 +25,7 @@ class Nexus:
     def __init__(self, *, host='127.0.0.1', port=0, tls_context=None):
         self.files = {}
         self.puts = []
+        self.gets = []
         self.fail_path = None
         self.fail_status = 403
         self.fail_count = 0
@@ -39,6 +40,7 @@ class Nexus:
                 pass
 
             def do_GET(self):
+                nexus.gets.append(self.path)
                 nexus.hosts.append(self.headers.get('Host'))
                 if self.headers.get('Authorization') != 'Basic dGVzdDp0ZXN0':
                     self.send_error(401)
@@ -194,6 +196,22 @@ class PublishingTests(unittest.TestCase):
         self.publish()
         self.assertEqual([len(n.puts) for n in self.nexuses], count)
         self.assertEqual(len(self.builds), 3)
+
+    def test_sync_reads_each_existing_jar_once_and_repairs_checksums(self):
+        self.seed(1)
+        self.publish()
+        plan = json.loads((Path(self.temp.name) / 'release_plan.json').read_text())
+        item = plan['items'][0]
+        jar_path = self.nexuses[0].path(item['artifactId'], item['version'], 'jar')
+        for nexus in self.nexuses:
+            nexus.gets.clear()
+            del nexus.files[jar_path + '.sha256']
+        with tempfile.TemporaryDirectory() as temp:
+            publisher.sync_connector(item, self.targets, Path(temp))
+        for nexus in self.nexuses:
+            self.assertEqual(nexus.gets.count(jar_path), 1)
+            self.assertEqual(nexus.files[jar_path + '.sha256'],
+                             hashlib.sha256(nexus.files[jar_path]).hexdigest().encode())
 
     def test_enterprise_plan_bom_metadata_and_resume_are_isolated(self):
         self.seed(1)

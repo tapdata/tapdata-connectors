@@ -213,6 +213,7 @@ jobs:
           done
 
       - name: Upload each local batch directly to both Nexus installations
+        timeout-minutes: 60
         if: steps.plan.outputs.batches != '[]'
         env:
           BATCHES: ${{ steps.plan.outputs.batches }}
@@ -234,6 +235,7 @@ jobs:
           done
 
       - name: Verify complete inventory and publish BOM to both installations
+        timeout-minutes: 30
         if: steps.plan.outputs.batches != '[]'
         env:
           NEXUS_INTERNAL_URL: ${{ vars.NEXUS_INTERNAL_URL }}

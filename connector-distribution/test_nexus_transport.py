@@ -2,18 +2,58 @@
 
 import os
 import ssl
+import signal
+import time
 import tempfile
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import publish_connectors as publisher
 from test_publish_connectors import Nexus
 
 
 class RequestTimeoutTests(unittest.TestCase):
+    def test_deadline_interrupts_blocked_put(self):
+        repo = {'name': 'test', 'url': 'https://nexus.example/',
+                'username': 'test', 'password': 'test'}
+        with patch.object(publisher, 'REQUEST_TOTAL_TIMEOUT', 0.08), \
+             patch.object(publisher, 'open_request', side_effect=lambda *_: time.sleep(5)):
+            with self.assertRaises(publisher.RequestDeadlineExceeded):
+                publisher.request(repo, repo['url'] + 'connector.jar', data=b'jar')
+
+    def test_deadline_interrupts_blocked_open_and_trickling_body(self):
+        repo = {'name': 'test', 'url': 'https://nexus.example/',
+                'username': 'test', 'password': 'test'}
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        for blocked_open in (True, False):
+            with self.subTest(blocked_open=blocked_open):
+                response = MagicMock()
+                response.__enter__.return_value = response
+                response.headers = {}
+
+                def trickle(_):
+                    time.sleep(0.02)
+                    return b'x'
+
+                response.read1.side_effect = trickle
+
+                def open_response(*_):
+                    if blocked_open:
+                        time.sleep(5)
+                    return response
+
+                started = time.monotonic()
+                with patch.object(publisher, 'REQUEST_TOTAL_TIMEOUT', 0.08), \
+                     patch.object(publisher, 'open_request', side_effect=open_response):
+                    with self.assertRaises(publisher.RequestDeadlineExceeded):
+                        publisher.request(repo, repo['url'] + 'connector.jar')
+                self.assertLess(time.monotonic() - started, 1)
+                self.assertEqual(signal.getsignal(signal.SIGALRM), previous_handler)
+                self.assertEqual(signal.getitimer(signal.ITIMER_REAL)[0], 0)
+
     def test_upload_timeout_for_dns_and_pinned_routes(self):
         for pinned in (False, True):
             for method, timeout in (("GET", 45), ("PUT", 600)):
