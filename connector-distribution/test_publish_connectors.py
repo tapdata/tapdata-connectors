@@ -97,6 +97,11 @@ class Nexus:
 
 class PublishingTests(unittest.TestCase):
     def setUp(self):
+        # CI runs this suite in both distribution legs. Each fixture starts with
+        # OSS coordinates; enterprise cases explicitly override this baseline.
+        distribution = patch.dict(os.environ, {'CONNECTOR_DISTRIBUTION': 'opensource'})
+        distribution.start()
+        self.addCleanup(distribution.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / 'repo'
         self.root.mkdir()
