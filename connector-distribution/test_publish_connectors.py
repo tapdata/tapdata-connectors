@@ -472,6 +472,68 @@ class PublishingTests(unittest.TestCase):
             publisher.sync_connector(item, self.targets, Path(self.temp.name))
         self.assertTrue(all(not n.puts for n in self.nexuses))
 
+    def seeded_sidecar_jar(self, jar):
+        for nexus in self.nexuses:
+            path = nexus.path('c00', '2.11.0', 'jar')
+            nexus.files[path] = jar
+            nexus.files[path + '.sha1'] = hashlib.sha1(jar).hexdigest().encode()
+            nexus.files[path + '.sha256'] = hashlib.sha256(jar).hexdigest().encode()
+            nexus.gets.clear()
+            nexus.puts.clear()
+        return path
+
+    def test_matching_sidecars_verify_without_downloading_jars(self):
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
+                'pdkApiVersion': '2.0.11'}
+        jar = b'x' * 1024
+        jar_path = self.seeded_sidecar_jar(jar)
+        with contextlib.redirect_stdout(io.StringIO()):
+            record = publisher.sync_connector(item, self.targets, Path(self.temp.name))
+        self.assertEqual(record['sha256'], hashlib.sha256(jar).hexdigest())
+        for nexus in self.nexuses:
+            # Neither the JAR nor its bytes move: verification used the sidecars.
+            self.assertNotIn(jar_path, nexus.gets)
+            self.assertTrue(all('.pom' in path for path in nexus.puts))
+        self.assert_replicated()
+
+    def test_conflicting_sidecars_fall_back_to_jar_bytes(self):
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
+                'pdkApiVersion': '2.0.11'}
+        jar_path = self.seeded_sidecar_jar(b'x' * 1024)
+        self.nexuses[1].files[jar_path + '.sha256'] = b'0' * 64
+        # The JARs are identical, so the drift is a stale immutable sidecar and
+        # repair must stay strict rather than overwrite it silently.
+        with self.assertRaisesRegex(RuntimeError, 'Immutable file differs'):
+            publisher.sync_connector(item, self.targets, Path(self.temp.name))
+        self.assertIn(jar_path, self.nexuses[1].gets)
+
+    def test_conflicting_sidecars_with_different_jars_fail(self):
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
+                'pdkApiVersion': '2.0.11'}
+        jar_path = self.seeded_sidecar_jar(b'x' * 1024)
+        other = b'y' * 1024
+        self.nexuses[1].files[jar_path] = other
+        self.nexuses[1].files[jar_path + '.sha256'] = hashlib.sha256(other).hexdigest().encode()
+        with self.assertRaisesRegex(RuntimeError, 'differs between'):
+            publisher.sync_connector(item, self.targets, Path(self.temp.name))
+        self.assertTrue(all(not n.puts for n in self.nexuses))
+
+    def test_missing_sha1_sidecar_is_repaired_with_one_jar_download(self):
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
+                'pdkApiVersion': '2.0.11'}
+        jar = b'x' * 1024
+        jar_path = self.seeded_sidecar_jar(jar)
+        del self.nexuses[1].files[jar_path + '.sha1']
+        with contextlib.redirect_stdout(io.StringIO()):
+            record = publisher.sync_connector(item, self.targets, Path(self.temp.name))
+        self.assertEqual(record['sha256'], hashlib.sha256(jar).hexdigest())
+        # sha1 cannot be synthesized from a peer sidecar, so exactly one
+        # environment downloads the JAR to rebuild it.
+        self.assertEqual(sum(nexus.gets.count(jar_path) for nexus in self.nexuses), 1)
+        self.assertEqual(self.nexuses[1].files[jar_path + '.sha1'],
+                         hashlib.sha1(jar).hexdigest().encode())
+        self.assert_replicated()
+
     def test_http_auth_and_network_errors_never_mean_absent(self):
         repo = {**self.targets[0], 'password': 'wrong'}
         with self.assertRaisesRegex(RuntimeError, 'HTTP 401'):
