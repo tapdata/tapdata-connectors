@@ -7,8 +7,10 @@ and retries. Downloads report byte progress every ten seconds while data arrives
 Requests have a ten-minute wall-clock limit covering connection setup, transfer,
 and all retries, in addition to socket inactivity timeouts. This uses POSIX timers
 in the publisher's main thread on the Linux CI runner; continuously trickling
-responses cannot extend the deadline. Upload steps are capped at 60 minutes and
-final inventory verification/BOM publication at 30 minutes. A timeout fails the
+responses cannot extend the deadline. Upload steps default to 120 minutes and final inventory verification/BOM
+publication to 180 minutes. Override these with positive integer Actions Variables
+`CONNECTOR_UPLOAD_TIMEOUT_MINUTES` and `CONNECTOR_FINALIZE_TIMEOUT_MINUTES`
+respectively (both must fit within the 480-minute job limit). A timeout fails the
 run; rerun the workflow to resume its immutable Nexus release plan.
 
 Final verification still downloads and compares the actual JAR bytes from both
