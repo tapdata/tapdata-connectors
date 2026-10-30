@@ -26,6 +26,7 @@ class Nexus:
         self.files = {}
         self.puts = []
         self.gets = []
+        self.heads = []
         self.fail_path = None
         self.fail_status = 403
         self.fail_count = 0
@@ -58,6 +59,18 @@ class Nexus:
                     self.close_connection = True
                 else:
                     self.wfile.write(content)
+
+            def do_HEAD(self):
+                nexus.heads.append(self.path)
+                if self.headers.get('Authorization') != 'Basic dGVzdDp0ZXN0':
+                    self.send_error(401)
+                    return
+                if self.path not in nexus.files:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(nexus.files[self.path])))
+                self.end_headers()
 
             def do_PUT(self):
                 nexus.hosts.append(self.headers.get('Host'))
@@ -532,6 +545,45 @@ class PublishingTests(unittest.TestCase):
         self.assertEqual(sum(nexus.gets.count(jar_path) for nexus in self.nexuses), 1)
         self.assertEqual(self.nexuses[1].files[jar_path + '.sha1'],
                          hashlib.sha1(jar).hexdigest().encode())
+        self.assert_replicated()
+
+    def test_deleted_jar_is_reuploaded_despite_surviving_sidecars(self):
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
+                'pdkApiVersion': '2.0.11'}
+        jar = b'x' * 1024
+        jar_path = self.seeded_sidecar_jar(jar)
+        # Maven's detached checksums can outlive a deleted artifact.
+        del self.nexuses[1].files[jar_path]
+        with contextlib.redirect_stdout(io.StringIO()):
+            record = publisher.sync_connector(item, self.targets, Path(self.temp.name))
+        self.assertEqual(record['sha256'], hashlib.sha256(jar).hexdigest())
+        # The missing JAR is re-uploaded from the verified peer, never skipped.
+        self.assertIn(jar_path, self.nexuses[1].puts)
+        self.assertEqual(self.nexuses[1].files[jar_path], jar)
+        self.assertNotIn(jar_path, self.nexuses[0].puts)
+        # Existence was probed with HEAD, and the repair downloaded the JAR
+        # once from the surviving peer; the repaired side's reads belong to
+        # put_immutable's pre-check and post-upload verification.
+        self.assertIn(jar_path, self.nexuses[0].heads)
+        self.assertEqual(self.nexuses[0].gets.count(jar_path), 1)
+        self.assert_replicated()
+
+    def test_deleted_jar_and_sha1_are_repaired_together(self):
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
+                'pdkApiVersion': '2.0.11'}
+        jar = b'x' * 1024
+        jar_path = self.seeded_sidecar_jar(jar)
+        del self.nexuses[1].files[jar_path]
+        del self.nexuses[1].files[jar_path + '.sha1']
+        with contextlib.redirect_stdout(io.StringIO()):
+            record = publisher.sync_connector(item, self.targets, Path(self.temp.name))
+        self.assertEqual(record['sha256'], hashlib.sha256(jar).hexdigest())
+        self.assertIn(jar_path, self.nexuses[1].puts)
+        # The JAR comes back before its sha1, never a checksum without a JAR.
+        self.assertEqual(self.nexuses[1].files[jar_path], jar)
+        self.assertEqual(self.nexuses[1].files[jar_path + '.sha1'],
+                         hashlib.sha1(jar).hexdigest().encode())
+        self.assertEqual(self.nexuses[0].gets.count(jar_path), 1)
         self.assert_replicated()
 
     def test_http_auth_and_network_errors_never_mean_absent(self):

@@ -150,14 +150,14 @@ def transfer_deadline(label):
                              previous_timer[1])
 
 
-def request(repo, url, *, data=None, destination=None):
-    method = "GET" if data is None else "PUT"
+def request(repo, url, *, data=None, destination=None, method=None):
+    method = method or ("GET" if data is None else "PUT")
     label = f"Nexus {repo['name']} {method} {urllib.parse.urlsplit(url).path}"
     started = time.monotonic()
     print(f"{label}: start" + (f" ({len(data)} bytes)" if data is not None else ""), flush=True)
     try:
         with transfer_deadline(label):
-            result = _request(repo, url, data=data, destination=destination)
+            result = _request(repo, url, data=data, destination=destination, method=method)
     except Exception as error:
         print(f"{label}: failed after {time.monotonic() - started:.1f}s ({type(error).__name__})", flush=True)
         raise
@@ -165,18 +165,21 @@ def request(repo, url, *, data=None, destination=None):
     return result
 
 
-def _request(repo, url, *, data=None, destination=None):
-    """Retry transient failures; only a GET 404 denotes an absent file."""
+def _request(repo, url, *, data=None, destination=None, method=None):
+    """Retry transient failures; only a GET or HEAD 404 denotes an absent file."""
+    method = method or ("GET" if data is None else "PUT")
     credentials = base64.b64encode(
         f"{repo['username']}:{repo['password']}".encode()
     ).decode()
     for attempt in range(ATTEMPTS):
         req = urllib.request.Request(url, data=data,
-                                     method="GET" if data is None else "PUT",
+                                     method=method,
                                      headers={"Authorization": f"Basic {credentials}",
                                               "Content-Type": "application/octet-stream"})
         try:
             with open_request(repo, req) as response:
+                if method == "HEAD":
+                    return True
                 received = 0
                 last_progress = time.monotonic()
                 expected = response.headers.get("Content-Length")
@@ -255,6 +258,12 @@ def sidecar_digest(repo, url):
               f"{urllib.parse.urlsplit(url).path}.sha256", flush=True)
         return None
     return digest
+
+
+def jar_exists(repo, url):
+    # A surviving .sha256 sidecar does not prove the JAR itself is still
+    # stored; detached checksums can outlive a deleted artifact.
+    return request(repo, url, method="HEAD") is not None
 
 
 def pom_dependencies(pom_path):
@@ -694,6 +703,8 @@ def sync_connector(item, targets, temp, *, jar=None):
     Immutable releases keep Maven's .sha256 sidecar next to each JAR, so a
     connector that every environment already stores is verified by comparing
     those tiny files instead of downloading hundreds of megabytes per side.
+    A sidecar only substitutes for the JAR once a HEAD request confirms the
+    artifact is still stored; detached checksums can outlive a deleted file.
     Missing, malformed, or disagreeing sidecars fall back to full downloads.
     """
     print(f"Verify connector {item['artifactId']}:{item['version']}", flush=True)
@@ -714,7 +725,10 @@ def sync_connector(item, targets, temp, *, jar=None):
         name = repo['name']
         digest = sidecar_digest(repo, urls[name])
         if digest is not None:
-            sidecars[name] = digest
+            # A surviving sidecar does not prove the JAR is still stored; a
+            # deleted artifact must fall through to the repair upload instead.
+            if jar_exists(repo, urls[name]):
+                sidecars[name] = digest
             continue
         path = download(name)
         if path is not None:
