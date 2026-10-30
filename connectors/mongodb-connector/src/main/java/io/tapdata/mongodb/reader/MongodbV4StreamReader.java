@@ -52,6 +52,7 @@ import static java.util.Collections.singletonList;
 public class MongodbV4StreamReader implements MongodbStreamReader {
 
     public static final String TAG = MongodbV4StreamReader.class.getSimpleName();
+    private static final String OPERATION_TIME_OFFSET = "mongodb_v4_operation_time";
 
     private final AtomicBoolean running = new AtomicBoolean(false);
     private MongoClient mongoClient;
@@ -119,6 +120,11 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 //如果完全没事件， 就需要从当前时间开始watch
                 if (offset instanceof Integer) {
                     changeStream = streamDatabase.watch(pipeline, RawBsonDocument.class).startAtOperationTime(new BsonTimestamp((Integer) offset, 0)).fullDocument(fullDocumentOption);
+                } else if (offset instanceof Map && Boolean.TRUE.equals(((Map<?, ?>) offset).get(OPERATION_TIME_OFFSET))) {
+                    Map<?, ?> operationTime = (Map<?, ?>) offset;
+                    BsonTimestamp timestamp = new BsonTimestamp(((Number) operationTime.get("seconds")).intValue(),
+                            ((Number) operationTime.get("inc")).intValue());
+                    changeStream = streamDatabase.watch(pipeline, RawBsonDocument.class).startAtOperationTime(timestamp).fullDocument(fullDocumentOption);
                 } else if (offset instanceof BsonTimestamp) {
                     changeStream = streamDatabase.watch(pipeline, RawBsonDocument.class).startAtOperationTime((BsonTimestamp) offset).fullDocument(fullDocumentOption);
                 } else {
@@ -459,7 +465,13 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
             if (timestamp instanceof BsonTimestamp) {
                 // startAtOperationTime is inclusive; advance one logical tick to exclude
                 // the captured boundary while keeping subsequent changes in the same second.
-                return new BsonTimestamp(((BsonTimestamp) timestamp).getValue() + 1);
+                BsonTimestamp start = new BsonTimestamp(((BsonTimestamp) timestamp).getValue() + 1);
+                // Persist primitive values: the engine serializer does not preserve BsonTimestamp.
+                Map<String, Object> operationTime = new HashMap<>();
+                operationTime.put(OPERATION_TIME_OFFSET, true);
+                operationTime.put("seconds", start.getTime());
+                operationTime.put("inc", start.getInc());
+                return operationTime;
             }
             Date serverDate = timestamp instanceof Date ? (Date) timestamp : result.getDate("localTime");
             offsetStartTime = serverDate == null ? 0L : serverDate.getTime();
