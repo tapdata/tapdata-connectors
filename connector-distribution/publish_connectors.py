@@ -150,14 +150,14 @@ def transfer_deadline(label):
                              previous_timer[1])
 
 
-def request(repo, url, *, data=None, destination=None):
-    method = "GET" if data is None else "PUT"
+def request(repo, url, *, data=None, destination=None, method=None):
+    method = method or ("GET" if data is None else "PUT")
     label = f"Nexus {repo['name']} {method} {urllib.parse.urlsplit(url).path}"
     started = time.monotonic()
     print(f"{label}: start" + (f" ({len(data)} bytes)" if data is not None else ""), flush=True)
     try:
         with transfer_deadline(label):
-            result = _request(repo, url, data=data, destination=destination)
+            result = _request(repo, url, data=data, destination=destination, method=method)
     except Exception as error:
         print(f"{label}: failed after {time.monotonic() - started:.1f}s ({type(error).__name__})", flush=True)
         raise
@@ -165,18 +165,21 @@ def request(repo, url, *, data=None, destination=None):
     return result
 
 
-def _request(repo, url, *, data=None, destination=None):
-    """Retry transient failures; only a GET 404 denotes an absent file."""
+def _request(repo, url, *, data=None, destination=None, method=None):
+    """Retry transient failures; only a GET or HEAD 404 denotes an absent file."""
+    method = method or ("GET" if data is None else "PUT")
     credentials = base64.b64encode(
         f"{repo['username']}:{repo['password']}".encode()
     ).decode()
     for attempt in range(ATTEMPTS):
         req = urllib.request.Request(url, data=data,
-                                     method="GET" if data is None else "PUT",
+                                     method=method,
                                      headers={"Authorization": f"Basic {credentials}",
                                               "Content-Type": "application/octet-stream"})
         try:
             with open_request(repo, req) as response:
+                if method == "HEAD":
+                    return True
                 received = 0
                 last_progress = time.monotonic()
                 expected = response.headers.get("Content-Length")
@@ -235,6 +238,32 @@ def upload_checksums(repo, url, content):
     for algorithm in ("sha1", "sha256"):
         checksum = hashlib.new(algorithm, content).hexdigest().encode()
         put_immutable(repo, f"{url}.{algorithm}", checksum)
+
+
+def sidecar_digest(repo, url):
+    """Return the normalized Maven .sha256 sidecar digest for url, or None.
+
+    A missing or malformed sidecar cannot stand in for the JAR bytes and
+    sends the caller back to a full download.
+    """
+    content = request(repo, f"{url}.sha256")
+    if content is None:
+        return None
+    try:
+        digest = content.decode("ascii").strip().lower()
+    except UnicodeDecodeError:
+        digest = ""
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        print(f"::warning::Ignoring malformed SHA-256 sidecar in {repo['name']}: "
+              f"{urllib.parse.urlsplit(url).path}.sha256", flush=True)
+        return None
+    return digest
+
+
+def jar_exists(repo, url):
+    # A surviving .sha256 sidecar does not prove the JAR itself is still
+    # stored; detached checksums can outlive a deleted artifact.
+    return request(repo, url, method="HEAD") is not None
 
 
 def pom_dependencies(pom_path):
@@ -669,42 +698,130 @@ def set_build_version(module, version):
 
 
 def sync_connector(item, targets, temp, *, jar=None):
-    """Use an existing remote JAR as canonical; repair missing files on either side."""
+    """Use an existing remote JAR as canonical; repair missing files on either side.
+
+    Immutable releases keep Maven's .sha256 sidecar next to each JAR, so a
+    connector that every environment already stores is verified by comparing
+    those tiny files instead of downloading hundreds of megabytes per side.
+    A sidecar only substitutes for the JAR once a HEAD request confirms the
+    artifact is still stored; detached checksums can outlive a deleted file.
+    Missing, malformed, or disagreeing sidecars fall back to full downloads.
+    """
     print(f"Verify connector {item['artifactId']}:{item['version']}", flush=True)
-    existing = []
-    verified_repos = set()
+    urls = {repo['name']: artifact_url(item["groupId"], item["artifactId"], item["version"], repo)
+            for repo in targets}
+    by_name = {repo['name']: repo for repo in targets}
+
+    def download(name):
+        path = temp / f"{item['artifactId']}-{name}.jar"
+        if request(by_name[name], urls[name], destination=path) is not None:
+            return path
+        path.unlink(missing_ok=True)
+        return None
+
+    existing = {}  # environment -> JAR downloaded and verified byte for byte
+    sidecars = {}  # environment -> .sha256 sidecar digest; JAR left in place
     for repo in targets:
-        path = temp / f"{item['artifactId']}-{repo['name']}.jar"
-        url = artifact_url(item["groupId"], item["artifactId"], item["version"], repo)
-        if request(repo, url, destination=path) is not None:
-            existing.append(path)
-            verified_repos.add(repo['name'])
-    if existing:
-        canonical = existing[0]
-        digest = hashlib.sha256(canonical.read_bytes()).hexdigest()
-        if any(hashlib.sha256(path.read_bytes()).hexdigest() != digest for path in existing[1:]):
-            raise RuntimeError(f"Immutable JAR differs between Nexus environments: {item['artifactId']}")
-        if jar and hashlib.sha256(jar.read_bytes()).hexdigest() != digest:
-            print(f"::warning::SHA-256 mismatch for {item['artifactId']}:{item['version']}; "
-                  "reusing Nexus bytes in both environments.")
-    elif jar:
+        name = repo['name']
+        digest = sidecar_digest(repo, urls[name])
+        if digest is not None:
+            # A surviving sidecar does not prove the JAR is still stored; a
+            # deleted artifact must fall through to the repair upload instead.
+            if jar_exists(repo, urls[name]):
+                sidecars[name] = digest
+            continue
+        path = download(name)
+        if path is not None:
+            existing[name] = path
+    present = set(existing) | set(sidecars)
+    canonical = None
+    digest = None
+    if present:
+        digests = {name: hashlib.sha256(path.read_bytes()).hexdigest()
+                   for name, path in existing.items()}
+        digests.update(sidecars)
+        if len(set(digests.values())) > 1:
+            # Sidecars disagree: only the JAR bytes can distinguish stale
+            # metadata from real drift between the environments.
+            sidecars = {}
+            for name in sorted(present):
+                if name not in existing:
+                    path = download(name)
+                    if path is None:
+                        present.discard(name)
+                        digests.pop(name, None)
+                        continue
+                    existing[name] = path
+                digests[name] = hashlib.sha256(existing[name].read_bytes()).hexdigest()
+            if len({digests[name] for name in present}) > 1:
+                raise RuntimeError(f"Immutable JAR differs between Nexus environments: {item['artifactId']}")
+        if present:
+            digest = digests[next(iter(present))]
+            if jar and hashlib.sha256(jar.read_bytes()).hexdigest() != digest:
+                print(f"::warning::SHA-256 mismatch for {item['artifactId']}:{item['version']}; "
+                      "reusing Nexus bytes in both environments.")
+    if digest is None:
+        if jar is None:
+            return None
         canonical = jar
         digest = hashlib.sha256(jar.read_bytes()).hexdigest()
-    else:
-        return None
+
+    def ensure_canonical_bytes():
+        nonlocal canonical
+        if canonical is None:
+            if existing:
+                canonical = existing[sorted(existing)[0]]
+            else:
+                # The sidecar comparison skipped every download; fetch the JAR
+                # once, only because it must be uploaded somewhere.
+                for name in sorted(present):
+                    path = download(name)
+                    if path is None:
+                        continue
+                    existing[name] = path
+                    if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                        raise RuntimeError(
+                            f"Immutable JAR differs between Nexus environments: {item['artifactId']}")
+                    canonical = path
+                    break
+        if canonical is None:
+            raise RuntimeError(f"no Nexus environment can provide {item['artifactId']}:{item['version']}")
+        return canonical
+
+    if sidecars:
+        # Repair checksum sidecars for JARs verified without their bytes. The
+        # sha256 value is proven by the cross-environment comparison; sha1
+        # cannot be synthesized without the JAR, so identical existing sha1
+        # sidecars are adopted and anything else re-verifies through one
+        # download instead of one per environment.
+        sha1s = {}
+        for name in sorted(sidecars):
+            content = request(by_name[name], f"{urls[name]}.sha1")
+            if content is None:
+                break
+            sha1s[name] = content
+        if len(sha1s) == len(sidecars) and len(set(sha1s.values())) == 1:
+            for name in sorted(sidecars):
+                put_immutable(by_name[name], f"{urls[name]}.sha256", digest.encode())
+        else:
+            content = ensure_canonical_bytes().read_bytes()
+            for name in sorted(sidecars):
+                upload_checksums(by_name[name], urls[name], content)
+
     pom = temp / f"{item['artifactId']}.pom"
     write_artifact_pom(pom, item)
     for repo in targets:
-        url = artifact_url(item["groupId"], item["artifactId"], item["version"], repo)
-        if repo['name'] in verified_repos:
-            # This JAR was just read and compared in full. Only repair sidecars;
-            # do not download the same immutable JAR again in put_immutable.
-            upload_checksums(repo, url, canonical.read_bytes())
-        else:
-            upload_file(repo, url, canonical)
+        name = repo['name']
+        url = urls[name]
+        if name in present and name not in sidecars:
+            # This JAR was verified byte for byte. Only repair sidecars; do not
+            # download the same immutable JAR again in put_immutable.
+            upload_checksums(repo, url, existing[name].read_bytes())
+        elif name not in present:
+            upload_file(repo, url, ensure_canonical_bytes())
         upload_file(repo, artifact_url(item["groupId"], item["artifactId"], item["version"], repo, "pom"), pom)
-    for path in existing:
-        path.unlink()
+    for path in existing.values():
+        path.unlink(missing_ok=True)
     return {**{key: item[key] for key in ("groupId", "artifactId", "version", "pdkApiVersion")},
             "sha256": digest}
 
