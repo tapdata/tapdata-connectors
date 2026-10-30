@@ -1,5 +1,20 @@
 # Connector distribution
 
+## Transfer limits and progress
+
+Every Nexus request logs its target name, method, artifact path, completion time,
+and retries. Downloads report byte progress every ten seconds while data arrives.
+Requests have a ten-minute wall-clock limit covering connection setup, transfer,
+and all retries, in addition to socket inactivity timeouts. This uses POSIX timers
+in the publisher's main thread on the Linux CI runner; continuously trickling
+responses cannot extend the deadline. Upload steps are capped at 60 minutes and
+final inventory verification/BOM publication at 30 minutes. A timeout fails the
+run; rerun the workflow to resume its immutable Nexus release plan.
+
+Final verification still downloads and compares the actual JAR bytes from both
+Nexus installations. Once a remote JAR has been verified in that pass, checksum
+repair does not download that same JAR again. Existing bytes are never replaced.
+
 This directory contains the automated connector release workflow. CI compares
 the selected source ref with the source commit recorded in the latest Nexus
 BOM, finds connector modules affected by changes, versions them according to
