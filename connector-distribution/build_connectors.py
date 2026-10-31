@@ -69,6 +69,14 @@ def rewrite_reactor_versions(checkout, items):
         trees[pom].write(pom, encoding="UTF-8", xml_declaration=True)
 
 
+def create_build_checkout(source_dir, checkout, source_commit):
+    # Legacy git-commit-id-plugin/JGit cannot resolve linked worktree commondir.
+    # A local clone has a normal .git directory and uses hardlinks where possible;
+    # no network fetch or copy of the source working tree is needed.
+    run(["git", "clone", "--local", "--no-checkout", str(source_dir), str(checkout)], cwd=source_dir)
+    run(["git", "checkout", "--detach", source_commit], cwd=checkout)
+
+
 def build(plan_path, source_dir, output_dir):
     source_dir = Path(source_dir).resolve()
     output_dir = Path(output_dir).resolve()
@@ -91,31 +99,28 @@ def build(plan_path, source_dir, output_dir):
         return
     with tempfile.TemporaryDirectory(prefix="connector-build-") as temp_dir:
         checkout = Path(temp_dir) / "source"
-        run(["git", "worktree", "add", "--detach", str(checkout), plan["sourceCommit"]], cwd=source_dir)
-        try:
-            rewrite_reactor_versions(checkout, items)
-            run(["mvn", "-B", "-pl", ",".join(item["module"] for item in items),
-                 "-am", "clean", "package", "-DskipTests", "-DskipITs"], cwd=checkout)
-            for item in items:
-                target = checkout / item["module"] / "target"
-                jars = [p for p in target.glob("*.jar") if not p.name.startswith("original-")
-                        and not p.name.endswith(("-sources.jar", "-javadoc.jar"))]
-                # Assembly-based connectors produce both Maven's thin
-                # artifactId-version.jar and the distributable
-                # artifactId-vversion-timestamp.jar. Prefer the latter; shade
-                # based connectors generally leave just one candidate.
-                distribution_prefix = f"{item['artifactId']}-v{item['version']}-"
-                distribution_jars = [p for p in jars if p.name.startswith(distribution_prefix)]
-                if len(distribution_jars) == 1:
-                    jars = distribution_jars
-                if len(jars) != 1:
-                    names = ", ".join(sorted(p.name for p in jars)) or "none"
-                    raise RuntimeError(f"expected one distributable JAR in {target}, found {len(jars)}: {names}")
-                destination = output_dir / item["artifactId"]
-                destination.mkdir()
-                shutil.copyfile(jars[0], destination / "connector.jar")
-        finally:
-            run(["git", "worktree", "remove", "--force", str(checkout)], cwd=source_dir)
+        create_build_checkout(source_dir, checkout, plan["sourceCommit"])
+        rewrite_reactor_versions(checkout, items)
+        run(["mvn", "-B", "-pl", ",".join(item["module"] for item in items),
+             "-am", "clean", "package", "-DskipTests", "-DskipITs"], cwd=checkout)
+        for item in items:
+            target = checkout / item["module"] / "target"
+            jars = [p for p in target.glob("*.jar") if not p.name.startswith("original-")
+                    and not p.name.endswith(("-sources.jar", "-javadoc.jar"))]
+            # Assembly-based connectors produce both Maven's thin
+            # artifactId-version.jar and the distributable
+            # artifactId-vversion-timestamp.jar. Prefer the latter; shade
+            # based connectors generally leave just one candidate.
+            distribution_prefix = f"{item['artifactId']}-v{item['version']}-"
+            distribution_jars = [p for p in jars if p.name.startswith(distribution_prefix)]
+            if len(distribution_jars) == 1:
+                jars = distribution_jars
+            if len(jars) != 1:
+                names = ", ".join(sorted(p.name for p in jars)) or "none"
+                raise RuntimeError(f"expected one distributable JAR in {target}, found {len(jars)}: {names}")
+            destination = output_dir / item["artifactId"]
+            destination.mkdir()
+            shutil.copyfile(jars[0], destination / "connector.jar")
 
 
 if __name__ == "__main__":
