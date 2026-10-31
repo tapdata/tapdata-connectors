@@ -4,7 +4,8 @@ Batch builds create an independent local clone of the already checked-out source
 and detach at the immutable release-plan commit. This does not fetch from GitHub.
 The normal `.git` directory supports legacy `git-commit-id-plugin`/JGit versions
 used by enterprise connectors, which cannot read linked worktree `commondir`
-layouts. Git reuses local objects via hardlinks where supported; temporary clones
+layouts. Git copies local objects with `--no-hardlinks` so the workspace and
+temporary directory can reside on separate filesystems. Temporary clones
 are removed on success or failure without altering the source checkout.
 
 ## Transfer limits and progress

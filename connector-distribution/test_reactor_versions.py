@@ -32,11 +32,22 @@ class BuildCheckoutTests(unittest.TestCase):
             (source / 'data').write_text('newer')
             git('commit', '-qam', 'advance branch')
             head = git('rev-parse', 'HEAD')
+            git('gc', '--prune=now')
             (source / 'data').write_text('local edits')
             checkout = root / 'build'
             create_build_checkout(source, checkout, pinned)
             self.assertTrue((checkout / '.git').is_dir())
             self.assertFalse((checkout / '.git/commondir').exists())
+            # Packed objects must be copies, not hardlinks that require both
+            # paths to reside on the same filesystem (workspace vs /tmp in CI).
+            packs = list((source / '.git/objects/pack').glob('*.pack'))
+            self.assertTrue(packs)
+            for original in packs:
+                copied = checkout / '.git/objects/pack' / original.name
+                self.assertEqual(copied.read_bytes(), original.read_bytes())
+                self.assertNotEqual((copied.stat().st_dev, copied.stat().st_ino),
+                                    (original.stat().st_dev, original.stat().st_ino))
+            self.assertFalse((checkout / '.git/objects/info/alternates').exists())
             self.assertEqual(git('rev-parse', 'HEAD', cwd=checkout), pinned)
             self.assertEqual((checkout / 'data').read_text(), 'pinned')
             self.assertEqual(git('rev-parse', 'HEAD'), head)
