@@ -71,9 +71,10 @@ def rewrite_reactor_versions(checkout, items):
 
 def create_build_checkout(source_dir, checkout, source_commit):
     # Legacy git-commit-id-plugin/JGit cannot resolve linked worktree commondir.
-    # A local clone has a normal .git directory and uses hardlinks where possible;
-    # no network fetch or copy of the source working tree is needed.
-    run(["git", "clone", "--local", "--no-checkout", str(source_dir), str(checkout)], cwd=source_dir)
+    # Copy objects: the runner workspace and /tmp may be separate mounts.
+    # Keep a normal .git directory without fetching over the network.
+    run(["git", "clone", "--local", "--no-hardlinks", "--no-checkout",
+         str(source_dir), str(checkout)], cwd=source_dir)
     run(["git", "checkout", "--detach", source_commit], cwd=checkout)
 
 
