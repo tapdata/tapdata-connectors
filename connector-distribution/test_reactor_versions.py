@@ -8,7 +8,40 @@ import unittest
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from build_connectors import rewrite_reactor_versions, NS
+from build_connectors import rewrite_reactor_versions, create_build_checkout, NS
+
+
+class BuildCheckoutTests(unittest.TestCase):
+    def test_standalone_checkout_keeps_pinned_commit_and_source_unmodified(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            source = root / 'source'
+            source.mkdir()
+
+            def git(*args, cwd=source):
+                return subprocess.check_output(['git', *args], cwd=cwd, text=True,
+                                               stderr=subprocess.DEVNULL).strip()
+
+            git('init', '-q')
+            git('config', 'user.email', 'test@example.com')
+            git('config', 'user.name', 'Test')
+            (source / 'data').write_text('pinned')
+            git('add', '.')
+            git('commit', '-qm', 'pinned source')
+            pinned = git('rev-parse', 'HEAD')
+            (source / 'data').write_text('newer')
+            git('commit', '-qam', 'advance branch')
+            head = git('rev-parse', 'HEAD')
+            (source / 'data').write_text('local edits')
+            checkout = root / 'build'
+            create_build_checkout(source, checkout, pinned)
+            self.assertTrue((checkout / '.git').is_dir())
+            self.assertFalse((checkout / '.git/commondir').exists())
+            self.assertEqual(git('rev-parse', 'HEAD', cwd=checkout), pinned)
+            self.assertEqual((checkout / 'data').read_text(), 'pinned')
+            self.assertEqual(git('rev-parse', 'HEAD'), head)
+            self.assertEqual((source / 'data').read_text(), 'local edits')
+            self.assertEqual(len(git('worktree', 'list', '--porcelain').split('worktree ')) - 1, 1)
 
 
 class ReactorVersionTests(unittest.TestCase):
