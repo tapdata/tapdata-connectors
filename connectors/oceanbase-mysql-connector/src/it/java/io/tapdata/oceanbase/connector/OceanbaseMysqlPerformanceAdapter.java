@@ -36,7 +36,10 @@ final class OceanbaseMysqlPerformanceAdapter implements PerformanceAdapter {
 
     OceanbaseMysqlPerformanceAdapter(DataMap connectionConfig) {
         this.connectionConfig = connectionConfig;
-        this.tableName = "TAP_PERF_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
+        // OceanBase MySQL reports table names in lowercase to CDC even when the
+        // table was created with an unquoted uppercase identifier. Keep the
+        // whitelist name passed through TapTable consistent with that value.
+        this.tableName = "tap_perf_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         this.table = createTapTable();
     }
 
