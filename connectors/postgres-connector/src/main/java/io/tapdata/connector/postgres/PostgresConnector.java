@@ -2043,7 +2043,10 @@ public class PostgresConnector extends CommonDbConnector {
 
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
-            String clearSQL = "truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()) + " cascade";
+            String clearSQL = "truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId());
+            if (postgresConfig != null && Boolean.TRUE.equals(postgresConfig.getCascadeTruncate())) {
+                clearSQL += " cascade";
+            }
             tapLogger.info("truncate table sql: {}", clearSQL);
             jdbcContext.execute(clearSQL);
         } else {

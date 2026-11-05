@@ -77,6 +77,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private String walTdeKeyWrapAlgorithm = "auto";
     private Integer walTdeDataEncryptionBits;
     private Boolean checkCdcSlave = false;
+    private Boolean cascadeTruncate = false;
 
     //customize
     public PostgresConfig() {
@@ -418,5 +419,13 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setCheckCdcSlave(Boolean checkCdcSlave) {
         this.checkCdcSlave = checkCdcSlave;
+    }
+
+    public Boolean getCascadeTruncate() {
+        return cascadeTruncate;
+    }
+
+    public void setCascadeTruncate(Boolean cascadeTruncate) {
+        this.cascadeTruncate = cascadeTruncate;
     }
 }
