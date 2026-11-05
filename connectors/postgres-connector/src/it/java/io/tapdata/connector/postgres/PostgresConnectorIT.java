@@ -8,6 +8,8 @@ import io.tapdata.it.dbforge.DbForgeLeaseProvider;
 import io.tapdata.it.performance.PerformanceAdapter;
 import io.tapdata.it.schema.TestDataType;
 import io.tapdata.it.schema.TestFieldSpec;
+import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
+import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
 import io.tapdata.it.schema.TestTableSpec;
 import io.tapdata.it.support.TestStateMap;
 import io.tapdata.it.tpcc.TpccAdapter;
@@ -17,9 +19,17 @@ import io.tapdata.it.verifier.JdbcVerifier;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
+import java.util.UUID;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class PostgresConnectorIT extends TpccConnectorIT {
@@ -140,5 +150,178 @@ public class PostgresConnectorIT extends TpccConnectorIT {
         } catch (Exception error) {
             System.err.println("[IT] Failed to release DBForge PostgreSQL lease: " + error.getMessage());
         }
+    }
+
+    // ---- TAP-13194：clearTable 的 TRUNCATE CASCADE 由节点参数 cascadeTruncate 控制，dropTable 保持 CASCADE ----
+
+    @Test
+    void should_fail_truncate_referenced_parent_and_keep_child_when_cascade_truncate_off() throws Throwable {
+        String suffix = randomSuffix();
+        String parent = "tap13194_p_" + suffix;
+        String child = "tap13194_c_" + suffix;
+        try (Connection connection = openJdbc()) {
+            createParentChild(connection, parent, child);
+            PostgresConnector connector = startConnector(false);
+            try {
+                Assertions.assertThrows(SQLException.class, () -> connector.clearTable(nodeContext(), clearEvent(parent)));
+            } finally {
+                connector.onStop(nodeContext());
+            }
+            Assertions.assertEquals(2, count(connection, parent));
+            Assertions.assertEquals(3, count(connection, child));
+        } finally {
+            dropQuietly(child, parent);
+        }
+    }
+
+    @Test
+    void should_truncate_parent_and_child_when_cascade_truncate_on() throws Throwable {
+        String suffix = randomSuffix();
+        String parent = "tap13194_p_" + suffix;
+        String child = "tap13194_c_" + suffix;
+        try (Connection connection = openJdbc()) {
+            createParentChild(connection, parent, child);
+            PostgresConnector connector = startConnector(true);
+            try {
+                connector.clearTable(nodeContext(), clearEvent(parent));
+            } finally {
+                connector.onStop(nodeContext());
+            }
+            Assertions.assertEquals(0, count(connection, parent));
+            Assertions.assertEquals(0, count(connection, child));
+        } finally {
+            dropQuietly(child, parent);
+        }
+    }
+
+    @Test
+    void should_keep_drop_cascade_when_cascade_truncate_off() throws Throwable {
+        String suffix = randomSuffix();
+        String parent = "tap13194_p_" + suffix;
+        String child = "tap13194_c_" + suffix;
+        try (Connection connection = openJdbc()) {
+            createParentChild(connection, parent, child);
+            PostgresConnector connector = startConnector(false);
+            try {
+                connector.dropTable(nodeContext(), dropEvent(parent));
+            } finally {
+                connector.onStop(nodeContext());
+            }
+            Assertions.assertFalse(tableExists(connection, parent));
+            Assertions.assertEquals(3, count(connection, child));
+            Assertions.assertEquals(0, foreignKeyCount(connection, child));
+        } finally {
+            dropQuietly(child, parent);
+        }
+    }
+
+    @Test
+    void should_clear_and_drop_plain_table_when_cascade_truncate_off() throws Throwable {
+        String table = "tap13194_t_" + randomSuffix();
+        try (Connection connection = openJdbc()) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("CREATE TABLE " + qualified(table) + " (id int primary key, v varchar(32))");
+                statement.execute("INSERT INTO " + qualified(table) + " VALUES (1,'a'),(2,'b')");
+            }
+            PostgresConnector connector = startConnector(false);
+            try {
+                connector.clearTable(nodeContext(), clearEvent(table));
+                Assertions.assertEquals(0, count(connection, table));
+                connector.dropTable(nodeContext(), dropEvent(table));
+            } finally {
+                connector.onStop(nodeContext());
+            }
+            Assertions.assertFalse(tableExists(connection, table));
+        } finally {
+            dropQuietly(table);
+        }
+    }
+
+    private PostgresConnector startConnector(boolean cascadeTruncate) throws Throwable {
+        DataMap nodeConfig = nodeContext().getNodeConfig();
+        if (nodeConfig == null) {
+            nodeConfig = DataMap.create();
+            nodeContext().setNodeConfig(nodeConfig);
+        }
+        nodeConfig.put("cascadeTruncate", cascadeTruncate);
+        PostgresConnector connector = new PostgresConnector();
+        connector.onStart(nodeContext());
+        return connector;
+    }
+
+    private Connection openJdbc() throws SQLException {
+        DataMap config = context.getConfig();
+        String url = "jdbc:postgresql://" + config.getString("host") + ":" + config.getValue("port", 5432)
+                + "/" + config.getString("database");
+        return DriverManager.getConnection(url, config.getString("user"), config.getString("password"));
+    }
+
+    private String schemaName() {
+        String schema = context.getConfig().getString("schema");
+        return schema == null || schema.isEmpty() ? "public" : schema;
+    }
+
+    private String qualified(String table) {
+        return "\"" + schemaName() + "\".\"" + table + "\"";
+    }
+
+    private void createParentChild(Connection connection, String parent, String child) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE " + qualified(parent) + " (id int primary key)");
+            statement.execute("CREATE TABLE " + qualified(child) + " (id int primary key, pid int REFERENCES "
+                    + qualified(parent) + "(id))");
+            statement.execute("INSERT INTO " + qualified(parent) + " VALUES (1),(2)");
+            statement.execute("INSERT INTO " + qualified(child) + " VALUES (1,1),(2,1),(3,2)");
+        }
+    }
+
+    private long count(Connection connection, String table) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery("SELECT count(*) FROM " + qualified(table))) {
+            resultSet.next();
+            return resultSet.getLong(1);
+        }
+    }
+
+    private boolean tableExists(Connection connection, String table) throws SQLException {
+        try (ResultSet resultSet = connection.getMetaData().getTables(null, schemaName(), table, null)) {
+            return resultSet.next();
+        }
+    }
+
+    private int foreignKeyCount(Connection connection, String table) throws SQLException {
+        int count = 0;
+        try (ResultSet resultSet = connection.getMetaData().getImportedKeys(null, schemaName(), table)) {
+            while (resultSet.next()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private void dropQuietly(String... tables) {
+        try (Connection connection = openJdbc(); Statement statement = connection.createStatement()) {
+            for (String table : tables) {
+                statement.execute("DROP TABLE IF EXISTS " + qualified(table) + " CASCADE");
+            }
+        } catch (SQLException ignored) {
+            // best-effort cleanup
+        }
+    }
+
+    private static String randomSuffix() {
+        return UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    }
+
+    private static TapClearTableEvent clearEvent(String table) {
+        TapClearTableEvent event = new TapClearTableEvent();
+        event.setTableId(table);
+        return event;
+    }
+
+    private static TapDropTableEvent dropEvent(String table) {
+        TapDropTableEvent event = new TapDropTableEvent();
+        event.setTableId(table);
+        return event;
     }
 }
