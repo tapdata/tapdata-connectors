@@ -34,6 +34,8 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private String deploymentMode;
     private ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress;
 
+    private Boolean cascadeTruncate = false;
+
     //customize
     public PostgresConfig() {
         setDbType("postgresql");
@@ -201,5 +203,13 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setMasterSlaveAddress(ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress) {
         this.masterSlaveAddress = masterSlaveAddress;
+    }
+
+    public Boolean getCascadeTruncate() {
+        return cascadeTruncate;
+    }
+
+    public void setCascadeTruncate(Boolean cascadeTruncate) {
+        this.cascadeTruncate = cascadeTruncate;
     }
 }
