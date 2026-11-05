@@ -671,6 +671,27 @@
     "node": {
       "type": "object",
       "properties": {
+        "cascadeTruncate": {
+          "type": "boolean",
+          "title": "${cascadeTruncate}",
+          "default": false,
+          "x-index": 2,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${cascadeTruncateTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "closeNotNull": {
           "type": "boolean",
           "title": "${closeNotNull}",
@@ -1169,6 +1190,8 @@
   "messages": {
     "default": "en_US",
     "en_US": {
+      "cascadeTruncate": "Cascade truncate",
+      "cascadeTruncateTooltip": "When enabled, clearing a target table runs TRUNCATE ... CASCADE, which also empties every table referencing it by foreign key (including tables written by other tasks). Disabled by default: TRUNCATE without CASCADE, which fails if the table is referenced by a foreign key.",
       "doc": "docs/postgres_en_US.md",
       "deploymentMode": "Deployment mode",
       "standalone": "Single machine deployment",
@@ -1260,6 +1283,8 @@
       "walLogPercent": "Wal log usage rate"
     },
     "zh_CN": {
+      "cascadeTruncate": "清空表时级联",
+      "cascadeTruncateTooltip": "开启后清空目标表执行 TRUNCATE ... CASCADE，会同时清空所有通过外键引用该表的子表（包括其它任务写入的表）。默认关闭：执行不带 CASCADE 的 TRUNCATE，若该表被外键引用则清空会报错。",
       "doc": "docs/postgres_zh_CN.md",
       "deploymentMode": "部署模式",
       "standalone": "单机部署",
@@ -1351,6 +1376,8 @@
       "walLogPercent": "Wal日志占用率"
     },
     "zh_TW": {
+      "cascadeTruncate": "清空表時級聯",
+      "cascadeTruncateTooltip": "開啟後清空目標表執行 TRUNCATE ... CASCADE，會同時清空所有通過外鍵引用該表的子表（包括其它任務寫入的表）。默認關閉：執行不帶 CASCADE 的 TRUNCATE，若該表被外鍵引用則清空會報錯。",
       "doc": "docs/postgres_zh_TW.md",
       "deploymentMode": "部署模式",
       "standalone": "單機部署",
