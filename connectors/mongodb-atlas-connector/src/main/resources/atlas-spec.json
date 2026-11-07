@@ -9,6 +9,9 @@
   },
   "configOptions": {
     "capabilities": [
+      {"id": "validation_exact_count_v1"},
+      {"id": "validation_key_order_v1"},
+      {"id": "validation_stable_model_v1", "alternatives": ["size", "storageSize", "avgObjSize", "indexSize"]},
       {
         "id": "master_slave_merge"
       },

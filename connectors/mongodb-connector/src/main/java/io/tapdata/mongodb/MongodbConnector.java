@@ -977,6 +977,40 @@ public class MongodbConnector extends ConnectorBase {
 		}
 	}
 
+    // Return comparison order for a single field from the initialized PDK connection.
+    private Map<String, String> validationKeyOrder(Map<String, Object> params) {
+        if (!"_id".equals(params.get("field")) || !(params.get("collection") instanceof String)
+                || !(params.get("nativeType") instanceof String)) {
+            return Collections.emptyMap();
+        }
+        String collection = (String) params.get("collection");
+        String nativeType = (String) params.get("nativeType");
+        if (nativeType.replace("_", "").equalsIgnoreCase("OBJECTID")) {
+            return Collections.singletonMap("logicalType", "object-id");
+        }
+        if (!nativeType.matches("STRING(?:\\([0-9]+\\))?")) {
+            return Collections.emptyMap();
+        }
+        Document info;
+        try {
+            info = mongoDatabase.listCollections().filter(new Document("name", collection)).first();
+        } catch (com.mongodb.MongoCommandException refused) {
+            if (refused.getErrorCode() == 13) return Collections.emptyMap();
+            throw refused;
+        }
+        if (info == null || !collection.equals(info.getString("name"))
+                || !"collection".equals(info.getString("type"))) {
+            return Collections.emptyMap();
+        }
+        Document options = info.get("options", Document.class);
+        if (options == null) return Collections.emptyMap();
+        Document collation = options.get("collation", Document.class);
+        if (collation != null && !"simple".equals(collation.getString("locale"))) {
+            return Collections.emptyMap();
+        }
+        return Collections.singletonMap("logicalType", "text");
+    }
+
 	protected void executeCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, Consumer<ExecuteResult> executeResultConsumer) {
 		try {
 			Map<String, Object> executeObj = tapExecuteCommand.getParams();
@@ -985,7 +1019,10 @@ public class MongodbConnector extends ConnectorBase {
 			if (MapUtils.isNotEmpty(executeObj) && StringUtils.isEmpty((CharSequence) executeObj.get("database"))) {
 				executeObj.put("database", mongoConfig.getDatabase());
 			}
-			if ("execute".equals(command)) {
+			if ("validation_key_order_v1".equals(command)) {
+                executeResultConsumer.accept(new ExecuteResult<Map<String, String>>()
+                        .result(validationKeyOrder(executeObj)));
+            } else if ("execute".equals(command)) {
 				executeResultConsumer.accept(new ExecuteResult<Long>().result(mongodbExecuteCommandFunction.execute(executeObj, mongoClient)));
 			} else if ("executeQuery".equals(command)) {
 				mongodbExecuteCommandFunction.executeQuery(executeObj, mongoClient, list -> executeResultConsumer.accept(new ExecuteResult<List<Map<String, Object>>>().result(list)), this::isAlive);
@@ -1130,7 +1167,7 @@ public class MongodbConnector extends ConnectorBase {
 
 	private long countByPartitionFilter(TapConnectorContext connectorContext, TapTable table, TapAdvanceFilter partitionFilter) {
 		Bson query = queryForPartitionFilter(partitionFilter, table);
-		return getCollectionNotAggregateCountByTableName(mongoClient, mongoConfig.getDatabase(), table.getId(), query);
+		return getMongoCollection(table.getId()).countDocuments(query);
 	}
 
 	private Bson queryForPartitionFilter(TapAdvanceFilter partitionFilter, TapTable tapTable) {

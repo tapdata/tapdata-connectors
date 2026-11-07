@@ -14,6 +14,7 @@
       ]
     },
     "capabilities":[
+      {"id": "validation_exact_count_v1"},
       {
         "id": "dml_insert_policy",
         "alternatives": ["update_on_exists", "ignore_on_exists", "just_insert"]

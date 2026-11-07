@@ -9,6 +9,7 @@
   },
   "configOptions": {
     "capabilities": [
+      {"id": "validation_exact_count_v1"},
       {
         "id": "dml_insert_policy",
         "alternatives": [
