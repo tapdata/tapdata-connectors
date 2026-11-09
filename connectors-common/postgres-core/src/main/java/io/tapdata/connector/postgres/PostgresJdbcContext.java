@@ -249,10 +249,10 @@ public class PostgresJdbcContext extends JdbcContext {
                     "ORDER BY t.relname, i.relname, a.attnum";
 
     protected final static String PG_ALL_FOREIGN_KEY = "select con.\"constraintName\",con.\"tableName\",con.\"referencesTableName\",con.\"onUpdate\",con.\"onDelete\",\n" +
-            "(select column_name from information_schema.columns where table_schema=con.nspname and table_name=con.\"tableName\" and ordinal_position=con.fk) fk,\n" +
-            "(select column_name from information_schema.columns where table_schema=con.nspname and table_name=con.\"referencesTableName\" and ordinal_position=con.rfk) rfk\n" +
+            "(select attname from pg_attribute where attrelid=con.conrelid and attnum=con.fk) fk,\n" +
+            "(select attname from pg_attribute where attrelid=con.confrelid and attnum=con.rfk) rfk\n" +
             "from\n" +
-            "(select c.conname \"constraintName\",pn.nspname,\n" +
+            "(select c.conname \"constraintName\",pn.nspname,c.conrelid,c.confrelid,\n" +
             "pc.relname \"tableName\",\n" +
             "(select relname from pg_class where oid=c.confrelid) \"referencesTableName\",\n" +
             "unnest(conkey) fk, unnest(confkey) rfk,\n" +
