@@ -1,5 +1,6 @@
 package io.tapdata.connector.postgres;
 
+import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.logger.TapLog;
 import io.tapdata.entity.utils.DataMap;
@@ -234,6 +235,48 @@ public class PostgresConnectorIT extends TpccConnectorIT {
             Assertions.assertFalse(tableExists(connection, table));
         } finally {
             dropQuietly(table);
+        }
+    }
+
+    // ---- TAP-13224：同步账号对被引用表无权限时，外键被引用列名不能丢失 ----
+
+    @Test
+    void should_discover_reference_key_when_referenced_table_not_granted() throws Throwable {
+        String suffix = randomSuffix();
+        String parent = "tap13224_p_" + suffix;
+        String child = "tap13224_c_" + suffix;
+        String role = "tap13224_u_" + suffix;
+        String password = "P" + UUID.randomUUID().toString().replace("-", "");
+        try (Connection connection = openJdbc(); Statement statement = connection.createStatement()) {
+            createParentChild(connection, parent, child);
+            statement.execute("CREATE ROLE " + role + " LOGIN PASSWORD '" + password + "'");
+            statement.execute("GRANT USAGE ON SCHEMA \"" + schemaName() + "\" TO " + role);
+            statement.execute("GRANT SELECT ON " + qualified(child) + " TO " + role);
+
+            DataMap restricted = DataMap.create();
+            restricted.putAll(context.getConfig());
+            restricted.put("user", role);
+            restricted.put("password", password);
+            PostgresConfig config = (PostgresConfig) new PostgresConfig().load(restricted);
+            try (PostgresJdbcContext jdbcContext = new PostgresJdbcContext(config)) {
+                List<DataMap> foreignKeys = jdbcContext.queryAllForeignKeys(List.of(child));
+                Assertions.assertEquals(1, foreignKeys.size());
+                Assertions.assertEquals(parent, foreignKeys.get(0).getString("referencesTableName"));
+                Assertions.assertEquals("pid", foreignKeys.get(0).getString("fk"));
+                Assertions.assertEquals("id", foreignKeys.get(0).getString("rfk"));
+            }
+        } finally {
+            dropQuietly(child, parent);
+            dropRoleQuietly(role);
+        }
+    }
+
+    private void dropRoleQuietly(String role) {
+        try (Connection connection = openJdbc(); Statement statement = connection.createStatement()) {
+            statement.execute("DROP OWNED BY " + role);
+            statement.execute("DROP ROLE IF EXISTS " + role);
+        } catch (SQLException ignored) {
+            // best-effort cleanup
         }
     }
 
