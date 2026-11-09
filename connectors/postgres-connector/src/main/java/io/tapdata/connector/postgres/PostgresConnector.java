@@ -146,6 +146,19 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     @Override
+    protected void singleThreadDiscoverSchema(List<DataMap> subList, Consumer<List<TapTable>> consumer) throws SQLException {
+        Set<String> viewNames = subList.stream()
+                .filter(table -> "VIEW".equalsIgnoreCase(table.getString("tableType")))
+                .map(table -> table.getString("tableName"))
+                .collect(Collectors.toSet());
+        super.singleThreadDiscoverSchema(subList, tables -> {
+            tables.stream().filter(table -> viewNames.contains(table.getId()))
+                    .forEach(table -> table.setType("view"));
+            consumer.accept(tables);
+        });
+    }
+
+    @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) throws SQLException {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
@@ -599,7 +612,8 @@ public class PostgresConnector extends CommonDbConnector {
         }
         postgresTest = new PostgresTest(postgresConfig, testItem -> {
         }, null).initContext();
-        postgresJdbcContext = new PostgresJdbcContext(postgresConfig);
+        postgresJdbcContext = new PostgresJdbcContext(postgresConfig)
+                .withDiscoverViews(getClass() == PostgresConnector.class);
         commonDbConfig = postgresConfig;
         jdbcContext = postgresJdbcContext;
         postgresVersion = postgresJdbcContext.queryVersion();
