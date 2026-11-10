@@ -860,7 +860,7 @@
       "targetFileSize_placeholder": "数据文件的目标大小（32-1024 MB，默认：128）",
       "enablePrimaryKeyUpdate": "是否更新主键",
       "enablePrimaryKeyUpdate_description": "开启后，会自动检查主键变更，将更新操作改为删除+写入，要求源库可以提供更新前数据，如果无法提供，开启此功能会报错退出。建议默认关闭该功能，如果确认主键值会变更再开启，开启后，更新性能会下降。",
-      "enableDeduplicateUpdateAfterCompletenessCheck": "校验 Deduplicate 表的 UPDATE_AFTER 字段完整性",
+      "enableDeduplicateUpdateAfterCompletenessCheck": "校验 Deduplicate 表的字段完整性",
       "enableDeduplicateUpdateAfterCompletenessCheck_description": "默认开启。仅当希望稀疏 UPDATE_AFTER 继续走 Paimon 正常写入流程时再关闭；缺失列可能写为 null 或 schema 默认值。其它校验仍然开启。"
     },
     "zh_TW": {
