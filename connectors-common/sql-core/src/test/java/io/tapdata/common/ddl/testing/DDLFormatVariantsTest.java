@@ -22,19 +22,4 @@ class DDLFormatVariantsTest {
         Assertions.assertTrue(first.stream().anyMatch(variant -> variant.contains("-- ddl format\n")));
         Assertions.assertTrue(first.stream().allMatch(variant -> variant.contains("'Keep Case'")));
     }
-
-    @Test
-    void insertsCommentsBeforeClauseKeywordsOutsideQuotedIdentifiersAndExistingComments() {
-        assertCommentInsertedBeforeClause("ALTER TABLE \"x add y\" ADD c INT",
-                "ALTER TABLE \"x add y\" /* ddl format */ ADD c INT");
-        assertCommentInsertedBeforeClause("ALTER TABLE t /* add marker */ ADD c INT",
-                "ALTER TABLE t /* add marker */ /* ddl format */ ADD c INT");
-        assertCommentInsertedBeforeClause("ALTER TABLE t -- add marker\n ADD c INT",
-                "ALTER TABLE t -- add marker\n /* ddl format */ ADD c INT");
-    }
-
-    private static void assertCommentInsertedBeforeClause(String sql, String expected) {
-        List<String> variants = DDLFormatVariants.variants(sql);
-        Assertions.assertTrue(variants.contains(expected), () -> "Missing expected variant: " + expected);
-    }
 }

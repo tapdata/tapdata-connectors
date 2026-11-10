@@ -2,6 +2,7 @@ package io.tapdata.connector.postgres;
 
 import io.tapdata.it.verifier.JdbcVerifier;
 
+import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -14,6 +15,11 @@ final class PostgresJdbcVerifier extends JdbcVerifier {
 
     PostgresJdbcVerifier(Object jdbcContext, String schema) {
         super(jdbcContext);
+        this.schema = schema == null || schema.isEmpty() ? "public" : schema;
+    }
+
+    PostgresJdbcVerifier(DataSource dataSource, String schema) {
+        super(dataSource);
         this.schema = schema == null || schema.isEmpty() ? "public" : schema;
     }
 

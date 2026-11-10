@@ -256,6 +256,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         super.consumeRecords(sourceRecords, committer);
         List<TapEvent> eventList = TapSimplify.list();
         Map<String, ?> offset = null;
+        Map<String, ?> eventListOffset = null;
         for (SourceRecord sr : sourceRecords) {
             offset = sr.sourceOffset();
             // PG use micros to indicate the time but in pdk api we use millis
@@ -297,6 +298,16 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             // ── DDL Trigger: intercept DDL audit table records ──
             if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())
                     && isDdlAuditRecord(schema, table)) {
+                // Keep transaction order across the two channels: DML is batched,
+                // while DDL is emitted immediately from the audit table. Flush any
+                // earlier DML before publishing the DDL boundary.
+                if (EmptyKit.isNotEmpty(eventList)) {
+                    PostgresOffset pendingOffset = new PostgresOffset();
+                    pendingOffset.setSourceOffset(TapSimplify.toJson(eventListOffset));
+                    consumer.accept(eventList, pendingOffset);
+                    eventList = TapSimplify.list();
+                    eventListOffset = null;
+                }
                 // The audit table only ever has INSERT (and DELETE) — we only care about INSERT
                 if ("c".equals(op)) {
                     Struct after = struct.getStruct("after");
@@ -386,16 +397,18 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 }
             }
             eventList.add(event);
+            eventListOffset = offset;
             if (eventList.size() >= recordSize) {
                 PostgresOffset postgresOffset = new PostgresOffset();
-                postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
+                postgresOffset.setSourceOffset(TapSimplify.toJson(eventListOffset));
                 consumer.accept(eventList, postgresOffset);
                 eventList = TapSimplify.list();
+                eventListOffset = null;
             }
         }
         if (EmptyKit.isNotEmpty(eventList)) {
             PostgresOffset postgresOffset = new PostgresOffset();
-            postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
+            postgresOffset.setSourceOffset(TapSimplify.toJson(eventListOffset));
             consumer.accept(eventList, postgresOffset);
         }
     }

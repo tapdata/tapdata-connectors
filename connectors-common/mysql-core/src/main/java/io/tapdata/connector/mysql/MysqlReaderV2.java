@@ -18,6 +18,10 @@ import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.ddl.TapDDLEvent;
 import io.tapdata.entity.event.ddl.TapDDLUnknownEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
+import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
+import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
@@ -140,7 +144,10 @@ public class MysqlReaderV2 {
                         handleTableMapEvent(event);
                         break;
                     case QUERY:
-                        concurrentProcessor.runAsyncWithBlocking(new ScanEvent(event, currentBinlogFile.get()), this::emit);
+                        ScanEvent queryEvent = new ScanEvent(event, currentBinlogFile.get());
+                        queryEvent.setDdlEvents(parseDdlEvents(event));
+                        queryEvent.getDdlEvents().forEach(e -> applyDdlToCachedSchema((TapDDLEvent) e));
+                        concurrentProcessor.runAsyncWithBlocking(queryEvent, this::emit);
                         return;
                     case XID:
                         if (doubleActiveFilter.get()) {
@@ -166,7 +173,13 @@ public class MysqlReaderV2 {
                     }
                 }
                 // 异步处理事件
-                concurrentProcessor.runAsync(new ScanEvent(event, currentBinlogFile.get()), this::emit);
+                ScanEvent scanEvent = new ScanEvent(event, currentBinlogFile.get());
+                if (eventType == EventType.WRITE_ROWS || eventType == EventType.EXT_WRITE_ROWS
+                        || eventType == EventType.UPDATE_ROWS || eventType == EventType.EXT_UPDATE_ROWS
+                        || eventType == EventType.DELETE_ROWS || eventType == EventType.EXT_DELETE_ROWS) {
+                    snapshotSchemaForRow(scanEvent, event);
+                }
+                concurrentProcessor.runAsync(scanEvent, this::emit);
             });
 
             consumer.streamReadStarted();
@@ -226,35 +239,9 @@ public class MysqlReaderV2 {
                 if (((EventHeaderV4) header).getFlags() == 8) {
                     return null;
                 }
-                QueryEventData queryEventData = event.getData();
-                long eventTime = header.getTimestamp();
-                String ddl = StringKit.removeSqlNote(queryEventData.getSql());
                 OffsetEvent offsetEvent = new OffsetEvent();
-                List<TapEvent> ddlEvents = new ArrayList<>();
-                try {
-                    DDLFactory.ddlToTapDDLEvent(
-                            ddlParserType,
-                            ddl,
-                            DDL_WRAPPER_CONFIG,
-                            tableMap,
-                            tapDDLEvent -> {
-                                tapDDLEvent.setTime(System.currentTimeMillis());
-                                tapDDLEvent.setReferenceTime(eventTime);
-                                tapDDLEvent.setOriginDDL(ddl);
-                                ddlEvents.add(tapDDLEvent);
-                                tapLogger.info("Read DDL: " + ddl + ", about to be packaged as some event(s)");
-                            }
-                    );
-                } catch (Throwable e) {
-                    TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
-                    tapDDLEvent.setTime(System.currentTimeMillis());
-                    tapDDLEvent.setReferenceTime(eventTime);
-                    tapDDLEvent.setOriginDDL(ddl);
-                    ddlEvents.add(tapDDLEvent);
-                }
-                offsetEvent.setTapEvent(ddlEvents);
+                offsetEvent.setTapEvent(scanEvent.getDdlEvents());
                 offsetEvent.setMysqlBinlogPosition(extractBinlogPosition(event, scanEvent.getFileName()));
-                ddlEvents.forEach(e -> ddlFlush(((TapDDLEvent) e).getTableId()));
                 return offsetEvent;
             }
 
@@ -265,15 +252,15 @@ public class MysqlReaderV2 {
             switch (eventType) {
                 case EXT_WRITE_ROWS:
                 case WRITE_ROWS:
-                    tapEvents = handleInsertEvent(event);
+                    tapEvents = handleInsertEvent(event, scanEvent);
                     break;
                 case EXT_UPDATE_ROWS:
                 case UPDATE_ROWS:
-                    tapEvents = handleUpdateEvent(event);
+                    tapEvents = handleUpdateEvent(event, scanEvent);
                     break;
                 case EXT_DELETE_ROWS:
                 case DELETE_ROWS:
-                    tapEvents = handleDeleteEvent(event);
+                    tapEvents = handleDeleteEvent(event, scanEvent);
                     break;
                 case HEARTBEAT:
                     tapEvents = Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis()));
@@ -293,6 +280,51 @@ public class MysqlReaderV2 {
             tapLogger.error("Error emitting event: {}, error: {}", scanEvent, e.getMessage(), e);
             return null;
         }
+    }
+
+    private List<TapEvent> parseDdlEvents(Event event) {
+        if (((EventHeaderV4) event.getHeader()).getFlags() == 8) {
+            return Collections.emptyList();
+        }
+        long eventTime = event.getHeader().getTimestamp();
+        String ddl = StringKit.removeSqlNote(((QueryEventData) event.getData()).getSql());
+        List<TapEvent> ddlEvents = new ArrayList<>();
+        try {
+            DDLFactory.ddlToTapDDLEvent(ddlParserType, ddl, DDL_WRAPPER_CONFIG, tableMap, tapDDLEvent -> {
+                tapDDLEvent.setTime(System.currentTimeMillis());
+                tapDDLEvent.setReferenceTime(eventTime);
+                tapDDLEvent.setOriginDDL(ddl);
+                ddlEvents.add(tapDDLEvent);
+                tapLogger.info("Read DDL: " + ddl + ", about to be packaged as some event(s)");
+            });
+        } catch (Throwable error) {
+            TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
+            tapDDLEvent.setTime(System.currentTimeMillis());
+            tapDDLEvent.setReferenceTime(eventTime);
+            tapDDLEvent.setOriginDDL(ddl);
+            ddlEvents.add(tapDDLEvent);
+        }
+        return ddlEvents;
+    }
+
+    private void snapshotSchemaForRow(ScanEvent scanEvent, Event event) {
+        long tableId;
+        EventType eventType = event.getHeader().getEventType();
+        if (eventType == EventType.WRITE_ROWS || eventType == EventType.EXT_WRITE_ROWS) {
+            tableId = ((WriteRowsEventData) EventDeserializer.EventDataWrapper.internal(event.getData())).getTableId();
+        } else if (eventType == EventType.UPDATE_ROWS || eventType == EventType.EXT_UPDATE_ROWS) {
+            tableId = ((UpdateRowsEventData) EventDeserializer.EventDataWrapper.internal(event.getData())).getTableId();
+        } else {
+            tableId = ((DeleteRowsEventData) EventDeserializer.EventDataWrapper.internal(event.getData())).getTableId();
+        }
+        Pair<String, String> databaseTableName = getDatabaseTableName(tableId);
+        String key = withSchema
+                ? escapeDatabaseAndTable(databaseTableName.getLeft(), databaseTableName.getRight())
+                : databaseTableName.getRight();
+        LinkedHashMap<String, String> dataTypes = dataTypeMap.get(key);
+        Map<String, Object[]> enumMap = enumDataTypeMap.get(key);
+        if (dataTypes != null) scanEvent.setDataTypes(new LinkedHashMap<>(dataTypes));
+        if (enumMap != null) scanEvent.setEnumMap(new HashMap<>(enumMap));
     }
 
     /**
@@ -332,6 +364,13 @@ public class MysqlReaderV2 {
         if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive()) && "_tap_double_active".equals(table)) {
             return;
         }
+        // Keep the schema version advanced from binlog DDL events. The connector's
+        // table map is updated by the downstream engine asynchronously, so reading
+        // it for every TABLE_MAP event can map a post-ADD row using the old schema
+        // (or a pre-DROP row using the new schema) during rapid DDL/DML sequences.
+        if (dataTypeMap.containsKey(tableKey)) {
+            return;
+        }
         TapTable tapTable = tableMap.get(tableKey);
         if (tapTable == null || EmptyKit.isEmpty(tapTable.getNameFieldMap())) {
             tapLogger.debug("Skip refreshing metadata for table {}, table metadata is unavailable", tableKey);
@@ -343,6 +382,75 @@ public class MysqlReaderV2 {
         dataTypeMap.put(tableKey, dataTypes);
         Map<String, Object[]> enumMap = generateEnumMap(tapTable.getNameFieldMap().entrySet().stream().filter(v -> v.getValue().getDataType().startsWith("enum")));
         enumDataTypeMap.put(tableKey, enumMap);
+    }
+
+    private void applyDdlToCachedSchema(TapDDLEvent ddlEvent) {
+        String tableId = ddlEvent.getTableId();
+        if (EmptyKit.isBlank(tableId)) {
+            return;
+        }
+        String tableKey = tableId;
+        LinkedHashMap<String, String> current = dataTypeMap.get(tableKey);
+        if (current == null) {
+            TapTable tapTable = tableMap.get(tableKey);
+            if (tapTable == null || EmptyKit.isEmpty(tapTable.getNameFieldMap())) {
+                return;
+            }
+            current = tapTable.getNameFieldMap().entrySet().stream()
+                    .collect(Collectors.toMap(Map.Entry::getKey, e -> StringKit.removeParentheses(e.getValue().getDataType()),
+                            (existing, replacement) -> existing, LinkedHashMap::new));
+        }
+        LinkedHashMap<String, String> next = new LinkedHashMap<>(current);
+        Map<String, Object[]> nextEnums = new HashMap<>(enumDataTypeMap.getOrDefault(tableKey, Collections.emptyMap()));
+        if (ddlEvent instanceof TapNewFieldEvent) {
+            List<TapField> fields = ((TapNewFieldEvent) ddlEvent).getNewFields();
+            if (fields != null) {
+                for (TapField field : fields) {
+                    if (field != null && EmptyKit.isNotBlank(field.getName())) {
+                        next.put(field.getName(), StringKit.removeParentheses(field.getDataType()));
+                        nextEnums.remove(field.getName());
+                        if (field.getDataType() != null && field.getDataType().startsWith("enum")) {
+                            nextEnums.put(field.getName(), parseEnumValues(field.getDataType()));
+                        }
+                    }
+                }
+            }
+        } else if (ddlEvent instanceof TapDropFieldEvent) {
+            String fieldName = ((TapDropFieldEvent) ddlEvent).getFieldName();
+            next.remove(fieldName);
+            nextEnums.remove(fieldName);
+        } else if (ddlEvent instanceof TapAlterFieldNameEvent) {
+            io.tapdata.entity.event.ddl.entity.ValueChange<String> change = ((TapAlterFieldNameEvent) ddlEvent).getNameChange();
+            if (change != null && next.containsKey(change.getBefore())) {
+                LinkedHashMap<String, String> renamed = new LinkedHashMap<>();
+                next.forEach((name, type) -> renamed.put(name.equals(change.getBefore()) ? change.getAfter() : name, type));
+                next = renamed;
+                Object[] enumValues = nextEnums.remove(change.getBefore());
+                if (enumValues != null) nextEnums.put(change.getAfter(), enumValues);
+            }
+        } else if (ddlEvent instanceof TapAlterFieldAttributesEvent) {
+            TapAlterFieldAttributesEvent attributes = (TapAlterFieldAttributesEvent) ddlEvent;
+            io.tapdata.entity.event.ddl.entity.ValueChange<String> typeChange = attributes.getDataTypeChange();
+            if (typeChange != null && EmptyKit.isNotBlank(typeChange.getAfter()) && next.containsKey(attributes.getFieldName())) {
+                next.put(attributes.getFieldName(), StringKit.removeParentheses(typeChange.getAfter()));
+                nextEnums.remove(attributes.getFieldName());
+                if (typeChange.getAfter().startsWith("enum")) {
+                    nextEnums.put(attributes.getFieldName(), parseEnumValues(typeChange.getAfter()));
+                }
+            }
+        }
+        dataTypeMap.put(tableKey, next);
+        enumDataTypeMap.put(tableKey, nextEnums);
+    }
+
+    private Object[] parseEnumValues(String enumType) {
+        String[] rawValues = enumType.substring("enum(".length(), enumType.length() - 1).split(",");
+        Object[] values = new Object[rawValues.length];
+        for (int i = 0; i < rawValues.length; i++) {
+            String value = rawValues[i].trim();
+            values[i] = value.startsWith("'") ? StringKit.removeHeadTail(value, "'", null) : new BigDecimal(value);
+        }
+        return values;
     }
 
     private Map<String, Object[]> generateEnumMap(Stream<Map.Entry<String, TapField>> stream) {
@@ -364,9 +472,9 @@ public class MysqlReaderV2 {
     /**
      * 处理 INSERT 事件
      */
-    private List<TapEvent> handleInsertEvent(Event event) {
+    private List<TapEvent> handleInsertEvent(Event event, ScanEvent scanEvent) {
         WriteRowsEventData eventData = (WriteRowsEventData) EventDeserializer.EventDataWrapper.internal(event.getData());
-        return handleRowsEvent(event, eventData.getTableId(), eventData.getRows(), (row, ctx) -> {
+        return handleRowsEvent(event, eventData.getTableId(), eventData.getRows(), scanEvent, (row, ctx) -> {
             TapInsertRecordEvent insertEvent = new TapInsertRecordEvent();
             insertEvent.init();
             insertEvent.table(ctx.tableName);
@@ -379,9 +487,9 @@ public class MysqlReaderV2 {
     /**
      * 处理 UPDATE 事件
      */
-    private List<TapEvent> handleUpdateEvent(Event event) {
+    private List<TapEvent> handleUpdateEvent(Event event, ScanEvent scanEvent) {
         UpdateRowsEventData eventData = (UpdateRowsEventData) EventDeserializer.EventDataWrapper.internal(event.getData());
-        return handleRowsEvent(event, eventData.getTableId(), eventData.getRows(), (row, ctx) -> {
+        return handleRowsEvent(event, eventData.getTableId(), eventData.getRows(), scanEvent, (row, ctx) -> {
             TapUpdateRecordEvent updateEvent = new TapUpdateRecordEvent();
             updateEvent.init();
             updateEvent.table(ctx.tableName);
@@ -395,9 +503,9 @@ public class MysqlReaderV2 {
     /**
      * 处理 DELETE 事件
      */
-    private List<TapEvent> handleDeleteEvent(Event event) {
+    private List<TapEvent> handleDeleteEvent(Event event, ScanEvent scanEvent) {
         DeleteRowsEventData eventData = (DeleteRowsEventData) EventDeserializer.EventDataWrapper.internal(event.getData());
-        return handleRowsEvent(event, eventData.getTableId(), eventData.getRows(), (row, ctx) -> {
+        return handleRowsEvent(event, eventData.getTableId(), eventData.getRows(), scanEvent, (row, ctx) -> {
             TapDeleteRecordEvent deleteEvent = new TapDeleteRecordEvent();
             deleteEvent.init();
             deleteEvent.table(ctx.tableName);
@@ -407,8 +515,8 @@ public class MysqlReaderV2 {
         });
     }
 
-    private <R> List<TapEvent> handleRowsEvent(Event event, long tableId, List<R> rows, BiFunction<R, RowChangeContext, TapBaseEvent> mapper) {
-        RowChangeContext ctx = prepareRowChangeContext(event, tableId);
+    private <R> List<TapEvent> handleRowsEvent(Event event, long tableId, List<R> rows, ScanEvent scanEvent, BiFunction<R, RowChangeContext, TapBaseEvent> mapper) {
+        RowChangeContext ctx = prepareRowChangeContext(event, tableId, scanEvent);
         if (ctx == null) {
             return null;
         }
@@ -426,7 +534,7 @@ public class MysqlReaderV2 {
         return tapEvents;
     }
 
-    private RowChangeContext prepareRowChangeContext(Event event, long tableId) {
+    private RowChangeContext prepareRowChangeContext(Event event, long tableId, ScanEvent scanEvent) {
         Pair<String, String> databaseTableName = getDatabaseTableName(tableId);
         String database = databaseTableName.getLeft();
         String tableName = databaseTableName.getRight();
@@ -442,8 +550,10 @@ public class MysqlReaderV2 {
         }
 
         return new RowChangeContext(database, tableName,
-                (withSchema ? dataTypeMap.get(escapeDatabaseAndTable(database, tableName)) : dataTypeMap.get(tableName)),
-                (withSchema ? enumDataTypeMap.get(escapeDatabaseAndTable(database, tableName)) : enumDataTypeMap.get(tableName)),
+                scanEvent.getDataTypes() != null ? scanEvent.getDataTypes()
+                        : (withSchema ? dataTypeMap.get(escapeDatabaseAndTable(database, tableName)) : dataTypeMap.get(tableName)),
+                scanEvent.getEnumMap() != null ? scanEvent.getEnumMap()
+                        : (withSchema ? enumDataTypeMap.get(escapeDatabaseAndTable(database, tableName)) : enumDataTypeMap.get(tableName)),
                 event.getHeader().getTimestamp());
     }
 
@@ -567,6 +677,9 @@ public class MysqlReaderV2 {
 
         private final Event event;
         private final String fileName;
+        private List<TapEvent> ddlEvents;
+        private LinkedHashMap<String, String> dataTypes;
+        private Map<String, Object[]> enumMap;
 
         public ScanEvent(Event event, String fileName) {
             this.event = event;
@@ -580,6 +693,13 @@ public class MysqlReaderV2 {
         public String getFileName() {
             return fileName;
         }
+
+        public List<TapEvent> getDdlEvents() { return ddlEvents; }
+        public void setDdlEvents(List<TapEvent> ddlEvents) { this.ddlEvents = ddlEvents; }
+        public LinkedHashMap<String, String> getDataTypes() { return dataTypes; }
+        public void setDataTypes(LinkedHashMap<String, String> dataTypes) { this.dataTypes = dataTypes; }
+        public Map<String, Object[]> getEnumMap() { return enumMap; }
+        public void setEnumMap(Map<String, Object[]> enumMap) { this.enumMap = enumMap; }
     }
 
     static class OffsetEvent {
