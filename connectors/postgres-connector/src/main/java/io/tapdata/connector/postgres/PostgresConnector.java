@@ -143,11 +143,14 @@ public class PostgresConnector extends CommonDbConnector {
         if (postgresJdbcContext != null) {
             return;
         }
+        boolean initialized = false;
         try {
             initConnection(connectorContext);
-        } catch (RuntimeException | Error error) {
-            onStop(connectorContext);
-            throw error;
+            initialized = true;
+        } finally {
+            if (!initialized) {
+                onStop(connectorContext);
+            }
         }
     }
 

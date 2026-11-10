@@ -42,4 +42,28 @@ class PostgresLifecycleTest {
         verify(connectionTest, times(1)).close();
     }
 
+    @Test
+    void failedStartClosesPartialResourcesAndPropagatesException() {
+        assertFailedStartClosesResources(new IllegalStateException("initialization failed"));
+    }
+
+    @Test
+    void failedStartClosesPartialResourcesAndPropagatesError() {
+        assertFailedStartClosesResources(new AssertionError("initialization failed"));
+    }
+
+    private void assertFailedStartClosesResources(Throwable failure) {
+        PostgresConnector connector = new PostgresConnector();
+        PostgresTest partialResource = mock(PostgresTest.class);
+        ReflectionTestUtils.setField(connector, "postgresTest", partialResource);
+        TapConnectorContext context = mock(TapConnectorContext.class);
+        doThrow(failure).when(context).getConnectionConfig();
+
+        assertSame(failure, assertThrows(failure.getClass(), () -> connector.onStart(context)));
+
+        verify(partialResource).close();
+        assertNull(ReflectionTestUtils.getField(connector, "postgresTest"));
+        assertNull(ReflectionTestUtils.getField(connector, "postgresJdbcContext"));
+    }
+
 }
