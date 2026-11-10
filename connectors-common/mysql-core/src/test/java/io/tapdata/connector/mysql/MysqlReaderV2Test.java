@@ -139,4 +139,45 @@ class MysqlReaderV2Test {
         org.junit.jupiter.api.Assertions.assertEquals(7, decoded.get(anchor));
         org.junit.jupiter.api.Assertions.assertEquals("tail value", decoded.get("tail_col"));
     }
+    static Stream<Arguments> multiColumnPositions() {
+        return Stream.of(
+                Arguments.of("a INT, ADD COLUMN b INT AFTER id", List.of("id", "b", "tail_col", "a")),
+                Arguments.of("a INT FIRST, ADD COLUMN b INT AFTER id", List.of("a", "id", "b", "tail_col")),
+                Arguments.of("a INT AFTER id, ADD COLUMN b INT", List.of("id", "a", "tail_col", "b")),
+                Arguments.of("a DECIMAL(10,2), ADD COLUMN b INT FIRST", List.of("b", "id", "tail_col", "a")),
+                Arguments.of("a VARCHAR(64) DEFAULT ', ADD COLUMN fake INT FIRST', ADD COLUMN b INT AFTER id",
+                        List.of("id", "b", "tail_col", "a")),
+                Arguments.of("a INT /* , ADD COLUMN fake INT FIRST */, ADD COLUMN b INT AFTER /*anchor*/ id",
+                        List.of("id", "b", "tail_col", "a")),
+                Arguments.of("a INT,\nADD COLUMN b INT AFTER a", List.of("id", "tail_col", "a", "b")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("multiColumnPositions")
+    void shouldDecodeRowsAfterMultipleAddClauses(String definitions, List<String> expectedOrder) {
+        @SuppressWarnings("unchecked")
+        Map<String, LinkedHashMap<String, String>> types =
+                (Map<String, LinkedHashMap<String, String>>) ReflectionTestUtils.getField(mysqlReader, "dataTypeMap");
+        LinkedHashMap<String, String> initial = new LinkedHashMap<>();
+        initial.put("id", "int");
+        initial.put("tail_col", "int");
+        types.put("orders", initial);
+        // CCJ can emit a separate event for each ADD, carrying the same original DDL
+        // and an append position based on the original table for both columns.
+        for (String name : List.of("a", "b")) {
+            TapNewFieldEvent ddl = new TapNewFieldEvent();
+            ddl.setTableId("orders");
+            ddl.setOriginDDL("ALTER TABLE orders ADD COLUMN " + definitions);
+            ddl.field(new TapField(name, "int").pos(3));
+            ReflectionTestUtils.invokeMethod(mysqlReader, "applyDdlToCachedSchema", ddl, "test_db");
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(expectedOrder, new ArrayList<>(types.get("orders").keySet()));
+        java.io.Serializable[] row = expectedOrder.toArray(new java.io.Serializable[0]);
+        Map<String, Object> decoded = ReflectionTestUtils.invokeMethod(mysqlReader, "convertRowToMap",
+                row, types.get("orders"), java.util.Collections.emptyMap());
+        for (String name : expectedOrder) {
+            org.junit.jupiter.api.Assertions.assertEquals(name, decoded.get(name));
+        }
+    }
+
 }

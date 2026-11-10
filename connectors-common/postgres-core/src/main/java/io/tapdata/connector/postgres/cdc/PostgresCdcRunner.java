@@ -275,6 +275,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             // so idle-period offset advancement is not blocked.
             if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
                 eventList.add(new HeartbeatEvent().init().referenceTime(struct.getInt64("ts_ms")));
+                eventListOffset = offset;
                 continue;
             }
             // ── time-based CDC filter ──────────────────────────────

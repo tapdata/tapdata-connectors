@@ -57,7 +57,12 @@ public class MysqlReaderV2 {
 
     private static final String DDL_IDENTIFIER = "(?:`(?:``|[^`])+`|\"(?:\"\"|[^\"])+\"|\\[(?:\\]\\]|[^\\]])+\\]|[\\w$]+)";
     private static final Pattern ADD_COLUMN_POSITION = Pattern.compile(
-            "(?is)\\bADD\\s+(?:COLUMN\\s+)?(?:IF\\s+NOT\\s+EXISTS\\s+)?(" + DDL_IDENTIFIER + ")\\s+([^;]*)");
+            "(?is)\\bADD\\s+(?:COLUMN\\s+)?(?:IF\\s+NOT\\s+EXISTS\\s+)?(" + DDL_IDENTIFIER + ")\\s+(.*)");
+    // Quoted values/identifiers and comments must be consumed before delimiters.
+    private static final Pattern DDL_TOKEN = Pattern.compile(
+            "(?s)'(?:\\\\.|''|[^'\\\\])*'|" + DDL_IDENTIFIER
+                    + "|/\\*.*?\\*/|--(?=\\s)[^\\r\\n]*|#[^\\r\\n]*|[(),;]");
+    private static final Pattern FIRST_COLUMN_POSITION = Pattern.compile("(?i)\\bFIRST\\s*$");
     private static final Pattern AFTER_COLUMN_POSITION = Pattern.compile(
             "(?is)\\bAFTER\\s+(" + DDL_IDENTIFIER + ")\\s*(?:,|;|$)");
 
@@ -488,13 +493,13 @@ public class MysqlReaderV2 {
         if (EmptyKit.isBlank(ddl)) {
             return null;
         }
-        Matcher matcher = ADD_COLUMN_POSITION.matcher(ddl);
-        while (matcher.find()) {
-            if (!fieldName.equalsIgnoreCase(unquoteDdlIdentifier(matcher.group(1)))) {
+        for (String clause : ddlClauses(ddl)) {
+            Matcher matcher = ADD_COLUMN_POSITION.matcher(clause);
+            if (!matcher.find() || !fieldName.equalsIgnoreCase(unquoteDdlIdentifier(matcher.group(1)))) {
                 continue;
             }
             String definitionTail = matcher.group(2);
-            if (Pattern.compile("(?i)\\bFIRST\\s*(?:,|;|$)").matcher(definitionTail).find()) {
+            if (FIRST_COLUMN_POSITION.matcher(definitionTail.trim()).find()) {
                 return 1;
             }
             Matcher after = AFTER_COLUMN_POSITION.matcher(definitionTail);
@@ -507,9 +512,37 @@ public class MysqlReaderV2 {
                     position++;
                 }
             }
-            return null;
+            return currentFields.size() + 1;
         }
         return null;
+    }
+
+    private List<String> ddlClauses(String ddl) {
+        List<String> clauses = new ArrayList<>();
+        StringBuilder clause = new StringBuilder();
+        Matcher tokens = DDL_TOKEN.matcher(ddl);
+        int depth = 0;
+        int end = 0;
+        while (tokens.find()) {
+            clause.append(ddl, end, tokens.start());
+            String token = tokens.group();
+            end = tokens.end();
+            if (token.startsWith("/*") || token.startsWith("--") || token.startsWith("#")) {
+                clause.append(' ');
+                continue;
+            }
+            if ("(".equals(token)) depth++;
+            if (")".equals(token)) depth--;
+            if (depth == 0 && (",".equals(token) || ";".equals(token))) {
+                clauses.add(clause.toString());
+                clause.setLength(0);
+            } else {
+                clause.append(token);
+            }
+        }
+        clause.append(ddl, end, ddl.length());
+        clauses.add(clause.toString());
+        return clauses;
     }
 
     private String unquoteDdlIdentifier(String identifier) {
