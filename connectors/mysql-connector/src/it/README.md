@@ -1,10 +1,11 @@
 # MySQL connector integration coverage
 
-Updated: 2026-09-14
+Updated: 2026-11-09
 
 `MySQLConnectorIT` invokes the connector API against a real MySQL database. It combines the shared
 `ConnectorIT` suite with MySQL-specific regressions derived from `t-layer3-test`, plus opt-in TPCC and
-performance suites.
+performance suites. `MySQLHighPerformanceCdcIT` reuses the same MySQL resource profile and runs only
+`streamRead` CDC scenarios with high-performance binlog reading enabled.
 
 ## Twelve acceptance categories
 
@@ -16,12 +17,17 @@ performance suites.
 | 4 | TPCC incremental source | TPCC workload CDC and saved-offset resume tests |
 | 5 | Basic target | Shared create/write/update/delete/clear/drop tests |
 | 6 | TPCC target | TPCC tables recreated and populated through connector target APIs |
-| 7 | Four DDL cases | Shared target add/drop/rename/alter tests plus `should_stream_supported_source_ddl_events` |
+| 7 | Source and target DDL | Shared target add/drop/rename/alter tests, supported source DDL, and a composite multi-column ADD assertion |
 | 8 | Offset reset/resume | Shared offset tests plus `should_resume_from_saved_offset` |
 | 9 | Full types source | `should_round_trip_full_types_and_one_megabyte_fields` covers temporal, unsigned, JSON, text, and binary types |
 | 10 | Full types target | The same test writes a codec-wrapped row and reads it back through `batchRead` |
 | 11 | Transactions | Commit, rollback, savepoint, uncommitted visibility, and opt-in long transaction tests |
 | 12 | Large fields | 1 MiB `LONGTEXT` and `LONGBLOB` values pass full read, target write, and CDC |
+
+The `should_stream_read_ddl_dml_drop_ddl_dml_sequence` shared case verifies source events in
+`ADD → DML → DROP → DML` order. The MySQL-specific `should_stream_composite_add_columns_ddl`
+asserts that both columns from one multi-column `ALTER TABLE ... ADD` arrive in a valid
+`TapDDLEvent` (`TapNewFieldEvent`).
 
 ## Layer3 regressions moved down
 
@@ -45,11 +51,30 @@ cd /home/tapdata-it
 mvn -DskipTests install
 ```
 
-Run the default suite (TPCC, performance, and long transactions excluded):
+Run the standard suite (TPCC, performance, and long transactions excluded):
 
 ```bash
 cd /home/tapdata-connectors
-mvn -pl connectors/mysql-connector -am verify -DskipITs=false
+mvn -pl connectors/mysql-connector -am verify -DskipITs=false -Dit.test=MySQLConnectorIT
+```
+
+Run the high-performance CDC-only suite against the same MySQL resource profile:
+
+```bash
+mvn -pl connectors/mysql-connector -am verify -DskipITs=false -Dit.test=MySQLHighPerformanceCdcIT
+```
+
+The high-performance class keeps only tests annotated for `streamRead` (and optional
+`getStreamOffset`), and excludes mixed full-read/write coverage, TPCC, performance, and long
+transactions. By default, both suites use the same configured MySQL database from
+`mysql-connection.json`. If DBForge is selected, each class acquires and releases a separate
+`mysql/dedicated/single` lease with the same environment configuration.
+
+Run the interleaved DDL/DML regression last, after either suite:
+
+```bash
+mvn -pl connectors/mysql-connector -DskipITs=false -Djacoco.skip=true \
+  -Dit.test=MySQLConnectorIT#should_stream_read_ddl_dml_drop_ddl_dml_sequence verify
 ```
 
 Run opt-in suites:

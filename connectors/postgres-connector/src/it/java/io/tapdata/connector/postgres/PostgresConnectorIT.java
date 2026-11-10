@@ -28,14 +28,16 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.UUID;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class PostgresConnectorIT extends TpccConnectorIT {
 
-    private DbForgeLeaseProvider dbForgeLeaseProvider;
-    private DataMap dbForgeConnectionConfig;
+    protected DbForgeLeaseProvider dbForgeLeaseProvider;
+    protected DataMap dbForgeConnectionConfig;
 
     @Override
     protected PerformanceAdapter createPerformanceAdapter() {
@@ -114,13 +116,31 @@ public class PostgresConnectorIT extends TpccConnectorIT {
                 "ALTER TABLE " + qualifiedTable + " DROP COLUMN c_ddl_probe_new");
     }
 
-    private synchronized DataMap loadConnectionConfig() throws Exception {
+    @Override
+    protected String sourceDdlInterleaveDropFieldStatement(String table) {
+        String qualifiedTable = "\"public\".\"" + table.replace("\"", "\"\"") + "\"";
+        return "ALTER TABLE " + qualifiedTable + " DROP COLUMN c_ddl_probe";
+    }
+
+    protected String dbForgeTopology() {
+        return "single";
+    }
+
+    protected String defaultCdcMode() {
+        return "postgres-logical-trigger";
+    }
+
+    protected synchronized DataMap loadConnectionConfig() throws Exception {
+        String cdcMode = System.getProperty("connector.it.cdc.mode", defaultCdcMode());
         if (!DbForgeLeaseProvider.isDbForgeSelected()) {
-            return readConnectionConfig("config/postgres-connection.json");
+            DataMap config = readConnectionConfig("config/postgres-connection.json");
+            applyCdcMode(config, cdcMode);
+            return config;
         }
         if (dbForgeConnectionConfig == null) {
             dbForgeLeaseProvider = DbForgeLeaseProvider.fromEnvironment("tapdata-postgres-connector-it");
-            DbForgeLeaseProvider.Connection connection = dbForgeLeaseProvider.acquire("postgresql", "dedicated", "single");
+            DbForgeLeaseProvider.Connection connection = dbForgeLeaseProvider.acquire(
+                    "postgresql", "dedicated", dbForgeTopology());
             dbForgeConnectionConfig = DataMap.create();
             dbForgeConnectionConfig.put("host", connection.required("host"));
             dbForgeConnectionConfig.put("port", connection.requiredPort());
@@ -129,14 +149,111 @@ public class PostgresConnectorIT extends TpccConnectorIT {
             dbForgeConnectionConfig.put("user", connection.firstRequired("user", "username"));
             dbForgeConnectionConfig.put("password", connection.required("password"));
             dbForgeConnectionConfig.put("slotName", "tapdata_connector_it");
-            dbForgeConnectionConfig.put("logPluginName", "physical");
+            if ("efm-tde".equals(dbForgeTopology())) {
+                assertDbForgeEfMEndpointIsStandby(dbForgeConnectionConfig);
+                dbForgeConnectionConfig.put("deploymentMode", "master-slave");
+                dbForgeConnectionConfig.put("checkCdcSlave", true);
+                // DbForge's EFM TDE image wraps key.bin with OpenSSL AES-128-CBC.
+                // Auto-detection can accept a wrong AES-256 unwrap if random padding happens to validate.
+                dbForgeConnectionConfig.put("walTdeKeyWrapAlgorithm", "aes-128-cbc");
+                LinkedHashMap<String, Object> standbyAddress = new LinkedHashMap<>();
+                standbyAddress.put("host", dbForgeConnectionConfig.getString("host"));
+                standbyAddress.put("port", dbForgeConnectionConfig.getInteger("port"));
+                dbForgeConnectionConfig.put("masterSlaveAddress", new ArrayList<>(List.of(standbyAddress)));
+                String tdeKey = connection.optional("walTdeKey");
+                if (tdeKey == null) {
+                    tdeKey = System.getProperty("connector.it.postgres.walTdeKey",
+                            System.getenv("CONNECTOR_IT_POSTGRES_WAL_TDE_KEY"));
+                }
+                if (tdeKey == null || tdeKey.isBlank()) {
+                    tdeKey = readTdeKeyFile(dbForgeConnectionConfig);
+                }
+                if (tdeKey != null && !tdeKey.isBlank()) {
+                    dbForgeConnectionConfig.put("walTdeKey", tdeKey);
+                }
+                String tdePassword = connection.optional("walTdeKeyPassword");
+                if (tdePassword == null) {
+                    tdePassword = connection.optional("tde");
+                }
+                if (tdePassword == null) {
+                    tdePassword = System.getProperty("connector.it.postgres.walTdeKeyPassword",
+                            System.getenv("CONNECTOR_IT_POSTGRES_WAL_TDE_KEY_PASSWORD"));
+                }
+                if (tdePassword != null && !tdePassword.isBlank()) {
+                    dbForgeConnectionConfig.put("walTdeKeyPassword", tdePassword);
+                }
+            }
             System.out.printf("[IT] DBForge PostgreSQL lease acquired: leaseId=%s, host=%s, port=%s, database=%s%n",
                     dbForgeLeaseProvider.getLeaseId(), dbForgeConnectionConfig.getString("host"),
                     dbForgeConnectionConfig.getInteger("port"), dbForgeConnectionConfig.getString("database"));
         }
         DataMap config = DataMap.create();
         config.putAll(dbForgeConnectionConfig);
+        applyCdcMode(config, cdcMode);
         return config;
+    }
+
+    private String readTdeKeyFile(DataMap connectionConfig) throws SQLException {
+        try {
+            Class.forName("org.postgresql.Driver");
+        } catch (ClassNotFoundException error) {
+            throw new SQLException("PostgreSQL JDBC driver is unavailable to the EFM IT", error);
+        }
+        String jdbcUrl = "jdbc:postgresql://" + connectionConfig.getString("host") + ":"
+                + connectionConfig.getInteger("port") + "/" + connectionConfig.getString("database");
+        try (Connection connection = DriverManager.getConnection(jdbcUrl,
+                connectionConfig.getString("user"), connectionConfig.getString("password"));
+             Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery(
+                     "SELECT pg_is_in_recovery(), encode(pg_read_binary_file('pg_encryption/key.bin'), 'base64')")) {
+            if (!result.next()) {
+                throw new SQLException("DBForge EFM PostgreSQL did not return its TDE key file");
+            }
+            if (!result.getBoolean(1)) {
+                throw new SQLException("DBForge efm-tde endpoint did not route to a PostgreSQL standby");
+            }
+            return result.getString(2);
+        }
+    }
+
+    private void assertDbForgeEfMEndpointIsStandby(DataMap connectionConfig) throws SQLException {
+        try {
+            Class.forName("org.postgresql.Driver");
+        } catch (ClassNotFoundException error) {
+            throw new SQLException("PostgreSQL JDBC driver is unavailable to the EFM IT", error);
+        }
+        String jdbcUrl = "jdbc:postgresql://" + connectionConfig.getString("host") + ":"
+                + connectionConfig.getInteger("port") + "/" + connectionConfig.getString("database");
+        try (Connection connection = DriverManager.getConnection(jdbcUrl,
+                connectionConfig.getString("user"), connectionConfig.getString("password"));
+             Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery("SELECT pg_is_in_recovery()")) {
+            if (!result.next() || !result.getBoolean(1)) {
+                throw new SQLException("DBForge efm-tde endpoint must route to a PostgreSQL standby");
+            }
+        }
+    }
+
+    protected String dbForgeEphemeralNamespace() {
+        return System.getProperty("connector.it.dbforge.ephemeral.namespace",
+                System.getenv().getOrDefault("CONNECTOR_IT_DBFORGE_EPHEMERAL_NAMESPACE", "dbforge-env-ephemeral"));
+    }
+
+    private void applyCdcMode(DataMap config, String cdcMode) {
+        if (cdcMode == null || cdcMode.isBlank()) return;
+        if ("postgres-logical-trigger".equalsIgnoreCase(cdcMode)) {
+            config.put("logPluginName", "pgoutput");
+            config.put("ddlTriggerEnable", true);
+        } else if ("postgres-physical".equalsIgnoreCase(cdcMode)) {
+            config.put("logPluginName", "physical");
+            config.put("ddlTriggerEnable", false);
+            if ("efm-tde".equals(dbForgeTopology())) {
+                config.put("deploymentMode", "master-slave");
+                config.put("checkCdcSlave", true);
+            }
+        } else {
+            throw new IllegalArgumentException("Unsupported PostgreSQL CDC test mode: " + cdcMode);
+        }
     }
 
     @AfterAll
