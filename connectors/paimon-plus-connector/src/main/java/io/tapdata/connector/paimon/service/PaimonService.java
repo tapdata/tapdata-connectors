@@ -1781,7 +1781,12 @@ public class PaimonService implements AutoCloseable {
         PaimonGeneratedFieldDependencies generatedFields =
                 generatedFieldDependencies(tapTable);
         PaimonDmlImageValidator.validateBatch(
-                tableKey, contract, generatedFields, tapTable, recordEvents);
+                tableKey,
+                contract,
+                generatedFields,
+                tapTable,
+                recordEvents,
+                config.getEnableDeduplicateUpdateAfterCompletenessCheck(tapTable.getName()));
         return new DmlBatchPreflight(fileStoreTable, contract);
     }
 
