@@ -55,6 +55,12 @@ import static io.tapdata.base.ConnectorBase.list;
 
 public class MysqlReaderV2 {
 
+    private static final String DDL_IDENTIFIER = "(?:`(?:``|[^`])+`|\"(?:\"\"|[^\"])+\"|\\[(?:\\]\\]|[^\\]])+\\]|[\\w$]+)";
+    private static final Pattern ADD_COLUMN_POSITION = Pattern.compile(
+            "(?is)\\bADD\\s+(?:COLUMN\\s+)?(?:IF\\s+NOT\\s+EXISTS\\s+)?(" + DDL_IDENTIFIER + ")\\s+([^;]*)");
+    private static final Pattern AFTER_COLUMN_POSITION = Pattern.compile(
+            "(?is)\\bAFTER\\s+(" + DDL_IDENTIFIER + ")\\s*(?:,|;|$)");
+
     private final MysqlConfig mysqlConfig;
     private final Log tapLogger;
     private List<String> tableList;
@@ -482,22 +488,20 @@ public class MysqlReaderV2 {
         if (EmptyKit.isBlank(ddl)) {
             return null;
         }
-        Pattern addColumn = Pattern.compile("(?is)\\bADD\\s+(?:COLUMN\\s+)?(?:IF\\s+NOT\\s+EXISTS\\s+)?[`\\\"\\[]?([\\w$]+)[`\\\"\\]]?\\b([^;]*)");
-        Matcher matcher = addColumn.matcher(ddl);
+        Matcher matcher = ADD_COLUMN_POSITION.matcher(ddl);
         while (matcher.find()) {
-            if (!fieldName.equalsIgnoreCase(matcher.group(1))) {
+            if (!fieldName.equalsIgnoreCase(unquoteDdlIdentifier(matcher.group(1)))) {
                 continue;
             }
             String definitionTail = matcher.group(2);
             if (Pattern.compile("(?i)\\bFIRST\\s*(?:,|;|$)").matcher(definitionTail).find()) {
                 return 1;
             }
-            Matcher after = Pattern.compile("(?i)\\bAFTER\\s+[`\\\"\\[]?([\\w$]+)[`\\\"\\]]?\\s*(?:,|;|$)")
-                    .matcher(definitionTail);
+            Matcher after = AFTER_COLUMN_POSITION.matcher(definitionTail);
             if (after.find()) {
                 int position = 1;
                 for (String existing : currentFields.keySet()) {
-                    if (existing.equalsIgnoreCase(after.group(1))) {
+                    if (existing.equalsIgnoreCase(unquoteDdlIdentifier(after.group(1)))) {
                         return position + 1;
                     }
                     position++;
@@ -506,6 +510,15 @@ public class MysqlReaderV2 {
             return null;
         }
         return null;
+    }
+
+    private String unquoteDdlIdentifier(String identifier) {
+        char first = identifier.charAt(0);
+        if (first == '`' || first == '"' || first == '[') {
+            String quote = first == '[' ? "]" : String.valueOf(first);
+            return identifier.substring(1, identifier.length() - 1).replace(quote + quote, quote);
+        }
+        return identifier;
     }
 
     private Object[] parseEnumValues(String enumType) {

@@ -54,6 +54,8 @@ mvn -pl connectors/postgres-connector -am verify -DskipITs=false \
   -Dit.test='PostgresEfmTdeConnectorIT'
 ```
 
+The EFM class requires DbForge mode. With the default JSON configuration it is disabled at the class level, with an explicit environment prerequisite reason; it must not fall back to the single-node endpoint. A JSON-only CI run therefore validates only the ordinary suite, not EFM. To validate both topologies, configure the DbForge variables above and run without an `it.test` filter.
+
 The EFM class excludes test methods that write to its read-only standby: all TPCC and performance cases, non-CDC cases requiring a verifier-backed data fixture, and cases exercising target-side write/DDL capabilities. CDC streamRead scenarios remain eligible because their source changes go through the primary verifier. This is based on where a test writes, not on `@UnderTest("streamRead")` alone. To run the DDL/DML interleaving regression last, run the full class excluding that method, then run the method separately as the final command.
 
 Both classes run the shared CDC test independently and each acquires/releases its own DBForge lease. The EFM case needs a database account allowed to read `pg_encryption/key.bin`; DBForge's `tde` lease secret supplies its unwrap password. The key and password are held only in the in-memory test connection config and are never logged. Set `CONNECTOR_IT_POSTGRES_WAL_TDE_KEY` only if the key file cannot be read from the standby; set `CONNECTOR_IT_POSTGRES_WAL_TDE_KEY_PASSWORD` only if the `tde` secret is not present in the lease response.

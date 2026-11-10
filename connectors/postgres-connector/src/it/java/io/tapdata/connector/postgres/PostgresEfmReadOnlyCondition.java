@@ -1,6 +1,7 @@
 package io.tapdata.connector.postgres;
 
 import io.tapdata.it.UnderTest;
+import io.tapdata.it.dbforge.DbForgeLeaseProvider;
 import org.junit.jupiter.api.extension.ConditionEvaluationResult;
 import org.junit.jupiter.api.extension.ExecutionCondition;
 import org.junit.jupiter.api.extension.ExtensionContext;
@@ -22,6 +23,10 @@ final class PostgresEfmReadOnlyCondition implements ExecutionCondition {
 
     @Override
     public ConditionEvaluationResult evaluateExecutionCondition(ExtensionContext context) {
+        if (!DbForgeLeaseProvider.isDbForgeSelected()) {
+            return ConditionEvaluationResult.disabled(
+                    "EFM TDE requires CONNECTOR_IT_CONFIG_SOURCE=dbforge and a dedicated efm-tde lease; JSON config only runs PostgresConnectorIT");
+        }
         if (context.getElement().filter(Method.class::isInstance).isEmpty()) {
             return ConditionEvaluationResult.enabled("EFM read-only test selection applies to test methods");
         }

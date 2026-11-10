@@ -22,7 +22,7 @@ public class PostgresEfmTdeConnectorIT extends PostgresConnectorIT {
     @Override
     protected ConnectorVerifier createVerifier() {
         if (!io.tapdata.it.dbforge.DbForgeLeaseProvider.isDbForgeSelected()) {
-            return super.createVerifier();
+            throw new IllegalStateException("EFM TDE IT requires CONNECTOR_IT_CONFIG_SOURCE=dbforge");
         }
         String leaseId = Objects.requireNonNull(dbForgeLeaseProvider, "DBForge lease is not acquired").getLeaseId();
         String namespace = dbForgeEphemeralNamespace();
