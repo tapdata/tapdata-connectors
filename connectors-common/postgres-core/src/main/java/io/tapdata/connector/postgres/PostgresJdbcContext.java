@@ -23,6 +23,7 @@ public class PostgresJdbcContext extends JdbcContext {
 
     private final static String TAG = PostgresJdbcContext.class.getSimpleName();
     String postgresVersion;
+    private boolean discoverViews;
 
     public PostgresJdbcContext(PostgresConfig config) {
         super(config);
@@ -31,6 +32,11 @@ public class PostgresJdbcContext extends JdbcContext {
 
     public PostgresJdbcContext withPostgresVersion(String postgresVersion) {
         this.postgresVersion = postgresVersion;
+        return this;
+    }
+
+    public PostgresJdbcContext withDiscoverViews(boolean discoverViews) {
+        this.discoverViews = discoverViews;
         return this;
     }
 
@@ -72,18 +78,23 @@ public class PostgresJdbcContext extends JdbcContext {
     protected String queryAllTablesSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND t.table_name IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'")).collect(Collectors.joining("','")) + "')" : "";
         if (Integer.parseInt(postgresVersion) < 100000) {
-            return String.format(PG_ALL_TABLE_LOWER_VERSION, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
+            return String.format(discoverViews ? PG_ALL_TABLE_AND_VIEW_LOWER_VERSION : PG_ALL_TABLE_LOWER_VERSION, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
         }
-        return String.format(PG_ALL_TABLE, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
+        String sql = discoverViews ? PG_ALL_TABLE
+                .replace("t.table_type = 'BASE TABLE'", "t.table_type IN ('BASE TABLE', 'VIEW')")
+                .replace("WHEN EXISTS (SELECT 1 FROM pg_partitioned_table pt WHERE pt.partrelid = c.oid) THEN 'Parent Table'",
+                        "WHEN t.table_type = 'VIEW' THEN 'VIEW'\n        WHEN EXISTS (SELECT 1 FROM pg_partitioned_table pt WHERE pt.partrelid = c.oid) THEN 'Parent Table'") : PG_ALL_TABLE;
+        return String.format(sql, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
     protected String queryAllColumnsSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'")).collect(Collectors.joining("','")) + "')" : "";
-        if (Integer.parseInt(postgresVersion) < 100000) {
-            return String.format(PG_ALL_COLUMN_LOWER_VERSION, StringKit.escape(schema, "'"), StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
+        String sql = Integer.parseInt(postgresVersion) < 100000 ? PG_ALL_COLUMN_LOWER_VERSION : PG_ALL_COLUMN;
+        if (discoverViews) {
+            sql = sql.replace("WHERE c.relname = col.table_name", "WHERE c.relname = col.table_name AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = col.table_schema)");
         }
-        return String.format(PG_ALL_COLUMN, StringKit.escape(schema, "'"), StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
+        return String.format(sql, StringKit.escape(schema, "'"), StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
@@ -113,6 +124,14 @@ public class PostgresJdbcContext extends JdbcContext {
         }
         return dataMap;
     }
+
+    private static final String PG_ALL_TABLE_AND_VIEW_LOWER_VERSION =
+            "SELECT t.table_name AS \"tableName\", t.table_type AS \"tableType\", " +
+            "obj_description(c.oid, 'pg_class') AS \"tableComment\" " +
+            "FROM information_schema.tables t JOIN pg_class c ON c.relname = t.table_name " +
+            "AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = t.table_schema) " +
+            "WHERE t.table_type IN ('BASE TABLE', 'VIEW') AND t.table_catalog='%s' " +
+            "AND t.table_schema='%s' %s ORDER BY t.table_name";
 
     protected final static String PG_ALL_TABLE_LOWER_VERSION = "SELECT t.table_name \"tableName\",\n" +
             "       (select max(cast(obj_description(relfilenode, 'pg_class') as varchar)) as \"tableComment\"\n" +
