@@ -157,70 +157,21 @@ public final class DDLFormatVariants {
     }
 
     private static String insertCommentAtFirstClauseGap(String sql, String comment) {
-        char quote = 0;
-        boolean lineComment = false;
-        boolean blockComment = false;
-        boolean bracketIdentifier = false;
-        boolean afterAlter = false;
-        for (int i = 0; i < sql.length(); i++) {
-            char c = sql.charAt(i);
-            char next = i + 1 < sql.length() ? sql.charAt(i + 1) : 0;
-            if (lineComment) {
-                if (c == '\n' || c == '\r') lineComment = false;
-                continue;
-            }
-            if (blockComment) {
-                if (c == '*' && next == '/') {
-                    blockComment = false;
-                    i++;
-                }
-                continue;
-            }
-            if (bracketIdentifier) {
-                if (c == ']') {
-                    if (next == ']') i++;
-                    else bracketIdentifier = false;
-                }
-                continue;
-            }
-            if (quote != 0) {
-                if (c == quote) {
-                    if (next == quote) i++;
-                    else quote = 0;
-                }
-                continue;
-            }
-            if ((c == '-' && next == '-') || (c == '/' && next == '*')) {
-                if (c == '-') lineComment = true;
-                else blockComment = true;
-                i++;
-                continue;
-            }
-            if (c == '\'' || c == '"' || c == '`') {
-                quote = c;
-                continue;
-            }
-            if (c == '[') {
-                bracketIdentifier = true;
-                continue;
-            }
-            if (!Character.isLetter(c) && c != '_') continue;
+        String lower = sql.toLowerCase(Locale.ROOT);
+        int alter = lower.indexOf("alter");
+        int add = lower.indexOf(" add ", alter < 0 ? 0 : alter + 5);
+        int modify = lower.indexOf(" modify ", alter < 0 ? 0 : alter + 5);
+        int drop = lower.indexOf(" drop ", alter < 0 ? 0 : alter + 5);
+        int rename = lower.indexOf(" rename ", alter < 0 ? 0 : alter + 5);
+        int clause = minPositive(add, modify, drop, rename);
+        if (clause < 0) return null;
+        int gap = clause + 1;
+        return sql.substring(0, gap) + comment + sql.substring(gap);
+    }
 
-            int start = i;
-            do {
-                i++;
-                if (i >= sql.length()) break;
-                c = sql.charAt(i);
-            } while (Character.isLetterOrDigit(c) || c == '_' || c == '$' || c == '#');
-            String word = sql.substring(start, i).toLowerCase(Locale.ROOT);
-            if (word.equals("alter")) {
-                afterAlter = true;
-            } else if (afterAlter && (word.equals("add") || word.equals("modify")
-                    || word.equals("drop") || word.equals("rename"))) {
-                return sql.substring(0, start) + comment + sql.substring(start);
-            }
-            i--;
-        }
-        return null;
+    private static int minPositive(int... values) {
+        int min = Integer.MAX_VALUE;
+        for (int value : values) if (value >= 0 && value < min) min = value;
+        return min == Integer.MAX_VALUE ? -1 : min;
     }
 }

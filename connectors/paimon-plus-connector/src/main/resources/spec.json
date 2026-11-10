@@ -702,6 +702,29 @@
               }
             }
           ]
+        },
+        "enableDeduplicateUpdateAfterCompletenessCheck": {
+          "type": "boolean",
+          "title": "${enableDeduplicateUpdateAfterCompletenessCheck}",
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "default": true,
+          "x-index": 150,
+          "x-perTable": true,
+          "x-decorator-props": {
+            "layout": "horizontal",
+            "tooltip": "${enableDeduplicateUpdateAfterCompletenessCheck_description}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -770,7 +793,9 @@
       "targetFileSize": "Target File Size (MB)",
       "targetFileSize_placeholder": "Target size for data files (32-1024 MB, default: 128)",
       "enablePrimaryKeyUpdate": "Enable Primary Key Update Detection",
-      "enablePrimaryKeyUpdate_description": "When enabled, automatically detects primary key changes and converts update operations to delete+insert. Requires source database to provide before-update data. If unavailable, enabling this feature will cause errors. It is recommended to keep this feature disabled by default and only enable it when primary key values are expected to change. Enabling this feature will reduce update performance."
+      "enablePrimaryKeyUpdate_description": "When enabled, automatically detects primary key changes and converts update operations to delete+insert. Requires source database to provide before-update data. If unavailable, enabling this feature will cause errors. It is recommended to keep this feature disabled by default and only enable it when primary key values are expected to change. Enabling this feature will reduce update performance.",
+      "enableDeduplicateUpdateAfterCompletenessCheck": "Validate UPDATE_AFTER completeness for Deduplicate tables",
+      "enableDeduplicateUpdateAfterCompletenessCheck_description": "Enabled by default. Disable only when sparse UPDATE_AFTER records should continue through the normal Paimon write path; omitted columns may be written as null or schema defaults. Other validation rules remain enabled."
     },
     "zh_CN": {
       "stopTimeoutSeconds": "STOP 总超时（秒）",
@@ -834,7 +859,9 @@
       "targetFileSize": "目标文件大小（MB）",
       "targetFileSize_placeholder": "数据文件的目标大小（32-1024 MB，默认：128）",
       "enablePrimaryKeyUpdate": "是否更新主键",
-      "enablePrimaryKeyUpdate_description": "开启后，会自动检查主键变更，将更新操作改为删除+写入，要求源库可以提供更新前数据，如果无法提供，开启此功能会报错退出。建议默认关闭该功能，如果确认主键值会变更再开启，开启后，更新性能会下降。"
+      "enablePrimaryKeyUpdate_description": "开启后，会自动检查主键变更，将更新操作改为删除+写入，要求源库可以提供更新前数据，如果无法提供，开启此功能会报错退出。建议默认关闭该功能，如果确认主键值会变更再开启，开启后，更新性能会下降。",
+      "enableDeduplicateUpdateAfterCompletenessCheck": "校验 Deduplicate 表的字段完整性",
+      "enableDeduplicateUpdateAfterCompletenessCheck_description": "默认开启。仅当希望稀疏 UPDATE_AFTER 继续走 Paimon 正常写入流程时再关闭；缺失列可能写为 null 或 schema 默认值。其它校验仍然开启。"
     },
     "zh_TW": {
       "stopTimeoutSeconds": "STOP 總超時（秒）",
@@ -898,7 +925,9 @@
       "targetFileSize": "目標文件大小（MB）",
       "targetFileSize_placeholder": "數據文件的目標大小（32-1024 MB，默認：128）",
       "enablePrimaryKeyUpdate": "是否更新主鍵",
-      "enablePrimaryKeyUpdate_description": "開啟後，會自動檢查主鍵變更，將更新操作改為刪除+寫入，要求源庫可以提供更新前數據，如果無法提供，開啟此功能會報錯退出。建議默認關閉該功能，如果確認主鍵值會變更再開啟，開啟後，更新性能會下降。"
+      "enablePrimaryKeyUpdate_description": "開啟後，會自動檢查主鍵變更，將更新操作改為刪除+寫入，要求源庫可以提供更新前數據，如果無法提供，開啟此功能會報錯退出。建議默認關閉該功能，如果確認主鍵值會變更再開啟，開啟後，更新性能會下降。",
+      "enableDeduplicateUpdateAfterCompletenessCheck": "校驗 Deduplicate 表的 UPDATE_AFTER 欄位完整性",
+      "enableDeduplicateUpdateAfterCompletenessCheck_description": "預設開啟。僅在希望稀疏 UPDATE_AFTER 繼續走 Paimon 正常寫入流程時才關閉；缺失欄位可能寫為 null 或 schema 預設值。其它校驗仍然開啟。"
     }
   },
   "dataTypes": {

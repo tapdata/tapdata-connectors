@@ -965,7 +965,8 @@ public class MysqlReader implements Closeable {
         if (null == tapField) return value;
         TapType tapType = tapField.getTapType();
         if (tapType instanceof TapDateTime) {
-            int fraction = ((TapDateTime) tapType).getFraction();
+            Integer configuredFraction = ((TapDateTime) tapType).getFraction();
+            int fraction = configuredFraction == null ? 0 : configuredFraction;
             if (value instanceof Long) {
                 if (fraction > 3) {
                     value = ((Long) value + diff * 1000) / (long) Math.pow(10, 6 - fraction);
@@ -997,7 +998,8 @@ public class MysqlReader implements Closeable {
         ZonedDateTime toZonedDateTime = dt.atZone(TimeZone.getTimeZone("GMT").toZoneId());
         long diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
         if (tapType instanceof TapDateTime) {
-            int fraction = ((TapDateTime) tapType).getFraction();
+            Integer configuredFraction = ((TapDateTime) tapType).getFraction();
+            int fraction = configuredFraction == null ? 0 : configuredFraction;
             if (value instanceof Long) {
                 if (fraction > 3) {
                     value = ((Long) value + diff * 1000) / (long) Math.pow(10, 6 - fraction);

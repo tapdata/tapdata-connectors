@@ -1,6 +1,7 @@
 package io.tapdata.connector.postgres;
 
 import io.tapdata.common.ResultSetConsumer;
+import io.tapdata.connector.postgres.config.PostgresConfig;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,8 @@ import java.sql.Timestamp;
 import java.util.List;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import org.junit.jupiter.api.DisplayName;
+import java.util.Arrays;
+import java.util.Collections;
 
 import static org.mockito.Mockito.*;
 
@@ -58,5 +61,27 @@ public class PostgresJdbcContextTest {
         }).when(postgresJdbcContext).queryWithNext(any(),any());
         doCallRealMethod().when(postgresJdbcContext).queryTimestamp();
         Assertions.assertEquals(timestamp.getTime(),postgresJdbcContext.queryTimestamp());
+    }
+
+    @Test
+    void test_queryAllForeignKeysSql_readsColumnNamesFromPgAttribute() {
+        // TAP-13224: information_schema.columns hides columns of tables the account cannot select,
+        // so foreign key column names must come from pg_attribute.
+        PostgresConfig config = new PostgresConfig();
+        config.setSchema("sys_o'rule");
+        when(postgresJdbcContext.getConfig()).thenReturn(config);
+        when(postgresJdbcContext.queryAllForeignKeysSql(any(), any())).thenCallRealMethod();
+
+        String sql = postgresJdbcContext.queryAllForeignKeysSql("ignored", Arrays.asList("child", "o'child"));
+
+        Assertions.assertFalse(sql.contains("information_schema"));
+        Assertions.assertTrue(sql.contains("(select attname from pg_attribute where attrelid=con.conrelid and attnum=con.fk) fk"));
+        Assertions.assertTrue(sql.contains("(select attname from pg_attribute where attrelid=con.confrelid and attnum=con.rfk) rfk"));
+        Assertions.assertTrue(sql.contains("c.conrelid,c.confrelid"));
+        Assertions.assertTrue(sql.contains("pn.nspname='sys_o''rule'"));
+        Assertions.assertTrue(sql.contains("and pc.relname in ('child','o''child')"));
+
+        String allTables = postgresJdbcContext.queryAllForeignKeysSql("ignored", Collections.emptyList());
+        Assertions.assertFalse(allTables.contains("pc.relname in"));
     }
 }

@@ -10,6 +10,7 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.paimon.catalog.Catalog;
@@ -655,6 +656,48 @@ class PaimonServiceDynamicBucketIntegrationTest {
             } else {
                 service.close();
             }
+        }
+    }
+
+    @Test
+    void deduplicateSparseUpdateShouldRespectTableConfig() throws Exception {
+        String tableName = "key_sparse_toggle_off_t";
+        PaimonConfig config = config("key-deduplicate-completeness-disabled");
+        config.setTableConfig(Collections.singletonMap(
+                tableName,
+                DataMap.create().kv("enableDeduplicateUpdateAfterCompletenessCheck", false)));
+        TapTable tapTable =
+                new TapTable(tableName)
+                        .add(new TapField("value", "STRING"))
+                        .add(new TapField("id", "INT").primaryKeyPos(1))
+                        .add(new TapField("pt", "INT"));
+
+        PaimonService service = service(config);
+        try {
+            createKeyDynamicTable(catalog(service), tableName);
+            TapConnectorContext connectorContext = context(stateMap());
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert(tableName, map("value", "old", "id", 10, "pt", 1))),
+                    tapTable,
+                    connectorContext);
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcUpdateAfter(tableName, map("id", 10, "pt", 1))),
+                    tapTable,
+                    connectorContext);
+
+            List<InternalRow> rows =
+                    readRows(
+                            catalog(service).getTable(Identifier.create(DATABASE, tableName)));
+            assertEquals(1, rows.size());
+            assertEquals(1, rows.get(0).getInt(0));
+            assertEquals(10, rows.get(0).getInt(1));
+            assertNull(
+                    rows.get(0).getString(2),
+                    "disabled completeness validation must follow normal Deduplicate write semantics");
+        } finally {
+            service.close();
         }
     }
 

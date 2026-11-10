@@ -138,7 +138,20 @@ public class PostgresConnector extends CommonDbConnector {
 
     @Override
     public void onStart(TapConnectionContext connectorContext) {
-        initConnection(connectorContext);
+        // releaseExternal can run while the connector is still started. Reuse its
+        // pools instead of overwriting them and leaking the original connections.
+        if (postgresJdbcContext != null) {
+            return;
+        }
+        boolean initialized = false;
+        try {
+            initConnection(connectorContext);
+            initialized = true;
+        } finally {
+            if (!initialized) {
+                onStop(connectorContext);
+            }
+        }
     }
 
     protected TapField makeTapField(DataMap dataMap) {
@@ -588,6 +601,9 @@ public class PostgresConnector extends CommonDbConnector {
         });
         EmptyKit.closeQuietly(postgresTest);
         EmptyKit.closeQuietly(postgresJdbcContext);
+        postgresTest = null;
+        postgresJdbcContext = null;
+        jdbcContext = null;
     }
 
     //initialize jdbc context, slot name, version
