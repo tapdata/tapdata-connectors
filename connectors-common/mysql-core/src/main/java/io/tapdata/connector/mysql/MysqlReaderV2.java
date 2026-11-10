@@ -46,6 +46,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -146,7 +148,9 @@ public class MysqlReaderV2 {
                     case QUERY:
                         ScanEvent queryEvent = new ScanEvent(event, currentBinlogFile.get());
                         queryEvent.setDdlEvents(parseDdlEvents(event));
-                        queryEvent.getDdlEvents().forEach(e -> applyDdlToCachedSchema((TapDDLEvent) e));
+                        String ddlDatabase = ((QueryEventData) EventDeserializer.EventDataWrapper.internal(event.getData()))
+                                .getDatabase();
+                        queryEvent.getDdlEvents().forEach(e -> applyDdlToCachedSchema((TapDDLEvent) e, ddlDatabase));
                         concurrentProcessor.runAsyncWithBlocking(queryEvent, this::emit);
                         return;
                     case XID:
@@ -384,15 +388,21 @@ public class MysqlReaderV2 {
         enumDataTypeMap.put(tableKey, enumMap);
     }
 
-    private void applyDdlToCachedSchema(TapDDLEvent ddlEvent) {
+    private void applyDdlToCachedSchema(TapDDLEvent ddlEvent, String database) {
         String tableId = ddlEvent.getTableId();
         if (EmptyKit.isBlank(tableId)) {
             return;
         }
         String tableKey = tableId;
+        if (withSchema && EmptyKit.isNotBlank(database) && !dataTypeMap.containsKey(tableKey)) {
+            tableKey = escapeDatabaseAndTable(database, tableId);
+        }
         LinkedHashMap<String, String> current = dataTypeMap.get(tableKey);
         if (current == null) {
             TapTable tapTable = tableMap.get(tableKey);
+            if (tapTable == null && withSchema) {
+                tapTable = tableMap.get(tableId);
+            }
             if (tapTable == null || EmptyKit.isEmpty(tapTable.getNameFieldMap())) {
                 return;
             }
@@ -407,7 +417,9 @@ public class MysqlReaderV2 {
             if (fields != null) {
                 for (TapField field : fields) {
                     if (field != null && EmptyKit.isNotBlank(field.getName())) {
-                        next.put(field.getName(), StringKit.removeParentheses(field.getDataType()));
+                        Integer position = ddlColumnPosition(String.valueOf(ddlEvent.getOriginDDL()), field.getName(), next);
+                        insertFieldAtPosition(next, field.getName(), StringKit.removeParentheses(field.getDataType()),
+                                position == null ? field.getPos() : position);
                         nextEnums.remove(field.getName());
                         if (field.getDataType() != null && field.getDataType().startsWith("enum")) {
                             nextEnums.put(field.getName(), parseEnumValues(field.getDataType()));
@@ -441,6 +453,59 @@ public class MysqlReaderV2 {
         }
         dataTypeMap.put(tableKey, next);
         enumDataTypeMap.put(tableKey, nextEnums);
+    }
+
+    private void insertFieldAtPosition(LinkedHashMap<String, String> fields, String name, String dataType, Integer position) {
+        fields.remove(name);
+        if (position == null || position < 1 || position > fields.size() + 1) {
+            fields.put(name, dataType);
+            return;
+        }
+        LinkedHashMap<String, String> reordered = new LinkedHashMap<>();
+        int currentPosition = 1;
+        boolean inserted = false;
+        for (Map.Entry<String, String> field : fields.entrySet()) {
+            if (!inserted && currentPosition++ == position) {
+                reordered.put(name, dataType);
+                inserted = true;
+            }
+            reordered.put(field.getKey(), field.getValue());
+        }
+        if (!inserted) {
+            reordered.put(name, dataType);
+        }
+        fields.clear();
+        fields.putAll(reordered);
+    }
+
+    private Integer ddlColumnPosition(String ddl, String fieldName, LinkedHashMap<String, String> currentFields) {
+        if (EmptyKit.isBlank(ddl)) {
+            return null;
+        }
+        Pattern addColumn = Pattern.compile("(?is)\\bADD\\s+(?:COLUMN\\s+)?(?:IF\\s+NOT\\s+EXISTS\\s+)?[`\\\"\\[]?([\\w$]+)[`\\\"\\]]?\\b([^;]*)");
+        Matcher matcher = addColumn.matcher(ddl);
+        while (matcher.find()) {
+            if (!fieldName.equalsIgnoreCase(matcher.group(1))) {
+                continue;
+            }
+            String definitionTail = matcher.group(2);
+            if (Pattern.compile("(?i)\\bFIRST\\s*(?:,|;|$)").matcher(definitionTail).find()) {
+                return 1;
+            }
+            Matcher after = Pattern.compile("(?i)\\bAFTER\\s+[`\\\"\\[]?([\\w$]+)[`\\\"\\]]?\\s*(?:,|;|$)")
+                    .matcher(definitionTail);
+            if (after.find()) {
+                int position = 1;
+                for (String existing : currentFields.keySet()) {
+                    if (existing.equalsIgnoreCase(after.group(1))) {
+                        return position + 1;
+                    }
+                    position++;
+                }
+            }
+            return null;
+        }
+        return null;
     }
 
     private Object[] parseEnumValues(String enumType) {

@@ -32,6 +32,9 @@ final class PostgresEfmReadOnlyCondition implements ExecutionCondition {
         }
 
         Method method = (Method) context.getElement().get();
+        if ("should_test_connection".equals(method.getName())) {
+            return ConditionEvaluationResult.disabled("connectionTest does not model the EFM primary-verifier and standby-CDC topology");
+        }
         if (STANDBY_WRITING_FIXTURES.contains(method.getName())) {
             return ConditionEvaluationResult.disabled("test fixture writes directly to the read-only EFM standby");
         }

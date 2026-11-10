@@ -27,13 +27,16 @@ public class PostgresEfmTdeConnectorIT extends PostgresConnectorIT {
         String leaseId = Objects.requireNonNull(dbForgeLeaseProvider, "DBForge lease is not acquired").getLeaseId();
         String namespace = dbForgeEphemeralNamespace();
         String primaryHost = leaseId + "-0." + leaseId + "-hs." + namespace + ".svc.cluster.local";
-        primaryVerifierDataSource = new HikariDataSource();
-        primaryVerifierDataSource.setJdbcUrl("jdbc:postgresql://" + primaryHost + ":5432/"
-                + dbForgeConnectionConfig.getString("database"));
-        primaryVerifierDataSource.setUsername(dbForgeConnectionConfig.getString("user"));
-        primaryVerifierDataSource.setPassword(dbForgeConnectionConfig.getString("password"));
-        primaryVerifierDataSource.setMaximumPoolSize(4);
-        primaryVerifierDataSource.setConnectionTimeout(10_000);
+        if (primaryVerifierDataSource == null) {
+            primaryVerifierDataSource = new HikariDataSource();
+            primaryVerifierDataSource.setJdbcUrl("jdbc:postgresql://" + primaryHost + ":5432/"
+                    + dbForgeConnectionConfig.getString("database"));
+            primaryVerifierDataSource.setUsername(dbForgeConnectionConfig.getString("user"));
+            primaryVerifierDataSource.setPassword(dbForgeConnectionConfig.getString("password"));
+            primaryVerifierDataSource.setMaximumPoolSize(2);
+            primaryVerifierDataSource.setMinimumIdle(0);
+            primaryVerifierDataSource.setConnectionTimeout(10_000);
+        }
         return new PostgresJdbcVerifier(primaryVerifierDataSource, dbForgeConnectionConfig.getString("schema"));
     }
 
