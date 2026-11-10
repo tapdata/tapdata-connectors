@@ -21,6 +21,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PaimonSpecTest {
 
     @Test
+    void deduplicateUpdateAfterCompletenessSwitchMustDefaultOnAndBePerTable() throws Exception {
+        JsonObject spec = loadSpec();
+        JsonObject field = spec.getAsJsonObject("configOptions").getAsJsonObject("node")
+                .getAsJsonObject("properties").getAsJsonObject("enableDeduplicateUpdateAfterCompletenessCheck");
+        assertTrue(field.get("default").getAsBoolean());
+        assertTrue(field.get("x-perTable").getAsBoolean());
+        assertEquals("${enableDeduplicateUpdateAfterCompletenessCheck_description}",
+                field.getAsJsonObject("x-decorator-props").get("tooltip").getAsString());
+        JsonObject messages = spec.getAsJsonObject("messages");
+        for (String locale : Arrays.asList("en_US", "zh_CN", "zh_TW")) {
+            assertTrue(messages.getAsJsonObject(locale)
+                    .get("enableDeduplicateUpdateAfterCompletenessCheck").getAsString().length() > 0, locale);
+            assertTrue(messages.getAsJsonObject(locale)
+                    .get("enableDeduplicateUpdateAfterCompletenessCheck_description").getAsString().length() > 0, locale);
+        }
+    }
+
+    @Test
     void spillSwitchMustDescribeNativeWriteBufferScopeInEveryLocale() throws Exception {
         JsonObject spec = loadSpec();
         JsonObject field = spec.getAsJsonObject("configOptions").getAsJsonObject("node")

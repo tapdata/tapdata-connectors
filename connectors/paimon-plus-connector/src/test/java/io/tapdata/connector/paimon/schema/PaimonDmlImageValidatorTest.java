@@ -73,6 +73,87 @@ class PaimonDmlImageValidatorTest {
         assertTrue(thrown.getMessage().contains("bucketMode=" + bucketMode));
     }
 
+    @Test
+    void deduplicateUpdateAfterShouldRespectPerTableCompletenessToggle() {
+        PaimonWriteSemanticContract contract =
+                contract(
+                        BucketMode.HASH_DYNAMIC,
+                        MergeEngine.DEDUPLICATE,
+                        false,
+                        Arrays.asList("id", "pt", "value"),
+                        set("id"),
+                        Collections.emptySet(),
+                        set("id"),
+                        set("pt"),
+                        null,
+                        -1);
+        TapTable table = tapTable("id", "pt", "value");
+
+        assertDoesNotThrow(
+                () ->
+                        PaimonDmlImageValidator.validateUpdate(
+                                "default.t",
+                                contract,
+                                PaimonGeneratedFieldDependencies.none(),
+                                table,
+                                null,
+                                map("id", 1, "pt", "A"),
+                                false));
+        assertDoesNotThrow(
+                () ->
+                        PaimonDmlImageValidator.validateUpdate(
+                                "default.t",
+                                contract,
+                                PaimonGeneratedFieldDependencies.none(),
+                                table,
+                                null,
+                                map("id", 1, "pt", "A", "value", "latest"),
+                                false));
+        assertThrows(
+                PaimonFatalWriteException.class,
+                () ->
+                        PaimonDmlImageValidator.validateUpdate(
+                                "default.t",
+                                contract,
+                                PaimonGeneratedFieldDependencies.none(),
+                                table,
+                                null,
+                                map("id", 1, "pt", "A"),
+                                true));
+    }
+
+    @Test
+    void fullChangelogStillRequiresCompleteUpdateAfter() {
+        PaimonWriteSemanticContract contract =
+                contract(
+                        BucketMode.HASH_DYNAMIC,
+                        MergeEngine.DEDUPLICATE,
+                        true,
+                        Arrays.asList("id", "pt", "value"),
+                        set("id"),
+                        Collections.emptySet(),
+                        set("id"),
+                        set("pt"),
+                        null,
+                        -1);
+
+        PaimonFatalWriteException thrown =
+                assertThrows(
+                        PaimonFatalWriteException.class,
+                        () ->
+                                PaimonDmlImageValidator.validateUpdate(
+                                        "default.t",
+                                        contract,
+                                        PaimonGeneratedFieldDependencies.none(),
+                                        tapTable("id", "pt", "value"),
+                                        map("id", 1, "pt", "A", "value", "before"),
+                                        map("id", 1, "pt", "A"),
+                                        false));
+
+        assertTrue(thrown.getMessage().contains("PAIMON_INCOMPLETE_AFTER_IMAGE"));
+        assertFalse(thrown.getMessage().contains("PAIMON_DEDUPLICATE_INCOMPLETE_UPDATE_AFTER"));
+    }
+
     private static Stream<BucketMode> primaryKeyBucketModes() {
         return Stream.of(
                 BucketMode.HASH_FIXED,
