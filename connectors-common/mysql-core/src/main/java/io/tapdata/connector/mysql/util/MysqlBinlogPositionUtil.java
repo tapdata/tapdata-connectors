@@ -32,17 +32,7 @@ public class MysqlBinlogPositionUtil implements AutoCloseable {
 
     public MysqlBinlogPositionUtil(String host, int port, String username, String password) throws SQLException {
         try (Connection conn = getConnection(host, port, username, password)) {
-            boolean lowVersion = true;
-            DatabaseMetaData databaseMetaData = conn.getMetaData();
-            String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
-            String[] versionNums = version.split("\\.");
-            if (versionNums.length >= 2) {
-                int majorVersion = Integer.parseInt(versionNums[0]);
-                int minorVersion = Integer.parseInt(versionNums[1]);
-                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
-                    lowVersion = false;
-                }
-            }
+            boolean lowVersion = !MysqlVersionUtil.usesBinaryLogStatus(conn.getMetaData());
             String firstBinlogFilename = queryOneString(conn, "show binlog events limit 1");
             if (null == firstBinlogFilename) throw new RuntimeException("not found first binlog filename.");
 
