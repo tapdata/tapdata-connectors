@@ -2,6 +2,7 @@ package io.tapdata.connector.mysql;
 
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.TapDDLEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
@@ -44,8 +45,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -102,6 +105,11 @@ public class MySQLConnectorIT extends TpccConnectorIT {
         return true;
     }
 
+    /** Standard MySQL CDC uses the connector's normal binlog reader. */
+    protected boolean highPerformanceCdcEnabled() {
+        return false;
+    }
+
     protected List<String> sourceDdlStatements(String table) {
         return List.of(
                 "ALTER TABLE " + table + " ADD COLUMN c_ddl_probe varchar(64)",
@@ -110,6 +118,11 @@ public class MySQLConnectorIT extends TpccConnectorIT {
                 "ALTER TABLE " + table + " DROP CONSTRAINT chk_ddl_probe",
                 "ALTER TABLE " + table + " CHANGE COLUMN c_ddl_probe c_ddl_probe_new varchar(64)",
                 "ALTER TABLE " + table + " DROP COLUMN c_ddl_probe_new");
+    }
+
+    @Override
+    protected String sourceDdlInterleaveDropFieldStatement(String table) {
+        return "ALTER TABLE " + table + " DROP COLUMN c_ddl_probe";
     }
 
     @Test
@@ -228,6 +241,59 @@ public class MySQLConnectorIT extends TpccConnectorIT {
             waitForMutationEvents(capture, 81L);
         } finally {
             capture.stop();
+        }
+    }
+
+    @Test
+    @UnderTest(value = "streamRead", requiresVerifier = true)
+    @DisplayName("MySQL composite ADD with multiple columns emits a valid DDL event")
+    void should_stream_composite_add_columns_ddl() throws Throwable {
+        String tableName = spec.getTableName();
+        createTransactionTable(tableName);
+        TapTable table = transactionTable(tableName);
+        registerTable(table);
+        Capture capture = startCapture(table, currentOffset());
+        try {
+            execute("ALTER TABLE " + qualified(tableName)
+                    + " ADD COLUMN c_composite_a VARCHAR(40) NULL,"
+                    + " ADD COLUMN c_composite_b BIGINT NULL");
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(streamReadTimeoutSeconds());
+            while (System.nanoTime() < deadline && !hasCompositeAddEvent(capture.events)) {
+                Thread.sleep(50L);
+            }
+            List<TapEvent> events;
+            synchronized (capture.events) {
+                events = new ArrayList<>(capture.events);
+            }
+            List<TapDDLEvent> ddlEvents = new ArrayList<>();
+            for (TapEvent event : events) {
+                if (event instanceof TapDDLEvent) ddlEvents.add((TapDDLEvent) event);
+            }
+            assertTrue(hasCompositeAddEvent(capture.events),
+                    "expected a valid TapDDLEvent containing both added columns; received: " + events);
+            List<TapNewFieldEvent> addEvents = events.stream()
+                    .filter(TapNewFieldEvent.class::isInstance).map(TapNewFieldEvent.class::cast)
+                    .collect(Collectors.toList());
+            assertFalse(addEvents.isEmpty(), "composite add should produce TapNewFieldEvent instances");
+            assertTrue(ddlEvents.containsAll(addEvents), "each added column must be delivered as a TapDDLEvent");
+            assertEquals(Set.of("c_composite_a", "c_composite_b"), compositeAddedFieldNames(events),
+                    "the composite DDL events should collectively contain exactly the two added columns");
+        } finally {
+            capture.stop();
+        }
+    }
+
+    private boolean hasCompositeAddEvent(List<TapEvent> events) {
+        Set<String> names = compositeAddedFieldNames(events);
+        return names.contains("c_composite_a") && names.contains("c_composite_b");
+    }
+
+    private Set<String> compositeAddedFieldNames(List<TapEvent> events) {
+        synchronized (events) {
+            return events.stream().filter(TapNewFieldEvent.class::isInstance)
+                    .map(TapNewFieldEvent.class::cast)
+                    .flatMap(event -> event.getNewFields().stream())
+                    .map(TapField::getName).map(String::toLowerCase).collect(Collectors.toSet());
         }
     }
 
@@ -585,8 +651,13 @@ public class MySQLConnectorIT extends TpccConnectorIT {
     }
 
     private DataMap loadConnectionConfig() throws Exception {
+        String cdcMode = System.getProperty("connector.it.cdc.mode");
+        boolean highPerformance = cdcMode == null || cdcMode.isBlank()
+                ? highPerformanceCdcEnabled() : resolveHighPerformanceMode(cdcMode);
         if (!DbForgeLeaseProvider.isDbForgeSelected()) {
-            return readConnectionConfig("config/mysql-connection.json");
+            DataMap config = readConnectionConfig("config/mysql-connection.json");
+            config.put("highPerformance", highPerformance);
+            return config;
         }
         if (dbForgeConnectionConfig == null) {
             dbForgeLeaseProvider = DbForgeLeaseProvider.fromEnvironment("tapdata-mysql-connector-it");
@@ -597,7 +668,7 @@ public class MySQLConnectorIT extends TpccConnectorIT {
             dbForgeConnectionConfig.put("database", connection.required("database"));
             dbForgeConnectionConfig.put("user", connection.firstRequired("user", "username"));
             dbForgeConnectionConfig.put("password", connection.required("password"));
-            dbForgeConnectionConfig.put("highPerformance", true);
+            dbForgeConnectionConfig.put("highPerformance", highPerformance);
             System.out.printf("[IT] DBForge MySQL lease acquired: leaseId=%s, host=%s, port=%s, database=%s, user=%s%n",
                     dbForgeLeaseProvider.getLeaseId(), dbForgeConnectionConfig.getString("host"),
                     dbForgeConnectionConfig.getInteger("port"), dbForgeConnectionConfig.getString("database"),
@@ -606,6 +677,12 @@ public class MySQLConnectorIT extends TpccConnectorIT {
         DataMap config = DataMap.create();
         config.putAll(dbForgeConnectionConfig);
         return config;
+    }
+
+    private boolean resolveHighPerformanceMode(String cdcMode) {
+        if ("mysql-standard".equalsIgnoreCase(cdcMode)) return false;
+        if ("mysql-high-performance".equalsIgnoreCase(cdcMode)) return true;
+        throw new IllegalArgumentException("Unsupported MySQL CDC test mode: " + cdcMode);
     }
 
     @AfterAll
