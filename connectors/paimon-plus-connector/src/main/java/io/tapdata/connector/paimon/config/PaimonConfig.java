@@ -150,6 +150,10 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // Requires source database to provide before-update data
     private Boolean enablePrimaryKeyUpdate = false;
 
+    // Validate complete UPDATE_AFTER images for primary-key Deduplicate tables by default.
+    // Disabling this per-table escape hatch may let omitted columns be written as null/default.
+    private Boolean enableDeduplicateUpdateAfterCompletenessCheck = true;
+
     public String getWarehouse() {
         return warehouse;
     }
@@ -505,6 +509,21 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     public void setEnablePrimaryKeyUpdate(Boolean enablePrimaryKeyUpdate) {
         this.enablePrimaryKeyUpdate = enablePrimaryKeyUpdate;
+    }
+
+    public Boolean getEnableDeduplicateUpdateAfterCompletenessCheck() {
+        return !Boolean.FALSE.equals(enableDeduplicateUpdateAfterCompletenessCheck);
+    }
+
+    public Boolean getEnableDeduplicateUpdateAfterCompletenessCheck(String key) {
+        return !Boolean.FALSE.equals(getTableConfigValue(
+                key,
+                "enableDeduplicateUpdateAfterCompletenessCheck",
+                enableDeduplicateUpdateAfterCompletenessCheck));
+    }
+
+    public void setEnableDeduplicateUpdateAfterCompletenessCheck(Boolean value) {
+        this.enableDeduplicateUpdateAfterCompletenessCheck = value;
     }
 
     /**

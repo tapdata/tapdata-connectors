@@ -29,6 +29,16 @@ public final class PaimonDmlImageValidator {
             PaimonGeneratedFieldDependencies generatedFields,
             TapTable tapTable,
             List<TapRecordEvent> recordEvents) {
+        validateBatch(tableKey, contract, generatedFields, tapTable, recordEvents, true);
+    }
+
+    public static void validateBatch(
+            String tableKey,
+            PaimonWriteSemanticContract contract,
+            PaimonGeneratedFieldDependencies generatedFields,
+            TapTable tapTable,
+            List<TapRecordEvent> recordEvents,
+            boolean validateDeduplicateUpdateAfterCompleteness) {
         ValidationRequirements requirements =
                 resolveRequirements(tableKey, contract, generatedFields, tapTable);
         for (TapRecordEvent event : Objects.requireNonNull(recordEvents, "recordEvents")) {
@@ -44,7 +54,12 @@ public final class PaimonDmlImageValidator {
                         false);
             } else if (event instanceof TapUpdateRecordEvent) {
                 TapUpdateRecordEvent update = (TapUpdateRecordEvent) event;
-                validateUpdateAfter(tableKey, contract, requirements, update.getAfter());
+                validateUpdateAfter(
+                        tableKey,
+                        contract,
+                        requirements,
+                        update.getAfter(),
+                        validateDeduplicateUpdateAfterCompleteness);
             } else if (event instanceof TapDeleteRecordEvent) {
                 validateImage(
                         tableKey,
@@ -83,6 +98,17 @@ public final class PaimonDmlImageValidator {
             TapTable tapTable,
             @Nullable Map<String, Object> before,
             @Nullable Map<String, Object> after) {
+        validateUpdate(tableKey, contract, generatedFields, tapTable, before, after, true);
+    }
+
+    public static void validateUpdate(
+            String tableKey,
+            PaimonWriteSemanticContract contract,
+            PaimonGeneratedFieldDependencies generatedFields,
+            TapTable tapTable,
+            @Nullable Map<String, Object> before,
+            @Nullable Map<String, Object> after,
+            boolean validateDeduplicateUpdateAfterCompleteness) {
         ValidationRequirements requirements =
                 resolveRequirements(tableKey, contract, generatedFields, tapTable);
         validateImage(
@@ -94,7 +120,8 @@ public final class PaimonDmlImageValidator {
                 "PAIMON_INCOMPLETE_BEFORE_IMAGE",
                 contract.requiresFullChangelog(),
                 false);
-        validateUpdateAfter(tableKey, contract, requirements, after);
+        validateUpdateAfter(
+                tableKey, contract, requirements, after, validateDeduplicateUpdateAfterCompleteness);
     }
 
     public static void validateDelete(
@@ -118,8 +145,11 @@ public final class PaimonDmlImageValidator {
             String tableKey,
             PaimonWriteSemanticContract contract,
             ValidationRequirements requirements,
-            @Nullable Map<String, Object> after) {
-        boolean deduplicateUpdateAfter = requirements.deduplicateUpdateAfterRequired;
+            @Nullable Map<String, Object> after,
+            boolean validateDeduplicateUpdateAfterCompleteness) {
+        boolean deduplicateUpdateAfter =
+                requirements.deduplicateUpdateAfterRequired
+                        && validateDeduplicateUpdateAfterCompleteness;
         validateImage(
                 tableKey,
                 contract,

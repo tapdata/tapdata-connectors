@@ -21,6 +21,31 @@ import static org.junit.jupiter.api.Assertions.*;
 class PaimonConfigTest {
 
     @Test
+    void deduplicateUpdateAfterCompletenessMustDefaultOnAndSupportPerTableOverride() {
+        PaimonConfig config = new PaimonConfig();
+        assertTrue(config.getEnableDeduplicateUpdateAfterCompletenessCheck());
+        assertTrue(config.getEnableDeduplicateUpdateAfterCompletenessCheck("orders"));
+
+        config.setEnableDeduplicateUpdateAfterCompletenessCheck(false);
+        assertFalse(config.getEnableDeduplicateUpdateAfterCompletenessCheck());
+        assertFalse(config.getEnableDeduplicateUpdateAfterCompletenessCheck("orders"));
+
+        config.setEnableDeduplicateUpdateAfterCompletenessCheck(true);
+        config.setTableConfig(Collections.singletonMap(
+                "orders",
+                DataMap.create().kv("enableDeduplicateUpdateAfterCompletenessCheck", false)));
+        assertFalse(config.getEnableDeduplicateUpdateAfterCompletenessCheck("orders"));
+        assertTrue(config.getEnableDeduplicateUpdateAfterCompletenessCheck("other"));
+
+        config.setEnableDeduplicateUpdateAfterCompletenessCheck(false);
+        config.setTableConfig(Collections.singletonMap(
+                "orders",
+                DataMap.create().kv("enableDeduplicateUpdateAfterCompletenessCheck", true)));
+        assertTrue(config.getEnableDeduplicateUpdateAfterCompletenessCheck("orders"));
+        assertFalse(config.getEnableDeduplicateUpdateAfterCompletenessCheck("other"));
+    }
+
+    @Test
     void effectiveGlobalNodeAndTableTmpDirsMustBeValidated() {
         PaimonConfig config = new PaimonConfig();
         config.setWarehouse("/tmp/paimon");
