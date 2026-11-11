@@ -324,10 +324,40 @@ public class MongodbMergeOperate {
 			if (null == mergeResult) {
 				mergeResult = new MergeResult();
 			}
-			updateIntoArrayMerge(mergeBundle, properties, mergeResult, mergeFilter);
-			return mergeResult;
+			if (properties.getIsArray()) {
+				updateIntoArrayMerge(mergeBundle, properties, mergeResult, mergeFilter);
+				return mergeResult;
+			}
+			return appendArrayPullOnParentDelete(mergeBundle, properties, mergeResult, mergeFilter);
 		}
 		return appendDescendantUnsetOnParentDelete(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
+	}
+
+	private static MergeResult appendArrayPullOnParentDelete(MergeBundle mergeBundle, MergeTableProperties properties,
+			MergeResult mergeResult, MergeFilter mergeFilter) {
+		// 父 DELETE 时父行字段已在同批前序写入中被 $unset，不能再用子表 joinKeys 映射到父字段的条件定位主文档，
+		// 否则按序执行后 $pull 匹配 0 条；只用父级 filter 定位主文档，按 arrayKeys 拉取元素
+		if (MapUtils.isEmpty(mergeResult.getFilter()) && null != mergeFilter) {
+			Document parentFilters = mergeFilter.appendFilters();
+			if (MapUtils.isNotEmpty(parentFilters)) {
+				mergeResult.getFilter().putAll(parentFilters);
+			}
+		} else {
+			appendAllParentMergeFilters(mergeResult, mergeFilter);
+		}
+		if (MapUtils.isEmpty(mergeResult.getFilter())) {
+			return mergeResult;
+		}
+		if (null == mergeResult.getOperation()) {
+			mergeResult.setOperation(MergeResult.Operation.UPDATE);
+		}
+		Document pullDoc = buildPullDocument(mergeBundle.getBefore(), properties.getArrayKeys(), false, properties.getTargetPath());
+		if (mergeResult.getUpdate().containsKey("$pull")) {
+			mergeResult.getUpdate().get("$pull", Document.class).putAll(pullDoc);
+		} else {
+			mergeResult.getUpdate().put("$pull", pullDoc);
+		}
+		return mergeResult;
 	}
 
 	private static MergeResult updateIntoArrayMergeIfNeed(MergeBundle mergeBundle, MergeTableProperties properties, MergeResult mergeResult, MergeFilter mergeFilter) {
