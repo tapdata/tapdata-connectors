@@ -76,6 +76,25 @@ class PaimonConfigTest {
     }
 
     @Test
+    void stopBudgetsMustAllowTableDefaultsThatMatchEffectiveNodeValues() {
+        PaimonConfig config = new PaimonConfig();
+        config.setTableConfig(Collections.singletonMap("orders", DataMap.create()
+                .kv("stopTimeoutSeconds", 180)
+                .kv("finalCompactionTimeoutSeconds", 120)
+                .kv("compactionCancelGraceSeconds", 30)));
+        assertDoesNotThrow(config::validateStopBudgets);
+
+        config.setStopTimeoutSeconds(45);
+        config.setFinalCompactionTimeoutSeconds(40);
+        config.setCompactionCancelGraceSeconds(15);
+        config.setTableConfig(Collections.singletonMap("orders", DataMap.create()
+                .kv("stopTimeoutSeconds", "45")
+                .kv("finalCompactionTimeoutSeconds", 40L)
+                .kv("compactionCancelGraceSeconds", 15.0)));
+        assertDoesNotThrow(config::validateStopBudgets);
+    }
+
+    @Test
     void stopBudgetsMissingNullAndLayeredDefaultsMustMatch() {
         PaimonConfig config = new PaimonConfig().load(Collections.emptyMap());
         assertEquals(180, config.getStopTimeoutSeconds());
