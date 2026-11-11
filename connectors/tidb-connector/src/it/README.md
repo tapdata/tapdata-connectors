@@ -40,4 +40,4 @@ The default connection file is `src/it/resources/config/tidb-connection.json`. O
 
 ## Source DDL regressions
 
-The suite enables the shared composite ADD and ADD → DML → DROP → DML regressions. These require valid column DDL events, the original table identity, added-column values, and DDL/DML delivery order. The existing ADD → rename → DROP followed by DML regression is enabled as well. See [the source DDL test matrix](../../../source-ddl-it/README.md) for targeted commands and derived-connector coverage.
+The suite enables the shared composite ADD and ADD → DML → DROP → DML regressions. These require valid column DDL events, the original table identity, added-column values, and DDL/DML delivery order. The existing ADD → rename → DROP followed by DML regression is enabled as well. See [the source DDL test matrix](../../../source-ddl-it-support/README.md) for targeted commands and derived-connector coverage.

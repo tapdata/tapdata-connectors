@@ -301,6 +301,13 @@ public class PostgresConnectorIT extends TpccConnectorIT {
     }
 
     @Override
+    protected String sourceCompositeAddColumnsStatement(String table) {
+        String qualifiedTable = "\"public\".\"" + table.replace("\"", "\"\"") + "\"";
+        return "ALTER TABLE " + qualifiedTable
+                + " ADD COLUMN c_composite_a VARCHAR(64), ADD COLUMN c_composite_b BIGINT";
+    }
+
+    @Override
     protected String sourceDdlInterleaveDropFieldStatement(String table) {
         String qualifiedTable = "\"public\".\"" + table.replace("\"", "\"\"") + "\"";
         return "ALTER TABLE " + qualifiedTable + " DROP COLUMN c_ddl_probe";

@@ -13,7 +13,7 @@
         <module>mongodb-connector</module>
 		<module>mongodb-atlas-connector</module>
 		<module>mysql-connector</module>
-        <module>source-ddl-it</module>
+        <module>source-ddl-it-support</module>
         <module>postgres-connector</module>
 		<module>elasticsearch-connector</module>
         <module>doris-connector</module>
