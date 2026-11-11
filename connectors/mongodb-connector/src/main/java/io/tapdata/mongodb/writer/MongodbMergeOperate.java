@@ -193,6 +193,9 @@ public class MongodbMergeOperate {
 				}
 				mergeResult = addMergeResults(mergeResults, mergeResult);
 				mergeResult = updateMergeIfNeed(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
+				if (MergeBundle.EventOperation.DELETE == mergeBundle.getOperation()) {
+					mergeResult = appendDescendantUnsetOnParentDelete(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
+				}
 				updateKeyDiff = keyDiffUnsetWhenUpdateWrite(mergeResult, updateKeyDiffInfos);
 				break;
 			case updateIntoArray:
@@ -201,7 +204,11 @@ public class MongodbMergeOperate {
 					mergeBundle.setOperation(MergeBundle.EventOperation.INSERT);
 				}
 				mergeResult = addMergeResults(mergeResults, mergeResult);
-				mergeResult = updateIntoArrayMergeIfNeed(mergeBundle, properties, mergeResult, mergeFilter);
+				if (MergeBundle.EventOperation.DELETE == mergeBundle.getOperation()) {
+					mergeResult = appendArrayDeleteOnParentDelete(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
+				} else {
+					mergeResult = updateIntoArrayMergeIfNeed(mergeBundle, properties, mergeResult, mergeFilter);
+				}
 				break;
 			default:
 				break;
@@ -213,11 +220,22 @@ public class MongodbMergeOperate {
 			for (MergeLookupResult mergeLookupResult : mergeLookupResults) {
 				privateLoopTime++;
 				final Map<String, Object> data = mergeLookupResult.getData();
-				mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, data);
-				mergeBundle.setRecursive(true);
-				mergeBundle.setDataExists(mergeLookupResult.isDataExists());
-				if (mergeFilter.isAppend() && null != mergeResult) {
-					mergeFilter.addFilter(mergeResult.getFilter());
+				if (MergeBundle.EventOperation.DELETE == mergeBundle.getOperation()) {
+					// 父 DELETE 级联清理：不得把子孙 lookup 数据改写成 INSERT/$set
+					// 子孙 $unset/$pull 必须打在父文档上，因此无论 MergeFilter 是否 append，都把父 filter 传下去
+					if (null != mergeFilter && null != mergeResult && MapUtils.isNotEmpty(mergeResult.getFilter())) {
+						mergeFilter.addFilter(mergeResult.getFilter());
+					}
+					mergeBundle = new MergeBundle(MergeBundle.EventOperation.DELETE, data, null);
+					mergeBundle.setRecursive(true);
+					mergeBundle.setDataExists(false);
+				} else {
+					mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, data);
+					mergeBundle.setRecursive(true);
+					mergeBundle.setDataExists(mergeLookupResult.isDataExists());
+					if (mergeFilter.isAppend() && null != mergeResult) {
+						mergeFilter.addFilter(mergeResult.getFilter());
+					}
 				}
 				recursiveMerge(
 						mergeBundle,
@@ -259,6 +277,57 @@ public class MongodbMergeOperate {
 			return updateKeyDiffUnset;
 		}
 		return null;
+	}
+
+
+	private static MergeResult appendDescendantUnsetOnParentDelete(MergeBundle mergeBundle, MergeTableProperties properties,
+			MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter) {
+		Map<String, Object> value = MapUtils.isNotEmpty(mergeBundle.getAfter()) ? mergeBundle.getAfter() : mergeBundle.getBefore();
+		String targetPath = MergeUtils.dynamicKey(properties.getTargetPath(), value);
+		if (StringUtils.isBlank(targetPath) || isShareJoinKey(sharedJoinKeys, targetPath)) {
+			return mergeResult;
+		}
+		if (null == mergeResult) {
+			mergeResult = new MergeResult();
+		}
+		// 父文档定位必须来自父级 filter，不能用子孙自己的 joinKeys（否则会写成 {idC: ...} 而打不到主文档）
+		if (MapUtils.isEmpty(mergeResult.getFilter()) && null != mergeFilter) {
+			Document parentFilters = mergeFilter.appendFilters();
+			if (MapUtils.isNotEmpty(parentFilters)) {
+				mergeResult.getFilter().putAll(parentFilters);
+			}
+		} else {
+			appendAllParentMergeFilters(mergeResult, mergeFilter);
+		}
+		if (MapUtils.isEmpty(mergeResult.getFilter())) {
+			return mergeResult;
+		}
+		if (null == mergeResult.getOperation()) {
+			mergeResult.setOperation(MergeResult.Operation.UPDATE);
+		}
+		Document unsetDoc = new Document(targetPath, true);
+		if (mergeResult.getUpdate().containsKey("$unset")) {
+			mergeResult.getUpdate().get("$unset", Document.class).putAll(unsetDoc);
+		} else {
+			mergeResult.getUpdate().put("$unset", unsetDoc);
+		}
+		return mergeResult;
+	}
+
+	private static MergeResult appendArrayDeleteOnParentDelete(MergeBundle mergeBundle, MergeTableProperties properties,
+			MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter) {
+		List<String> arrayKeys = properties.getArrayKeys();
+		Map<String, Object> before = mergeBundle.getBefore();
+		boolean canPull = CollectionUtils.isNotEmpty(arrayKeys) && MapUtils.isNotEmpty(before)
+				&& arrayKeys.stream().anyMatch(key -> MapUtil.getValueByKey(before, key) != null);
+		if (canPull) {
+			if (null == mergeResult) {
+				mergeResult = new MergeResult();
+			}
+			updateIntoArrayMerge(mergeBundle, properties, mergeResult, mergeFilter);
+			return mergeResult;
+		}
+		return appendDescendantUnsetOnParentDelete(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
 	}
 
 	private static MergeResult updateIntoArrayMergeIfNeed(MergeBundle mergeBundle, MergeTableProperties properties, MergeResult mergeResult, MergeFilter mergeFilter) {
