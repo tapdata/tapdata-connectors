@@ -278,6 +278,134 @@ class MongodbMergeOperateTest {
 		void testParentDeleteMustNotInsertChildLookup() {
 			testParentDeleteUnsetChildTargetPath();
 		}
+
+		@Test
+		@DisplayName("U5 parent flatten DELETE then descendant $unset/$pull executed in order must clean productPart and attrList of main doc")
+		void testParentDeleteCleanDescendantsWhenExecutedInOrder() {
+			Map<String, Object> before = new HashMap<>();
+			before.put("_id", 101);
+			before.put("PROD_ID", 101);
+			before.put("itemId", 1);
+			before.put("attrCode", "IRON");
+			before.put("partName", "part-101");
+			MergeTableProperties parent = new MergeTableProperties();
+			parent.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			parent.setTargetPath("");
+			parent.setJoinKeys(joinKeys("itemId", "itemId"));
+			MergeTableProperties docChild = new MergeTableProperties();
+			docChild.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			docChild.setTargetPath("productPart");
+			docChild.setJoinKeys(joinKeys("referenceCode", "attrCode"));
+			MergeTableProperties arrChild = new MergeTableProperties();
+			arrChild.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			arrChild.setTargetPath("attrList");
+			arrChild.setIsArray(false);
+			arrChild.setArrayKeys(new ArrayList<>(Collections.singletonList("attrId")));
+			arrChild.setJoinKeys(joinKeys("referenceCode", "attrCode"));
+			List<MergeLookupResult> lookups = new ArrayList<>();
+			lookups.add(lookup(docChild, "level3_doc", new Document("_id", 1).append("attrId", 1).append("referenceCode", "IRON").append("attrName", "Iron")));
+			lookups.add(lookup(arrChild, "level3_arr", new Document("_id", 11).append("attrId", 11).append("referenceCode", "IRON").append("v", "a")));
+			lookups.add(lookup(arrChild, "level3_arr", new Document("_id", 12).append("attrId", 12).append("referenceCode", "IRON").append("v", "b")));
+			List<MergeResult> mergeResults = new ArrayList<>();
+			MongodbMergeOperate.recursiveMerge(
+					new MergeBundle(MergeBundle.EventOperation.DELETE, before, null),
+					parent,
+					mergeResults,
+					lookups,
+					null,
+					new HashSet<>(Collections.singletonList("itemId")),
+					new MergeFilter(true),
+					2,
+					null
+			);
+
+			Document main = new Document("itemId", 1).append("name", "item-1")
+					.append("PROD_ID", 101).append("attrCode", "IRON").append("partName", "part-101")
+					.append("productPart", new Document("_id", 1).append("attrId", 1).append("referenceCode", "IRON").append("attrName", "Iron"))
+					.append("attrList", new ArrayList<>(Arrays.asList(
+							new Document("_id", 11).append("attrId", 11).append("referenceCode", "IRON").append("v", "a"),
+							new Document("_id", 12).append("attrId", 12).append("referenceCode", "IRON").append("v", "b"))));
+			Document other = new Document("itemId", 2).append("name", "item-2")
+					.append("PROD_ID", 102).append("attrCode", "GOLD").append("partName", "part-102")
+					.append("productPart", new Document("_id", 2).append("attrId", 2).append("referenceCode", "GOLD"))
+					.append("attrList", new ArrayList<>(Collections.singletonList(new Document("_id", 21).append("attrId", 21).append("referenceCode", "GOLD"))));
+			List<Document> collection = Arrays.asList(main, other);
+			for (MergeResult result : mergeResults) {
+				if (result == null || result.getOperation() == null) {
+					continue;
+				}
+				assertEquals(MergeResult.Operation.UPDATE, result.getOperation());
+				applyInOrder(collection, result.getFilter(), result.getUpdate());
+			}
+
+			assertEquals(1, main.get("itemId"));
+			assertEquals("item-1", main.get("name"));
+			assertFalse(main.containsKey("PROD_ID"));
+			assertFalse(main.containsKey("attrCode"));
+			assertFalse(main.containsKey("partName"));
+			assertFalse(main.containsKey("productPart"));
+			Object attrList = main.get("attrList");
+			assertTrue(null == attrList || ((List<?>) attrList).isEmpty(), "attrList should be pulled, actual: " + attrList);
+			assertEquals("GOLD", other.get("attrCode"));
+			assertTrue(other.containsKey("productPart"));
+			assertEquals(1, ((List<?>) other.get("attrList")).size());
+		}
+
+		private List<Map<String, String>> joinKeys(String source, String target) {
+			List<Map<String, String>> keys = new ArrayList<>();
+			Map<String, String> key = new HashMap<>();
+			key.put("source", source);
+			key.put("target", target);
+			keys.add(key);
+			return keys;
+		}
+
+		private MergeLookupResult lookup(MergeTableProperties property, String table, Map<String, Object> data) {
+			MergeLookupResult lookupResult = new MergeLookupResult();
+			lookupResult.setDataExists(true);
+			lookupResult.setData(data);
+			lookupResult.setTapTable(new TapTable(table));
+			lookupResult.setProperty(property);
+			return lookupResult;
+		}
+
+		/**
+		 * 按 Mongo 语义顺序执行合并写出的 UpdateOne（仅支持本场景用到的等值过滤、$unset、$pull），
+		 * 用于发现「前序 $unset 掉的字段被后续写入当过滤条件」这类只有顺序执行才暴露的问题。
+		 */
+		private void applyInOrder(List<Document> collection, Document filter, Document update) {
+			for (Document doc : collection) {
+				boolean matched = true;
+				for (Map.Entry<String, Object> condition : filter.entrySet()) {
+					assertFalse(condition.getValue() instanceof Document, "unsupported filter operator: " + condition);
+					if (!doc.containsKey(condition.getKey()) || !Objects.equals(doc.get(condition.getKey()), condition.getValue())) {
+						matched = false;
+						break;
+					}
+				}
+				if (!matched) {
+					continue;
+				}
+				for (Map.Entry<String, Object> op : update.entrySet()) {
+					Document body = (Document) op.getValue();
+					if ("$unset".equals(op.getKey())) {
+						body.keySet().forEach(doc::remove);
+					} else if ("$pull".equals(op.getKey())) {
+						for (Map.Entry<String, Object> pull : body.entrySet()) {
+							Object array = doc.get(pull.getKey());
+							if (!(array instanceof List)) {
+								continue;
+							}
+							Map<?, ?> condition = (Map<?, ?>) pull.getValue();
+							((List<?>) array).removeIf(element -> element instanceof Map && condition.entrySet().stream()
+									.allMatch(c -> Objects.equals(((Map<?, ?>) element).get(c.getKey()), c.getValue())));
+						}
+					} else {
+						fail("unsupported update operator in parent DELETE cleanup: " + op.getKey());
+					}
+				}
+			}
+		}
 	}
 
 	@Nested
