@@ -6,6 +6,7 @@ import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.JdbcContext;
 import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
+import io.tapdata.connector.mysql.util.MysqlVersionUtil;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.DbKit;
@@ -183,22 +184,9 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     }
 
     private boolean isLowVersion() throws SQLException {
-        boolean lowVersion = true;
-        try (
-                Connection connection = getConnection()
-        ) {
-            DatabaseMetaData databaseMetaData = connection.getMetaData();
-            String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
-            String[] versionNums = version.split("\\.");
-            if (versionNums.length >= 2) {
-                int majorVersion = Integer.parseInt(versionNums[0]);
-                int minorVersion = Integer.parseInt(versionNums[1]);
-                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
-                    lowVersion = false;
-                }
-            }
+        try (Connection connection = getConnection()) {
+            return !MysqlVersionUtil.usesBinaryLogStatus(connection.getMetaData());
         }
-        return lowVersion;
     }
 
     public Timestamp queryCurrentTime() throws SQLException {

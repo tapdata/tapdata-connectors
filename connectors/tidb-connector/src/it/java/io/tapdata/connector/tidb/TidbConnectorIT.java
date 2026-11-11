@@ -17,6 +17,8 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.TestInstance;
 
+import java.util.List;
+
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class TidbConnectorIT extends TpccConnectorIT {
 
@@ -29,6 +31,30 @@ public class TidbConnectorIT extends TpccConnectorIT {
         // server and create a changefeed before streamReadStarted is reported.
         // Observed cold startup exceeds the base IT suite's 15-second window.
         return 60L;
+    }
+
+    @Override
+    protected boolean supportsSourceDdlCapture() {
+        return true;
+    }
+
+    @Override
+    protected List<String> sourceDdlStatements(String table) {
+        return List.of(
+                "ALTER TABLE " + table + " ADD COLUMN c_ddl_probe VARCHAR(64)",
+                "ALTER TABLE " + table + " CHANGE COLUMN c_ddl_probe c_ddl_probe_new VARCHAR(64)",
+                "ALTER TABLE " + table + " DROP COLUMN c_ddl_probe_new");
+    }
+
+    @Override
+    protected String sourceCompositeAddColumnsStatement(String table) {
+        return "ALTER TABLE " + table
+                + " ADD COLUMN c_composite_a VARCHAR(64), ADD COLUMN c_composite_b BIGINT";
+    }
+
+    @Override
+    protected String sourceDdlInterleaveDropFieldStatement(String table) {
+        return "ALTER TABLE " + table + " DROP COLUMN c_ddl_probe";
     }
 
     @Override

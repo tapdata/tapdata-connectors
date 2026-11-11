@@ -310,7 +310,10 @@ public class MysqlReader implements Closeable {
 				 add a configuration that supports partial update of some table schemas,
 				  and logic implementation
 			*/
-            builder.with("snapshot.mode", MySqlConnectorConfig.SnapshotMode.SCHEMA_ONLY_RECOVERY);
+            // Recovery requires a persisted binlog position; a fresh task must capture its initial schema/offset.
+            builder.with("snapshot.mode", StringUtils.isBlank(offsetStr)
+                    ? MySqlConnectorConfig.SnapshotMode.SCHEMA_ONLY
+                    : MySqlConnectorConfig.SnapshotMode.SCHEMA_ONLY_RECOVERY);
             if (null != throwableAtomicReference.get()) {
                 String lastErrorMessage = throwableAtomicReference.get().getMessage();
                 if (StringUtils.isNotBlank(lastErrorMessage) && lastErrorMessage.contains("Could not find existing binlog information while attempting schema only recovery snapshot")) {
@@ -465,7 +468,10 @@ public class MysqlReader implements Closeable {
 				todo The main scenario is shared mining, which dynamically modifies the table include list. If the last cached model list is used, debezium will not load the newly added table model, resulting in a parsing error when reading: whose schema isn't known to this connector
 				todo Best practice, need to change the debezium source code, add a configuration that supports partial update of some table schemas, and logic implementation
 			*/
-            builder.with("snapshot.mode", MySqlConnectorConfig.SnapshotMode.SCHEMA_ONLY_RECOVERY);
+            // Recovery requires a persisted binlog position; a fresh task must capture its initial schema/offset.
+            builder.with("snapshot.mode", StringUtils.isBlank(offsetStr)
+                    ? MySqlConnectorConfig.SnapshotMode.SCHEMA_ONLY
+                    : MySqlConnectorConfig.SnapshotMode.SCHEMA_ONLY_RECOVERY);
             if (null != throwableAtomicReference.get()) {
                 String lastErrorMessage = throwableAtomicReference.get().getMessage();
                 if (StringUtils.isNotBlank(lastErrorMessage) && lastErrorMessage.contains("Could not find existing binlog information while attempting schema only recovery snapshot")) {

@@ -303,7 +303,7 @@ public class MySqlSnapshotChangeEventSource extends RelationalSnapshotChangeEven
         final MySqlOffsetContext offsetContext = MySqlOffsetContext.initial(connectorConfig);
         ctx.offset = offsetContext;
         LOGGER.info("Read binlog position of MySQL primary server");
-        final String showMasterStmt = "SHOW MASTER STATUS";
+        final String showMasterStmt = MySqlConnection.binlogStatusQuery(connection.connection().getMetaData());
         connection.query(showMasterStmt, rs -> {
             if (rs.next()) {
                 final String binlogFilename = rs.getString(1);

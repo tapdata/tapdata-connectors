@@ -220,6 +220,18 @@ public class MySqlConnection extends JdbcConnection {
         }
     }
 
+    // Keep this signature in sync with the shared class: the shared snapshot source calls it.
+    static String binlogStatusQuery(DatabaseMetaData metadata) throws SQLException {
+        String product = metadata.getDatabaseProductName();
+        String version = metadata.getDatabaseProductVersion();
+        boolean mariaDb = (product != null && product.toLowerCase(java.util.Locale.ROOT).contains("mariadb"))
+                || (version != null && version.toLowerCase(java.util.Locale.ROOT).contains("mariadb"));
+        int major = metadata.getDatabaseMajorVersion();
+        int minor = metadata.getDatabaseMinorVersion();
+        return !mariaDb && (major > 8 || (major == 8 && minor >= 4))
+                ? "SHOW BINARY LOG STATUS" : "SHOW MASTER STATUS";
+    }
+
     /**
      * Determine the executed GTID set for MySQL.
      *

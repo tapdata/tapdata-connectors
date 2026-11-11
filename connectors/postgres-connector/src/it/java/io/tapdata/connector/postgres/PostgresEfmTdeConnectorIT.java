@@ -7,6 +7,8 @@ import com.zaxxer.hikari.HikariDataSource;
 import io.tapdata.it.verifier.ConnectorVerifier;
 
 import java.util.Objects;
+import java.util.List;
+import java.util.Map;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
@@ -51,6 +53,22 @@ public class PostgresEfmTdeConnectorIT extends PostgresConnectorIT {
     }
 
     @Override
+    protected List<Map<String, Object>> prepareData(int count) throws Throwable {
+        List<Map<String, Object>> rows = super.prepareData(count);
+        // Fixtures write to the primary, while batchRead reads the standby.
+        // Wait for replay so immediate read-back assertions see committed rows.
+        try (Connection connection = primaryVerifierDataSource.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery("SELECT pg_current_wal_flush_lsn()")) {
+            if (!result.next()) {
+                throw new IllegalStateException("Primary PostgreSQL did not return the current flushed WAL LSN");
+            }
+            awaitStandbyReplay(result.getString(1), null);
+        }
+        return rows;
+    }
+
+    @Override
     protected Object sourceDdlStreamOffset() throws Throwable {
         try (Connection connection = primaryVerifierDataSource.getConnection();
              Statement statement = connection.createStatement()) {
@@ -89,7 +107,8 @@ public class PostgresEfmTdeConnectorIT extends PostgresConnectorIT {
     private void awaitStandbyReplay(String targetLsn, String targetRedoLsn) throws Exception {
         String standbyUrl = standbyJdbcUrl();
         long target = org.postgresql.replication.LogSequenceNumber.valueOf(targetLsn).asLong();
-        long targetRedo = org.postgresql.replication.LogSequenceNumber.valueOf(targetRedoLsn).asLong();
+        Long targetRedo = targetRedoLsn == null ? null
+                : org.postgresql.replication.LogSequenceNumber.valueOf(targetRedoLsn).asLong();
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(90);
         while (System.nanoTime() < deadline) {
             try (Connection connection = java.sql.DriverManager.getConnection(standbyUrl,
@@ -99,15 +118,15 @@ public class PostgresEfmTdeConnectorIT extends PostgresConnectorIT {
                          "SELECT pg_last_wal_replay_lsn(), redo_lsn FROM pg_control_checkpoint()")) {
                 if (result.next() && result.getString(1) != null
                         && org.postgresql.replication.LogSequenceNumber.valueOf(result.getString(1)).asLong() >= target
-                        && result.getString(2) != null
-                        && org.postgresql.replication.LogSequenceNumber.valueOf(result.getString(2)).asLong() >= targetRedo) {
+                        && (targetRedo == null || (result.getString(2) != null
+                        && org.postgresql.replication.LogSequenceNumber.valueOf(result.getString(2)).asLong() >= targetRedo))) {
                     return;
                 }
             }
             Thread.sleep(100L);
         }
-        throw new IllegalStateException("DBForge PostgreSQL standby did not replay and persist checkpoint redo "
-                + targetRedoLsn + " through test offset " + targetLsn);
+        throw new IllegalStateException("DBForge PostgreSQL standby did not replay through test offset " + targetLsn
+                + (targetRedoLsn == null ? "" : " and persist checkpoint redo " + targetRedoLsn));
     }
 
     private String standbyJdbcUrl() {
