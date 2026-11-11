@@ -220,6 +220,17 @@ public class MySqlConnection extends JdbcConnection {
         }
     }
 
+    static String binlogStatusQuery(DatabaseMetaData metadata) throws SQLException {
+        String product = metadata.getDatabaseProductName();
+        String version = metadata.getDatabaseProductVersion();
+        boolean mariaDb = (product != null && product.toLowerCase(java.util.Locale.ROOT).contains("mariadb"))
+                || (version != null && version.toLowerCase(java.util.Locale.ROOT).contains("mariadb"));
+        int major = metadata.getDatabaseMajorVersion();
+        int minor = metadata.getDatabaseMinorVersion();
+        return !mariaDb && (major > 8 || (major == 8 && minor >= 4))
+                ? "SHOW BINARY LOG STATUS" : "SHOW MASTER STATUS";
+    }
+
     /**
      * Determine the executed GTID set for MySQL.
      *
@@ -227,20 +238,9 @@ public class MySqlConnection extends JdbcConnection {
      */
     public String knownGtidSet() {
         try {
-            String binLogStatusSql = "SHOW MASTER STATUS";
-            try (
-                    Connection connection = connection()
-            ) {
-                DatabaseMetaData databaseMetaData = connection.getMetaData();
-                String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
-                String[] versionNums = version.split("\\.");
-                if (versionNums.length >= 2) {
-                    int majorVersion = Integer.parseInt(versionNums[0]);
-                    int minorVersion = Integer.parseInt(versionNums[1]);
-                    if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
-                        binLogStatusSql = "SHOW BINARY LOG STATUS";
-                    }
-                }
+            String binLogStatusSql;
+            try (Connection connection = connection()) {
+                binLogStatusSql = binlogStatusQuery(connection.getMetaData());
             }
             return queryAndMap(binLogStatusSql, rs -> {
                 if (rs.next() && rs.getMetaData().getColumnCount() > 4) {

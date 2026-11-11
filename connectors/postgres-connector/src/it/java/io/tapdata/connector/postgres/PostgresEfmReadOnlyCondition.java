@@ -16,6 +16,9 @@ final class PostgresEfmReadOnlyCondition implements ExecutionCondition {
             "writeRecord", "createTableV2", "dropTable", "clearTable", "createIndex", "deleteIndex",
             "alterTableCharset", "alterTableTTL", "alterDatabaseTimeZone");
     private static final Set<String> STANDBY_WRITING_FIXTURES = Set.of(
+            "should_discover_and_read_ordinary_view_with_projected_columns",
+            "should_read_only_granted_view_and_isolate_schema_metadata",
+            "should_discover_reference_key_when_referenced_table_not_granted",
             "should_fail_truncate_referenced_parent_and_keep_child_when_cascade_truncate_off",
             "should_truncate_parent_and_child_when_cascade_truncate_on",
             "should_keep_drop_cascade_when_cascade_truncate_off",

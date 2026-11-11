@@ -32,13 +32,196 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.entity.QueryOperator;
+import io.tapdata.pdk.apis.entity.SortOn;
+import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
+import io.tapdata.entity.schema.TapTable;
+import org.junit.jupiter.api.DisplayName;
 import java.util.UUID;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class PostgresConnectorIT extends TpccConnectorIT {
 
+    @Test
+    @DisplayName("普通视图发现仅暴露投影列，保留视图注释且不纳入物化视图")
+    void should_discover_and_read_ordinary_view_with_projected_columns() throws Throwable {
+        String suffix = randomSuffix();
+        String base = "tap13227_base_" + suffix;
+        String view = "tap13227_view_" + suffix;
+        String materialized = "tap13227_mat_" + suffix;
+        try (Connection connection = openJdbc(); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE " + qualified(base) + " (id bigint primary key, name text, wm bigint, secret text)");
+            statement.execute("INSERT INTO " + qualified(base) + " VALUES (1,'A',10,'hidden'),(2,'B',20,'hidden')");
+            statement.execute("CREATE VIEW " + qualified(view) + " AS SELECT id,name,wm FROM " + qualified(base));
+            statement.execute("COMMENT ON VIEW " + qualified(view) + " IS 'public projection'");
+            statement.execute("COMMENT ON COLUMN " + qualified(view) + ".name IS 'visible name'");
+            statement.execute("CREATE MATERIALIZED VIEW " + qualified(materialized) + " AS SELECT id FROM " + qualified(base));
+            PostgresConnector derived = new PostgresConnector() { };
+            try {
+                derived.onStart(nodeContext());
+                List<TapTable> inherited = new ArrayList<>();
+                derived.discoverSchema(nodeContext(), List.of(base, view, materialized), 10, inherited::addAll);
+                Assertions.assertEquals(1, inherited.size());
+                Assertions.assertEquals(base, inherited.get(0).getId());
+                Assertions.assertNotEquals("view", inherited.get(0).getType());
+            } finally {
+                derived.onStop(nodeContext());
+            }
+            PostgresConnector connector = startConnector(false);
+            try {
+                List<TapTable> tables = new ArrayList<>();
+                connector.discoverSchema(nodeContext(), List.of(base, view, materialized), 1, tables::addAll);
+                Assertions.assertEquals(2, tables.size());
+                TapTable model = tables.stream().filter(t -> view.equals(t.getId())).findFirst().orElseThrow();
+                Assertions.assertEquals("view", model.getType());
+                Assertions.assertEquals("public projection", model.getComment());
+                Assertions.assertEquals(java.util.Set.of("id", "name", "wm"), model.getNameFieldMap().keySet());
+                Assertions.assertEquals("visible name", model.getNameFieldMap().get("name").getComment());
+                Assertions.assertTrue(model.primaryKeys() == null || model.primaryKeys().isEmpty());
+                Assertions.assertEquals(2, count(connection, view));
+                ConnectorFunctions functions = new ConnectorFunctions();
+                connector.registerCapabilities(functions, new TapCodecsRegistry());
+                List<TapEvent> snapshot = new ArrayList<>();
+                functions.getBatchReadFunction().batchRead(nodeContext(), model, null, 1,
+                        (events, offset) -> snapshot.addAll(events));
+                Assertions.assertEquals(2, snapshot.size());
+                snapshot.forEach(event -> {
+                    Assertions.assertTrue(event instanceof TapInsertRecordEvent);
+                    Assertions.assertEquals(java.util.Set.of("id", "name", "wm"),
+                            ((TapInsertRecordEvent) event).getAfter().keySet());
+                });
+                List<Map<String, Object>> rows = new ArrayList<>();
+                connector.queryByAdvanceFilterWithOffset(nodeContext(), TapAdvanceFilter.create(), model,
+                        result -> rows.addAll(result.getResults()));
+                Assertions.assertEquals(2, rows.size());
+                rows.forEach(row -> Assertions.assertEquals(java.util.Set.of("id", "name", "wm"), row.keySet()));
+                statement.execute("INSERT INTO " + qualified(base) + " VALUES (3,'C',30,'hidden')");
+                statement.execute("UPDATE " + qualified(base) + " SET name='A2',wm=40 WHERE id=1");
+                rows.clear();
+                connector.queryByAdvanceFilterWithOffset(nodeContext(),
+                        TapAdvanceFilter.create().op(QueryOperator.gt("wm", 20L)), model,
+                        result -> rows.addAll(result.getResults()));
+                Assertions.assertEquals(2, rows.size());
+                Assertions.assertTrue(rows.stream().anyMatch(row -> "A2".equals(row.get("name"))));
+                Assertions.assertTrue(rows.stream().anyMatch(row -> "C".equals(row.get("name"))));
+                for (long watermark : List.of(20L, 30L)) {
+                    rows.clear();
+                    connector.queryByAdvanceFilterWithOffset(nodeContext(), TapAdvanceFilter.create()
+                                    .op(QueryOperator.gt("wm", watermark)).sort(SortOn.ascending("wm")).limit(1),
+                            model, result -> rows.addAll(result.getResults()));
+                    Assertions.assertEquals(1, rows.size());
+                    Assertions.assertEquals(watermark + 10L, ((Number) rows.get(0).get("wm")).longValue());
+                }
+                rows.clear();
+                connector.queryByAdvanceFilterWithOffset(nodeContext(),
+                        TapAdvanceFilter.create().op(QueryOperator.gt("wm", 40L)), model,
+                        result -> rows.addAll(result.getResults()));
+                Assertions.assertTrue(rows.isEmpty());
+                if (connection.getMetaData().getDatabaseMajorVersion() >= 10) {
+                    String parent = "tap13227_part_" + suffix;
+                    String child = "tap13227_child_" + suffix;
+                    try {
+                        statement.execute("CREATE TABLE " + qualified(parent) + " (id bigint) PARTITION BY RANGE (id)");
+                        statement.execute("CREATE TABLE " + qualified(child) + " PARTITION OF " + qualified(parent)
+                                + " FOR VALUES FROM (0) TO (100)");
+                        statement.execute("INSERT INTO " + qualified(parent) + " VALUES (1),(2)");
+                        List<TapTable> mixed = new ArrayList<>();
+                        connector.discoverSchema(nodeContext(), List.of(parent, child, view), 10, mixed::addAll);
+                        Assertions.assertTrue(mixed.stream().anyMatch(t -> parent.equals(t.getId()) && t.getPartitionInfo() != null));
+                        Assertions.assertTrue(mixed.stream().anyMatch(t -> view.equals(t.getId()) && "view".equals(t.getType())));
+                        Assertions.assertEquals(2, count(connection, parent));
+                    } finally {
+                        statement.execute("DROP TABLE IF EXISTS " + qualified(parent) + " CASCADE");
+                    }
+                }
+            } finally {
+                connector.onStop(nodeContext());
+            }
+        } finally {
+            try (Connection connection = openJdbc(); Statement statement = connection.createStatement()) {
+                statement.execute("DROP MATERIALIZED VIEW IF EXISTS " + qualified(materialized));
+                statement.execute("DROP VIEW IF EXISTS " + qualified(view));
+                statement.execute("DROP TABLE IF EXISTS " + qualified(base));
+            }
+        }
+    }
+
     protected DbForgeLeaseProvider dbForgeLeaseProvider;
     protected DataMap dbForgeConnectionConfig;
+
+    @Test
+    @DisplayName("仅授权视图的账号可发现读取且同名schema注释不串用，撤权后读取失败")
+    void should_read_only_granted_view_and_isolate_schema_metadata() throws Throwable {
+        String suffix = randomSuffix();
+        String schema = "tap13227_a_" + suffix;
+        String other = "tap13227_b_" + suffix;
+        String reader = "tap13227_r_" + suffix;
+        String password = UUID.randomUUID().toString();
+        PostgresConnector connector = null;
+        TapConnectorContext readerContext = null;
+        try (Connection admin = openJdbc(); Statement statement = admin.createStatement()) {
+            statement.execute("CREATE SCHEMA " + schema);
+            statement.execute("CREATE SCHEMA " + other);
+            statement.execute("CREATE ROLE " + reader + " LOGIN PASSWORD '" + password + "'");
+            for (String name : List.of(schema, other)) {
+                statement.execute("CREATE TABLE " + name + ".base (id bigint, name text, wm bigint, secret text)");
+                statement.execute("INSERT INTO " + name + ".base VALUES (1,'A',10,'hidden')");
+                statement.execute("CREATE VIEW " + name + ".v_public AS SELECT id,name,wm FROM " + name + ".base");
+                statement.execute("COMMENT ON VIEW " + name + ".v_public IS '" + name + "'");
+                statement.execute("COMMENT ON COLUMN " + name + ".v_public.name IS '" + name + "'");
+            }
+            statement.execute("GRANT USAGE ON SCHEMA " + schema + " TO " + reader);
+            statement.execute("GRANT SELECT ON " + schema + ".v_public TO " + reader);
+            DataMap config = DataMap.create();
+            config.putAll(context.getConfig());
+            config.put("schema", schema);
+            config.put("user", reader);
+            config.put("password", password);
+            readerContext = new TapConnectorContext(loadSpecification("spec_postgres.json"), config,
+                    DataMap.create(), new TapLog());
+            readerContext.setStateMap(new TestStateMap());
+            connector = new PostgresConnector();
+            connector.onStart(readerContext);
+            Assertions.assertEquals(1, connector.tableCount(readerContext));
+            List<TapTable> models = new ArrayList<>();
+            connector.discoverSchema(readerContext, List.of("v_public", "base"), 1, models::addAll);
+            Assertions.assertEquals(1, models.size());
+            TapTable view = models.get(0);
+            Assertions.assertEquals("view", view.getType());
+            Assertions.assertEquals(schema, view.getComment());
+            Assertions.assertEquals(schema, view.getNameFieldMap().get("name").getComment());
+            List<Map<String, Object>> rows = new ArrayList<>();
+            connector.queryByAdvanceFilterWithOffset(readerContext, TapAdvanceFilter.create(), view,
+                    result -> rows.addAll(result.getResults()));
+            Assertions.assertEquals(1, rows.size());
+            Assertions.assertEquals(java.util.Set.of("id", "name", "wm"), rows.get(0).keySet());
+            String url = "jdbc:postgresql://" + config.getString("host") + ":" + config.getValue("port", 5432)
+                    + "/" + config.getString("database");
+            try (Connection read = DriverManager.getConnection(url, reader, password); Statement denied = read.createStatement()) {
+                Assertions.assertThrows(SQLException.class, () -> denied.executeQuery("SELECT * FROM " + schema + ".base"));
+                Assertions.assertThrows(SQLException.class, () -> denied.executeQuery("SELECT * FROM " + other + ".v_public"));
+            }
+            statement.execute("REVOKE SELECT ON " + schema + ".v_public FROM " + reader);
+            Assertions.assertEquals(0, connector.tableCount(readerContext));
+            PostgresConnector active = connector;
+            TapConnectorContext activeContext = readerContext;
+            Assertions.assertThrows(SQLException.class, () -> active.queryByAdvanceFilterWithOffset(
+                    activeContext, TapAdvanceFilter.create(), view, result -> {}));
+        } finally {
+            try {
+                if (connector != null) connector.onStop(readerContext);
+            } finally {
+                try (Connection admin = openJdbc(); Statement statement = admin.createStatement()) {
+                    statement.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+                    statement.execute("DROP SCHEMA IF EXISTS " + other + " CASCADE");
+                    statement.execute("DROP ROLE IF EXISTS " + reader);
+                }
+            }
+        }
+    }
 
     @Override
     protected PerformanceAdapter createPerformanceAdapter() {
@@ -115,6 +298,13 @@ public class PostgresConnectorIT extends TpccConnectorIT {
                 "ALTER TABLE " + qualifiedTable + " DROP CONSTRAINT chk_ddl_probe",
                 "ALTER TABLE " + qualifiedTable + " RENAME COLUMN c_ddl_probe TO c_ddl_probe_new",
                 "ALTER TABLE " + qualifiedTable + " DROP COLUMN c_ddl_probe_new");
+    }
+
+    @Override
+    protected String sourceCompositeAddColumnsStatement(String table) {
+        String qualifiedTable = "\"public\".\"" + table.replace("\"", "\"\"") + "\"";
+        return "ALTER TABLE " + qualifiedTable
+                + " ADD COLUMN c_composite_a VARCHAR(64), ADD COLUMN c_composite_b BIGINT";
     }
 
     @Override
@@ -405,7 +595,7 @@ public class PostgresConnectorIT extends TpccConnectorIT {
         }
         nodeConfig.put("cascadeTruncate", cascadeTruncate);
         PostgresConnector connector = new PostgresConnector();
-        connector.onStart(nodeContext());
+        connector.init(nodeContext());
         return connector;
     }
 

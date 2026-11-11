@@ -37,3 +37,7 @@ mvn -pl connectors/tidb-connector -am verify -DskipITs=false
 The requested lease is `tidb/dedicated/single`. DBForge supplies the SQL, PD, and TiKV endpoints, so `enableIncrement` remains enabled and GA, TPCC, and performance CDC cases run against the leased cluster.
 
 The default connection file is `src/it/resources/config/tidb-connection.json`. Override values with `connector.it.*` system properties or `CONNECTOR_IT_*` environment variables. Incremental cases additionally require a reachable PD endpoint and TiCDC prerequisites; set `enableIncrement` accordingly.
+
+## Source DDL regressions
+
+The suite enables the shared composite ADD and ADD → DML → DROP → DML regressions. These require valid column DDL events, the original table identity, added-column values, and DDL/DML delivery order. The existing ADD → rename → DROP followed by DML regression is enabled as well. See [the source DDL test matrix](../../../source-ddl-it-support/README.md) for targeted commands and derived-connector coverage.

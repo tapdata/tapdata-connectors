@@ -15,6 +15,10 @@ import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.ddl.TapDDLEvent;
 import io.tapdata.entity.event.ddl.TapDDLUnknownEvent;
+import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
+import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
@@ -36,6 +40,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -51,8 +56,8 @@ public class OceanbaseReaderV2 {
     protected StreamReadConsumer consumer;
     protected Object offsetState;
     protected int recordSize;
-    private final Map<String, String> dataTypeMap = new HashMap<>();
-    private final Map<String, String> dataFormatMap = new HashMap<>();
+    private final Map<String, String> dataTypeMap = new ConcurrentHashMap<>();
+    private final Map<String, String> dataFormatMap = new ConcurrentHashMap<>();
     protected final String connectorId;
     private ObReadLogServerGrpc.ObReadLogServerBlockingStub blockingStub;
     protected final AtomicBoolean ddlStop = new AtomicBoolean(false);
@@ -92,13 +97,52 @@ public class OceanbaseReaderV2 {
             }
             if (tapTable != null) {
                 for (Map.Entry<String, TapField> entry : tapTable.getNameFieldMap().entrySet()) {
-                    String dataType = entry.getValue().getDataType();
-                    String column = table + "." + entry.getKey();
-                    String normalizedDataType = StringKit.removeParentheses(dataType).toLowerCase(Locale.ROOT)
-                            .replace(" unsigned", "").replace(" zerofill", "");
-                    dataTypeMap.put(column, normalizedDataType);
-                    dataTypeMap.put(column.toLowerCase(Locale.ROOT), normalizedDataType);
+                    cacheDataType(table, entry.getKey(), entry.getValue().getDataType());
                 }
+            }
+        }
+    }
+
+    private void cacheDataType(String table, String field, String type) {
+        String column = table + "." + field;
+        String normalized = StringKit.removeParentheses(type).toLowerCase(Locale.ROOT)
+                .replace(" unsigned", "").replace(" zerofill", "");
+        dataTypeMap.put(column, normalized);
+        dataTypeMap.put(column.toLowerCase(Locale.ROOT), normalized);
+        dataFormatMap.remove(column);
+        dataFormatMap.remove(column.toLowerCase(Locale.ROOT));
+    }
+
+    private void removeCachedColumn(String table, String field) {
+        String column = table + "." + field;
+        dataTypeMap.remove(column);
+        dataTypeMap.remove(column.toLowerCase(Locale.ROOT));
+        dataFormatMap.remove(column);
+        dataFormatMap.remove(column.toLowerCase(Locale.ROOT));
+    }
+
+    void applyDdlToCachedSchema(TapDDLEvent event) {
+        String table = event.getTableId();
+        if (event instanceof TapNewFieldEvent) {
+            for (TapField field : ((TapNewFieldEvent) event).getNewFields()) {
+                cacheDataType(table, field.getName(), field.getDataType());
+            }
+        } else if (event instanceof TapDropFieldEvent) {
+            removeCachedColumn(table, ((TapDropFieldEvent) event).getFieldName());
+        } else if (event instanceof TapAlterFieldNameEvent) {
+            io.tapdata.entity.event.ddl.entity.ValueChange<String> change =
+                    ((TapAlterFieldNameEvent) event).getNameChange();
+            if (change != null) {
+                String type = dataTypeMap.get((table + "." + change.getBefore()).toLowerCase(Locale.ROOT));
+                if (type != null) {
+                    removeCachedColumn(table, change.getBefore());
+                    cacheDataType(table, change.getAfter(), type);
+                }
+            }
+        } else if (event instanceof TapAlterFieldAttributesEvent) {
+            TapAlterFieldAttributesEvent attributes = (TapAlterFieldAttributesEvent) event;
+            if (attributes.getDataTypeChange() != null && attributes.getDataTypeChange().getAfter() != null) {
+                cacheDataType(table, attributes.getFieldName(), attributes.getDataTypeChange().getAfter());
             }
         }
     }
@@ -148,7 +192,11 @@ public class OceanbaseReaderV2 {
                                 events.get().addAll(messageEvent.getEvent());
                                 consumer.accept(events.get(), messageEvent.getPayload().getTransactionTime());
                                 events.set(new ArrayList<>());
-                                generateDataTypeMap(tableMap);
+                                // The engine's tableMap may still contain the startup schema. Advance
+                                // decoding from the ordered DDL before releasing subsequent DML workers.
+                                for (TapEvent event : messageEvent.getEvent()) {
+                                    if (event instanceof TapDDLEvent) applyDdlToCachedSchema((TapDDLEvent) event);
+                                }
                                 ddlStop.set(false);
                                 continue;
                             }
@@ -177,7 +225,8 @@ public class OceanbaseReaderV2 {
                 }
                 ReadLogPayload payload = payloads.next();
                 while (ddlStop.get() && isAlive.get()) {
-                    TapSimplify.sleep(500);
+                    if (throwable.get() != null) throw throwable.get();
+                    TapSimplify.sleep(50);
                 }
                 if (payload.getOpValue() == 6) {
                     ddlStop.set(true);

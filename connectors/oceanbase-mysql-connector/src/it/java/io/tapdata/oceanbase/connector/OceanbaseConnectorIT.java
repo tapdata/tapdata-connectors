@@ -55,6 +55,30 @@ public class OceanbaseConnectorIT extends TpccConnectorIT {
     private static DataMap dbForgeConnectionConfig;
 
     @Override
+    protected boolean supportsSourceDdlCapture() {
+        return true;
+    }
+
+    @Override
+    protected List<String> sourceDdlStatements(String table) {
+        return List.of(
+                "ALTER TABLE " + table + " ADD COLUMN c_ddl_probe VARCHAR(64)",
+                "ALTER TABLE " + table + " CHANGE COLUMN c_ddl_probe c_ddl_probe_new VARCHAR(64)",
+                "ALTER TABLE " + table + " DROP COLUMN c_ddl_probe_new");
+    }
+
+    @Override
+    protected String sourceCompositeAddColumnsStatement(String table) {
+        return "ALTER TABLE " + table
+                + " ADD COLUMN c_composite_a VARCHAR(64), ADD COLUMN c_composite_b BIGINT";
+    }
+
+    @Override
+    protected String sourceDdlInterleaveDropFieldStatement(String table) {
+        return "ALTER TABLE " + table + " DROP COLUMN c_ddl_probe";
+    }
+
+    @Override
     protected PerformanceAdapter createPerformanceAdapter() {
         return new OceanbaseMysqlPerformanceAdapter(context.getConfig());
     }
