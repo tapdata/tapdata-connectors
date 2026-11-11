@@ -13,7 +13,7 @@
     <properties>
         <skipITs>true</skipITs>
         <!-- The DDL fixture intentionally contains only id and c_varchar. -->
-        <it.test>*DdlIT#should_stream_composite_add_columns_ddl+should_stream_read_ddl_dml_drop_ddl_dml_sequence+should_stream_read_source_ddl_and_continue_dml</it.test>
+        <it.test>*DdlIT#should_stream_composite_add_columns_ddl+should_stream_read_ddl_dml_drop_ddl_dml_sequence+should_stream_read_source_ddl_and_continue_dml+should_start_new_cdc_task_without_previous_offset</it.test>
         <java.version>8</java.version>
         <mysql.driver.version>8.0.33</mysql.driver.version>
         <hikari.version>4.0.3</hikari.version>
