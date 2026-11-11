@@ -200,6 +200,84 @@ class MongodbMergeOperateTest {
 			);
 			assertEquals(3, mergeResults.size());
 		}
+
+		@Test
+		@DisplayName("U1 parent flatten DELETE should $unset child document targetPath and keep update not delete")
+		void testParentDeleteUnsetChildTargetPath() {
+			Map<String, Object> before = new HashMap<>();
+			before.put("id", 1);
+			before.put("colB", "b1");
+			MergeTableProperties parent = new MergeTableProperties();
+			parent.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			parent.setJoinKeys(new ArrayList<Map<String, String>>() {{
+				add(new HashMap<String, String>() {{
+					put("source", "id");
+					put("target", "id");
+				}});
+			}});
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.DELETE, before, null);
+			List<MergeResult> mergeResults = new ArrayList<>();
+			MergeLookupResult child = new MergeLookupResult();
+			child.setDataExists(true);
+			child.setData(new HashMap<String, Object>() {{
+				put("idC", 11);
+				put("name", "part");
+			}});
+			child.setTapTable(new TapTable("level3"));
+			MergeTableProperties childProp = new MergeTableProperties();
+			childProp.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			childProp.setTargetPath("productPart");
+			childProp.setJoinKeys(new ArrayList<Map<String, String>>() {{
+				add(new HashMap<String, String>() {{
+					put("source", "idC");
+					put("target", "idC");
+				}});
+			}});
+			child.setProperty(childProp);
+			List<MergeLookupResult> lookups = new ArrayList<>();
+			lookups.add(child);
+			MongodbMergeOperate.recursiveMerge(
+					mergeBundle,
+					parent,
+					mergeResults,
+					lookups,
+					null,
+					null,
+					new MergeFilter(false),
+					1,
+					null
+			);
+			assertFalse(mergeResults.isEmpty());
+			boolean unsetChildPath = false;
+			boolean setChildPath = false;
+			boolean deletedMain = false;
+			for (MergeResult result : mergeResults) {
+				if (result == null || result.getOperation() == null) {
+					continue;
+				}
+				assertEquals(MergeResult.Operation.UPDATE, result.getOperation());
+				assertEquals(1, result.getFilter().get("id"));
+				Document update = result.getUpdate();
+				if (update != null && update.containsKey("$unset") && update.get("$unset", Document.class).containsKey("productPart")) {
+					unsetChildPath = true;
+				}
+				if (update != null && update.containsKey("$set") && update.get("$set", Document.class).keySet().stream().anyMatch(k -> k.equals("productPart") || k.startsWith("productPart."))) {
+					setChildPath = true;
+				}
+				if (result.getOperation() == MergeResult.Operation.DELETE) {
+					deletedMain = true;
+				}
+			}
+			assertTrue(unsetChildPath);
+			assertFalse(setChildPath);
+			assertFalse(deletedMain);
+		}
+
+		@Test
+		@DisplayName("U2 parent DELETE must not rewrite existing child lookup data as INSERT/$set")
+		void testParentDeleteMustNotInsertChildLookup() {
+			testParentDeleteUnsetChildTargetPath();
+		}
 	}
 
 	@Nested
