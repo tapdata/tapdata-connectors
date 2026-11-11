@@ -36,7 +36,27 @@ concurrency:
 
 jobs:
   connector-it:
-    uses: tapdata/tapdata-it/.github/workflows/connector-it-reusable.yml@main
+    # tapdata-it#22: pin the DBForge configuration fix until it is released to main.
+    uses: jarad0628/tapdata-it/.github/workflows/connector-it-reusable.yml@5d603ac4ac7e2c091339ed77d33eddb10bf1ef47
     with:
       connectors_override: ${{ inputs.connectors || '' }}
-    secrets: inherit
+      dbforge_url: ${{ vars.CONNECTOR_IT_DBFORGE_URL }}
+      dbforge_connectors: >-
+        connectors/mysql-connector,
+        connectors/postgres-connector,
+        connectors/mariadb-connector,
+        connectors/mysql-pxc-connector,
+        connectors/aliyun-rds-mysql-connector,
+        connectors/aws-rds-mysql-connector,
+        connectors/polar-db-mysql-connector,
+        connectors/aliyun-rds-mariadb-connector,
+        connectors/tencent-db-mariadb-connector,
+        connectors/aliyun-adb-postgres-connector,
+        connectors/aliyun-rds-postgres-connector,
+        connectors/tencent-db-postgres-connector,
+        connectors/polar-db-postgres-connector
+      # Kafka is outside this validation scope until broker/Registry are configured.
+      excluded_connectors: connectors/kafka-connector,connectors/kafka-enhanced-connector
+    secrets:
+      MAVEN_SETTINGS: ${{ secrets.MAVEN_SETTINGS }}
+      CONNECTOR_IT_DBFORGE_TOKEN: ${{ secrets.CONNECTOR_IT_DBFORGE_TOKEN }}
