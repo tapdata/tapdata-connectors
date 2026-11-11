@@ -56,7 +56,10 @@ jobs:
         connectors/tencent-db-postgres-connector,
         connectors/polar-db-postgres-connector
       # Kafka is outside this validation scope until broker/Registry are configured.
-      excluded_connectors: connectors/kafka-connector,connectors/kafka-enhanced-connector
+      excluded_connectors: >-
+        connectors/kafka-connector,
+        connectors/kafka-enhanced-connector,
+        connectors/kafka-avro-connector
     secrets:
       MAVEN_SETTINGS: ${{ secrets.MAVEN_SETTINGS }}
       CONNECTOR_IT_DBFORGE_TOKEN: ${{ secrets.CONNECTOR_IT_DBFORGE_TOKEN }}
