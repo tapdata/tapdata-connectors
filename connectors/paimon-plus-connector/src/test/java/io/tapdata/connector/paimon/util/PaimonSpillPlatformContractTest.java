@@ -14,13 +14,11 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collections;
 import java.util.Comparator;
@@ -86,7 +84,7 @@ class PaimonSpillPlatformContractTest {
      */
     @Test
     void runtimeNameDependsOnHostResolutionButPidAndStartTimeDoNot(@TempDir Path dir) throws Exception {
-        String hostname = localHostName();
+        String hostname = SpillProbeProcess.localHostName();
         assumeFalse(hostname.isEmpty() || "localhost".equals(hostname), "主机名为 localhost 时无法区分两种结果");
         Path hosts = Files.write(dir.resolve("hosts"), new byte[0]);
         try (SpillProbeProcess.Handle child = SpillProbeProcess.start(
@@ -236,17 +234,5 @@ class PaimonSpillPlatformContractTest {
 
     private static String value(String line) {
         return line.substring(line.indexOf('=') + 1);
-    }
-
-    /** 不经名称解析读取本机主机名：Linux 读 procfs，其他平台执行 hostname。 */
-    private static String localHostName() throws Exception {
-        Path procfs = Paths.get("/proc/sys/kernel/hostname");
-        if (Files.isReadable(procfs)) {
-            return new String(Files.readAllBytes(procfs), StandardCharsets.UTF_8).trim();
-        }
-        Process process = new ProcessBuilder("hostname").redirectErrorStream(true).start();
-        String name = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-        assertTrue(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS));
-        return process.exitValue() == 0 ? name : "";
     }
 }

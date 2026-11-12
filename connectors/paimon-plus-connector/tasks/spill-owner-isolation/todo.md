@@ -38,7 +38,7 @@
 
 ### T03.2：集成分支更名为 hotfix 并推送 —— 本地 PR #3.2
 - [x] `feature/paimon-spill-owner-isolation` 更名为 `hotfix/paimon-spill-owner-isolation`，Spec §9 与 plan §2 中的分支名与远端规则同步更新
-- [x] 推送到 fork 远端 `czy006`（与既有 `hotfix/paimon-*` 分支约定一致），不推送 `pr/*` 主题分支，不推送 `origin`
+- [x] 推送到 fork 远端 `czy006`（与既有 `hotfix/paimon-*` 分支约定一致），不推送 `pr/*` 主题分支，不推送 `origin`；合并提交 `bb245dca`
 
 ---
 
@@ -47,9 +47,10 @@
 **Description**：按 Spec §4.2 实现 jvmId：反射调用 `RuntimeMXBean#getPid`，Java 8 退回 `getName()` 中 `@` 之前的部分，再与 `getStartTime()` 一起做 SHA-256，取前 32 位十六进制并加 `j` 前缀；每个 ClassLoader 惰性计算一次并缓存。提供包内可见的纯函数 `derive(pid, startTime)` 与可注入的 provider。
 
 **Acceptance criteria**：
-- [ ] 固定期望值：`derive(12345, 1700000000000L)` 等于测试中写死的常量；格式符合正则 `j[0-9a-f]{32}`
-- [ ] 两个隔离 ClassLoader 结果相同；子进程结果不同；子进程在 `jdk.net.hosts.file` 切换前后计算结果不变（AC-01）
-- [ ] pid 获取失败或 `getName()` 格式不符时抛出带原因的 `IllegalStateException`；生产代码不出现主机名相关调用（AC-08 的身份部分）
+- [x] 固定期望值：`derive(12345, 1700000000000L)` 等于测试中写死的常量；格式符合正则 `j[0-9a-f]{32}`
+- [x] 两个隔离 ClassLoader 结果相同；子进程结果不同；子进程在 `jdk.net.hosts.file` 切换前后计算结果不变（AC-01）
+- [x] pid 获取失败或 `getName()` 格式不符时抛出带原因的 `IllegalStateException`；生产代码不出现主机名相关调用（AC-08 的身份部分）
+- [x] 证据：`TEST PaimonJvmIdentityTest,PaimonSpillPlatformContractTest` 18 项通过；变异（把 `getName().hashCode()` 混入派生输入）被 `identityIgnoresHostNameResolution` 与 `currentIsDerivedFromProcessIdAndStartTimeAndStable` 检出，已还原
 
 **Verification**：`TEST PaimonJvmIdentityTest`；变异检验：把主机名混入派生输入，hosts 切换用例应失败。\
 **Dependencies**：T03\
