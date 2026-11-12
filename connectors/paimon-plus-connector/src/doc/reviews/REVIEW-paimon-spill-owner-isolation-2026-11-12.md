@@ -2,6 +2,7 @@
 
 > 关联规范：[SPEC-paimon-spill-owner-isolation.md V0.3](../specs/SPEC-paimon-spill-owner-isolation.md)\
 > 关联计划：[plan.md](../../../tasks/spill-owner-isolation/plan.md)、[todo.md](../../../tasks/spill-owner-isolation/todo.md)\
+> 生命周期图：[SPILL-所有权隔离-修改前后对比与生命周期.md](SPILL-所有权隔离-修改前后对比与生命周期.md)\
 > 证据基线：tapdata-connectors develop `e3f68298`；Paimon `release-1.3.2`（`c05f7d1f`）；Flink Runtime 1.20.1 sources JAR；Oracle JDK 17.0.20 `lib/src.zip`。\
 > 可执行证据：本地 PR #2（`213f9c49`）新增的特征化测试。本文只陈述已核实的事实；未核实项单独标注。
 

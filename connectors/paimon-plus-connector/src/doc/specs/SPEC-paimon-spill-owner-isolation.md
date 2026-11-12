@@ -4,6 +4,7 @@
 > 版本：V0.3，2026-11-12；状态：V0.2 已批准，V0.3 吸收评审修订，**待用户复核**。修订记录见 §16。\
 > 目标模块：tapdata-connectors / connectors/paimon-plus-connector。\
 > 证据与评审：[REVIEW-paimon-spill-owner-isolation-2026-11-12.md](../reviews/REVIEW-paimon-spill-owner-isolation-2026-11-12.md)\
+> 生命周期图与修改前后对比：[SPILL-所有权隔离-修改前后对比与生命周期.md](../reviews/SPILL-所有权隔离-修改前后对比与生命周期.md)\
 > 实施计划：[plan.md](../../../tasks/spill-owner-isolation/plan.md)；任务清单：[todo.md](../../../tasks/spill-owner-isolation/todo.md)\
 > 本文补充 SPEC-paimon-spill-sync-graceful-stop.md V1.2，不替代其业务提交、取消来源、超时预算与 FAILED_RETAINED 契约。
 

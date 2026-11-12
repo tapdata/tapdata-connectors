@@ -29,7 +29,12 @@
 - [x] Spec V0.3 吸收评审问题 1–7 及 Consider/Nit 项（处置表见证据 §7），并补充状态机、安全性/活性论证、平台前提与交付流程
 - [x] 新增证据文档：现场栈逐帧核实、Paimon 1.3.2 与 Paimon Flink Connector 源码核实、取证程序
 - [x] 全量基线（集成分支 `213f9c49`）：`PACKAGE` 成功，paimon-plus-connector 1255 项，0 失败、0 错误、1 跳过（`PaimonRustFsIntegrationTest`，依赖外部服务），耗时 129 s
-- [x] 分支 `pr/spill-owner-isolation/03-spec-plan-v0.3`，只含文档
+- [x] 分支 `pr/spill-owner-isolation/03-spec-plan-v0.3`，合并提交 `c5600c59`，只含文档
+
+### T03.1：生命周期图与内核证据清单 —— 本地 PR #3.1
+- [x] 新增 `SPILL-所有权隔离-修改前后对比与生命周期.md`：内核 spill 调用链、目录布局、修改前后完整生命周期、故障与修复后时序、租约状态机、逐项对比，以及 Paimon 内核、Paimon Flink Connector、Flink Runtime、JDK 证据清单
+- [x] 7 张 Mermaid 图经 mermaid 11.17.2 `parse` 全部通过；用故意写错的图确认校验器能检出错误
+- [x] 分支 `pr/spill-owner-isolation/03.1-lifecycle-diagrams`，只含文档
 
 ---
 
