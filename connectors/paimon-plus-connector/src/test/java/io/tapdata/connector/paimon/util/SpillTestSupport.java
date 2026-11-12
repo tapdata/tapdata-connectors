@@ -63,6 +63,26 @@ public final class SpillTestSupport {
         return ownerLockFile(spillDir.getPath()).toFile();
     }
 
+    /** 以另一个进程探测：该 spill 目录所属租约的 OS 记录锁是否仍被本进程持有（同进程探测会释放锁，见 C1）。 */
+    public static boolean ownerLockHeld(String spillDir) {
+        try {
+            return !SpillProbeProcess.otherProcessAcquires(ownerLockFile(spillDir));
+        } catch (Exception failure) {
+            throw new AssertionError("Cannot probe owner lock of " + spillDir, failure);
+        }
+    }
+
+    /** 在另一个 JVM 中对该 spill 目录所在的根执行一次新协议回收，返回回收数。 */
+    public static int reclaimInOtherJvm(String spillDir) {
+        Path root = Paths.get(spillDir).getParent().getParent().getParent().getParent().getParent();
+        try {
+            String line = SpillProbeProcess.reclaimInOtherJvm(root);
+            return Integer.parseInt(line.substring("reclaimed=".length()));
+        } catch (Exception failure) {
+            throw new AssertionError("Cannot run reclaim in another JVM for " + root, failure);
+        }
+    }
+
     /** 该目录是否仍处于本 ClassLoader 的 owner 登记中（存活保护与锁对象均在）。 */
     public static boolean ownerRegistered(String spillDir) {
         return staticField("OWNERS", Map.class).containsKey(spillDir);

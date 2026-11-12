@@ -217,9 +217,10 @@
 **Description**：用 `IsolatedConnectorLoader` 与驱动类，在两个 ClassLoader 中执行 Provision、Reclaim 与建 channel。只使用纯 Java 的 IOManager，不加载 RocksDB JNI。
 
 **Acceptance criteria**：
-- [ ] AC-02（跨 ClassLoader）与 AC-03（新回收器版本）：loader B 对 A 命名空间的打开次数为 0；随后子进程 C 运行新回收器，删除数为 0；A 建 channel 成功
-- [ ] AC-04：钩子停在“已加锁、未返回”时，同 ClassLoader 并发回收的打开次数为 0；AC-05：两个 loader 并发回收同一 ORPHANED lease
-- [ ] AC-15：loader A 中保留一个活跃使用者线程，只丢弃 PDK 侧引用并施加 GC 压力，外部 tryLock 仍失败
+- [x] AC-02（跨 ClassLoader）与 AC-03（新回收器版本）：loader B 对 A 命名空间的打开次数为 0；随后子进程 C 运行新回收器，删除数为 0；A 建 channel 成功
+- [x] AC-04：钩子停在“已加锁、未返回”时，同 ClassLoader 并发回收的打开次数为 0；AC-05：两个 loader 并发回收同一 ORPHANED lease
+- [x] AC-15：loader A 中保留一个活跃使用者线程，只丢弃 PDK 侧引用并施加 GC 压力，外部 tryLock 仍失败
+- [x] 证据（补记）：`TEST PaimonSpillIsolatedClassLoaderIntegrationTest` 4 项通过；变异（去掉本命名空间排除）使 2 项失败，断言之一为“owner 的 OS 锁必须仍被持有 ==> expected <false> but was <true>”，即原缺陷重现；PR #11 合并提交 `6a990ccc`。PR #11 未包含 todo 改动（脚本断言文字不符），在本 PR #13 补记
 
 **Verification**：`TEST PaimonSpillIsolatedClassLoaderIntegrationTest`\
 **Dependencies**：T10\
@@ -231,9 +232,10 @@
 **Description**：把 `PaimonSpillDirCleanerProcessIntegrationTest` 改写为 `PaimonSpillProcessIntegrationTest`，用 stdin/stdout 握手控制竞态顺序。
 
 **Acceptance criteria**：
-- [ ] AC-06：两个回收者进程处理同一 ORPHANED lease，至多一个完成，全程不新建锁文件；AC-07：活跃 lease 的 mtime 改为很早，仍不删除
-- [ ] AC-09：owner 子进程被 SIGKILL 后由父进程回收；子进程 1 被杀后由子进程 2 回收
-- [ ] AC-16：迟到回收者复核失败，不删除任何内容；AC-17（跨进程）：Provision 与 Retire 的 ENOENT 竞态均得到预期结果
+- [x] AC-06：两个回收者进程处理同一 ORPHANED lease，至多一个完成，全程不新建锁文件；AC-07：活跃 lease 的 mtime 改为很早，仍不删除
+- [x] AC-09：owner 子进程被 SIGKILL 后由父进程回收；子进程 1 被杀后由子进程 2 回收
+- [x] AC-16：迟到回收者复核失败，不删除任何内容；AC-17（跨进程）：Provision 与 Retire 的 ENOENT 竞态均得到预期结果
+- [x] 证据（补记）：`TEST PaimonSpillProcessIntegrationTest` 8 项通过（由 PaimonSpillDirCleanerProcessIntegrationTest 改名并扩充；AC-07 由 owner 子进程把 mtime 设为 1970 的原用例覆盖）；变异（持锁后发现锁文件已 unlink 仍继续删除）被检出；PR #12 合并提交 `65a1823c`。PR #12 的合并说明称“补记 PR #11”，但同样因脚本断言失败未包含 todo 改动，该说明不准确，以本 PR #13 为准
 
 **Verification**：`TEST PaimonSpillProcessIntegrationTest`\
 **Dependencies**：T10\
@@ -245,9 +247,10 @@
 **Description**：在 V1.2 的生命周期测试中补充 lease 层面的断言：凡是保留路径，用 `SpillTestSupport.ownerLockHeld` 证明锁仍被持有；凡是完成路径，断言 lease 不存在。
 
 **Acceptance criteria**：
-- [ ] AC-10、AC-11：RETAINED 与“已取消但仍在运行”时锁保持，反复回收不删除
-- [ ] AC-13：多根部分失败、DDL/rebuild、有限读失败时锁保持
-- [ ] AC-14：`rocksdb-*` 位于 `<io>/paimon-io-*` 内；AC-12 全部回归通过
+- [x] AC-10、AC-11：RETAINED 与“已取消但仍在运行”时锁保持，反复回收不删除
+- [x] AC-13：多根部分失败、DDL/rebuild、有限读失败时锁保持
+- [x] AC-14：`rocksdb-*` 位于 `<io>/paimon-io-*` 内；AC-12 全部回归通过
+- [x] 证据：`TEST` 8 个生命周期类 80 项通过；保留路径断言 `ownerLockHeld` 与“其他 JVM 回收数为 0”加在使用真实租约的 Factory 回滚、Preflight、CompactionSpillLifecycle（等待与取消）、SyncStop；DDL/rebuild 与有限读的现有测试使用 mock IOManager（无真实租约），其保留语义走同一 releaseAfterClose 路径，由上述真实租约用例覆盖；AC-14 在 Preflight 断言受限视图位于租约 io/ 内，并由 ContextIntegrationTest 断言 KEY_DYNAMIC 的 rocksdb 位置；变异（无关闭证明也退役）使 Factory 1 项、Preflight 2 项失败
 
 **Verification**：`TEST PaimonCompactionSpillLifecycleIntegrationTest,PaimonBoundedStopTest,PaimonTableWriteContextFactoryTest,PaimonFiniteReadLifecycleTest,PaimonServiceDdlCompactionFailureTest,PaimonDynamicBucketPreflightCleanupTest`\
 **Dependencies**：T10\
