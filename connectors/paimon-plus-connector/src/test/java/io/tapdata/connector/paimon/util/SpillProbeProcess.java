@@ -42,6 +42,12 @@ public final class SpillProbeProcess {
             case "runtime-name":
                 runtimeName(Paths.get(args[1]), args[2]);
                 break;
+            case "jvm-id":
+                System.out.println("jvmId=" + PaimonJvmIdentity.current());
+                break;
+            case "jvm-id-hosts":
+                jvmIdAcrossHostResolution(Paths.get(args[1]), args[2]);
+                break;
             case "legacy-cleanup":
                 // develop e3f68298 的现有清理器；grace=0 只替代“目录空闲超过宽限期”，不参与存活判定。
                 int deleted = PaimonSpillDirCleaner.cleanupStaleSpillDirs(new String[] {args[1]}, 0L, null);
@@ -96,6 +102,33 @@ public final class SpillProbeProcess {
         Thread.sleep(5_500L);
         System.out.println("unresolved=" + runtime.getName());
         System.out.println("identity-after=" + runtime.getPid() + "|" + runtime.getStartTime());
+    }
+
+    /** 主机名可解析与不可解析两种状态下，各重新派生一次 jvmId（不走缓存）。 */
+    private static void jvmIdAcrossHostResolution(Path hostsFile, String hostname) throws Exception {
+        RuntimeMXBean runtime = ManagementFactory.getRuntimeMXBean();
+        Files.write(hostsFile, ("127.0.0.1 " + hostname + "\n").getBytes(StandardCharsets.UTF_8));
+        System.out.println("resolved-name=" + runtime.getName());
+        System.out.println("resolved-id=" + PaimonJvmIdentity.fromRuntime(runtime));
+        Files.write(hostsFile, "127.0.0.1 unrelated.invalid\n".getBytes(StandardCharsets.UTF_8));
+        Thread.sleep(5_500L);
+        System.out.println("unresolved-name=" + runtime.getName());
+        System.out.println("unresolved-id=" + PaimonJvmIdentity.fromRuntime(runtime));
+    }
+
+    /** 不经名称解析读取本机主机名：Linux 读 procfs，其他平台执行 hostname。 */
+    static String localHostName() throws Exception {
+        Path procfs = Paths.get("/proc/sys/kernel/hostname");
+        if (Files.isReadable(procfs)) {
+            return new String(Files.readAllBytes(procfs), StandardCharsets.UTF_8).trim();
+        }
+        Process process = new ProcessBuilder("hostname").redirectErrorStream(true).start();
+        String name = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+        if (!process.waitFor(10, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            return "";
+        }
+        return process.exitValue() == 0 ? name : "";
     }
 
     static String testClassPath() {
