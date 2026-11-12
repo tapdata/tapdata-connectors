@@ -42,6 +42,9 @@ public final class SpillProbeProcess {
             case "runtime-name":
                 runtimeName(Paths.get(args[1]), args[2]);
                 break;
+            case "hold-lock":
+                holdLock(Paths.get(args[1]));
+                break;
             case "jvm-id":
                 System.out.println("jvmId=" + PaimonJvmIdentity.current());
                 break;
@@ -66,6 +69,22 @@ public final class SpillProbeProcess {
             System.out.println("acquired=" + (lock != null));
             if (lock != null) {
                 lock.release();
+            }
+        }
+    }
+
+    /** 以独立进程持有锁文件的排他锁，直到收到 release：模拟仍存活的外部 owner。 */
+    private static void holdLock(Path file) throws IOException {
+        BufferedReader commands = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ, StandardOpenOption.WRITE);
+             FileLock lock = channel.tryLock()) {
+            if (lock == null) {
+                throw new IllegalStateException("Lock is already held elsewhere");
+            }
+            System.out.println("locked");
+            System.out.flush();
+            if (!"release".equals(commands.readLine())) {
+                throw new IllegalStateException("Probe did not receive release");
             }
         }
     }
