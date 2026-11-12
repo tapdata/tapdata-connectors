@@ -316,16 +316,16 @@ C1–C10 与 R1–R3 已由本地 PR #2 合入（证据 §4），作为下列验
 
 ## 9. 交付流程（本地 PR）
 
-1. **分支**：集成分支 `feature/paimon-spill-owner-isolation`，位于独立 worktree，基于 develop `e3f68298`。每个步骤在主题分支 `pr/spill-owner-isolation/<NN>-<slug>` 上完成。
+1. **分支**：集成分支 `hotfix/paimon-spill-owner-isolation`（2026-11-12 由 `feature/` 更名，推送到 fork 远端 `czy006`），位于独立 worktree，基于 develop `e3f68298`。每个步骤在主题分支 `pr/spill-owner-isolation/<NN>-<slug>` 上完成。
 2. **提交**：采用约定式提交（`docs|test|feat|fix|refactor(paimon): …`），一个提交只做一件事。只提交计划内文件；工作区中他人的改动不得进入提交。
 3. **合入**：以 `git merge --no-ff` 合入集成分支。合并提交正文即 PR 描述，必须包含：范围、动机、执行的命令与结果（测试数/失败数/跳过数）、变异检验结果（生产代码 PR 必做：反转一个新增条件，确认至少一个测试失败，再还原）、未覆盖项、复查命令。
 4. **门禁**：合入前，定向测试必须全绿，`git diff --check` 必须干净；检查点 PR 还必须通过模块 `package`。
 5. **复查**：
-   - `git log --first-parent --merges feature/paimon-spill-owner-isolation` 列出全部 PR；
+   - `git log --first-parent --merges hotfix/paimon-spill-owner-isolation` 列出全部 PR；
    - `git show <merge>` 查看 PR 描述；
    - `git diff <merge>^1 <merge>` 查看该 PR 的全部改动。
 6. **不可变性**：已合入的 PR 不得改写历史；需要修正时提交新的 PR。
-7. **远端**：只有用户明确要求时才推送或创建远端 PR。
+7. **远端**：集成分支推送到 fork 远端 `czy006`（与既有 `hotfix/paimon-*` 分支一致）；创建上游 PR 须用户明确要求。
 
 ## 10. 成功标准
 

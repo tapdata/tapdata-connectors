@@ -2,7 +2,7 @@
 
 > 版本：Plan v2，2026-11-12；状态：待用户复核。获批前不修改生产代码；已合入的 PR #1–#2 只包含文档与测试。\
 > 规范：[SPEC V0.3](../../src/doc/specs/SPEC-paimon-spill-owner-isolation.md)；证据：[REVIEW 2026-11-12](../../src/doc/reviews/REVIEW-paimon-spill-owner-isolation-2026-11-12.md)；任务唯一事实源：[todo.md](todo.md)。\
-> 代码基线：develop `e3f68298`；集成分支 `feature/paimon-spill-owner-isolation`，位于独立 worktree `tapdata-connectors-paimon-spill-owner-isolation`。主工作区中他人的暂存与未提交改动不受影响。\
+> 代码基线：develop `e3f68298`；集成分支 `hotfix/paimon-spill-owner-isolation`（远端 `czy006`），位于独立 worktree `tapdata-connectors-paimon-spill-owner-isolation`。主工作区中他人的暂存与未提交改动不受影响。\
 > 依赖：Paimon 1.3.2；生产代码 `<release>8`，测试 `<testRelease>11`；构建需要 JDK 17。\
 > 存放位置：模块 `tasks/plan.md` 与 `tasks/todo.md` 是 V1.2 的完成记录；根目录 `tasks/` 是未完成的微批计划。两者都不修改，本计划使用独立子目录。
 
@@ -29,8 +29,9 @@
 | 变异检验 | 生产代码 PR 必做：反转一个新增条件，确认至少一个测试失败，再用 `git checkout -- <file>` 还原；把结果写进 PR 描述 |
 | 合入 | `git merge --no-ff -F <描述文件>`；合并提交正文即 PR 描述，包含范围、动机、命令与结果（测试数/失败/错误/跳过）、变异检验、未覆盖项、复查命令 |
 | 记录 | 下一个 PR 在 todo.md 中补记上一个 PR 的合并提交哈希 |
-| 复查 | `git log --first-parent --merges feature/paimon-spill-owner-isolation`；`git show <merge>`；`git diff <merge>^1 <merge>` |
-| 禁止 | 改写已合入的历史；推送远端（除非用户要求）；把他人改动带入提交 |
+| 复查 | `git log --first-parent --merges hotfix/paimon-spill-owner-isolation`；`git show <merge>`；`git diff <merge>^1 <merge>` |
+| 远端 | 每个检查点或用户要求时，把集成分支推送到 `czy006`（`git push czy006 hotfix/paimon-spill-owner-isolation`）；不推送 `pr/*` 主题分支；不向 `origin` 推送，创建上游 PR 须用户明确要求 |
+| 禁止 | 改写已合入或已推送的历史；强制推送；把他人改动带入提交 |
 
 构建命令（Spec §12）：
 
