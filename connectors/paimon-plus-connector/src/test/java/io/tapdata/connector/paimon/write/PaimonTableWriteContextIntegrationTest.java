@@ -93,15 +93,18 @@ class PaimonTableWriteContextIntegrationTest {
             // paimon-io-<uuid> directory, never a rocksdb-<uuid> sibling under the raw root:
             // only the spill directory is protected by the live registry, the termination
             // barrier, and the stale cleaner.
-            java.io.File[] rootChildren =
-                    ioRoot.toFile().listFiles((dir, name) -> name.startsWith("paimon-io-"));
-            assertEquals(1, rootChildren.length);
+            List<String> spillDirs = context.spillDirs();
+            assertEquals(1, spillDirs.size());
+            java.io.File spill = new java.io.File(spillDirs.get(0));
+            org.junit.jupiter.api.Assertions.assertTrue(spill.toPath().startsWith(
+                    ioRoot.toRealPath().resolve("tapdata-paimon-v2")), "spill 目录必须位于租约内");
+            assertEquals(0, ioRoot.toFile().listFiles((dir, name) -> name.startsWith("paimon-io-")).length,
+                    "raw root 下不得出现平铺的 spill 目录");
             assertEquals(
                     0,
                     ioRoot.toFile().listFiles((dir, name) -> name.startsWith("rocksdb-")).length,
                     "rocksdb index leaked to the raw tmp root");
-            java.io.File[] spillChildren = rootChildren[0]
-                    .listFiles((dir, name) -> name.startsWith("rocksdb-"));
+            java.io.File[] spillChildren = spill.listFiles((dir, name) -> name.startsWith("rocksdb-"));
             assertEquals(1, spillChildren.length);
         }
 

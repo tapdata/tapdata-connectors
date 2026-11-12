@@ -168,7 +168,7 @@
 | PROVISIONING → ACTIVE | owner | — | `open(<lock>, O_CREAT\|O_EXCL)` 后 `tryLock`，再 `mkdir(<io>)` | 锁被持有 |
 | ACTIVE → RETAINED | owner | 关闭证明不足或超时 | 不做任何文件操作 | 锁保持 |
 | ACTIVE → RETIRING | owner | 关闭证明完整（§4.4） | 删除 `<io>` 子树（不跟随符号链接）；持锁 `unlink(<lock>)` | — |
-| RETIRING → ABSENT | owner | — | 释放锁并关闭 channel；`rmdir(<lease>)`，ENOENT 视为完成 | 终态 |
+| RETIRING → ABSENT | owner | — | 释放锁并关闭 channel；`rmdir(<lease>)`，ENOENT 视为完成；随后依次尝试 rmdir 空的 `<ns>` 与 `<sub>` | 终态；正常停止不留空目录 |
 | ACTIVE/RETAINED → ORPHANED | 内核 | owner 进程终止 | 释放进程的全部记录锁 | — |
 | ORPHANED → RECLAIMING | 回收者 | jvmId ≠ 自身；文件系统准入；`open(<lock>)` 不带 `O_CREAT`、`O_NOFOLLOW`；`tryLock` 成功；fileKey 复核一致 | — | 回收者独占 |
 | RECLAIMING → ABSENT | 回收者 | — | 删除 `<io>`（失败则保留 `<lock>` 并释放锁）；持锁 `unlink(<lock>)`；释放；`rmdir(<lease>)` | 终态 |
@@ -179,7 +179,7 @@
 
 1. 对 roots 做规范化（`createDirectories` 后取 `toRealPath`），按真实路径去重，保持原顺序。
 2. 计算 jvmId。
-3. 对每个根，最多尝试 3 次：`createDirectories(<ns>)`（`<sub>` 与 `<ns>` 不得是符号链接）→ `createDirectory(<lease>)` → `open(<lock>, CREATE_NEW, WRITE)` → `tryLock`（必须成功）→ `createDirectory(<io>)`。第 1–3 步遇到 ENOENT 时，换新 leaseId 从头重试；其他错误即失败。
+3. 对每个根，最多尝试 3 次：`createDirectories(<ns>)`（`<sub>` 与 `<ns>` 不得是符号链接）→ `createDirectory(<lease>)` → `open(<lock>, CREATE_NEW, WRITE)` → `tryLock`（必须成功）→ `createDirectory(<io>)`。前三步遇到 ENOENT（空的 `<sub>`、`<ns>` 或 lease 刚被外部回收者或本进程退役的 owner 删除）时，换新 leaseId 从头重试；其他错误即失败。
 4. 任一根失败：对已就绪的根执行退役。此时尚未构造 IOManager，不存在异步使用者，退役是安全的。
 5. 以全部 `<io>` 为根执行 `IOManager.create`，并物化目录；每个根必须恰好有一个 `paimon-io-*`，否则按 V1.2 语义保留全部资源并失败（D6）。
 6. 登记 owner 索引（每个 ClassLoader 一份，以 `paimon-io-*` 的规范路径为键），供本 ClassLoader 的 owner 退役使用。回收者禁止读取该索引。
@@ -189,7 +189,7 @@
 1. spillDirs 为空时直接返回完成；含未登记路径时返回“不完整”（D5）。
 2. 对每个 lease：删除 `<io>` 子树 → 持锁 `unlink(<lock>)` → 释放锁并关闭 channel → `rmdir(<lease>)`。
 3. 释放锁之前任一步失败：保留锁，返回不完整（沿用 ReleaseResult 与 FAILED_RETAINED 语义）。
-4. 释放锁之后的 rmdir：ENOENT 视为完成（外部回收者已删除空目录）；其他错误只记审计告警，不影响完成判定。此时目录已无锁，残留按 PROVISIONING 状态处理。
+4. 释放锁之后的 rmdir：ENOENT 视为完成（外部回收者已删除空目录）；其他错误只记审计告警，不影响完成判定。此时目录已无锁，残留按 PROVISIONING 状态处理。lease 删除后依次尝试 rmdir 空的 `<ns>` 与 `<sub>`，使正常停止不留空目录；并发的 Provision 由第 3 步的重试兜底。
 
 **不注册 shutdown hook**：hook 在进程退出时与仍在运行的 compaction 线程并发执行，删除目录会违反“使用者退出先于删除”的前提。进程退出后，锁由内核释放，残留由后继进程回收，等效于 Flink 的 `tm_<resourceId>/tmp` 在重启时被清空。
 
