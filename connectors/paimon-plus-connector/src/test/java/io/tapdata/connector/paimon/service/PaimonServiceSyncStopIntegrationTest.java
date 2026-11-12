@@ -199,6 +199,7 @@ class PaimonServiceSyncStopIntegrationTest {
             File directory = new File(spillDirectory);
             assertTrue(directory.isDirectory(), "真实任务尚未结束：" + directory);
             assertTrue(ownerMarker(directory).isFile(), "等待期间 owner marker 必须保留");
+            assertTrue(SpillTestSupport.ownerLockHeld(spillDirectory), "等待期间租约锁必须被持有");
         }
     }
 

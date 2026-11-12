@@ -269,7 +269,13 @@ class PaimonCompactionSpillLifecycleIntegrationTest {
             assertFalse(((org.apache.paimon.operation.AbstractFileStoreWrite<?>) fixture.writer.getWrite()).writers().isEmpty(),
                     "不能把取消吞为空结果后内联关闭/移除 bucket writer");
             assertEquals(0, io.closeCount());
-            for (File directory : spillingDirsOf(io)) { assertTrue(directory.exists()); assertTrue(ownerMarker(directory).exists()); }
+            for (File directory : spillingDirsOf(io)) {
+                assertTrue(directory.exists());
+                assertTrue(ownerMarker(directory).exists());
+                // AC-11：Future 已取消但 spill 仍在运行，租约锁必须仍被持有，其他 JVM 回收不到。
+                assertTrue(SpillTestSupport.ownerLockHeld(directory.getPath()));
+                assertEquals(0, SpillTestSupport.reclaimInOtherJvm(directory.getPath()));
+            }
             release.countDown();
             assertTrue(fixture.closeReturned.await(10, TimeUnit.SECONDS));
             assertNull(fixture.closeFailure.get());
@@ -352,6 +358,8 @@ class PaimonCompactionSpillLifecycleIntegrationTest {
             for (File directory : spillingDirsOf(io)) {
                 assertTrue(directory.isDirectory());
                 assertTrue(ownerMarker(directory).isFile());
+                assertTrue(SpillTestSupport.ownerLockHeld(directory.getPath()), "等待实际终止期间锁必须被持有");
+                assertEquals(0, SpillTestSupport.reclaimInOtherJvm(directory.getPath()));
             }
 
             release.countDown();

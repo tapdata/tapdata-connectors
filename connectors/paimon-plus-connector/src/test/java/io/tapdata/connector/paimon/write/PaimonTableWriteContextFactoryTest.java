@@ -344,6 +344,9 @@ class PaimonTableWriteContextFactoryTest {
                 assertTrue(java.nio.file.Files.isDirectory(java.nio.file.Paths.get(dir)));
                 assertTrue(java.nio.file.Files.exists(ownerMarker(dir)),
                         "清理失败不能丢失残留目录的 owner marker");
+                // AC-13：回滚未取得关闭证明时，租约锁保持，其他 JVM 回收不到。
+                assertTrue(SpillTestSupport.ownerLockHeld(dir));
+                assertEquals(0, SpillTestSupport.reclaimInOtherJvm(dir));
             }
             verify(fixture.writer, org.mockito.Mockito.times(1)).close();
             verify(fixture.committer, org.mockito.Mockito.times(1)).close();
@@ -403,6 +406,7 @@ class PaimonTableWriteContextFactoryTest {
                 for (String dir : dirs) {
                     assertTrue(java.nio.file.Files.isDirectory(java.nio.file.Paths.get(dir)));
                     assertTrue(java.nio.file.Files.exists(ownerMarker(dir)));
+                    assertTrue(SpillTestSupport.ownerLockHeld(dir), "assigner 未证明关闭时租约锁保持");
                 }
             } else {
                 assertSame(bootstrap, failure);

@@ -120,6 +120,11 @@ class PaimonDynamicBucketPreflightCleanupTest {
             verify(checkers.constructed().get(0)).open(org.mockito.ArgumentMatchers.eq(0L),
                     view.capture(), org.mockito.ArgumentMatchers.eq(1), org.mockito.ArgumentMatchers.eq(0), any());
             org.junit.jupiter.api.Assertions.assertArrayEquals(dirs.toArray(new String[0]), view.getValue().tempDirs());
+            for (String confined : view.getValue().tempDirs()) {
+                // AC-14：GlobalIndexAssigner 经 tempDirs() 建 rocksdb-*，该路径必须位于租约的 io/ 内。
+                assertTrue(Paths.get(confined).getParent().getFileName().toString().equals("io")
+                        && confined.contains("tapdata-paimon-v2"), confined);
+            }
             org.junit.jupiter.api.Assertions.assertNotSame(io, view.getValue());
             assertEquals(1, bootstraps.constructed().size());
             verify(checkers.constructed().get(0), times(1)).close();
@@ -163,6 +168,13 @@ class PaimonDynamicBucketPreflightCleanupTest {
                         "清理失败必须保留目录 owner marker");
                 assertEquals(scenario != CleanupFailure.NONE, SpillTestSupport.ownerRegistered(dir),
                         "checker 未证明关闭时不能释放 owner 登记与目录文件锁");
+                if (scenario != CleanupFailure.NONE) {
+                    // AC-10：FAILED_RETAINED 保持持锁，其他 JVM 的反复回收都不能删除。
+                    assertTrue(SpillTestSupport.ownerLockHeld(dir));
+                    assertEquals(0, SpillTestSupport.reclaimInOtherJvm(dir));
+                    assertEquals(0, SpillTestSupport.reclaimInOtherJvm(dir));
+                    assertTrue(Files.isDirectory(Paths.get(dir)));
+                }
             }
         } finally {
             // 注入的 checker 没有真实后台访问者；退出构造 mock 作用域后才允许测试回收保留的资源。
