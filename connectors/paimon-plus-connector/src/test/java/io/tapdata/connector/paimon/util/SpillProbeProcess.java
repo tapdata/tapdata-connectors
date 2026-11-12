@@ -51,6 +51,10 @@ public final class SpillProbeProcess {
             case "jvm-id-hosts":
                 jvmIdAcrossHostResolution(Paths.get(args[1]), args[2]);
                 break;
+            case "reclaim":
+                System.out.println("reclaimed=" + PaimonSpillReclaimer.standard()
+                        .reclaim(java.util.Collections.singletonList(args[1])).reclaimed.size());
+                break;
             case "legacy-cleanup":
                 // develop e3f68298 的现有清理器；grace=0 只替代“目录空闲超过宽限期”，不参与存活判定。
                 int deleted = PaimonSpillDirCleaner.cleanupStaleSpillDirs(new String[] {args[1]}, 0L, null);
@@ -178,6 +182,15 @@ public final class SpillProbeProcess {
             String line = probe.expectLine("acquired=");
             probe.awaitSuccess();
             return Boolean.parseBoolean(line.substring("acquired=".length()));
+        }
+    }
+
+    /** 在另一个 JVM 中运行新协议的回收者，返回其输出行。 */
+    static String reclaimInOtherJvm(Path root) throws Exception {
+        try (Handle reclaimer = start(Collections.emptyList(), "reclaim", root.toString())) {
+            String line = reclaimer.expectLine("reclaimed=");
+            reclaimer.awaitSuccess();
+            return line;
         }
     }
 
