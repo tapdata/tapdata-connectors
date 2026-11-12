@@ -55,6 +55,9 @@ public final class SpillProbeProcess {
                 System.out.println("reclaimed=" + PaimonSpillReclaimer.standard()
                         .reclaim(java.util.Collections.singletonList(args[1])).reclaimed.size());
                 break;
+            case "reclaim-paused":
+                reclaimPausedAfterOpen(args[1]);
+                break;
             case "legacy-cleanup":
                 // develop e3f68298 平铺清理器的冻结副本，代表同机仍运行旧版本连接器的引擎；grace=0 只替代
                 // “目录空闲超过宽限期”。
@@ -126,6 +129,23 @@ public final class SpillProbeProcess {
         Thread.sleep(5_500L);
         System.out.println("unresolved=" + runtime.getName());
         System.out.println("identity-after=" + runtime.getPid() + "|" + runtime.getStartTime());
+    }
+
+    /** 新回收者在打开某个锁文件之后、tryLock 之前暂停，等待父进程的 go：模拟迟到的回收者。 */
+    private static void reclaimPausedAfterOpen(String root) {
+        BufferedReader commands = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        PaimonSpillReclaimer reclaimer = new PaimonSpillReclaimer(PaimonJvmIdentity::current,
+                PaimonSpillReclaimer.DEFAULT_TYPE_PROBE, lockFile -> {
+                    FileChannel channel = PaimonSpillReclaimer.DEFAULT_OPENER.open(lockFile);
+                    System.out.println("opened=" + lockFile);
+                    System.out.flush();
+                    if (!"go".equals(commands.readLine())) {
+                        channel.close();
+                        throw new IOException("Probe did not receive go");
+                    }
+                    return channel;
+                }, PaimonSpillFiles.FILES_DELETE, PaimonSpillAudit.defaultAudit(), PaimonSpillReclaimer.DEFAULT_BUDGET);
+        System.out.println("reclaimed=" + reclaimer.reclaim(Collections.singletonList(root)).reclaimed.size());
     }
 
     /** 主机名可解析与不可解析两种状态下，各重新派生一次 jvmId（不走缓存）。 */
