@@ -168,9 +168,10 @@
 **Description**：按 Spec §4.5–4.6 实现回收器：命名空间按名称排除、正则校验、符号链接拒绝、不带 CREATE 打开、fileKey 复核、ENOENT/ENOTEMPTY 容忍、Overlapping 跳过、每次调用预算、文件系统准入、审计在锁外统一写出。
 
 **Acceptance criteria**：
-- [ ] 本 JVM 命名空间的打开次数为 0，且不列出其内容（AC-02 同 ClassLoader 部分）；jvmId 碰撞时跳过（AC-07 部分）；两个线程并发回收同一 ORPHANED lease 时无异常逃逸、至多一次成功（AC-05 部分）
-- [ ] AC-08 的输入校验；AC-18 中 `<io>` 删除失败保留锁文件；预算生效
-- [ ] AC-19：nfs4、fuse.*、未知类型、探针异常时打开次数为 0，告警一次
+- [x] 本 JVM 命名空间的打开次数为 0，且不列出其内容（AC-02 同 ClassLoader 部分）；jvmId 碰撞时跳过（AC-07 部分）；两个线程并发回收同一 ORPHANED lease 时无异常逃逸、至多一次成功（AC-05 部分）
+- [x] AC-08 的输入校验；AC-18 中 `<io>` 删除失败保留锁文件；预算生效
+- [x] AC-19：nfs4、fuse.*、未知类型、探针异常时打开次数为 0，告警一次
+- [x] 证据：`TEST PaimonSpillReclaimerTest` 14 项通过（含外部进程持锁、mtime 极早仍保留，AC-07；源码不含时间输入的结构检查，INV-03）；变异 (a) 去掉本命名空间排除、(b) 去掉 fileKey 复核，均被检出并还原；本 PR 先于 PR #8 合入（Plan 允许并行），PR #7 合并提交 `57edbcef`
 
 **Verification**：`TEST PaimonSpillReclaimerTest`；人工检查回收器源码中没有 mtime 与时钟调用；变异检验：去掉自身命名空间排除，AC-02 用例应失败。\
 **Dependencies**：T06（可与 T07、T08 并行）\
