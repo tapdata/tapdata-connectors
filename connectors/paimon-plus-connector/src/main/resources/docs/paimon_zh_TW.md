@@ -51,6 +51,30 @@ Paimon 存儲數據的根路徑。可以是:
 ### 數據庫名稱
 Paimon 數據庫名稱（默認：default）
 
+### 本地臨時目錄與 Spill 回收
+
+連接器在 `diskTmpDir` 下按以下結構存放 Paimon 的本地 Spill 與索引文件，每個寫入表各有獨立的租約目錄：
+
+```text
+<diskTmpDir>/tapdata-paimon-v2/<進程標識>/<租約>/owner.lock
+<diskTmpDir>/tapdata-paimon-v2/<進程標識>/<租約>/io/paimon-io-<UUID>/
+```
+
+- **存活判定：** 只以作業系統文件鎖判斷目錄是否仍在使用，不按修改時間推斷。運行中任務的目錄不會被其他任務或其他引擎刪除。
+- **正常停止：** 任務正常停止後，其目錄全部刪除，不留空目錄。
+- **異常退出：** 進程崩潰（OOM、`kill -9`）後遺留的目錄，由同一台機器上下一次啟動 Paimon 任務的引擎回收（包括重啟後的同一引擎）；每次最多回收 64 個，其餘留到下一次。
+- **部署建議：** 每個引擎進程使用獨佔的 `diskTmpDir`。Kubernetes 使用每個 Pod 獨立的 emptyDir 或獨立的 subPath，Docker 使用獨立的 volume。
+- **網路或 FUSE 文件系統：** `diskTmpDir` 位於 NFS、CIFS、FUSE、Ceph 等文件系統時，跨主機文件鎖不可靠，連接器不自動回收遺留目錄，只記錄告警。請改用本地磁碟，或按下方步驟手動清理。
+- **升級：** 升級連接器後請重啟引擎，避免同一進程內新舊版本並存。舊版本在 `diskTmpDir` 根下創建的 `paimon-io-*` 目錄與 `.paimon-io-*.tapdata-owner.lock` 文件不會被新版本打開或刪除。確認使用該目錄的所有引擎都已升級並重啟後，可以一次性刪除：
+
+  ```sh
+  # 先列出，確認沒有任何舊版本引擎仍在使用該目錄後再刪除
+  find <diskTmpDir> -maxdepth 1 \( -name 'paimon-io-*' -o -name '.paimon-io-*.tapdata-owner.lock' \) -print
+  find <diskTmpDir> -maxdepth 1 \( -name 'paimon-io-*' -o -name '.paimon-io-*.tapdata-owner.lock' \) -exec rm -rf {} +
+  ```
+
+- **排查：** 租約的創建、退役、保留、回收與跳過事件寫入引擎日誌，logger 名為 `io.tapdata.connector.paimon.spill`；任務日誌只記錄摘要。
+
 ## 數據類型映射
 
 | Paimon 類型 | Tapdata 類型 |
