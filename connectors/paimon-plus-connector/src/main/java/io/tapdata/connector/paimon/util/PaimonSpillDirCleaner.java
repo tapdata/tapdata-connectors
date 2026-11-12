@@ -14,12 +14,9 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.DirectoryStream;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -428,7 +425,7 @@ public final class PaimonSpillDirCleaner {
                     if (now - newestModified < graceMs) {
                         continue;
                     }
-                    DeletionResult result = deleteRecursively(spillPath, deleteAction);
+                    PaimonSpillFiles.DeletionResult result = deleteRecursively(spillPath, deleteAction);
                     if (result.success) {
                         removeOwnerFile = true;
                         deleted++;
@@ -464,15 +461,8 @@ public final class PaimonSpillDirCleaner {
     }
 
     /** Delete a tree without following symbolic links. */
-    private static DeletionResult deleteRecursively(Path root, DeleteAction deleteAction) {
-        DeletingFileVisitor visitor = new DeletingFileVisitor(deleteAction);
-        try {
-            Files.walkFileTree(root, visitor);
-        } catch (IOException | SecurityException traversalFailure) {
-            visitor.failed = true;
-        }
-        boolean rootDeleted = Files.notExists(root, LinkOption.NOFOLLOW_LINKS);
-        return new DeletionResult(!visitor.failed && rootDeleted, visitor.bytesDeleted);
+    private static PaimonSpillFiles.DeletionResult deleteRecursively(Path root, DeleteAction deleteAction) {
+        return PaimonSpillFiles.deleteTree(root, deleteAction::delete);
     }
 
     static String canonical(File file) {
@@ -499,57 +489,6 @@ public final class PaimonSpillDirCleaner {
     @FunctionalInterface
     interface DeleteAction {
         void delete(Path path) throws IOException;
-    }
-
-    private static final class DeletingFileVisitor extends SimpleFileVisitor<Path> {
-        private final DeleteAction deleteAction;
-        private long bytesDeleted;
-        private boolean failed;
-
-        private DeletingFileVisitor(DeleteAction deleteAction) {
-            this.deleteAction = deleteAction;
-        }
-
-        @Override
-        public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
-            long fileBytes = attributes.isRegularFile() ? attributes.size() : 0L;
-            delete(file, fileBytes);
-            return FileVisitResult.CONTINUE;
-        }
-
-        @Override
-        public FileVisitResult visitFileFailed(Path file, IOException failure) {
-            failed = true;
-            return FileVisitResult.CONTINUE;
-        }
-
-        @Override
-        public FileVisitResult postVisitDirectory(Path dir, IOException failure) {
-            if (failure != null) {
-                failed = true;
-            }
-            delete(dir, 0L);
-            return FileVisitResult.CONTINUE;
-        }
-
-        private void delete(Path path, long fileBytes) {
-            try {
-                deleteAction.delete(path);
-                bytesDeleted = saturatedAdd(bytesDeleted, fileBytes);
-            } catch (IOException | SecurityException deleteFailure) {
-                failed = true;
-            }
-        }
-    }
-
-    private static final class DeletionResult {
-        private final boolean success;
-        private final long bytesDeleted;
-
-        private DeletionResult(boolean success, long bytesDeleted) {
-            this.success = success;
-            this.bytesDeleted = bytesDeleted;
-        }
     }
 
     private static final class OwnerLock {

@@ -90,9 +90,10 @@
 提供 Provision 阶段钩子（“已加锁、未返回”）供 T11 使用。
 
 **Acceptance criteria**：
-- [ ] 布局与命名符合 Spec §4.1；重复或互为别名的根被去重（AC-20）
-- [ ] 用钩子在 `mkdir(<lease>)` 之后删除空 lease 或空命名空间，Provision 重试后成功；Retire 前在锁释放后外部删除空 lease，结果为完成（AC-17 单进程部分）
-- [ ] `<io>` 删除失败时保留锁并返回不完整；多根部分失败时不残留锁（AC-18 owner 部分）
+- [x] 布局与命名符合 Spec §4.1；重复或互为别名的根被去重（AC-20）
+- [x] 用钩子在 `mkdir(<lease>)` 之后删除空 lease 或空命名空间，Provision 重试后成功；Retire 前在锁释放后外部删除空 lease，结果为完成（AC-17 单进程部分）
+- [x] `<io>` 删除失败时保留锁并返回不完整；多根部分失败时不残留锁（AC-18 owner 部分）
+- [x] 证据：`TEST PaimonSpillLeaseTest` 12 项通过，旧清理器回归（PaimonSpillDirCleanerTest 18、进程集成 3、现场复现 3）不变；变异 (a) Retire 末步 ENOENT 视为失败、(b) Provision 遇 ENOENT 不重试，均被检出并还原；PR #5 合并提交 `4bc8fe9e`
 
 **Verification**：`TEST PaimonSpillLeaseTest`；变异检验：把 Retire 最后一步对 ENOENT 的容忍改为失败，竞态用例应失败。\
 **Dependencies**：T04、T05\
