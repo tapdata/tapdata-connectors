@@ -62,9 +62,10 @@
 **Description**：实现 Spec §4.7。SLF4J logger 名为 `io.tapdata.connector.paimon.spill`；三类事件（跳过、准入拒绝、旧布局清单）按（根目录, 原因）限流；sink 可注入；主机名只读环境变量 `HOSTNAME`。
 
 **Acceptance criteria**：
-- [ ] 事件字段齐全，不含连接配置；限流窗口内同一（根目录, 原因）只输出一次（AC-23 单元部分）
-- [ ] sink 抛出异常时由审计层吞掉并降级，不传播（AC-18 审计部分）
-- [ ] 代码中没有 `InetAddress` 或 `getName()` 调用
+- [x] 事件字段齐全，不含连接配置；限流窗口内同一（根目录, 原因）只输出一次（AC-23 单元部分）
+- [x] sink 抛出异常时由审计层吞掉并降级，不传播（AC-18 审计部分）
+- [x] 代码中没有 `InetAddress` 或 `getName()` 调用
+- [x] 证据：`TEST PaimonSpillAuditTest` 5 项通过；变异（取消限流判断）被 `rateLimitedEventsAreEmittedOncePerKeyAndWindow` 检出，已还原；PR #4 合并提交 `1fdfd5a2`
 
 **Verification**：`TEST PaimonSpillAuditTest`；变异检验：去掉限流判断，限流用例应失败。\
 **Dependencies**：T03（可与 T04 并行）\
@@ -72,7 +73,7 @@
 **Scope**：S
 
 ### 检查点 A（T04–T05 之后）
-- [ ] 新增测试全绿，`TEST PaimonSpillDirCleanerTest` 仍为 18 项全绿（生产行为未变）
+- [x] 新增测试全绿，`TEST PaimonSpillDirCleanerTest` 仍为 18 项全绿（生产行为未变）：6 个类 47 项通过
 
 ---
 
