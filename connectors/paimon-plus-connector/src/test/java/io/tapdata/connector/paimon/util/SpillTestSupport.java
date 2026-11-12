@@ -15,7 +15,6 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -27,7 +26,7 @@ import static org.mockito.ArgumentMatchers.any;
  *
  * <p>测试只经本类构造“已登记”的 IOManager、定位 owner 锁文件、观察登记状态与执行启动清理，不直接依赖
  * 生产代码的目录布局或 static 字段。布局切换（Plan T08/T10）时只改本类内部实现，测试断言保持不变。
- * 当前实现对应 develop e3f68298 的平铺布局。
+ * 当前实现对应 Spec V0.3 的租约布局：{@code <root>/tapdata-paimon-v2/<jvmId>/<lease>/{owner.lock, io/paimon-io-*}}。
  */
 public final class SpillTestSupport {
 
@@ -38,8 +37,10 @@ public final class SpillTestSupport {
 
     /** 创建并登记一个属于测试的 IOManager；目录在返回前已物化。 */
     public static IOManagerImpl ownedIOManager(String root) {
-        IOManagerImpl ioManager = (IOManagerImpl) IOManager.create(root);
-        OWNED.put(ioManager, PaimonSpillDirCleaner.registerLiveDirs(ioManager));
+        PaimonSpillDirCleaner.IOManagerBuildResult built =
+                PaimonSpillDirCleaner.resolveAndCreateIOManager(root, "test-owned");
+        IOManagerImpl ioManager = (IOManagerImpl) built.ioManager();
+        OWNED.put(ioManager, built.spillDirs());
         return ioManager;
     }
 
@@ -54,8 +55,8 @@ public final class SpillTestSupport {
 
     /** spill 目录对应的 owner 锁文件。 */
     public static Path ownerLockFile(String spillDir) {
-        Path path = Paths.get(spillDir);
-        return path.resolveSibling("." + path.getFileName() + PaimonSpillDirCleaner.OWNER_LOCK_SUFFIX);
+        // <lease>/io/paimon-io-<uuid> → <lease>/owner.lock
+        return Paths.get(spillDir).getParent().getParent().resolve(PaimonSpillLease.LOCK_FILE);
     }
 
     public static File ownerLockFile(File spillDir) {
@@ -64,23 +65,20 @@ public final class SpillTestSupport {
 
     /** 该目录是否仍处于本 ClassLoader 的 owner 登记中（存活保护与锁对象均在）。 */
     public static boolean ownerRegistered(String spillDir) {
-        Set<?> live = staticField("LIVE_DIRS", Set.class);
-        Map<?, ?> owners = staticField("OWNER_LOCKS", Map.class);
-        boolean registered = live.contains(spillDir);
-        if (registered != owners.containsKey(spillDir)) {
-            throw new AssertionError("Spill live registration and owner lock diverged for " + spillDir);
-        }
-        return registered;
+        return staticField("OWNERS", Map.class).containsKey(spillDir);
     }
 
     /** 当前 ClassLoader 中仍被持有的 owner 登记数量，用于检测泄漏。 */
     public static int ownerRegistrationCount() {
-        return staticField("OWNER_LOCKS", Map.class).size();
+        return staticField("OWNERS", Map.class).size();
     }
 
     /** 以零宽限期执行一次启动清理扫描，覆盖 spill 目录所在的根；返回删除数。 */
     public static int runStartupCleanup(List<String> spillDirs, BiConsumer<String, Long> onDeleted) {
-        String[] roots = spillDirs.stream().map(dir -> new File(dir).getParent()).distinct().toArray(String[]::new);
+        // <root>/tapdata-paimon-v2/<jvmId>/<lease>/io/paimon-io-<uuid> 向上 5 级即配置的根目录。
+        String[] roots = spillDirs.stream()
+                .map(dir -> Paths.get(dir).getParent().getParent().getParent().getParent().getParent().toString())
+                .distinct().toArray(String[]::new);
         return PaimonSpillDirCleaner.cleanupStaleSpillDirs(roots, 0L, onDeleted);
     }
 

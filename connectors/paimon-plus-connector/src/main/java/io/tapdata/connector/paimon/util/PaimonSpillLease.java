@@ -120,20 +120,20 @@ final class PaimonSpillLease {
         Path namespaceDir = subroot.resolve(namespace);
         NoSuchFileException lastRace = null;
         for (int attempt = 1; attempt <= MAX_PROVISION_ATTEMPTS; attempt++) {
-            Files.createDirectories(namespaceDir);
-            requireRealDirectory(subroot);
-            requireRealDirectory(namespaceDir);
             Path lease = namespaceDir.resolve(tag + "-" + UUID.randomUUID());
             FileChannel channel;
             try {
+                Files.createDirectories(namespaceDir);
+                requireRealDirectory(subroot);
+                requireRealDirectory(namespaceDir);
                 hook.beforeLeaseDirectory(namespaceDir);
                 Files.createDirectory(lease);
                 hook.afterLeaseDirectory(lease);
                 channel = FileChannel.open(lease.resolve(LOCK_FILE),
                         StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
             } catch (NoSuchFileException removedByReclaimer) {
-                // 外部回收者只会 rmdir 空的命名空间或空的 lease（Spec §4.3 PROVISIONING → ABSENT）；
-                // 此时尚无任何资源，换新 leaseId 从头重试。
+                // 其他参与者只会 rmdir 空的子根、命名空间或 lease（外部回收者，或本进程刚退役最后一个
+                // lease 的 owner，Spec §4.3）；此时尚无任何资源，换新 leaseId 从头重试。
                 lastRace = removedByReclaimer;
                 continue;
             }
@@ -306,6 +306,12 @@ final class PaimonSpillLease {
                 audit.record(PaimonSpillAudit.Event.LEASE_RESIDUE,
                         PaimonSpillAudit.details("lease", lease, "reason", "lease-directory-not-removed"));
             } else {
+                // 正常停止不留空目录：命名空间与子根为空时一并移除（rmdir 只删空目录）；本进程并发中的
+                // Provision 会因此得到 ENOENT 并重试（Spec §4.4）。
+                Path namespace = lease.getParent();
+                if (PaimonSpillFiles.removeEmptyDirectory(namespace) == PaimonSpillFiles.EmptyDirectoryRemoval.REMOVED) {
+                    PaimonSpillFiles.removeEmptyDirectory(namespace.getParent());
+                }
                 audit.record(PaimonSpillAudit.Event.LEASE_RETIRED, PaimonSpillAudit.details(
                         "lease", lease, "bytes", ioDeletion.bytesDeleted));
             }

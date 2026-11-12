@@ -140,9 +140,11 @@
 - 把 `PaimonSpillFieldFailureReproductionTest` 改名为 `PaimonSpillOwnerIsolationRegressionTest`：步骤不变（loader B 与子进程 C 仍运行**旧平铺清理器**），结论反转。
 
 **Acceptance criteria**：
-- [ ] 写上下文与预检只产生 v2 布局；`closeForStop` 成功后不留 lease
-- [ ] AC-03（旧清理器版本）：C 删除数为 0，A 建 channel 成功，外部 tryLock 失败；AC-21；jvmId 失败时 Context 初始化失败且不产生 lease（AC-08）
-- [ ] `PACKAGE` 全绿；与 T03 基线相比，测试数的差异逐项说明
+- [x] 写上下文与预检只产生 v2 布局；`closeForStop` 成功后不留 lease（且空的命名空间与子根一并移除）
+- [x] AC-03（旧清理器版本）：C 删除数为 0，A 建 channel 成功，外部 tryLock 失败；AC-21；jvmId 失败时 Context 初始化失败且不产生 lease（AC-08，由 PaimonSpillLeaseTest 覆盖，外观只传播异常）
+- [x] `PACKAGE` 全绿：1298 项，0 失败，1 跳过（既有）。相对 T07 的 1280：+14 回收器（PR #9）、+2 清理器（删 2 个旧 owner 用例，增 4 个）、+2 lease
+- [x] 首次全量有 3 个类失败，均为测试依赖旧布局或旧回退：PhysicalTableOwnerTest 的 Fixture 虚构 spill 路径（D5 后改为空列表）；ContextIntegrationTest 按平铺布局查找（等价改写）；DynamicBucketIntegrationTest 断言停止后根目录为空（改为 owner 退役时清理空命名空间与子根，并把 `createDirectories` 纳入 ENOENT 重试；Spec §4.3/§4.4 同步）
+- [x] 变异：(a) Retire 跳过 unlink → 9 项失败；(b) 未登记路径静默成功 → 1 项失败；(c) 不清理空命名空间 → 1 项失败；均已还原。PR #9 合并提交 `80b90fd5`
 
 **Verification**：`TEST PaimonSpillDirCleanerTest,PaimonTableWriteContextFactoryTest,PaimonDynamicBucketPreflightCleanupTest,PaimonSpillOwnerIsolationRegressionTest`；`PACKAGE`；变异检验：Retire 跳过 unlink，相关用例应失败。\
 **Dependencies**：T06、T07\
@@ -158,8 +160,8 @@
 **Scope**：M
 
 ### 检查点 B（T06–T08 之后）
-- [ ] `PACKAGE` 全绿；人工跑一次 `PaimonWriteBufferSpillIntegrationTest`，运行中只出现 v2 布局，结束后无残留
-- [ ] AC-03 回归通过：现场缺陷在 owner 侧已不可复现
+- [x] `PACKAGE` 全绿；v2 布局与“结束后根目录无残留”由 `PaimonTableWriteContextIntegrationTest.keyDynamicRocksDbIndexMustLiveInsideTheSpillDirectory` 与 `PaimonServiceDynamicBucketIntegrationTest` 自动断言，取代人工检查
+- [x] AC-03 回归通过：现场缺陷在 owner 侧已不可复现（`PaimonSpillOwnerIsolationRegressionTest` 3 项）
 
 ---
 

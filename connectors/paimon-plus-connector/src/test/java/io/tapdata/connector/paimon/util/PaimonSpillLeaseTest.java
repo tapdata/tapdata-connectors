@@ -231,6 +231,42 @@ class PaimonSpillLeaseTest {
         assertFalse(Files.exists(owned.lease));
     }
 
+    /** 最后一个 lease 退役后不留空目录；仍有其他 lease 时命名空间保留。 */
+    @Test
+    void retireRemovesEmptyNamespaceAndSubrootOnlyWhenNoLeaseRemains(@TempDir Path root) throws Exception {
+        PaimonSpillLease first = provision(Collections.singletonList(root.toString()), PaimonSpillLease.NO_HOOK);
+        PaimonSpillLease second = provision(Collections.singletonList(root.toString()), PaimonSpillLease.NO_HOOK);
+        Path namespace = first.roots().get(0).lease.getParent();
+
+        assertNull(first.roots().get(0).retire());
+        assertTrue(Files.isDirectory(namespace), "仍有其他 lease 时命名空间必须保留");
+
+        assertNull(second.roots().get(0).retire());
+        assertFalse(Files.exists(namespace));
+        assertFalse(Files.exists(root.toRealPath().resolve("tapdata-paimon-v2")), "正常停止后不留空子根");
+    }
+
+    /** 子根被另一个参与者删除（例如本进程刚退役最后一个 lease）时，Provision 重建后成功。 */
+    @Test
+    void provisionRetriesWhenSubrootIsRemovedConcurrently(@TempDir Path root) throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        PaimonSpillLease.ProvisionHook ownerRetiredMeanwhile = new PaimonSpillLease.ProvisionHook() {
+            @Override
+            public void beforeLeaseDirectory(Path namespace) throws IOException {
+                if (calls.getAndIncrement() == 0) {
+                    Files.delete(namespace);
+                    Files.delete(namespace.getParent());
+                }
+            }
+        };
+
+        PaimonSpillLease lease = provision(Collections.singletonList(root.toString()), ownerRetiredMeanwhile);
+
+        assertEquals(2, calls.get());
+        assertTrue(Files.isRegularFile(lease.roots().get(0).lockFile));
+        assertNull(lease.roots().get(0).retire());
+    }
+
     @Test
     void tagIsAStableDigestOfTheOwnerLabel() {
         assertEquals(PaimonSpillLease.tag("default.orders"), PaimonSpillLease.tag("default.orders"));

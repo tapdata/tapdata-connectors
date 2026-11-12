@@ -195,7 +195,7 @@ public final class PaimonTableWriteContextFactory {
             tableWrite = tableWrite.withCompactExecutor(compactionLifecycle.compactionExecutor());
             if (createIoManager) {
                 PaimonSpillDirCleaner.IOManagerBuildResult built =
-                        PaimonSpillDirCleaner.resolveAndCreateIOManager(configuredTmpDirs, scope);
+                        PaimonSpillDirCleaner.resolveAndCreateIOManager(configuredTmpDirs, tableKey, scope);
                 ioManager = built.ioManager();
                 spillDirs = built.spillDirs();
                 tableWrite = tableWrite.withIOManager(ioManager);
