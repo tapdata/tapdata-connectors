@@ -1,357 +1,281 @@
-# 任务清单：Paimon Spill 进程命名空间与死亡 owner 回收
+# 任务清单：Paimon Spill 进程级命名空间与租约回收协议（Plan v2）
 
-> 状态：Draft，待用户批准 [plan.md](plan.md)；本文件不表示生产代码已修改。  
-> 规范：[SPEC V0.2](../../src/doc/specs/SPEC-paimon-spill-owner-isolation.md)。任务按编号与依赖执行；每完成一项在此勾选并记录命令、测试数和结果。
+> 规范：[SPEC V0.3](../../src/doc/specs/SPEC-paimon-spill-owner-isolation.md)；计划：[plan.md](plan.md)；证据：[REVIEW](../../src/doc/reviews/REVIEW-paimon-spill-owner-isolation-2026-11-12.md)。\
+> 规则：任务 Txx 即本地 PR #xx，按 plan §2 的流程交付。勾选必须附带命令、测试数和合并提交；失败也如实记录。
 
-命令约定（在仓库根目录执行）：
+命令约定（在 worktree 根目录执行，需先 `export JAVA_HOME=<JDK 17>`）：
 
-- `TEST <类名列表>` 表示 `mvn -B -pl connectors/paimon-plus-connector -am -DskipTests=false -Dtest='<类名列表>' -Dsurefire.failIfNoSpecifiedTests=false -DfailIfNoTests=false test`
-- `PACKAGE` 表示 `mvn -B -pl connectors/paimon-plus-connector -am -DskipTests=false package`
+- `TEST <类>` = `$MVN -o -B -pl connectors/paimon-plus-connector -am -DskipTests=false -Dtest='<类>' -Dsurefire.failIfNoSpecifiedTests=false -DfailIfNoTests=false test`
+- `PACKAGE` = `$MVN -o -B -pl connectors/paimon-plus-connector -am -DskipTests=false package`
+- 其中 `$MVN` 为 Maven 3.9 的二进制路径（plan §2）。
 
-路径前缀：`main/` = `connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/`，`test/` = `connectors/paimon-plus-connector/src/test/java/io/tapdata/connector/paimon/`。
-
----
-
-## Task 0：基线与验收环境
-
-**Description：** 在未改动的 develop 上跑一遍定向测试和全量 package，记录基线；确认 AC-21 使用的 Linux + JDK 17 环境（P-OQ-1）。
-
-**Acceptance criteria：**
-- [ ] 记录 `java -version`、`mvn -version` 与基线提交
-- [ ] 记录 Spec §11 两组定向测试和 `PACKAGE` 的通过数、失败数；已有失败如实列出，不归因于本次改动
-- [ ] P-OQ-1 有结论（环境与执行方式）
-
-**Verification：**
-- [ ] `TEST PaimonSpillDirCleanerTest,PaimonSpillDirCleanerProcessIntegrationTest,PaimonServiceStaleSpillCleanupTest`
-- [ ] `TEST PaimonBoundedStopTest,PaimonStopControllerTest,PaimonNativeStopContractTest,PaimonCompactionSpillLifecycleIntegrationTest,PaimonTableWriteContextFactoryTest,PaimonFiniteReadLifecycleTest,PaimonConnectorStopTest`
-- [ ] `PACKAGE`
-
-**Dependencies：** None  
-**Files likely touched：** 本文件  
-**Estimated scope：** XS
+路径前缀：`main/` = `connectors/paimon-plus-connector/src/main/java/io/tapdata/connector/paimon/`；`test/` = 对应的 `src/test/java/...`。
 
 ---
 
-## Task 1：PaimonJvmIdentity 与隔离 ClassLoader 测试工具
+## 已完成
 
-**Description：** 新增只读 jvmId 计算（AD-4），并提供一个测试工具：用 platform ClassLoader 作父加载器，从测试 classpath 隔离加载 Connector 类。该工具在 T08 复用。
+### T01：导入 V0.2 基线文档 —— 本地 PR #1
+- [x] 原样导入 Spec V0.2、plan v1、todo v1，作为 V0.3 修订的 diff 基线
+- [x] 分支 `pr/spill-owner-isolation/01-baseline-docs`，合并提交 `2e2f66dd`，只含文档
 
-**Acceptance criteria：**
-- [ ] `current()` 返回 `j` + 32 位小写十六进制；只调用 `ManagementFactory.getRuntimeMXBean()` 的 `getName()` / `getStartTime()`，不调用 `getPlatformMBeanServer`
-- [ ] 两个隔离 ClassLoader 中取得的值相同；子 JVM 取得的值不同（AC-01）
-- [ ] 获取失败时抛出带原因的 `IllegalStateException`，不回退（为 AC-08 预留包内可见的提供器重载）
+### T02：平台特征化测试与现场复现 —— 本地 PR #2
+- [x] 新增 `PaimonSpillPlatformContractTest`（C1–C10）、`PaimonSpillFieldFailureReproductionTest`（R1–R3）、`SpillProbeProcess`、`IsolatedConnectorLoader`；生产代码零改动
+- [x] `TEST PaimonSpillPlatformContractTest,PaimonSpillFieldFailureReproductionTest`：13 项，0 失败、0 跳过（macOS / JDK 17.0.20 / apfs）
+- [x] 变异检验：`OwnerLock.tryAcquire` 冲突后不关闭 channel 时，R1、R2 失败，R3 通过；已还原
+- [x] 分支 `pr/spill-owner-isolation/02-platform-contract-tests`，合并提交 `213f9c49`
 
-**Verification：**
-- [ ] `TEST PaimonJvmIdentityTest`
-- [ ] 生产代码以 `<release>8` 编译通过
-
-**Dependencies：** T00  
-**Files likely touched：**
-- `main/util/PaimonJvmIdentity.java`（新）
-- `test/util/PaimonJvmIdentityTest.java`（新）
-- `test/util/IsolatedConnectorLoader.java`（新，测试工具）
-
-**Estimated scope：** S
+### T03：Spec V0.3、Plan v2、证据文档 —— 本地 PR #3
+- [x] Spec V0.3 吸收评审问题 1–7 及 Consider/Nit 项（处置表见证据 §7），并补充状态机、安全性/活性论证、平台前提与交付流程
+- [x] 新增证据文档：现场栈逐帧核实、Paimon 1.3.2 与 Paimon Flink Connector 源码核实、取证程序
+- [x] 全量基线（集成分支 `213f9c49`）：`PACKAGE` 成功，paimon-plus-connector 1255 项，0 失败、0 错误、1 跳过（`PaimonRustFsIntegrationTest`，依赖外部服务），耗时 129 s
+- [x] 分支 `pr/spill-owner-isolation/03-spec-plan-v0.3`，只含文档
 
 ---
 
-## Task 2：PaimonSpillAudit
+## T04：PaimonJvmIdentity —— 本地 PR #4
 
-**Description：** 统一审计出口：SLF4J logger `io.tapdata.connector.paimon.spill`，事件包括创建、退役、保留、回收开始/完成/失败、跳过、文件系统门禁、旧布局清单。跳过、门禁、旧布局三类按（根目录, 原因）限流。提供包内可见的 sink 接缝供测试捕获。
+**Description**：按 Spec §4.2 实现 jvmId：反射调用 `RuntimeMXBean#getPid`，Java 8 退回 `getName()` 中 `@` 之前的部分，再与 `getStartTime()` 一起做 SHA-256，取前 32 位十六进制并加 `j` 前缀；每个 ClassLoader 惰性计算一次并缓存。提供包内可见的纯函数 `derive(pid, startTime)` 与可注入的 provider。
 
-**Acceptance criteria：**
-- [ ] 事件字段包含 REQ-10 所列：协议版本、pid、hostname、jvmId 摘要、leaseId、tableTag、ClassLoader 标识、根目录、文件系统类型、动作来源、结果、异常
-- [ ] 不输出连接配置；同一（根目录, 原因）的告警在限流窗口内只输出一次
-- [ ] sink 抛出异常时被吞掉并降级，不向调用方传播（AC-17 的一部分）
+**Acceptance criteria**：
+- [ ] 固定期望值：`derive(12345, 1700000000000L)` 等于测试中写死的常量；格式符合正则 `j[0-9a-f]{32}`
+- [ ] 两个隔离 ClassLoader 结果相同；子进程结果不同；子进程在 `jdk.net.hosts.file` 切换前后计算结果不变（AC-01）
+- [ ] pid 获取失败或 `getName()` 格式不符时抛出带原因的 `IllegalStateException`；生产代码不出现主机名相关调用（AC-08 的身份部分）
 
-**Verification：**
-- [ ] `TEST PaimonSpillAuditTest`
+**Verification**：`TEST PaimonJvmIdentityTest`；变异检验：把主机名混入派生输入，hosts 切换用例应失败。\
+**Dependencies**：T03\
+**Files**：`main/util/PaimonJvmIdentity.java`（新）、`test/util/PaimonJvmIdentityTest.java`（新）、`test/util/SpillProbeProcess.java`（新增 `jvm-id` 模式）\
+**Scope**：S
 
-**Dependencies：** T00  
-**Files likely touched：**
-- `main/util/PaimonSpillAudit.java`（新）
-- `test/util/PaimonSpillAuditTest.java`（新）
+## T05：PaimonSpillAudit —— 本地 PR #5
 
-**Estimated scope：** S
+**Description**：实现 Spec §4.7。SLF4J logger 名为 `io.tapdata.connector.paimon.spill`；三类事件（跳过、准入拒绝、旧布局清单）按（根目录, 原因）限流；sink 可注入；主机名只读环境变量 `HOSTNAME`。
 
-### Checkpoint A（T01–T02 之后）
-- [ ] 模块编译通过，T01/T02 新测试通过
-- [ ] 生产行为未变（`PaimonSpillDirCleanerTest` 仍全绿）
+**Acceptance criteria**：
+- [ ] 事件字段齐全，不含连接配置；限流窗口内同一（根目录, 原因）只输出一次（AC-23 单元部分）
+- [ ] sink 抛出异常时由审计层吞掉并降级，不传播（AC-18 审计部分）
+- [ ] 代码中没有 `InetAddress` 或 `getName()` 调用
 
----
+**Verification**：`TEST PaimonSpillAuditTest`；变异检验：去掉限流判断，限流用例应失败。\
+**Dependencies**：T03（可与 T04 并行）\
+**Files**：`main/util/PaimonSpillAudit.java`（新）、`test/util/PaimonSpillAuditTest.java`（新）\
+**Scope**：S
 
-## Task 3：PaimonSpillLease（owner 侧）
-
-**Description：** 按 plan §3.1 实现多根 lease 的创建、创建期回滚与关闭后退役。包内可见接缝：jvmId 提供器、创建阶段钩子（“已加锁、未返回”），供 T08 的 AC-04 使用。
-
-**Acceptance criteria：**
-- [ ] 布局符合 REQ-01；`owner.lock` 用 `CREATE_NEW` 创建；子根或命名空间目录是符号链接时失败；父目录消失时换 UUID 有界重试
-- [ ] 多根中任一根失败：已建成的根立即退役并删除，不留锁；成功时每个根各持一把锁
-- [ ] 退役顺序为删 io → unlink 锁文件 → 释放锁 → rmdir lease；io 删除失败时保留锁并返回失败（AC-17 owner 部分）
-
-**Verification：**
-- [ ] `TEST PaimonSpillLeaseTest`（顺序用钩子断言，不用 sleep）
-
-**Dependencies：** T01、T02  
-**Files likely touched：**
-- `main/util/PaimonSpillLease.java`（新）
-- `test/util/PaimonSpillLeaseTest.java`（新）
-
-**Estimated scope：** S
+### 检查点 A（T04–T05 之后）
+- [ ] 新增测试全绿，`TEST PaimonSpillDirCleanerTest` 仍为 18 项全绿（生产行为未变）
 
 ---
 
-## Task 4：外观接入 lease，Factory 与 Preflight 传 owner 标签
+## T06：PaimonSpillLease（owner 协议）—— 本地 PR #6
 
-**Description：** `PaimonSpillDirCleaner.resolveAndCreateIOManager(configuredTmpDirs, ownerLabel, scope)` 改为：
+**Description**：按 Spec §4.4 实现 Provision 与 Retire：
 
-1. 创建 lease；
-2. 以各根的 `io/` 为根调用 `IOManager.create`，并物化目录；
-3. 要求每个根恰好有一个 `paimon-io-*`；
-4. 写入 owner 索引（AD-3）。
+- 根目录规范化并去重；
+- 子根与命名空间不得是符号链接；
+- `mkdir(<lease>)`、`O_EXCL` 创建锁文件并 tryLock、`mkdir(<io>)`；第 1–3 步遇 ENOENT 时换新 leaseId 重试，最多 3 次；
+- 多根部分失败时回滚已就绪的根；
+- Retire 顺序为删除 `<io>` → 持锁 unlink → 释放锁 → rmdir，最后一步遇 ENOENT 视为完成。
 
-`releaseAfterClose` 改为通过索引退役 lease。传入未登记的路径时仍按“无可释放”处理，与现有语义一致。Factory 与 Preflight 分别传 tableKey 和 `preflight:` + tableKey。`registerLiveDirs` 在本任务中暂时保留，只供测试使用，T05 删除。
+提供 Provision 阶段钩子（“已加锁、未返回”）供 T11 使用。
 
-**Acceptance criteria：**
-- [ ] 写上下文与预检创建的 `paimon-io-*` 位于 `<root>/tapdata-paimon-v2/<jvmId>/<tag>-<uuid>/io/` 下；`withConfinedTempDirs` 返回这些路径
-- [ ] `closeForStop` 成功后 lease 目录不存在；构造回滚与预检失败路径的“保留/完成”判定与改动前一致
-- [ ] jvmId 获取失败时 Context 初始化失败，且根目录下没有新目录（AC-08 部分）
+**Acceptance criteria**：
+- [ ] 布局与命名符合 Spec §4.1；重复或互为别名的根被去重（AC-20）
+- [ ] 用钩子在 `mkdir(<lease>)` 之后删除空 lease 或空命名空间，Provision 重试后成功；Retire 前在锁释放后外部删除空 lease，结果为完成（AC-17 单进程部分）
+- [ ] `<io>` 删除失败时保留锁并返回不完整；多根部分失败时不残留锁（AC-18 owner 部分）
 
-**Verification：**
-- [ ] `TEST PaimonSpillDirCleanerTest,PaimonTableWriteContextFactoryTest,PaimonDynamicBucketPreflightCleanupTest`
-- [ ] 上述测试中原来按旧锁文件路径（`resolveSibling("." + name + ".tapdata-owner.lock")`）断言的地方，改为断言 lease 锁文件
+**Verification**：`TEST PaimonSpillLeaseTest`；变异检验：把 Retire 最后一步对 ENOENT 的容忍改为失败，竞态用例应失败。\
+**Dependencies**：T04、T05\
+**Files**：`main/util/PaimonSpillLease.java`（新）、`test/util/PaimonSpillLeaseTest.java`（新）\
+**Scope**：M
 
-**Dependencies：** T03  
-**Files likely touched：**
-- `main/util/PaimonSpillDirCleaner.java`
-- `main/write/PaimonTableWriteContextFactory.java`
-- `main/service/PaimonDynamicBucketPreflight.java`
-- `test/util/PaimonSpillDirCleanerTest.java`
-- `test/write/PaimonTableWriteContextFactoryTest.java`
-- `test/service/PaimonDynamicBucketPreflightCleanupTest.java`
+## T07：测试抽象层（旧布局上全绿）—— 本地 PR #7
 
-**Estimated scope：** M（3 个生产文件 + 3 个测试文件的断言更新）
+**Description**：新增 `SpillTestSupport`，按**当前平铺布局**实现：`leaseIOManager(root)`、`ownerLockOf(spillDir)`、`ownerLockHeld(spillDir)`（以子进程 tryLock 判定）、`ownerIndexContains(spillDir)`。把下列测试中的 `registerLiveDirs` 调用、旁置锁文件路径断言和对 `OWNER_LOCKS` 的反射，替换为对该工具类的调用；断言的语义保持不变。
 
----
+不修改生产代码。本 PR 修改 9 个文件，超过 5 个文件的上限；理由是所有改动都是同一种访问方式的替换，需要逐行确认的只有替换本身。
 
-## Task 5：迁移 registerLiveDirs 测试，删除 owner 侧旧注册
+**Acceptance criteria**：
+- [ ] 测试源码中只有 `SpillTestSupport` 直接引用 `registerLiveDirs`、`OWNER_LOCKS` 与 `.tapdata-owner.lock`
+- [ ] 断言数量与语义不变（以 diff 复核）；`PACKAGE` 全绿，测试数与 T03 基线一致
+- [ ] 生产代码 diff 为空
 
-**Description：** 新增测试工具 `SpillTestSupport.leaseIOManager(Path root)`，内部走生产的 lease 创建路径；把 6 个测试中的 `IOManager.create` + `registerLiveDirs` 机械替换为它，不修改原断言。之后删除 `registerLiveDirs`、`registerCreatedIOManager`、`registerPaths`，以及 `OWNER_LOCKS` 的注册路径。
-
-**Acceptance criteria：**
-- [ ] 生产代码与测试代码中不再出现 `registerLiveDirs` / `registerCreatedIOManager`
-- [ ] 6 个迁移的测试断言不变且全部通过（AC-12 回归）
-- [ ] 改动只限于调用替换和工具类
-
-**Verification：**
-- [ ] `TEST PaimonFinalCompactionIntegrationTest,PaimonCompactionSpillLifecycleIntegrationTest,PaimonFinalPrepareBucketModeIntegrationTest,PaimonNativeStopContractTest,PaimonServiceSyncStopIntegrationTest,PaimonServiceNativeMaintenanceIntegrationTest`
-- [ ] `PACKAGE`
-
-**Dependencies：** T04  
-**Files likely touched：**
+**Verification**：`TEST` 下列 8 个类；`PACKAGE`。\
+**Dependencies**：T06（与生产代码无关，可以提前；放在 T08 之前即可）\
+**Files**：
 - `test/util/SpillTestSupport.java`（新）
 - `test/write/PaimonFinalCompactionIntegrationTest.java`
 - `test/write/PaimonCompactionSpillLifecycleIntegrationTest.java`
 - `test/write/PaimonFinalPrepareBucketModeIntegrationTest.java`
 - `test/write/PaimonNativeStopContractTest.java`
+- `test/write/PaimonTableWriteContextFactoryTest.java`
 - `test/service/PaimonServiceSyncStopIntegrationTest.java`
 - `test/service/PaimonServiceNativeMaintenanceIntegrationTest.java`
-- `main/util/PaimonSpillDirCleaner.java`
-
-**Estimated scope：** M（文件多，但都是同一处调用的机械替换）
-
-### Checkpoint B（T03–T05 之后）
-- [ ] `PACKAGE` 全绿，测试数与 T00 基线对比后记录差异原因
-- [ ] 人工检查：跑一次 `PaimonWriteBufferSpillIntegrationTest`，确认运行期间只出现 v2 布局，结束后无 lease 残留
-- [ ] 旧平铺扫描仍在运行，但只作用于根目录下的 `paimon-io-*`
-
----
-
-## Task 6：PaimonSpillReclaimer（GC 侧）
-
-**Description：** 按 plan §3.1 实现回收器。包内可见接缝：jvmId 提供器、文件系统类型探针、锁文件打开器（可计数）、审计 sink。原有平铺扫描的符号链接、深层目录、部分删除失败、只统计普通文件字节数等测试意图，迁移为本类的用例。
-
-**Acceptance criteria：**
-- [ ] 本 JVM 命名空间的打开次数为 0，且不列出其内容（AC-02 同 ClassLoader 部分）；jvmId 碰撞时跳过（AC-07）
-- [ ] 缺锁文件时只 rmdir 空 lease；符号链接、名称不符、未知子根一律跳过（AC-08）；io 删除失败时保留锁文件，审计 sink 异常不影响结果（AC-17）
-- [ ] 文件系统门禁：nfs4、fuse.*、未知类型、探针异常时返回 0、打开次数为 0、告警一次（AC-18）；同 JVM 两线程并发回收同一死亡 lease 时，无异常逃逸且至多一次成功（AC-05 部分）
-
-**Verification：**
-- [ ] `TEST PaimonSpillReclaimerTest`
-- [ ] 回收器源码中没有 mtime、`System.currentTimeMillis` 或 grace 参数（代码审阅）
-
-**Dependencies：** T03（可与 T04/T05 并行）  
-**Files likely touched：**
-- `main/util/PaimonSpillReclaimer.java`（新）
-- `test/util/PaimonSpillReclaimerTest.java`（新）
-
-**Estimated scope：** M
-
----
-
-## Task 7：PaimonService 切换到回收器，删除平铺扫描
-
-**Description：** `PaimonService.cleanupStaleSpillDirs` 沿用现有的根目录收集逻辑（全局与表级 diskTmpDir、符号链接根跳过），改为调用 `PaimonSpillReclaimer`。对每个根统计旧平铺 `paimon-io-*` 的数量并通过审计限流告警，但不打开、不删除。删除 plan §7 所列的旧代码，并逐项列出被删除或改写的旧测试用例。
-
-**Acceptance criteria：**
-- [ ] 启动时只回收 v2 布局中其他 JVM 已死亡的 lease；旧平铺目录与旧锁文件不被打开，也不被删除
-- [ ] plan §7 列出的旧代码全部删除；生产代码中 `grep -E "tapdata-owner\.lock|LIVE_DIRS|newestModified|DEFAULT_STALE_GRACE_MS"` 无结果
-- [ ] 回收结果和旧布局告警同时写入 SLF4J 审计与任务 TapLog 摘要
-
-**Verification：**
-- [ ] `TEST PaimonServiceStaleSpillCleanupTest,PaimonSpillDirCleanerTest,PaimonSpillReclaimerTest,PaimonServiceSyncStopIntegrationTest`
-- [ ] `PACKAGE`
-
-**Dependencies：** T05、T06  
-**Files likely touched：**
-- `main/service/PaimonService.java`
-- `main/util/PaimonSpillDirCleaner.java`
-- `test/service/PaimonServiceStaleSpillCleanupTest.java`
-- `test/util/PaimonSpillDirCleanerTest.java`
-- `test/service/PaimonServiceSyncStopIntegrationTest.java`
-
-**Estimated scope：** M
-
-### Checkpoint C（T06–T07 之后）
-- [ ] `PACKAGE` 全绿
-- [ ] 与用户复核删除的旧代码与旧测试清单
-- [ ] 确认 `PaimonSpillDirCleaner` 行数下降，新类各自职责单一
-
----
-
-## Task 8：隔离 ClassLoader 集成验收
-
-**Description：** 用 T01 的隔离加载工具，在两个 ClassLoader 中分别加载 Connector 与 Paimon 类，通过测试源码中的驱动类调用创建、回收、建 channel 等操作。只使用纯 Java 的 IOManager，不加载 RocksDB JNI。
-
-**Acceptance criteria：**
-- [ ] AC-02：loader B 回收时对 loader A 命名空间的打开次数为 0
-- [ ] AC-03：A 持有真实 IOManager 的 lease，B 扫描后再由子进程 C 扫描；C 删除数为 0，A 建 channel 成功，子进程 tryLock 失败。AC-04：创建钩子停在“已加锁、未返回”时，同 ClassLoader 的并发回收打开次数为 0
-- [ ] AC-05：两个 loader 并发回收同一个死亡 lease。AC-15：丢弃 loader A 的引用并施加 GC 压力，lease 仍保留时子进程 tryLock 仍失败
-
-**Verification：**
-- [ ] `TEST PaimonSpillIsolatedClassLoaderIntegrationTest`
-
-**Dependencies：** T07  
-**Files likely touched：**
-- `test/util/PaimonSpillIsolatedClassLoaderIntegrationTest.java`（新）
-- `test/util/SpillLoaderDriver.java`（新，在各隔离 loader 内执行）
-- `test/util/IsolatedConnectorLoader.java`（按需补充）
-
-**Estimated scope：** M
-
----
-
-## Task 9：多进程验收
-
-**Description：** 把 `PaimonSpillDirCleanerProcessIntegrationTest` 改写为 `PaimonSpillProcessIntegrationTest`，复用其中的子进程启动、就绪与关闭模式；新增基于 stdin/stdout 的握手，用于控制并发顺序。
-
-**Acceptance criteria：**
-- [ ] AC-06：两个 GC 子进程回收同一死亡 lease，至多一个完成，全程不新建 `owner.lock`。AC-07：子进程持有的活跃 lease 被设为很旧的 mtime 后，父进程回收仍不删除
-- [ ] AC-09：SIGKILL owner 子进程后，父进程回收其 lease；子进程 1 被杀后由子进程 2（新 JVM）回收
-- [ ] AC-16：子进程先打开旧锁文件 → owner 退役 → 子进程 tryLock 成功但复核失败，什么也不删
-
-**Verification：**
-- [ ] `TEST PaimonSpillProcessIntegrationTest`
-
-**Dependencies：** T07  
-**Files likely touched：**
-- `test/util/PaimonSpillProcessIntegrationTest.java`（由旧类改名改写）
-- `test/util/PaimonSpillDirCleanerProcessIntegrationTest.java`（删除）
-
-**Estimated scope：** M
-
----
-
-## Task 10：生命周期回归断言
-
-**Description：** 在现有 V1.2 生命周期测试中补充 lease 层面的断言：凡是“保留”的路径，lease 锁必须仍被持有（用子进程 tryLock 证明）；凡是“完成”的路径，lease 目录必须不存在。
-
-**Acceptance criteria：**
-- [ ] AC-10/11：FAILED_RETAINED 与“已取消但 worker 仍运行”时，lease 锁仍被持有，重复回收不删除
-- [ ] AC-13：Factory 多根部分失败、DDL/rebuild、有限读 close 失败，未证明关闭的 lease 保持持锁
-- [ ] AC-14：`rocksdb-*` 实际路径位于 `lease/io/paimon-io-*` 内，所有 bucket 策略与预检一致；AC-12 原有回归全绿
-
-**Verification：**
-- [ ] `TEST PaimonCompactionSpillLifecycleIntegrationTest,PaimonBoundedStopTest,PaimonTableWriteContextFactoryTest,PaimonFiniteReadLifecycleTest,PaimonServiceDdlCompactionFailureTest,PaimonDynamicBucketPreflightCleanupTest`
-
-**Dependencies：** T07  
-**Files likely touched：**
-- `test/write/PaimonCompactionSpillLifecycleIntegrationTest.java`
-- `test/service/PaimonBoundedStopTest.java`
-- `test/write/PaimonTableWriteContextFactoryTest.java`
-- `test/service/PaimonFiniteReadLifecycleTest.java`
 - `test/service/PaimonDynamicBucketPreflightCleanupTest.java`
 
-**Estimated scope：** M
+**Scope**：M（机械替换）
+
+## T08：owner 侧翻转，R1–R3 改为回归 —— 本地 PR #8
+
+**Description**：
+
+- 外观 `resolveAndCreateIOManager(configuredTmpDirs, ownerLabel, scope)` 改为走 lease，并登记 owner 索引；`releaseAfterClose` 改为经索引执行 Retire。
+- 释放非空且未登记的路径时，返回不完整（D5）。
+- IOManager 构造后若某根未物化，保留资源（D6）。
+- Factory 与 Preflight 传入 owner 标签。
+- `SpillTestSupport` 改为 v2 布局实现。
+- 删除 `registerLiveDirs`、`registerCreatedIOManager`、`registerPaths` 与 `OWNER_LOCKS` 的注册路径。
+- 把 `PaimonSpillFieldFailureReproductionTest` 改名为 `PaimonSpillOwnerIsolationRegressionTest`：步骤不变（loader B 与子进程 C 仍运行**旧平铺清理器**），结论反转。
+
+**Acceptance criteria**：
+- [ ] 写上下文与预检只产生 v2 布局；`closeForStop` 成功后不留 lease
+- [ ] AC-03（旧清理器版本）：C 删除数为 0，A 建 channel 成功，外部 tryLock 失败；AC-21；jvmId 失败时 Context 初始化失败且不产生 lease（AC-08）
+- [ ] `PACKAGE` 全绿；与 T03 基线相比，测试数的差异逐项说明
+
+**Verification**：`TEST PaimonSpillDirCleanerTest,PaimonTableWriteContextFactoryTest,PaimonDynamicBucketPreflightCleanupTest,PaimonSpillOwnerIsolationRegressionTest`；`PACKAGE`；变异检验：Retire 跳过 unlink，相关用例应失败。\
+**Dependencies**：T06、T07\
+**Files**：
+- `main/util/PaimonSpillDirCleaner.java`
+- `main/write/PaimonTableWriteContextFactory.java`
+- `main/service/PaimonDynamicBucketPreflight.java`
+- `test/util/SpillTestSupport.java`
+- `test/util/PaimonSpillOwnerIsolationRegressionTest.java`（由 R1–R3 改写）
+- `test/util/PaimonSpillDirCleanerTest.java`
+- `test/util/PaimonSpillDirCleanerProcessIntegrationTest.java`
+
+**Scope**：M
+
+### 检查点 B（T06–T08 之后）
+- [ ] `PACKAGE` 全绿；人工跑一次 `PaimonWriteBufferSpillIntegrationTest`，运行中只出现 v2 布局，结束后无残留
+- [ ] AC-03 回归通过：现场缺陷在 owner 侧已不可复现
 
 ---
 
-## Task 11：旧布局并存与重复运行无残留
+## T09：PaimonSpillReclaimer —— 本地 PR #9
 
-**Description：** 冻结一份 develop `e3f68298` 的平铺扫描逻辑作为测试夹具，证明新旧两版扫描互不进入对方的布局；再用真实写入反复启停，证明没有残留。
+**Description**：按 Spec §4.5–4.6 实现回收器：命名空间按名称排除、正则校验、符号链接拒绝、不带 CREATE 打开、fileKey 复核、ENOENT/ENOTEMPTY 容忍、Overlapping 跳过、每次调用预算、文件系统准入、审计在锁外统一写出。
 
-**Acceptance criteria：**
-- [ ] AC-19：新回收器不打开旧锁文件、不删除旧目录，并输出告警；旧扫描夹具不进入 `tapdata-paimon-v2/`；回退场景中旧扫描不删除新目录
-- [ ] AC-22：多表、多根反复启停后，所有根下无 lease 残留，进程打开的 channel 数回到基线
+**Acceptance criteria**：
+- [ ] 本 JVM 命名空间的打开次数为 0，且不列出其内容（AC-02 同 ClassLoader 部分）；jvmId 碰撞时跳过（AC-07 部分）；两个线程并发回收同一 ORPHANED lease 时无异常逃逸、至多一次成功（AC-05 部分）
+- [ ] AC-08 的输入校验；AC-18 中 `<io>` 删除失败保留锁文件；预算生效
+- [ ] AC-19：nfs4、fuse.*、未知类型、探针异常时打开次数为 0，告警一次
 
-**Verification：**
-- [ ] `TEST PaimonSpillLegacyCoexistenceTest,PaimonWriteBufferSpillIntegrationTest,PaimonSpillOptionsIntegrationTest`
+**Verification**：`TEST PaimonSpillReclaimerTest`；人工检查回收器源码中没有 mtime 与时钟调用；变异检验：去掉自身命名空间排除，AC-02 用例应失败。\
+**Dependencies**：T06（可与 T07、T08 并行）\
+**Files**：`main/util/PaimonSpillReclaimer.java`（新）、`test/util/PaimonSpillReclaimerTest.java`（新）\
+**Scope**：M
 
-**Dependencies：** T07  
-**Files likely touched：**
-- `test/util/PaimonSpillLegacyCoexistenceTest.java`（新）
-- `test/util/LegacyFlatSpillCleanerFixture.java`（新，冻结副本并注明来源提交）
-- `test/write/PaimonWriteBufferSpillIntegrationTest.java`
+## T10：Service 切换，删除平铺扫描 —— 本地 PR #10
 
-**Estimated scope：** S
+**Description**：
 
-### Checkpoint D（T08–T11 之后）
-- [ ] plan §6 中除 AC-21 外的每个 AC 都有通过的测试
-- [ ] `PACKAGE` 全绿，测试数与 T00 基线的差异有说明
+- `PaimonService` 的初始化清理改为调用 Reclaim（根目录收集逻辑沿用）；对旧平铺目录只输出限流清单。
+- 删除 plan §7 中剩余的旧代码。
+- 新增 `LegacyFlatSpillCleanerFixture`：从 `e3f68298` 冻结旧清理器的扫描逻辑，并注明来源；`SpillProbeProcess` 的 `legacy-cleanup` 模式改为调用该副本。
+- 回归测试中 loader B 的部分改为调用新回收器。
+- 原平铺扫描的单元测试按意图迁移到回收器测试，或者删除，并逐项列出。
 
----
+**Acceptance criteria**：
+- [ ] 生产代码中 `grep -E "tapdata-owner\.lock|LIVE_DIRS|newestModified|DEFAULT_STALE_GRACE_MS|cleanupStaleSpillDirs"` 无结果
+- [ ] 启动时只回收外部命名空间中的 ORPHANED lease；旧目录与旧锁文件不被打开（AC-22 部分）
+- [ ] `PACKAGE` 全绿；被删除或迁移的测试有逐项清单
 
-## Task 12：文档、发布说明与 Spec 实现记录
+**Verification**：`TEST PaimonServiceStaleSpillCleanupTest,PaimonServiceSyncStopIntegrationTest,PaimonSpillReclaimerTest,PaimonSpillOwnerIsolationRegressionTest`；`PACKAGE`。\
+**Dependencies**：T08、T09\
+**Files**：
+- `main/service/PaimonService.java`
+- `main/util/PaimonSpillDirCleaner.java`
+- `test/util/LegacyFlatSpillCleanerFixture.java`（新）
+- `test/util/SpillProbeProcess.java`
+- `test/service/PaimonServiceStaleSpillCleanupTest.java`
 
-**Description：** 更新连接器文档：部署规范（REQ-11）、升级后重启引擎的建议、旧平铺目录的一次性清理步骤、网络盘不自动回收的说明。在 Spec 末尾追加实现记录（源码位置、测试映射、执行证据）。在真实 Engine 中人工确认审计日志出现在引擎日志里。
+以及按需修改的 `test/util/PaimonSpillDirCleanerTest.java`。\
+**Scope**：M
 
-**Acceptance criteria：**
-- [ ] `paimon_zh_CN.md` / `paimon_en_US.md` / `paimon_zh_TW.md` 三种语言内容一致
-- [ ] 发布说明写明：本次修复本地目录所有权，不提供全局表 fencing；对 2026-11 现场故障的结论以 OQ-04 为准
-- [ ] AC-20 人工检查结果有记录；未能在真实 Engine 验证的，如实标注
-
-**Verification：**
-- [ ] 人工审阅文档；`git diff --check`
-
-**Dependencies：** T08–T11  
-**Files likely touched：**
-- `connectors/paimon-plus-connector/src/main/resources/docs/paimon_zh_CN.md`
-- `connectors/paimon-plus-connector/src/main/resources/docs/paimon_en_US.md`
-- `connectors/paimon-plus-connector/src/main/resources/docs/paimon_zh_TW.md`
-- `connectors/paimon-plus-connector/src/doc/specs/SPEC-paimon-spill-owner-isolation.md`
-
-**Estimated scope：** S
+### 检查点 C（T09–T10 之后）
+- [ ] `PACKAGE` 全绿；与用户复核删除的代码与测试清单
 
 ---
 
-## Task 13：Linux + JDK 17 验收（AC-21）
+## T11：跨 ClassLoader 验收 —— 本地 PR #11
 
-**Description：** 在 T00 确定的 Linux 环境中执行目录/锁相关测试和全量 package，并打印各根目录的实际 `FileStore.type()`，用于 OQ-05。
+**Description**：用 `IsolatedConnectorLoader` 与驱动类，在两个 ClassLoader 中执行 Provision、Reclaim 与建 channel。只使用纯 Java 的 IOManager，不加载 RocksDB JNI。
 
-**Acceptance criteria：**
-- [ ] `PaimonSpillIsolatedClassLoaderIntegrationTest`、`PaimonSpillProcessIntegrationTest`、`PaimonSpillReclaimerTest`、`PaimonSpillLeaseTest` 在 Linux + JDK 17 上通过
-- [ ] `PACKAGE` 在同一环境通过；记录 OS、内核、JDK、文件系统类型
-- [ ] 未覆盖的 OS/文件系统组合写明“不宣称支持”
+**Acceptance criteria**：
+- [ ] AC-02（跨 ClassLoader）与 AC-03（新回收器版本）：loader B 对 A 命名空间的打开次数为 0；随后子进程 C 运行新回收器，删除数为 0；A 建 channel 成功
+- [ ] AC-04：钩子停在“已加锁、未返回”时，同 ClassLoader 并发回收的打开次数为 0；AC-05：两个 loader 并发回收同一 ORPHANED lease
+- [ ] AC-15：loader A 中保留一个活跃使用者线程，只丢弃 PDK 侧引用并施加 GC 压力，外部 tryLock 仍失败
 
-**Verification：**
-- [ ] `TEST PaimonSpillIsolatedClassLoaderIntegrationTest,PaimonSpillProcessIntegrationTest,PaimonSpillReclaimerTest,PaimonSpillLeaseTest`
-- [ ] `PACKAGE`
+**Verification**：`TEST PaimonSpillIsolatedClassLoaderIntegrationTest`\
+**Dependencies**：T10\
+**Files**：`test/util/PaimonSpillIsolatedClassLoaderIntegrationTest.java`（新）、`test/util/SpillLoaderDriver.java`（新）\
+**Scope**：M
 
-**Dependencies：** T12、P-OQ-1  
-**Files likely touched：** 本文件；Spec 实现记录  
-**Estimated scope：** S
+## T12：多进程验收 —— 本地 PR #12
 
-### Checkpoint E：完成
-- [ ] AC-01–22 全部通过或有书面原因
-- [ ] `git diff --check` 干净，`git status` 只包含计划内文件
-- [ ] 用户审阅后决定是否建分支并提交
+**Description**：把 `PaimonSpillDirCleanerProcessIntegrationTest` 改写为 `PaimonSpillProcessIntegrationTest`，用 stdin/stdout 握手控制竞态顺序。
+
+**Acceptance criteria**：
+- [ ] AC-06：两个回收者进程处理同一 ORPHANED lease，至多一个完成，全程不新建锁文件；AC-07：活跃 lease 的 mtime 改为很早，仍不删除
+- [ ] AC-09：owner 子进程被 SIGKILL 后由父进程回收；子进程 1 被杀后由子进程 2 回收
+- [ ] AC-16：迟到回收者复核失败，不删除任何内容；AC-17（跨进程）：Provision 与 Retire 的 ENOENT 竞态均得到预期结果
+
+**Verification**：`TEST PaimonSpillProcessIntegrationTest`\
+**Dependencies**：T10\
+**Files**：`test/util/PaimonSpillProcessIntegrationTest.java`（新）、`test/util/PaimonSpillDirCleanerProcessIntegrationTest.java`（删除）、`test/util/SpillProbeProcess.java`\
+**Scope**：M
+
+## T13：生命周期回归 —— 本地 PR #13
+
+**Description**：在 V1.2 的生命周期测试中补充 lease 层面的断言：凡是保留路径，用 `SpillTestSupport.ownerLockHeld` 证明锁仍被持有；凡是完成路径，断言 lease 不存在。
+
+**Acceptance criteria**：
+- [ ] AC-10、AC-11：RETAINED 与“已取消但仍在运行”时锁保持，反复回收不删除
+- [ ] AC-13：多根部分失败、DDL/rebuild、有限读失败时锁保持
+- [ ] AC-14：`rocksdb-*` 位于 `<io>/paimon-io-*` 内；AC-12 全部回归通过
+
+**Verification**：`TEST PaimonCompactionSpillLifecycleIntegrationTest,PaimonBoundedStopTest,PaimonTableWriteContextFactoryTest,PaimonFiniteReadLifecycleTest,PaimonServiceDdlCompactionFailureTest,PaimonDynamicBucketPreflightCleanupTest`\
+**Dependencies**：T10\
+**Files**：上述 6 个测试类中的 5 个（`PaimonServiceDdlCompactionFailureTest` 只运行、不修改）\
+**Scope**：M
+
+## T14：旧布局并存与残留 —— 本地 PR #14
+
+**Acceptance criteria**：
+- [ ] AC-22：新回收器不打开旧锁文件、不删除旧目录，并输出清单告警；冻结的旧清理器不进入 `tapdata-paimon-v2/`；回退场景中旧扫描不删除新目录
+- [ ] AC-25：多表、多根反复启停后无 lease 残留、无 channel 泄漏；预算生效
+
+**Verification**：`TEST PaimonSpillLegacyCoexistenceTest,PaimonWriteBufferSpillIntegrationTest`\
+**Dependencies**：T10\
+**Files**：`test/util/PaimonSpillLegacyCoexistenceTest.java`（新）、`test/write/PaimonWriteBufferSpillIntegrationTest.java`\
+**Scope**：S
+
+### 检查点 D（T11–T14 之后）
+- [ ] 除 AC-24 外，全部 AC 都有通过的测试（plan §6）；`PACKAGE` 全绿
+
+---
+
+## T15：文档与发布说明 —— 本地 PR #15
+
+**Acceptance criteria**：
+- [ ] 中、英、繁三种语言的连接器文档内容一致：部署规范（REQ-11）、升级后重启引擎、旧目录一次性清理步骤、网络盘不自动回收
+- [ ] 在 Spec 中追加实现记录（源码位置、测试映射、各 PR 的合并提交）；发布说明写明不提供全局 fencing，现场结论以 OQ-04 为准
+- [ ] AC-23 人工检查：在真实 Engine 中确认审计日志出现在引擎日志；无法验证时如实标注
+
+**Verification**：人工审阅；`git diff --check`\
+**Dependencies**：T11–T14\
+**Files**：`src/main/resources/docs/paimon_{zh_CN,en_US,zh_TW}.md`、Spec\
+**Scope**：S
+
+## T16：Linux + JDK 17 验收 —— 本地 PR #16
+
+**Acceptance criteria**：
+- [ ] 在 OQ-06 确定的环境中，`PaimonSpillPlatformContractTest`、`PaimonJvmIdentityTest`、`PaimonSpillLeaseTest`、`PaimonSpillReclaimerTest`、`PaimonSpillIsolatedClassLoaderIntegrationTest`、`PaimonSpillProcessIntegrationTest` 全部通过（AC-24）
+- [ ] 同一环境下 `PACKAGE` 通过；记录 OS、内核、JDK 与 `FileStore.type()` 的实际值（供 OQ-05）
+- [ ] 未覆盖的 OS 与文件系统组合写明“不宣称支持”
+
+**Dependencies**：T15、OQ-06\
+**Scope**：S
+
+### 检查点 E：完成
+- [ ] AC-01–25 全部通过或有书面原因；`git log --first-parent --merges` 可以复查 PR #1–#16
+- [ ] 用户复核后，再决定是否推送远端
