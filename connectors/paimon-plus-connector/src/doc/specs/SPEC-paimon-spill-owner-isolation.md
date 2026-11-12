@@ -1,7 +1,7 @@
 # Spec：Paimon 本地 Spill 的进程级命名空间与基于 OS 记录锁的租约回收协议
 
 > Spec ID：paimon-spill-owner-isolation\
-> 版本：V0.3，2026-11-12；状态：V0.2 已批准，V0.3 吸收评审修订，**待用户复核**。修订记录见 §16。\
+> 版本：V0.3，2026-11-12；状态：已按本版在本地实现（本地 PR #4–#15，集成分支 `hotfix/paimon-spill-owner-isolation`）；Linux 验收（AC-24）待 OQ-06。实现记录见 §17，发布说明见 §18，修订记录见 §16。\
 > 目标模块：tapdata-connectors / connectors/paimon-plus-connector。\
 > 证据与评审：[REVIEW-paimon-spill-owner-isolation-2026-11-12.md](../reviews/REVIEW-paimon-spill-owner-isolation-2026-11-12.md)\
 > 生命周期图与修改前后对比：[SPILL-所有权隔离-修改前后对比与生命周期.md](../reviews/SPILL-所有权隔离-修改前后对比与生命周期.md)\
@@ -419,3 +419,72 @@ git diff --check
   - 故障叙述与证据迁入评审文档。
 - **V0.2（2026-11-12）**：按 Flink 对照方案改为“进程命名空间 + 死亡 owner 回收”；用户批准。
 - **V0.1（2026-11-12）**：初稿。
+
+## 17. 实现记录（2026-11-12）
+
+### 17.1 源码位置
+
+| 协议部分 | 源码（模块 `src/main/java/io/tapdata/connector/paimon/`） | 本地 PR |
+| --- | --- | --- |
+| §4.2 jvmId | `util/PaimonJvmIdentity.java` | #4 |
+| §4.7 审计 | `util/PaimonSpillAudit.java` | #5 |
+| §4.3–4.4 租约、owner 协议 | `util/PaimonSpillLease.java`、`util/PaimonSpillFiles.java` | #6、#8 |
+| §4.5–4.6 回收者、准入 | `util/PaimonSpillReclaimer.java` | #9 |
+| §7 外观 | `util/PaimonSpillDirCleaner.java`：owner 侧切换（#8）；`reclaimOrphanedLeases`，删除平铺扫描（#10）；文件由 624 行降为 396 行 | #8、#10 |
+| owner 标签 | `write/PaimonTableWriteContextFactory.java`（tableKey）、`service/PaimonDynamicBucketPreflight.java`（`preflight:` + tableKey） | #8 |
+| 启动回收入口 | `service/PaimonService.java#reclaimOrphanedSpillLeases` | #10 |
+
+### 17.2 验收映射
+
+| AC | 测试（模块 `src/test/java/io/tapdata/connector/paimon/`） |
+| --- | --- |
+| AC-01 | `util/PaimonJvmIdentityTest` |
+| AC-02 | `util/PaimonSpillReclaimerTest#ownNamespaceIsNeverOpenedEvenWhenItsLockIsFree`、`util/PaimonSpillIsolatedClassLoaderIntegrationTest#foreignLoaderNeverOpensFilesInTheSharedJvmNamespace` |
+| AC-03 | `util/PaimonSpillOwnerIsolationRegressionTest`（与 PR #2 的现场复现步骤相同，结论反转） |
+| AC-04 | `util/PaimonSpillIsolatedClassLoaderIntegrationTest#reclaimDuringProvisioningWindowDoesNotTouchTheNewLease` |
+| AC-05 | `util/PaimonSpillReclaimerTest#concurrentReclaimersInOneJvmReclaimAtMostOnce`、`util/PaimonSpillIsolatedClassLoaderIntegrationTest#twoLoadersReclaimTheSameOrphanAtMostOnce` |
+| AC-06 | `util/PaimonSpillProcessIntegrationTest#twoReclaimerProcessesReclaimTheSameOrphanOnce` |
+| AC-07 | `util/PaimonSpillReclaimerTest#liveForeignLeaseWithAncientMtimesIsKept`、`util/PaimonSpillProcessIntegrationTest#otherJvmCleanerMustKeepLiveOwnerEvenWithZeroGrace`、`util/PaimonSpillReclaimerTest#reclaimerHasNoTemporalInput` |
+| AC-08 | `util/PaimonSpillReclaimerTest#malformedNamesSymbolicLinksAndUnknownVersionsAreIgnored`、`#leaseWithoutLockFileIsOnlyRemovedWhenEmpty`、`#identityFailureDisablesReclaimEntirely`、`util/PaimonSpillLeaseTest#identityFailureCreatesNoProtocolDirectory` |
+| AC-09 | `util/PaimonSpillProcessIntegrationTest#cleanerMustReclaimCrashedJvmResidueButKeepUnmarkedLegacyDirectory`、`#restartedEngineReclaimsThePreviousInstanceLease` |
+| AC-10 | `service/PaimonDynamicBucketPreflightCleanupTest`（保留场景） |
+| AC-11 | `write/PaimonCompactionSpillLifecycleIntegrationTest`、`service/PaimonServiceSyncStopIntegrationTest` |
+| AC-12 | 模块全量回归（§17.4） |
+| AC-13 | `write/PaimonTableWriteContextFactoryTest#rollbackCloseFailureMustRetainCauseAndReportIncompleteCleanup`、`#keyDynamicBootstrapErrorMustRetainIoWhenAssignerCleanupIsIncomplete`、`util/PaimonSpillLeaseTest#partialMultiRootFailureRetiresProvisionedRoots` |
+| AC-14 | `write/PaimonTableWriteContextIntegrationTest#keyDynamicRocksDbIndexMustLiveInsideTheSpillDirectory`、`service/PaimonDynamicBucketPreflightCleanupTest`（受限视图位于租约 io/ 内） |
+| AC-15 | `util/PaimonSpillIsolatedClassLoaderIntegrationTest#ownerLockSurvivesLoaderDereferenceWhileAUserIsAlive` |
+| AC-16 | `util/PaimonSpillProcessIntegrationTest#lateReclaimerProcessCannotActAfterOwnerRetires`、`util/PaimonSpillReclaimerTest#lockFileRetiredBeforeLockingIsSkipped` |
+| AC-17 | `util/PaimonSpillLeaseTest`（4 个竞态用例）、`util/PaimonSpillProcessIntegrationTest#provisionSurvivesAnotherProcessRemovingItsEmptyLease`、`#retireSurvivesAnotherProcessRemovingTheEmptiedLease` |
+| AC-18 | `util/PaimonSpillLeaseTest#ioDeletionFailureRetainsOwnerLock`、`util/PaimonSpillReclaimerTest#ioDeletionFailureKeepsLockFileForRetry`、`util/PaimonSpillAuditTest#sinkFailuresNeverEscape` |
+| AC-19 | `util/PaimonSpillReclaimerTest#unsupportedFileSystemsDisableReclaim` |
+| AC-20 | `util/PaimonSpillLeaseTest#duplicateAndAliasedRootsAreProvisionedOnce`、`util/PaimonSpillDirCleanerTest#duplicateRootsShareOneLeaseRoot` |
+| AC-21 | `util/PaimonSpillDirCleanerTest#releasingAnUnregisteredDirectoryIsIncomplete` |
+| AC-22 | `util/PaimonSpillLegacyCoexistenceTest`、`util/PaimonSpillReclaimerTest#legacyFlatLayoutIsReportedButNeverTouched`、`util/PaimonSpillOwnerIsolationRegressionTest`（同 JVM 中的旧版本） |
+| AC-23 | `util/PaimonSpillAuditTest`（字段与限流）；在真实 Engine 中查看引擎日志**未执行** |
+| AC-24 | **未执行**：本机没有 Linux 环境（OQ-06） |
+| AC-25 | `util/PaimonSpillResidueTest`、`util/PaimonSpillReclaimerTest#budgetBoundsReclaimsPerInvocation` |
+
+### 17.3 实现中对 V0.3 的细化
+
+- 多个根下的 lease 目录名各自生成（重试时更换），对应关系由 owner 索引与审计记录（PR #6，§4.1 已同步）。
+- owner 退役后依次 rmdir 空的命名空间与子根，正常停止不留空目录；Provision 把 `createDirectories(<ns>)` 纳入 ENOENT 重试以兜底该竞态（PR #8，§4.3/§4.4 已同步）。
+- T09 先于 T08 合入（Plan 依赖图允许），使 T08 的进程级测试可直接使用新回收器。
+
+### 17.4 验证
+
+- 最终全量（集成分支 `0510d607`，macOS / Oracle JDK 17.0.20 / apfs，Maven 3.9.16 离线）：`package` 成功，paimon-plus-connector 1307 项，0 失败，0 错误，1 跳过（`PaimonRustFsIntegrationTest`，依赖外部服务，与本次无关）。基线为 1255 项。
+- 每个修改生产代码的 PR 都做了变异检验，所有变异均被至少一个测试检出（明细见各合并提交说明）。其中跨 ClassLoader 用例在“去掉本命名空间排除”时报出“owner 的 OS 锁必须仍被持有 ==> expected <false> but was <true>”，即原缺陷重现。
+- 未覆盖：AC-24（Linux）；AC-23 的真实 Engine 日志检查；Java 8 运行时的 `getName()` 回退只有单元测试；OQ-04 现场取证；OQ-05 白名单的生产确认。
+
+### 17.5 本地 PR
+
+`git log --first-parent --merges hotfix/paimon-spill-owner-isolation` 可列出全部合并。对应关系：#1 `2e2f66dd`、#2 `213f9c49`、#3 `c5600c59`、#3.1 `e4032180`、#3.2 `bb245dca`、#4 `1fdfd5a2`、#5 `4bc8fe9e`、#6 `ca5457b7`、#7 `57edbcef`、#9 `80b90fd5`、#8 `db9679b2`、#10 `be8adb37`、#11 `6a990ccc`、#12 `65a1823c`、#13 `b7e2d844`、#14 `0510d607`、#15（本次文档 PR）。
+
+## 18. 发布说明（草稿）
+
+**Paimon 连接器：修复本地 Spill 目录被误删导致的 `Channel to path ... could not be opened (No such file or directory)`。**
+
+- **问题：** 旧版本按“目录 10 分钟未修改”判断 Spill 目录已失效，并在同一 JVM 内重复打开其他任务（或升级后旧版本连接器）的锁文件，导致锁被操作系统释放；同机另一个引擎随后可能删除仍在使用的目录，compaction spill 失败、任务报错。
+- **修复：** Spill 目录改为 `<diskTmpDir>/tapdata-paimon-v2/<进程标识>/<租约>/` 结构，只以操作系统文件锁判断目录是否在使用；本进程永不探测自己的目录；崩溃残留由同机下一次启动的引擎按锁回收。正常停止后不留任何目录。
+- **兼容：** 旧版本在 `diskTmpDir` 根下创建的 `paimon-io-*` 目录与锁文件不会被打开或删除，可在所有引擎升级并重启后手动清理（见连接器文档）。升级后请重启引擎。
+- **限制：** `diskTmpDir` 位于 NFS、CIFS、FUSE、Ceph 等文件系统时不自动回收遗留目录；本次修复的是本地目录所有权，不提供跨引擎的表级写入 fencing。对 2026-11 现场故障是否已根治，以现场取证（OQ-04）为准。

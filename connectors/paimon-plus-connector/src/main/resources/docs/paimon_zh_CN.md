@@ -35,6 +35,30 @@ Paimon 存储数据的根路径。可以是:
 
 旧版本中关闭开关可能仍使用原生默认 `true`。本次修正后，重启任务会实际传入 `false`，可能改变内存使用、flush 频率和文件数量；不保证生产吞吐保持不变。临时目录仍须等相关使用者退出后才清理，超时则按既有规则保留。
 
+### 本地临时目录与 Spill 回收
+
+连接器在 `diskTmpDir` 下按以下结构存放 Paimon 的本地 Spill 与索引文件，每个写入表各有独立的租约目录：
+
+```text
+<diskTmpDir>/tapdata-paimon-v2/<进程标识>/<租约>/owner.lock
+<diskTmpDir>/tapdata-paimon-v2/<进程标识>/<租约>/io/paimon-io-<UUID>/
+```
+
+- **存活判定：** 只以操作系统文件锁判断目录是否仍在使用，不按修改时间推断。运行中任务的目录不会被其他任务或其他引擎删除。
+- **正常停止：** 任务正常停止后，其目录全部删除，不留空目录。
+- **异常退出：** 进程崩溃（OOM、`kill -9`）后遗留的目录，由同一台机器上下一次启动 Paimon 任务的引擎回收（包括重启后的同一引擎）；每次最多回收 64 个，其余留到下一次。
+- **部署建议：** 每个引擎进程使用独占的 `diskTmpDir`。Kubernetes 使用每个 Pod 独立的 emptyDir 或独立的 subPath，Docker 使用独立的 volume。
+- **网络或 FUSE 文件系统：** `diskTmpDir` 位于 NFS、CIFS、FUSE、Ceph 等文件系统时，跨主机文件锁不可靠，连接器不自动回收遗留目录，只记录告警。请改用本地磁盘，或按下方步骤手动清理。
+- **升级：** 升级连接器后请重启引擎，避免同一进程内新旧版本并存。旧版本在 `diskTmpDir` 根下创建的 `paimon-io-*` 目录与 `.paimon-io-*.tapdata-owner.lock` 文件不会被新版本打开或删除。确认使用该目录的所有引擎都已升级并重启后，可以一次性删除：
+
+  ```sh
+  # 先列出，确认没有任何旧版本引擎仍在使用该目录后再删除
+  find <diskTmpDir> -maxdepth 1 \( -name 'paimon-io-*' -o -name '.paimon-io-*.tapdata-owner.lock' \) -print
+  find <diskTmpDir> -maxdepth 1 \( -name 'paimon-io-*' -o -name '.paimon-io-*.tapdata-owner.lock' \) -exec rm -rf {} +
+  ```
+
+- **排查：** 租约的创建、退役、保留、回收与跳过事件写入引擎日志，logger 名为 `io.tapdata.connector.paimon.spill`；任务日志只记录摘要。
+
 ### 原生维护模式
 
 `snapshot.expire.execution-mode` 由 Paimon 解释：SYNC、ASYNC 均可使用，连接器不强制设置模式、不 ALTER 已有表，也不自行执行或重试维护。未配置时使用 Catalog 和 Paimon 的默认值。历史已改为 SYNC 的表不会自动恢复；连接器的 `enableAsyncCommit` 是另一个独立参数。

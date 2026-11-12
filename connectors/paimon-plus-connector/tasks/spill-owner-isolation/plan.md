@@ -1,6 +1,6 @@
 # 实施计划：Paimon Spill 进程级命名空间与租约回收协议
 
-> 版本：Plan v2，2026-11-12；状态：待用户复核。获批前不修改生产代码；已合入的 PR #1–#2 只包含文档与测试。\
+> 版本：Plan v2，2026-11-12；状态：T01–T15 已按本地 PR 完成（实现记录见 Spec §17）；T16（Linux + JDK 17）待 OQ-06。\
 > 规范：[SPEC V0.3](../../src/doc/specs/SPEC-paimon-spill-owner-isolation.md)；证据：[REVIEW 2026-11-12](../../src/doc/reviews/REVIEW-paimon-spill-owner-isolation-2026-11-12.md)；任务唯一事实源：[todo.md](todo.md)。\
 > 代码基线：develop `e3f68298`；集成分支 `hotfix/paimon-spill-owner-isolation`（远端 `czy006`），位于独立 worktree `tapdata-connectors-paimon-spill-owner-isolation`。主工作区中他人的暂存与未提交改动不受影响。\
 > 依赖：Paimon 1.3.2；生产代码 `<release>8`，测试 `<testRelease>11`；构建需要 JDK 17。\
