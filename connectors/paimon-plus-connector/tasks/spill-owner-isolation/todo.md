@@ -260,8 +260,9 @@
 ## T14：旧布局并存与残留 —— 本地 PR #14
 
 **Acceptance criteria**：
-- [ ] AC-22：新回收器不打开旧锁文件、不删除旧目录，并输出清单告警；冻结的旧清理器不进入 `tapdata-paimon-v2/`；回退场景中旧扫描不删除新目录
-- [ ] AC-25：多表、多根反复启停后无 lease 残留、无 channel 泄漏；预算生效
+- [x] AC-22：新回收器不打开旧锁文件、不删除旧目录，并输出清单告警；冻结的旧清理器不进入 `tapdata-paimon-v2/`；回退场景中旧扫描不删除新目录
+- [x] AC-25：多表、多根反复启停后无 lease 残留、无 channel 泄漏；预算生效
+- [x] 证据：`TEST PaimonSpillLegacyCoexistenceTest,PaimonSpillResidueTest` 3 项通过（新旧两代扫描在同一根目录互不越界；回退后旧扫描不删除空闲的 v2 租约；20 轮 × 3 表 × 2 根后无目录、无登记、无描述符泄漏；预算由 PaimonSpillReclaimerTest 覆盖）；变异（退役不关闭锁 channel）被描述符计数检出（before=240 after=360）；PR #13 合并提交 `b7e2d844`
 
 **Verification**：`TEST PaimonSpillLegacyCoexistenceTest,PaimonWriteBufferSpillIntegrationTest`\
 **Dependencies**：T10\
