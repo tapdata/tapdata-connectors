@@ -107,9 +107,10 @@
 不修改生产代码。本 PR 修改 9 个文件，超过 5 个文件的上限；理由是所有改动都是同一种访问方式的替换，需要逐行确认的只有替换本身。
 
 **Acceptance criteria**：
-- [ ] 测试源码中只有 `SpillTestSupport` 直接引用 `registerLiveDirs`、`OWNER_LOCKS` 与 `.tapdata-owner.lock`
-- [ ] 断言数量与语义不变（以 diff 复核）；`PACKAGE` 全绿，测试数与 T03 基线一致
-- [ ] 生产代码 diff 为空
+- [x] 测试源码中只有 `SpillTestSupport` 直接引用 `registerLiveDirs`、`OWNER_LOCKS` 与 `.tapdata-owner.lock`（清理器自身的 4 个测试与子进程探针除外，按计划在 T08/T10 改写）
+- [x] 断言数量与语义不变（以 diff 复核）；`PACKAGE` 全绿：1280 项（T03 基线 1255 + PR #4–#6 新增 25），0 失败，1 跳过（既有）
+- [x] 生产代码 diff 为空
+- [x] 补充：`BlockingSpillIOManager.owned` 与 Factory 测试 Fixture 的根目录参数；Factory/Preflight 测试改为截获生产代码实际调用的 `IOManager.create(roots)`；PR #6 合并提交 `ca5457b7`
 
 **Verification**：`TEST` 下列 8 个类；`PACKAGE`。\
 **Dependencies**：T06（与生产代码无关，可以提前；放在 T08 之前即可）\
