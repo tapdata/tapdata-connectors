@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.write;
 
+import io.tapdata.connector.paimon.util.SpillTestSupport;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContractResolver;
 import io.tapdata.connector.paimon.util.PaimonSpillDirCleaner;
@@ -82,10 +83,8 @@ class PaimonCompactionSpillLifecycleIntegrationTest {
                         "删除临时目录不能代替释放 owner 文件锁及通道"));
     }
 
-    private static int ownerLockCount() throws ReflectiveOperationException {
-        java.lang.reflect.Field field = PaimonSpillDirCleaner.class.getDeclaredField("OWNER_LOCKS");
-        field.setAccessible(true);
-        return ((Map<?, ?>) field.get(null)).size();
+    private static int ownerLockCount() {
+        return SpillTestSupport.ownerRegistrationCount();
     }
 
     private FileStoreTable table() throws Exception {
@@ -225,7 +224,7 @@ class PaimonCompactionSpillLifecycleIntegrationTest {
             java.util.function.IntFunction<GenericRow> rowFactory) throws Exception {
         FileStoreTable table = table();
         CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
-        BlockingSpillIOManager io = new BlockingSpillIOManager(ioTmpDir, entered, release);
+        BlockingSpillIOManager io = BlockingSpillIOManager.owned(ioTmpDir, entered, release);
         try (Fixture fixture = new Fixture(table, "cancel-real-spill", io, release)) {
             io.tapdata.connector.paimon.service.PaimonStopController controller =
                     new io.tapdata.connector.paimon.service.PaimonStopController("native-cancel", 20, 1, 10);
@@ -290,7 +289,7 @@ class PaimonCompactionSpillLifecycleIntegrationTest {
                 .option("snapshot.expire.execution-mode", "SYNC").build(), false);
         FileStoreTable table = table();
         CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
-        BlockingSpillIOManager io = new BlockingSpillIOManager(ioTmpDir, new CountDownLatch(0), new CountDownLatch(0));
+        BlockingSpillIOManager io = BlockingSpillIOManager.owned(ioTmpDir, new CountDownLatch(0), new CountDownLatch(0));
         try (Fixture fixture = new Fixture(table, "cancel-append", io, release)) {
             io.tapdata.connector.paimon.service.PaimonStopController controller =
                     new io.tapdata.connector.paimon.service.PaimonStopController("append-cancel", 20, 1, 10);
@@ -332,7 +331,7 @@ class PaimonCompactionSpillLifecycleIntegrationTest {
         FileStoreTable table = table();
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
-        BlockingSpillIOManager io = new BlockingSpillIOManager(ioTmpDir, entered, release);
+        BlockingSpillIOManager io = BlockingSpillIOManager.owned(ioTmpDir, entered, release);
         try (Fixture fixture = new Fixture(table, "wait-" + finalizeCompaction, io, release)) {
             for (int version = 0; version < 3; version++) {
                 fixture.context.write(GenericRow.of(1, BinaryString.fromString("v" + version)));
@@ -392,7 +391,7 @@ class PaimonCompactionSpillLifecycleIntegrationTest {
     }
 
     private static File ownerMarker(File directory) {
-        return new File(directory.getParentFile(), "." + directory.getName() + ".tapdata-owner.lock");
+        return SpillTestSupport.ownerLockFile(directory);
     }
 
     private static void joinAndAssertStopped(Thread thread) throws InterruptedException {
@@ -433,7 +432,7 @@ class PaimonCompactionSpillLifecycleIntegrationTest {
                         new PaimonBucketWriterStrategyContext(
                                 "default." + TABLE, table, writer, user, io, contract),
                         DefaultPaimonBucketWriterRuntimeFactory.INSTANCE);
-                directories = PaimonSpillDirCleaner.registerLiveDirs(io.delegate());
+                directories = SpillTestSupport.spillDirsOf(io.delegate());
                 context = new PaimonTableWriteContext("default." + TABLE, TABLE, user, strategy,
                         new PaimonStreamTableCommitter(rawCommitter), io, directories, 0L,
                         PaimonTableWriteContext.CommitStateStore.NOOP, lifecycle,
