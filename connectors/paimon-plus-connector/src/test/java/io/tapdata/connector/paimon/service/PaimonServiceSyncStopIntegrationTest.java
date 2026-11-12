@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.service;
 
+import io.tapdata.connector.paimon.util.SpillTestSupport;
 import io.tapdata.connector.paimon.commit.PaimonServiceLifecycle;
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract;
@@ -102,9 +103,7 @@ class PaimonServiceSyncStopIntegrationTest {
                 assertNull(fixture.closeFailure.get());
                 assertFalse(fixture.compaction.compactionExecutor().isTerminated());
                 assertEquals(0, fixture.io.closeCount.get());
-                String[] roots = fixture.spillDirectories.stream()
-                        .map(dir -> new File(dir).getParent()).distinct().toArray(String[]::new);
-                assertEquals(0, PaimonSpillDirCleaner.cleanupStaleSpillDirs(roots, 0L,
+                assertEquals(0, SpillTestSupport.runStartupCleanup(fixture.spillDirectories,
                         (dir, bytes) -> { throw new AssertionError("活跃 Spill 被 stale cleaner 删除：" + dir); }));
                 assertSpillProtectionPresent(fixture.spillDirectories);
                 assertSecondOwnerRejected(fixture.contender, fixture.table);
@@ -204,7 +203,7 @@ class PaimonServiceSyncStopIntegrationTest {
     }
 
     private static File ownerMarker(File directory) {
-        return new File(directory.getParentFile(), "." + directory.getName() + ".tapdata-owner.lock");
+        return SpillTestSupport.ownerLockFile(directory);
     }
 
     private static long normalExitCount(List<InfoEvent> events) {
@@ -404,7 +403,7 @@ class PaimonServiceSyncStopIntegrationTest {
                         new PaimonBucketWriterStrategyContext(
                                 TABLE_KEY, table, rawWriter, commitUser, io, contract),
                         DefaultPaimonBucketWriterRuntimeFactory.INSTANCE);
-                spillDirectories = PaimonSpillDirCleaner.registerLiveDirs(io.delegate);
+                spillDirectories = SpillTestSupport.spillDirsOf(io.delegate);
                 context = new PaimonTableWriteContext(
                         TABLE_KEY, TABLE_NAME, commitUser, strategy,
                         commitAdapter(rawCommitter), io, spillDirectories,
@@ -504,7 +503,7 @@ class PaimonServiceSyncStopIntegrationTest {
         final AtomicInteger closeCount = new AtomicInteger();
 
         BlockingSpillIO(String tmpDir, boolean blockSpill) {
-            delegate = (IOManagerImpl) IOManager.create(tmpDir);
+            delegate = SpillTestSupport.ownedIOManager(tmpDir);
             releaseSpill = new CountDownLatch(blockSpill ? 1 : 0);
         }
 

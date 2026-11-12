@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.write;
 
+import io.tapdata.connector.paimon.util.SpillTestSupport;
 import org.apache.paimon.disk.BufferFileReader;
 import org.apache.paimon.disk.BufferFileWriter;
 import org.apache.paimon.disk.IOManager;
@@ -25,9 +26,19 @@ final class BlockingSpillIOManager implements IOManager {
     private final AtomicInteger closeCount = new AtomicInteger();
 
     BlockingSpillIOManager(String tmpDir, CountDownLatch spillEntered, CountDownLatch releaseSpill) {
-        this.delegate = (IOManagerImpl) IOManager.create(tmpDir);
+        this((IOManagerImpl) IOManager.create(tmpDir), spillEntered, releaseSpill);
+    }
+
+    private BlockingSpillIOManager(IOManagerImpl delegate, CountDownLatch spillEntered, CountDownLatch releaseSpill) {
+        this.delegate = delegate;
         this.spillEntered = spillEntered;
         this.releaseSpill = releaseSpill;
+    }
+
+    /** 委托的 IOManager 经 SpillTestSupport 创建并登记 owner；目录由 releaseAfterClose 释放。 */
+    static BlockingSpillIOManager owned(String tmpDir, CountDownLatch spillEntered, CountDownLatch releaseSpill) {
+        return new BlockingSpillIOManager(
+                SpillTestSupport.ownedIOManager(tmpDir), spillEntered, releaseSpill);
     }
 
     /** Stack of the first parked spill call; guards the fixture against silently leaving the
