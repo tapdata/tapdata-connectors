@@ -34,7 +34,11 @@
 ### T03.1：生命周期图与内核证据清单 —— 本地 PR #3.1
 - [x] 新增 `SPILL-所有权隔离-修改前后对比与生命周期.md`：内核 spill 调用链、目录布局、修改前后完整生命周期、故障与修复后时序、租约状态机、逐项对比，以及 Paimon 内核、Paimon Flink Connector、Flink Runtime、JDK 证据清单
 - [x] 7 张 Mermaid 图经 mermaid 11.17.2 `parse` 全部通过；用故意写错的图确认校验器能检出错误
-- [x] 分支 `pr/spill-owner-isolation/03.1-lifecycle-diagrams`，只含文档
+- [x] 分支 `pr/spill-owner-isolation/03.1-lifecycle-diagrams`，合并提交 `e4032180`，只含文档
+
+### T03.2：集成分支更名为 hotfix 并推送 —— 本地 PR #3.2
+- [x] `feature/paimon-spill-owner-isolation` 更名为 `hotfix/paimon-spill-owner-isolation`，Spec §9 与 plan §2 中的分支名与远端规则同步更新
+- [x] 推送到 fork 远端 `czy006`（与既有 `hotfix/paimon-*` 分支约定一致），不推送 `pr/*` 主题分支，不推送 `origin`
 
 ---
 
