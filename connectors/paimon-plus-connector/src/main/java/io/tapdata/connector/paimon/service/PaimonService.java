@@ -64,6 +64,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -82,6 +85,10 @@ import java.util.stream.Collectors;
  * @author Tapdata
  */
 public class PaimonService implements AutoCloseable {
+
+    /** Hadoop S3A fast-upload scratch directory; also settable from S3 advanced properties. */
+    static final String S3A_BUFFER_DIR = "fs.s3a.buffer.dir";
+
 
     /** 日志和异常信息中使用的当前 Service 类标识。 */
     private static final String TAG = PaimonService.class.getName();
@@ -487,22 +494,15 @@ public class PaimonService implements AutoCloseable {
             // S3A fast-upload buffers each upload block to a local directory before sending to S3.
             // Defaults to ${hadoop.tmp.dir}/s3a under /tmp, which can run out of space and fail with
             // "Could not find any valid local directory for s3ablock-...". Redirect the buffer to the
-            // configured scratch dir (the same disk used for Paimon spill) and ensure it exists.
-            String s3aBufferDir = PaimonSpillDirCleaner.resolveTmpDirs(config.getDiskTmpDir());
-            for (String p : s3aBufferDir.split(",")) {
-                String dir = p.trim();
-                if (!dir.isEmpty()) {
-                    try {
-                        new File(dir).mkdirs();
-                    } catch (Exception ignore) {
-                        // best-effort directory creation
-                    }
-                }
-            }
-            conf.set("fs.s3a.buffer.dir", s3aBufferDir);
+            // configured scratch dir (the same disk used for Paimon spill).
+            conf.set(S3A_BUFFER_DIR, PaimonSpillDirCleaner.resolveTmpDirs(config.getDiskTmpDir()));
             if (EmptyKit.isNotEmpty(config.getS3Properties())) {
                 config.getS3Properties().forEach(v -> conf.set(v.get("propKey"), v.get("propValue")));
             }
+            // 用户属性可以覆盖 fs.s3a.buffer.dir，因此校验必须放在覆盖之后。
+            // 若只在覆盖前建目录，被覆盖的路径既不会创建也不会验证，S3A 会一直用它并在
+            // LocalDirAllocator 报 "max capacity ... is 0"，把配置/权限问题伪装成磁盘满（TAP-13250）。
+            applyVerifiedS3ABufferDir(conf);
         }
         // 用户属性可覆盖缓存/认证选项；仅替换标准实现的初始化入口，不覆盖自定义 FS。
         // Paimon HadoopFileIO 按 authority 懒创建 FS，单独移动 Catalog 构造线程不足以覆盖该路径。
@@ -514,6 +514,100 @@ public class PaimonService implements AutoCloseable {
                     org.apache.hadoop.fs.FileSystem.class);
         }
         return conf;
+    }
+
+    /**
+     * Validates the <em>effective</em> S3A fast-upload scratch directory, i.e. after user table
+     * properties have been applied, because {@code fs.s3a.buffer.dir} is user-overridable.
+     *
+     * <p>Hadoop only rejects the buffer directory deep inside {@code LocalDirAllocator}, where a
+     * missing, unwritable or full directory all surface as {@code max capacity ... is 0}. That
+     * message cannot distinguish a bad path from a full disk, so an operator reading it tends to
+     * chase capacity. Failing here reports the concrete path and the concrete reason instead.
+     */
+    private void applyVerifiedS3ABufferDir(Configuration conf) {
+        String configured = conf.getTrimmed(S3A_BUFFER_DIR);
+        if (StringUtils.isBlank(configured)) {
+            // 用户把属性覆盖成空值时退回 spill 根目录，避免 S3A 悄悄用回 ${hadoop.tmp.dir}/s3a。
+            configured = PaimonSpillDirCleaner.resolveTmpDirs(config.getDiskTmpDir());
+        }
+        conf.set(S3A_BUFFER_DIR, verifyS3ABufferDirs(configured));
+    }
+
+    /**
+     * Verifies every entry of a comma-separated S3A buffer directory list and returns the list to
+     * configure. Paths are validated in full before anything is created so a rejected configuration
+     * leaves no half-built directories behind, and each root gets a real write probe because
+     * {@link File#canWrite()} cannot see read-only mounts, quotas or ACL denials.
+     */
+    static String verifyS3ABufferDirs(String configured) {
+        List<Path> roots = new ArrayList<>();
+        for (String raw : configured.split(",", -1)) {
+            int index = roots.size() + 1;
+            String dir = raw.trim();
+            if (dir.isEmpty()) {
+                throw new IllegalArgumentException("fs.s3a.buffer.dir entry " + index
+                        + " must be an absolute local directory, not an empty entry");
+            }
+            Path candidate;
+            try {
+                candidate = Paths.get(dir);
+            } catch (RuntimeException invalid) {
+                throw new IllegalArgumentException("fs.s3a.buffer.dir entry " + index
+                        + " is not a usable local directory path: " + dir);
+            }
+            if (!candidate.isAbsolute()) {
+                throw new IllegalArgumentException("fs.s3a.buffer.dir entry " + index
+                        + " must be an absolute local directory: " + dir);
+            }
+            roots.add(candidate);
+        }
+        List<String> verified = new ArrayList<>(roots.size());
+        List<Path> created = new ArrayList<>();
+        try {
+            for (int i = 0; i < roots.size(); i++) {
+                Path path = roots.get(i);
+                File dir = path.toFile();
+                if (dir.exists() && !dir.isDirectory()) {
+                    throw new IllegalStateException("fs.s3a.buffer.dir entry " + (i + 1) + " (" + dir
+                            + ") exists but is not a directory");
+                }
+                if (!dir.isDirectory()) {
+                    if (!dir.mkdirs() && !dir.isDirectory()) {
+                        throw new IllegalStateException("fs.s3a.buffer.dir entry " + (i + 1) + " (" + dir
+                                + ") does not exist and cannot be created; S3A upload buffering requires"
+                                + " a writable local directory on the engine host");
+                    }
+                    created.add(path);
+                }
+                Path probe = path.resolve(".tapdata-s3a-buffer-probe-"
+                        + UUID.randomUUID().toString().replace("-", ""));
+                try {
+                    Files.write(probe, new byte[] {0});
+                } catch (IOException | RuntimeException failure) {
+                    throw new IllegalStateException("fs.s3a.buffer.dir entry " + (i + 1) + " (" + dir
+                            + ") is not writable by the engine process: " + failure, failure);
+                } finally {
+                    try {
+                        Files.deleteIfExists(probe);
+                    } catch (IOException ignore) {
+                        // A leftover probe file is harmless; the writability answer is already known.
+                    }
+                }
+                verified.add(dir.toString());
+            }
+        } catch (RuntimeException failure) {
+            // 只回收本次新建的目录；非空目录删除会抛异常并被忽略，不会误删其他进程的数据。
+            for (int i = created.size() - 1; i >= 0; i--) {
+                try {
+                    Files.deleteIfExists(created.get(i));
+                } catch (IOException ignore) {
+                    // Directory is in use: leave it alone.
+                }
+            }
+            throw failure;
+        }
+        return String.join(",", verified);
     }
 
     /**
