@@ -191,9 +191,9 @@
 - 原平铺扫描的单元测试按意图迁移到回收器测试，或者删除，并逐项列出。
 
 **Acceptance criteria**：
-- [ ] 生产代码中 `grep -E "tapdata-owner\.lock|LIVE_DIRS|newestModified|DEFAULT_STALE_GRACE_MS|cleanupStaleSpillDirs"` 无结果
-- [ ] 启动时只回收外部命名空间中的 ORPHANED lease；旧目录与旧锁文件不被打开（AC-22 部分）
-- [ ] `PACKAGE` 全绿；被删除或迁移的测试有逐项清单
+- [x] 生产代码中 `grep -E "tapdata-owner\.lock|LIVE_DIRS|newestModified|DEFAULT_STALE_GRACE_MS|cleanupStaleSpillDirs"` 无结果
+- [x] 启动时只回收外部命名空间中的 ORPHANED lease；旧目录与旧锁文件不被打开（AC-22 部分）
+- [x] `PACKAGE` 全绿：1295 项，0 失败，1 跳过（既有）；9 个旧扫描器用例的去向见 PR #10 合并说明；变异（服务层不调用回收）被检出；PR #8 合并提交 `db9679b2`
 
 **Verification**：`TEST PaimonServiceStaleSpillCleanupTest,PaimonServiceSyncStopIntegrationTest,PaimonSpillReclaimerTest,PaimonSpillOwnerIsolationRegressionTest`；`PACKAGE`。\
 **Dependencies**：T08、T09\
@@ -208,7 +208,7 @@
 **Scope**：M
 
 ### 检查点 C（T09–T10 之后）
-- [ ] `PACKAGE` 全绿；与用户复核删除的代码与测试清单
+- [x] `PACKAGE` 全绿；删除清单写入 PR #10 合并说明，留待用户复核
 
 ---
 

@@ -9,17 +9,11 @@ import org.apache.paimon.disk.IOManagerImpl;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.channels.FileChannel;
-import java.nio.channels.FileLock;
-import java.nio.channels.OverlappingFileLockException;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -28,7 +22,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
 /**
@@ -42,10 +35,7 @@ public final class PaimonSpillDirCleaner {
 
     /** Prefix of spill directories created by Paimon IOManager: {@code paimon-io-<uuid>}. */
     static final String SPILL_DIR_PREFIX = "paimon-io-";
-    static final String OWNER_LOCK_SUFFIX = ".tapdata-owner.lock";
 
-    /** An unlocked spill dir untouched for longer than this is treated as stale. */
-    public static final long DEFAULT_STALE_GRACE_MS = TimeUnit.MINUTES.toMillis(10);
 
     /**
      * owner 索引：{@code paimon-io-*} 规范路径 → 所属租约根。强引用保证锁对象可达性不短于租约（INV-02）；
@@ -220,10 +210,10 @@ public final class PaimonSpillDirCleaner {
      * spill directories instead of the raw configured roots. Paimon 1.3.2's
      * {@code GlobalIndexAssigner} picks {@code ioManager.tempDirs()} to create its
      * {@code rocksdb-<uuid>} index directory; without this confinement that directory is a
-     * sibling of {@code paimon-io-*} under the raw root — invisible to the live-dir registry,
-     * never deleted by the IOManager close barrier, and never reclaimed by the stale cleaner
-     * after a crash. Spill channels keep flowing through the delegate's FileChannelManager
-     * (real {@code paimon-io-*} directories) unchanged.
+     * sibling of the lease under the raw root — outside the owner lock's protection, never
+     * deleted by the IOManager close barrier, and never reclaimed after a crash. Spill channels
+     * keep flowing through the delegate's FileChannelManager (real {@code paimon-io-*}
+     * directories inside the lease) unchanged.
      *
      * <p>Source: {@code paimon-core/src/main/java/org/apache/paimon/crosspartition/
      * GlobalIndexAssigner.java#open}, lines 136-142. Baseline:
@@ -359,111 +349,41 @@ public final class PaimonSpillDirCleaner {
     }
 
     /**
-     * Delete stale {@code paimon-io-*} spill directories under the given roots. A directory is
-     * deleted only when it is not owned by a live IOManager in this JVM, its cross-process owner
-     * lock can be acquired, and it has not been modified within {@code graceMs}.
+     * 启动时回收其他 JVM 已终止后遗留的租约（Spec §4.5–4.6）。本 JVM 的命名空间按名称跳过、不打开任何文件；
+     * 旧平铺布局只计数，不打开、不删除（INV-09）。
      *
-     * @param roots     temp roots to scan
-     * @param graceMs   freshness window protecting recently active / racing dirs
-     * @param onDeleted optional callback invoked per deleted dir with (canonicalPath, bytesDeleted)
-     * @return number of stale directories deleted
+     * @param roots       已规范化的根目录
+     * @param onReclaimed 每个被回收的租约回调 (lease 路径, 删除的普通文件字节数)，在其锁释放之后调用
      */
-    public static int cleanupStaleSpillDirs(String[] roots, long graceMs, BiConsumer<String, Long> onDeleted) {
-        return cleanupStaleSpillDirs(roots, graceMs, onDeleted, Files::delete);
+    public static ReclaimSummary reclaimOrphanedLeases(Collection<String> roots, BiConsumer<String, Long> onReclaimed) {
+        PaimonSpillReclaimer.Result result = PaimonSpillReclaimer.standard().reclaim(roots);
+        if (onReclaimed != null) {
+            for (PaimonSpillReclaimer.Reclaimed reclaimed : result.reclaimed) {
+                onReclaimed.accept(reclaimed.lease, reclaimed.bytes);
+            }
+        }
+        return new ReclaimSummary(result.reclaimed.size(), result.failed, result.legacyDirectories,
+                result.budgetExhausted);
     }
 
-    static int cleanupStaleSpillDirs(
-            String[] roots,
-            long graceMs,
-            BiConsumer<String, Long> onDeleted,
-            DeleteAction deleteAction) {
-        if (roots == null) {
-            return 0;
-        }
-        if (deleteAction == null) {
-            throw new IllegalArgumentException("Delete action must not be null");
-        }
-        int deleted = 0;
-        long now = System.currentTimeMillis();
-        for (String root : roots) {
-            if (root == null || root.trim().isEmpty()) {
-                continue;
-            }
-            File rootDir = new File(root.trim());
-            File[] children = rootDir.listFiles((dir, name) -> name.startsWith(SPILL_DIR_PREFIX));
-            if (children == null) {
-                continue;
-            }
-            for (File child : children) {
-                Path spillPath = child.toPath().toAbsolutePath().normalize();
-                if (!Files.isDirectory(spillPath, LinkOption.NOFOLLOW_LINKS)) {
-                    continue;
-                }
-                String path = canonical(child);
-                File ownerFile = lockFile(spillPath.toString());
-                if (!ownerFile.isFile()) {
-                    // Rolling-upgrade compatibility: older connector versions did not publish an
-                    // owner lock. Such a directory may still be active in an old JVM, so absence of
-                    // a lock file is not permission to delete it. Legacy leftovers require an
-                    // operator-controlled cleanup after all old tasks have stopped.
-                    continue;
-                }
-                OwnerLock cleanupLock = OwnerLock.tryAcquire(ownerFile);
-                if (cleanupLock == null) {
-                    // Another JVM still owns this spill directory. Age alone is never sufficient
-                    // evidence that a RocksDB/IOManager directory is inactive.
-                    continue;
-                }
-                boolean removeOwnerFile = false;
-                try {
-                    long newestModified;
-                    try {
-                        newestModified = newestModified(spillPath);
-                    } catch (IOException | SecurityException inspectionFailure) {
-                        // Fail closed. Keep the owner marker so a later scan can retry.
-                        continue;
-                    }
-                    if (now - newestModified < graceMs) {
-                        continue;
-                    }
-                    PaimonSpillFiles.DeletionResult result = deleteRecursively(spillPath, deleteAction);
-                    if (result.success) {
-                        removeOwnerFile = true;
-                        deleted++;
-                        if (onDeleted != null) {
-                            onDeleted.accept(path, result.bytesDeleted);
-                        }
-                    }
-                } finally {
-                    cleanupLock.close();
-                    if (removeOwnerFile) {
-                        deleteQuietly(cleanupLock.file);
-                    }
-                }
-            }
-        }
-        return deleted;
-    }
+    /** 一次启动回收的摘要，供任务 TapLog 输出；逐条审计已写入引擎日志。 */
+    public static final class ReclaimSummary {
+        private final int reclaimed;
+        private final int failed;
+        private final int legacyDirectories;
+        private final boolean budgetExhausted;
 
-    /** Newest lastModified across the dir and its direct children without following links. */
-    private static long newestModified(Path dir) throws IOException {
-        long newest =
-                Files.getLastModifiedTime(dir, LinkOption.NOFOLLOW_LINKS).toMillis();
-        try (DirectoryStream<Path> children = Files.newDirectoryStream(dir)) {
-            for (Path child : children) {
-                long m =
-                        Files.getLastModifiedTime(child, LinkOption.NOFOLLOW_LINKS).toMillis();
-                if (m > newest) {
-                    newest = m;
-                }
-            }
+        private ReclaimSummary(int reclaimed, int failed, int legacyDirectories, boolean budgetExhausted) {
+            this.reclaimed = reclaimed;
+            this.failed = failed;
+            this.legacyDirectories = legacyDirectories;
+            this.budgetExhausted = budgetExhausted;
         }
-        return newest;
-    }
 
-    /** Delete a tree without following symbolic links. */
-    private static PaimonSpillFiles.DeletionResult deleteRecursively(Path root, DeleteAction deleteAction) {
-        return PaimonSpillFiles.deleteTree(root, deleteAction::delete);
+        public int reclaimed() { return reclaimed; }
+        public int failed() { return failed; }
+        public int legacyDirectories() { return legacyDirectories; }
+        public boolean budgetExhausted() { return budgetExhausted; }
     }
 
     static String canonical(File file) {
@@ -471,94 +391,6 @@ public final class PaimonSpillDirCleaner {
             return file.getCanonicalPath();
         } catch (IOException e) {
             return file.getAbsolutePath();
-        }
-    }
-
-    private static File lockFile(String canonicalSpillDir) {
-        File spillDir = new File(canonicalSpillDir);
-        return new File(
-                spillDir.getParentFile(), "." + spillDir.getName() + OWNER_LOCK_SUFFIX);
-    }
-
-    private static void deleteQuietly(File file) {
-        if (file != null && file.exists()) {
-            // Best effort. A stale unlocked owner file is harmless and is reused by the next scan.
-            file.delete();
-        }
-    }
-
-    @FunctionalInterface
-    interface DeleteAction {
-        void delete(Path path) throws IOException;
-    }
-
-    private static final class OwnerLock {
-        private final File file;
-        private final RandomAccessFile randomAccessFile;
-        private final FileChannel channel;
-        private final FileLock lock;
-
-        private OwnerLock(
-                File file,
-                RandomAccessFile randomAccessFile,
-                FileChannel channel,
-                FileLock lock) {
-            this.file = file;
-            this.randomAccessFile = randomAccessFile;
-            this.channel = channel;
-            this.lock = lock;
-        }
-
-        private static OwnerLock tryAcquire(File file) {
-            RandomAccessFile randomAccessFile = null;
-            FileChannel channel = null;
-            try {
-                randomAccessFile = new RandomAccessFile(file, "rw");
-                channel = randomAccessFile.getChannel();
-                FileLock lock = channel.tryLock();
-                if (lock == null) {
-                    closeQuietly(channel, randomAccessFile);
-                    return null;
-                }
-                return new OwnerLock(file, randomAccessFile, channel, lock);
-            } catch (OverlappingFileLockException e) {
-                closeQuietly(channel, randomAccessFile);
-                return null;
-            } catch (IOException | RuntimeException e) {
-                closeQuietly(channel, randomAccessFile);
-                // Cleanup must fail closed: inability to prove exclusive ownership means skip.
-                return null;
-            }
-        }
-
-        private Throwable close() {
-            Throwable failure = null;
-            try { lock.release(); } catch (IOException | RuntimeException e) { failure = e; }
-            try { channel.close(); } catch (IOException | RuntimeException e) {
-                if (failure == null) { failure = e; } else { PaimonFailures.append(failure, e); }
-            }
-            try { randomAccessFile.close(); } catch (IOException | RuntimeException e) {
-                if (failure == null) { failure = e; } else { PaimonFailures.append(failure, e); }
-            }
-            return failure;
-        }
-
-        private static void closeQuietly(
-                FileChannel channel, RandomAccessFile randomAccessFile) {
-            if (channel != null) {
-                try {
-                    channel.close();
-                } catch (IOException ignored) {
-                    // Best effort.
-                }
-            }
-            if (randomAccessFile != null) {
-                try {
-                    randomAccessFile.close();
-                } catch (IOException ignored) {
-                    // Best effort.
-                }
-            }
         }
     }
 }

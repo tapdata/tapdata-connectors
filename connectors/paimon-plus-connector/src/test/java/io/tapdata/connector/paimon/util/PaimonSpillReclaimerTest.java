@@ -278,12 +278,17 @@ class PaimonSpillReclaimerTest {
         Path legacy = Files.createDirectories(root.resolve("paimon-io-" + UUID.randomUUID()));
         Files.write(legacy.resolve("a.channel"), new byte[] {1});
         Path legacyLock = Files.write(root.resolve("." + legacy.getFileName() + ".tapdata-owner.lock"), new byte[0]);
+        Path bareRocksdb = Files.write(Files.createDirectories(root.resolve("rocksdb-orphan")).resolve("index.sst"),
+                new byte[] {1});
+        Path rocksdbMarker = Files.write(root.resolve(".rocksdb-orphan.tapdata-owner.lock"), new byte[0]);
 
         PaimonSpillReclaimer.Result result = reclaimer().reclaim(roots(root));
 
         assertEquals(1, result.legacyDirectories);
         assertTrue(Files.isDirectory(legacy));
         assertTrue(Files.isRegularFile(legacyLock));
+        assertTrue(Files.exists(bareRocksdb), "根目录下的裸 rocksdb 目录不属于任何租约");
+        assertTrue(Files.exists(rocksdbMarker));
         assertTrue(opened.isEmpty());
         assertTrue(events.contains(PaimonSpillAudit.Event.LEGACY_LAYOUT_FOUND));
     }

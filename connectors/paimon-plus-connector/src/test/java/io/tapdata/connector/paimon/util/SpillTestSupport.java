@@ -73,13 +73,13 @@ public final class SpillTestSupport {
         return staticField("OWNERS", Map.class).size();
     }
 
-    /** 以零宽限期执行一次启动清理扫描，覆盖 spill 目录所在的根；返回删除数。 */
+    /** 执行一次生产启动回收（PaimonService 的同一入口），覆盖 spill 目录所在的根；返回回收的租约数。 */
     public static int runStartupCleanup(List<String> spillDirs, BiConsumer<String, Long> onDeleted) {
         // <root>/tapdata-paimon-v2/<jvmId>/<lease>/io/paimon-io-<uuid> 向上 5 级即配置的根目录。
         String[] roots = spillDirs.stream()
                 .map(dir -> Paths.get(dir).getParent().getParent().getParent().getParent().getParent().toString())
                 .distinct().toArray(String[]::new);
-        return PaimonSpillDirCleaner.cleanupStaleSpillDirs(roots, 0L, onDeleted);
+        return PaimonSpillDirCleaner.reclaimOrphanedLeases(java.util.Arrays.asList(roots), onDeleted).reclaimed();
     }
 
     /**
