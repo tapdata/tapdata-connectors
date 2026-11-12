@@ -28,7 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <ul>
  *   <li>A：本测试 JVM 的应用 ClassLoader，经生产外观持有真实 Paimon IOManager 与租约锁；</li>
- *   <li>B：同一 JVM 的隔离 ClassLoader（模拟 PDK 重新加载 jar）或同一 ClassLoader，运行当前版本的启动清理；</li>
+ *   <li>B：同一 JVM 的隔离 ClassLoader（模拟 PDK 重新加载 jar，新版本或未重启的旧版本）或同一 ClassLoader，
+ *       运行启动清理；</li>
  *   <li>C：另一个 JVM，分别运行 develop 平铺清理器（旧版本引擎）与新回收器（新版本引擎），grace=0。</li>
  * </ul>
  */
@@ -44,12 +45,15 @@ class PaimonSpillOwnerIsolationRegressionTest {
             assertFalse(SpillProbeProcess.otherProcessAcquires(lockFile), "Provision 后 owner 锁必须有效");
 
             try (URLClassLoader loaderB = IsolatedConnectorLoader.create()) {
-                Class<?> foreignCleaner = loaderB.loadClass(PaimonSpillDirCleaner.class.getName());
-                assertNotSame(PaimonSpillDirCleaner.class, foreignCleaner, "B 必须重新定义清理器类");
-                assertEquals(0, foreignCleaner
-                        .getMethod("cleanupStaleSpillDirs", String[].class, long.class, BiConsumer.class)
-                        .invoke(null, new String[] {root.toString()}, PaimonSpillDirCleaner.DEFAULT_STALE_GRACE_MS, null));
+                // B 代表同一 JVM 中重新加载的新版本连接器……
+                Class<?> foreignReclaimer = loaderB.loadClass(PaimonSpillReclaimer.class.getName());
+                assertNotSame(PaimonSpillReclaimer.class, foreignReclaimer, "B 必须重新定义回收器类");
                 assertEquals(0, reclaimIn(loaderB, root));
+                // ……或升级后未重启、仍留在同一 JVM 中的旧版本连接器（AC-22）。
+                Method legacy = loaderB.loadClass(LegacyFlatSpillCleanerFixture.class.getName())
+                        .getMethod("cleanupStaleSpillDirs", String[].class, long.class, BiConsumer.class);
+                legacy.setAccessible(true);
+                assertEquals(0, legacy.invoke(null, new String[] {root.toString()}, 0L, null));
             }
 
             assertLeaseSurvivesOtherJvmCleanup(owner, lockFile, root);
@@ -64,10 +68,8 @@ class PaimonSpillOwnerIsolationRegressionTest {
                 PaimonSpillDirCleaner.resolveAndCreateIOManager(root.toString(), "default.orders");
         try {
             Path lockFile = SpillTestSupport.ownerLockFile(owner.spillDirs().get(0));
-            assertEquals(0, PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                    new String[] {root.toString()}, PaimonSpillDirCleaner.DEFAULT_STALE_GRACE_MS, null));
-            assertEquals(0, PaimonSpillReclaimer.standard().reclaim(Collections.singletonList(root.toString()))
-                    .reclaimed.size());
+            assertEquals(0, SpillTestSupport.runStartupCleanup(owner.spillDirs(), null), "生产启动回收入口");
+            assertEquals(0, LegacyFlatSpillCleanerFixture.cleanupStaleSpillDirs(new String[] {root.toString()}, 0L, null));
 
             assertLeaseSurvivesOtherJvmCleanup(owner, lockFile, root);
         } finally {

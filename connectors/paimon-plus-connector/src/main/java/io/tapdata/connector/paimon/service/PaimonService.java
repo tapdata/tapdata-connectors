@@ -308,10 +308,9 @@ public class PaimonService implements AutoCloseable {
         }
             config.validate();
 
-        // Clean up stale paimon-io-* spill dirs left by abnormally terminated JVMs (OOM/crash/SIGKILL),
-        // which would otherwise accumulate and exhaust local disk. Live dirs owned by active sibling
-        // tasks in this JVM are protected and never deleted.
-        cleanupStaleSpillDirs();
+        // 回收其他 JVM 异常终止（OOM/crash/SIGKILL）后遗留的 Spill 租约，避免本地磁盘耗尽。本 JVM 的
+        // 命名空间按名称跳过、不打开任何文件；外部租约只在 OS 锁可取得时回收（SPEC-paimon-spill-owner-isolation §4.5）。
+        reclaimOrphanedSpillLeases();
 
         Options options = new Options();
         options.set("warehouse", config.getFullWarehousePath());
@@ -336,12 +335,11 @@ public class PaimonService implements AutoCloseable {
     }
 
     /**
-     * Remove stale {@code paimon-io-*} spill directories under every root the runtime can spill
-     * into: the global {@code diskTmpDir} plus each per-table override from the table node
-     * config, because contexts and the HASH_DYNAMIC preflight resolve their IOManager roots
-     * through the per-table value. Best-effort: failures are logged, never thrown.
+     * 回收覆盖运行时可能使用的全部根目录：全局 {@code diskTmpDir} 与表节点配置中的每个表级覆盖，
+     * 因为写上下文与 HASH_DYNAMIC 预检按表级值解析 IOManager 根。尽力而为：失败只记日志，不抛出。
+     * 逐条审计写入引擎日志（logger io.tapdata.connector.paimon.spill），任务日志只写摘要。
      */
-    private void cleanupStaleSpillDirs() {
+    private void reclaimOrphanedSpillLeases() {
         try {
             Set<String> roots = new LinkedHashSet<>();
             collectTmpDirRoots(config.getDiskTmpDir(), roots);
@@ -353,15 +351,19 @@ public class PaimonService implements AutoCloseable {
                     }
                 }
             }
-            int deleted = PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                    roots.toArray(new String[0]),
-                    PaimonSpillDirCleaner.DEFAULT_STALE_GRACE_MS,
-                    (path, bytes) -> log.info("Removed stale Paimon spill dir {} ({} bytes)", path, bytes));
-            if (deleted > 0) {
-                log.info("Cleaned up {} stale Paimon spill dir(s) under {}", deleted, roots);
+            PaimonSpillDirCleaner.ReclaimSummary summary = PaimonSpillDirCleaner.reclaimOrphanedLeases(roots,
+                    (lease, bytes) -> log.info("Reclaimed orphaned Paimon spill lease {} ({} bytes)", lease, bytes));
+            if (summary.reclaimed() > 0 || summary.failed() > 0) {
+                log.info("Reclaimed {} orphaned Paimon spill lease(s) under {}; failed {}{}", summary.reclaimed(),
+                        roots, summary.failed(), summary.budgetExhausted() ? "; remaining leases deferred" : "");
+            }
+            if (summary.legacyDirectories() > 0) {
+                log.info("Found {} legacy flat Paimon spill director(ies) under {}; this version never opens or "
+                        + "deletes them, see the connector documentation for one-off cleanup",
+                        summary.legacyDirectories(), roots);
             }
         } catch (Exception e) {
-            log.warn("Failed to clean up stale Paimon spill dirs: {}", e.getMessage());
+            log.warn("Failed to reclaim orphaned Paimon spill leases: {}", e.getMessage());
         }
     }
 

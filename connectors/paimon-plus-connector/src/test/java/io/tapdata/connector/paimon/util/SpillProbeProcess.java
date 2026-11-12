@@ -56,8 +56,9 @@ public final class SpillProbeProcess {
                         .reclaim(java.util.Collections.singletonList(args[1])).reclaimed.size());
                 break;
             case "legacy-cleanup":
-                // develop e3f68298 的现有清理器；grace=0 只替代“目录空闲超过宽限期”，不参与存活判定。
-                int deleted = PaimonSpillDirCleaner.cleanupStaleSpillDirs(new String[] {args[1]}, 0L, null);
+                // develop e3f68298 平铺清理器的冻结副本，代表同机仍运行旧版本连接器的引擎；grace=0 只替代
+                // “目录空闲超过宽限期”。
+                int deleted = LegacyFlatSpillCleanerFixture.cleanupStaleSpillDirs(new String[] {args[1]}, 0L, null);
                 System.out.println("deleted=" + deleted);
                 break;
             default:
@@ -194,7 +195,7 @@ public final class SpillProbeProcess {
         }
     }
 
-    /** 在另一个 JVM 中运行 develop 现有清理器，返回其输出行。 */
+    /** 在另一个 JVM 中运行旧版本（develop e3f68298）平铺清理器的冻结副本，返回其输出行。 */
     static String legacyCleanupInOtherJvm(Path root) throws Exception {
         try (Handle cleaner = start(Collections.emptyList(), "legacy-cleanup", root.toString())) {
             String line = cleaner.expectLine("deleted=");

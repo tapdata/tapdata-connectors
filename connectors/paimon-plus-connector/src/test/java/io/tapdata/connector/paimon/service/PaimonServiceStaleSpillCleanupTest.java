@@ -18,10 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 /**
- * Startup stale-spill cleanup must cover every root the runtime can spill into: the global
- * {@code diskTmpDir} plus each per-table override from the table node config. Contexts and the
- * HASH_DYNAMIC preflight resolve their IOManager roots through the per-table value, so a crash
- * under an overridden root must also be reclaimed here.
+ * 启动回收必须覆盖运行时可能使用的全部根：全局 {@code diskTmpDir} 与表节点配置中的每个表级覆盖。
+ * 写上下文与 HASH_DYNAMIC 预检按表级值解析 IOManager 根，进程在覆盖根下崩溃留下的租约也必须在此回收。
  */
 class PaimonServiceStaleSpillCleanupTest {
 
@@ -93,32 +91,33 @@ class PaimonServiceStaleSpillCleanupTest {
     }
 
     @Test
-    void startupCleanupMustCoverPerTableDiskTmpDirRoots() throws Exception {
-        File staleDir = Files.createDirectory(tempDir.resolve("paimon-io-stale")).toFile();
-        File staleData = Files.write(staleDir.toPath().resolve("data.sst"), new byte[] {1})
-                .toFile();
-        File ownerFile = new File(
-                tempDir.toFile(), ".paimon-io-stale" + ".tapdata-owner.lock");
-        assertTrue(ownerFile.createNewFile());
-        long old = System.currentTimeMillis() - 2 * PaimonSpillDirCleaner.DEFAULT_STALE_GRACE_MS;
-        assertTrue(staleData.setLastModified(old));
-        assertTrue(staleDir.setLastModified(old));
+    void startupReclaimMustCoverPerTableDiskTmpDirRoots() throws Exception {
+        // 另一个已终止 JVM 遗留的租约（锁文件未被持有），只位于表级根下。
+        Path lease = Files.createDirectories(tempDir.resolve("tapdata-paimon-v2")
+                .resolve("j0123456789abcdef0123456789abcdef").resolve("0123456789ab-" + java.util.UUID.randomUUID()));
+        Files.write(lease.resolve("owner.lock"), new byte[0]);
+        Files.write(Files.createDirectories(lease.resolve("io").resolve("paimon-io-orphan")).resolve("data.sst"),
+                new byte[] {1});
+        // 旧平铺布局残留：新版本不打开、不删除（INV-09）。
+        Path legacy = Files.createDirectory(tempDir.resolve("paimon-io-stale"));
+        File legacyMarker = new File(tempDir.toFile(), ".paimon-io-stale.tapdata-owner.lock");
+        assertTrue(legacyMarker.createNewFile());
 
         PaimonConfig config = new PaimonConfig();
         config.setDatabase("default");
-        // The global root points elsewhere, so only the per-table root knows about the stale
-        // directory.
+        // 全局根指向别处，只有表级根知道这个租约。
         config.setDiskTmpDir(tempDir.resolve("global-root-unused").toString());
         DataMap table = new DataMap();
         table.put("diskTmpDir", tempDir.toString());
         config.setTableConfig(Collections.singletonMap("orders", table));
 
         PaimonService service = new PaimonService(config, mock(Log.class));
-        Method cleanup = PaimonService.class.getDeclaredMethod("cleanupStaleSpillDirs");
-        cleanup.setAccessible(true);
-        cleanup.invoke(service);
+        Method reclaim = PaimonService.class.getDeclaredMethod("reclaimOrphanedSpillLeases");
+        reclaim.setAccessible(true);
+        reclaim.invoke(service);
 
-        assertFalse(staleDir.exists(), "stale dir under the per-table root must be removed");
-        assertFalse(ownerFile.exists(), "owner marker must be removed with the stale dir");
+        assertFalse(Files.exists(lease), "表级根下的 ORPHANED 租约必须被回收");
+        assertTrue(Files.isDirectory(legacy), "旧平铺目录不得被删除");
+        assertTrue(legacyMarker.exists(), "旧平铺锁文件不得被打开或删除");
     }
 }
