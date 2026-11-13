@@ -330,7 +330,18 @@ public class MongodbMergeOperate {
 				mergeResult = new MergeResult();
 			}
 			if (properties.getIsArray()) {
+				// 嵌套在父数组元素内的子孙（如 parts.attrList）：updateIntoArrayMerge 只生成 arrayFilters 不带主文档条件，
+				// 必须用父级 filter 限定主文档，否则 q:{} 会按 arrayFilters 跨文档误删其他主文档中同关联值的数组元素
+				Document parentFilters = null == mergeFilter ? null : mergeFilter.appendFilters();
+				if (MapUtils.isEmpty(parentFilters)) {
+					return mergeResult;
+				}
 				updateIntoArrayMerge(mergeBundle, properties, mergeResult, mergeFilter);
+				for (Map.Entry<String, Object> entry : parentFilters.entrySet()) {
+					if (!MergeFilterManager.test(entry)) {
+						mergeResult.getFilter().putIfAbsent(entry.getKey(), entry.getValue());
+					}
+				}
 				return mergeResult;
 			}
 			return appendArrayPullOnParentDelete(mergeBundle, properties, mergeResult, mergeFilter);
