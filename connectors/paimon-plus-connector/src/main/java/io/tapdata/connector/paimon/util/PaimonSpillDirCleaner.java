@@ -132,7 +132,8 @@ public final class PaimonSpillDirCleaner {
             if (created[0] == null) {
                 PaimonSpillAudit.defaultAudit().record(PaimonSpillAudit.Event.IO_MANAGER_BUILD_FAILED,
                         PaimonSpillAudit.details("owner", ownerLabel, "roots",
-                                Arrays.asList(lease.ioRoots())), failure);
+                                Arrays.asList(lease.ioRoots()), "directoryState",
+                                PaimonLocalDirectories.describeRoots(Arrays.asList(lease.ioRoots()))), failure);
                 // 尚无 IOManager，也就没有任何使用者：立即退役全部根（Spec §4.4 第 4 步）。
                 for (PaimonSpillLease.Root root : lease.roots()) {
                     Throwable rollback = root.retire();
@@ -158,8 +159,12 @@ public final class PaimonSpillDirCleaner {
             return new IOManagerBuildResult(ioManager, paths);
         } catch (Exception | Error failure) {
             // IOManager 已构造：按 V1.2 语义保留租约与锁，不 close、不递归删除（Spec D6）。
+            List<java.util.Map<String, Object>> state =
+                    PaimonLocalDirectories.describeRoots(Arrays.asList(lease.ioRoots()));
+            failure.addSuppressed(new IOException("Paimon spill directory evidence: owner="
+                    + lease.ownerLabel() + ", directoryState=" + state));
             PaimonSpillAudit.defaultAudit().record(PaimonSpillAudit.Event.SPILL_REGISTRATION_INCOMPLETE,
-                    PaimonSpillAudit.details("owner", lease.ownerLabel()), failure);
+                    PaimonSpillAudit.details("owner", lease.ownerLabel(), "directoryState", state), failure);
             scope.retain(failure);
             if (failure instanceof Error) { throw (Error) failure; }
             throw new IllegalStateException("Paimon spill registration incomplete; lease retained", failure);
@@ -375,6 +380,99 @@ public final class PaimonSpillDirCleaner {
         }
         return new ReclaimSummary(result.reclaimed.size(), result.failed, result.legacyDirectories,
                 result.budgetExhausted);
+    }
+
+    private static final java.util.concurrent.atomic.AtomicInteger RECLAIM_THREAD_SEQ =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /**
+     * 与 PaimonCompactionExecutor 保持同一约定：扫描线程显式沿用提交方的 TCCL，并在线程名里带上实例标识。
+     * 计数器只在一个 ClassLoader 内递增，因此名字里再加提交方 ClassLoader 的 identity hash，
+     * 否则几百个连接器实例都叫 paimon-spill-reclaim-1，线程栈无法归属到具体实例。
+     * 显式设置 TCCL 而不是依赖 new Thread 的隐式继承：行为相同，但意图可见，
+     * 将来改用非继承的线程工厂/线程组时不会静默改变。空闲 worker 会在 30s 内被下一个提交复用，
+     * 那时携带的是最初的提交方 loader。
+     */
+    static Thread newReclaimThread(Runnable task) {
+        ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
+        Thread thread = new Thread(task, "paimon-spill-reclaim-"
+                + Integer.toHexString(System.identityHashCode(contextLoader))
+                + "-" + RECLAIM_THREAD_SEQ.incrementAndGet());
+        thread.setContextClassLoader(contextLoader);
+        thread.setDaemon(true);
+        return thread;
+    }
+
+    private static final java.util.concurrent.ThreadPoolExecutor RECLAIM_WORKER =
+            new java.util.concurrent.ThreadPoolExecutor(0, 1, 30, java.util.concurrent.TimeUnit.SECONDS,
+                    new java.util.concurrent.SynchronousQueue<>(), PaimonSpillDirCleaner::newReclaimThread,
+                    new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+
+    /**
+     * Bound task startup waiting to 200 ms. At most one scan per ClassLoader is in flight,
+     * with no pending queue; busy callers defer to the next startup. A running scan is never
+     * cancelled: its OS lock and the cross-ClassLoader monitor protect deletion to completion.
+     */
+    public static void reclaimForStartup(Collection<String> roots, io.tapdata.entity.logger.Log log) {
+        reclaimForStartup(roots, log, RECLAIM_WORKER, 200);
+    }
+
+    static void reclaimForStartup(Collection<String> roots, io.tapdata.entity.logger.Log log,
+            java.util.concurrent.ExecutorService worker, long waitMillis) {
+        final List<String> snapshot = new ArrayList<>(roots);
+        java.util.concurrent.Future<?> scan;
+        try {
+            scan = worker.submit(() -> {
+                try {
+                    PaimonSpillReclaimer.Result result = PaimonSpillReclaimer
+                            .standard(PaimonSpillAudit.withTaskLog(log)).reclaim(snapshot);
+                    io.tapdata.connector.paimon.service.PaimonStopLog.offer(log,
+                            "Paimon spill reclaim finished: roots=" + snapshot + ", reclaimed="
+                                    + result.reclaimed.size() + ", failed=" + result.failed
+                                    + ", legacyDirectories=" + result.legacyDirectories
+                                    + ", budgetExhausted=" + result.budgetExhausted, null);
+                    if (result.legacyDirectories > 0) {
+                        io.tapdata.connector.paimon.service.PaimonStopLog.offerWarn(log,
+                                "Legacy Paimon spill directories remain under " + snapshot
+                                        + "; observedBytes=" + result.legacyBytes
+                                        + ", sizeIncomplete=" + result.legacySizeIncomplete
+                                        + "; upgrade does not free their disk space. Stop all engines and old tasks "
+                                        + "using these roots, inspect du -sh -- <root>/paimon-io-*, then remove only "
+                                        + "confirmed unused directories. See connector documentation.", null);
+                    }
+                } catch (RuntimeException | LinkageError failure) {
+                    // The caller may already have timed out: the Future alone is not a log outlet.
+                    io.tapdata.connector.paimon.service.PaimonStopLog.offerError(log,
+                            "Paimon spill background reclaim failed: roots=" + snapshot, failure);
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException busy) {
+            if (worker.isShutdown()) {
+                // 异常路径：worker 已关闭，本次没有扫描。生产路径不会走到（RECLAIM_WORKER 不关闭）。
+                io.tapdata.connector.paimon.service.PaimonStopLog.offerWarn(log,
+                        "Paimon spill reclaim skipped: reclaim worker unavailable; roots=" + snapshot, null);
+                return;
+            }
+            // 正常路径：同一 ClassLoader 一次只跑一个扫描，后续启动顺延到下次。
+            io.tapdata.connector.paimon.service.PaimonStopLog.offer(log,
+                    "Paimon spill reclaim deferred: another scan is running; roots=" + snapshot, null);
+            return;
+        }
+        try {
+            scan.get(waitMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException pending) {
+            // 正常路径：慢盘或多任务同时启动时每次都会走到这里，不应记 WARN。
+            io.tapdata.connector.paimon.service.PaimonStopLog.offer(log,
+                    "Paimon spill reclaim continues in background after " + waitMillis
+                            + " ms; task startup proceeds; roots=" + snapshot, null);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            io.tapdata.connector.paimon.service.PaimonStopLog.offerWarn(log,
+                    "Paimon spill reclaim wait interrupted; scan keeps its lock until finished", interrupted);
+        } catch (java.util.concurrent.ExecutionException failure) {
+            io.tapdata.connector.paimon.service.PaimonStopLog.offerError(log,
+                    "Paimon spill reclaim failed: roots=" + snapshot, failure.getCause());
+        }
     }
 
     /** 一次启动回收的摘要，供任务 TapLog 输出；逐条审计已写入引擎日志。 */

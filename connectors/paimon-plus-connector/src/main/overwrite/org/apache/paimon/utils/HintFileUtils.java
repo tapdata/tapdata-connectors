@@ -40,6 +40,11 @@ import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
  */
 public class HintFileUtils {
 
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(HintFileUtils.class);
+    private static final java.util.Map<String, Long> LAST_ORPHAN_LOG =
+            new java.util.LinkedHashMap<>();
+    private static final int MAX_ORPHAN_LOG_KEYS = 1024;
+
     public static final String EARLIEST = "EARLIEST";
     public static final String LATEST = "LATEST";
 
@@ -55,12 +60,34 @@ public class HintFileUtils {
             // A hint is only an optimization: DROP/recreate can leave LATEST behind
             // after its target was deleted. Fall back to listing actual versions in that
             // case, for both recovery and native writer/committer snapshot discovery.
-            if (fileIO.exists(file.apply(snapshotId))
-                    && !fileIO.exists(file.apply(nextSnapshot))) {
+            boolean targetExists = fileIO.exists(file.apply(snapshotId));
+            if (targetExists && !fileIO.exists(file.apply(nextSnapshot))) {
                 return snapshotId;
+            }
+            if (!targetExists) {
+                Long actual = findByListFiles(fileIO, Math::max, dir, prefix);
+                if (shouldLogOrphan(dir.toString(), System.nanoTime())) {
+                    try {
+                        LOG.warn("Paimon orphan LATEST hint ignored: directory={}, hint={}, actualLatest={}",
+                                dir, snapshotId, actual);
+                    } catch (RuntimeException | LinkageError ignored) { }
+                }
+                return actual;
             }
         }
         return findByListFiles(fileIO, Math::max, dir, prefix);
+    }
+
+    // Per-directory rate limiting: a noisy table must not hide another table's recovery.
+    static synchronized boolean shouldLogOrphan(String directory, long now) {
+        Long previous = LAST_ORPHAN_LOG.get(directory);
+        if (previous != null && now - previous < TimeUnit.MINUTES.toNanos(1)) { return false; }
+        LAST_ORPHAN_LOG.remove(directory);
+        if (LAST_ORPHAN_LOG.size() >= MAX_ORPHAN_LOG_KEYS) {
+            LAST_ORPHAN_LOG.remove(LAST_ORPHAN_LOG.keySet().iterator().next());
+        }
+        LAST_ORPHAN_LOG.put(directory, now);
+        return true;
     }
 
     @Nullable

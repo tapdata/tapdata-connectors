@@ -243,3 +243,25 @@ SUM/AVG 对所有数值类型返回 BigDecimal，AVG 使用 DECIMAL128 舍入。
 不支持选择或在表达式中引用 ARRAY/MAP/MULTISET/ROW 列；含复杂列的表请显式列出标量列。ORDER BY 未加引号的别名忽略大小写，带引号的别名精确匹配；当前 JSqlParser 4.4 不接受标识符内部双写双引号的语法。WHERE 比较支持列在左右任一侧；DATE(column) 不受支持，请使用 CAST(column AS DATE)。
 
 截止时间与耗时在生命周期准入完成后开始计算，包含 catalog、规划、读取、排序及结果构建。排序取消时丢弃内部缓冲，不发布部分排序结果。
+
+
+### 本地临时目录与升级
+
+建议每个引擎使用独占、持久且容量充足的本地临时目录。配置 `diskTmpDir` 时，同时检查
+`fs.s3a.buffer.dir` 和 `fs.s3a.bucket.<bucket>.buffer.dir` 覆盖值。初始化写探针只验证
+当时能写入一字节，不预留上传块，也不保证运行期间空间始终充足。
+
+升级后必须重启引擎：旧任务的 ClassLoader 不遵守新增的回收同步协议。
+`systemd-tmpfiles` 对 `/tmp` 的清理以及容器卷删除，都可能越过应用文件锁删除活跃目录。
+请在主机或容器中配置临时目录的保留规则。NFS/FUSE 等不在准入白名单内的文件系统不自动回收。
+
+旧平铺 `paimon-io-*` 目录只告警、不自动删除，升级不会自动释放这些空间。
+先停止所有使用这些根目录的引擎和任务，再用
+`find <root> -maxdepth 1 -type d -name 'paimon-io-*'` 列出候选，
+用 `du -sh -- <specific-directory>` 检查体积，仅逐个删除已确认不再使用的目录。
+引擎运行时不得删除 `tapdata-paimon-v2` 或其他仍在使用的临时目录。
+
+启动最多等待回收 200ms；超时后后台扫描继续持锁完成，忙时不积压后续扫描。
+回收 WARN/ERROR 同时转发到有界异步任务日志；日志后端阻塞或队列饱和仍可能丢失事件，
+关闭摘要中的 `droppedLogs` 可辅助观察。容量或挂载问题需使用引擎账号，在相同挂载命名空间下
+结合 `df -hT`、`df -i`、`findmnt -T <directory>`、`namei -l <directory>` 检查。

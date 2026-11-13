@@ -28,9 +28,16 @@ import java.util.function.Supplier;
  *
  * <p>安全性只依赖 OS 记录锁：本 JVM 的命名空间按目录名整体跳过，在任何文件打开之前完成（INV-01），因此本进程
  * 永不探测、也就永不会因关闭探测 channel 而释放自己的锁；外部 lease 只有在锁可取得、且持锁后路径与 fileKey
- * 复核一致时才删除（INV-04）。本类不读取 mtime 或任何时钟（INV-03）。
+ * 复核一致时才删除（INV-04）。存活判断不读取 mtime 或时钟（INV-03）；单调时钟仅限制旧目录体积观察预算。
  */
 final class PaimonSpillReclaimer {
+
+    // String.intern is shared by all ClassLoaders in this JVM. A class-local monitor is
+    // insufficient: closing ANY fd for an inode releases this process's POSIX locks on it.
+    // Keep this key stable across connector releases using this protocol. Serialize the
+    // entire attribute/open/lock/delete/close cycle, even when roots alias the same inode.
+    private static final Object RECLAIM_MONITOR =
+            "io.tapdata.connector.paimon.spill.v2.reclaimer.open-close".intern();
 
     static final int DEFAULT_BUDGET = 64;
     static final Set<String> SUPPORTED_FILE_STORE_TYPES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
@@ -72,8 +79,12 @@ final class PaimonSpillReclaimer {
     }
 
     static PaimonSpillReclaimer standard() {
+        return standard(PaimonSpillAudit.defaultAudit());
+    }
+
+    static PaimonSpillReclaimer standard(PaimonSpillAudit audit) {
         return new PaimonSpillReclaimer(PaimonJvmIdentity::current, DEFAULT_TYPE_PROBE, DEFAULT_OPENER,
-                PaimonSpillFiles.FILES_DELETE, PaimonSpillAudit.defaultAudit(), DEFAULT_BUDGET);
+                PaimonSpillFiles.FILES_DELETE, audit, DEFAULT_BUDGET);
     }
 
     Result reclaim(Collection<String> roots) {
@@ -136,21 +147,29 @@ final class PaimonSpillReclaimer {
 
     private boolean admitted(Path root, Path subroot) {
         String type;
+        Throwable probeFailure = null;
         try {
             type = typeProbe.type(subroot);
         } catch (IOException | RuntimeException failure) {
             type = null;
+            probeFailure = failure;
         }
         String normalized = type == null ? "unknown" : type.trim().toLowerCase(Locale.ROOT);
         if (SUPPORTED_FILE_STORE_TYPES.contains(normalized)) {
             return true;
         }
         audit.recordRateLimited(PaimonSpillAudit.Event.ADMISSION_DENIED, root.toString(),
-                PaimonSpillAudit.details("root", root, "fileStoreType", normalized));
+                PaimonSpillAudit.details("root", root, "fileStoreType", normalized), probeFailure);
         return false;
     }
 
     private void reclaimLease(Path root, Path lease, Result result) {
+        synchronized (RECLAIM_MONITOR) {
+            reclaimLeaseExclusively(root, lease, result);
+        }
+    }
+
+    private void reclaimLeaseExclusively(Path root, Path lease, Result result) {
         Path lockFile = lease.resolve(PaimonSpillLease.LOCK_FILE);
         BasicFileAttributes before;
         try {
@@ -160,7 +179,7 @@ final class PaimonSpillReclaimer {
             PaimonSpillFiles.removeEmptyDirectory(lease);
             return;
         } catch (IOException | RuntimeException failure) {
-            skip(root, lease, "lock-attributes-unreadable", result);
+            inspectionFailed(root, lease, "lock-attributes-unreadable", failure, result);
             return;
         }
         if (!before.isRegularFile() || before.fileKey() == null) {
@@ -173,7 +192,7 @@ final class PaimonSpillReclaimer {
         } catch (NoSuchFileException retiredMeanwhile) {
             return;
         } catch (IOException | RuntimeException failure) {
-            skip(root, lease, "lock-open-failed", result);
+            inspectionFailed(root, lease, "lock-open-failed", failure, result);
             return;
         }
         Outcome outcome;
@@ -181,7 +200,7 @@ final class PaimonSpillReclaimer {
             outcome = reclaimLocked(lease, lockFile, before, channel);
         } finally {
             try {
-                // 只释放本回收者的锁：本进程不持有任何外部命名空间中的 owner 锁（INV-01、INV-05）。
+                // JVM-wide monitor prevents another reclaimer from opening/closing this inode until here.
                 channel.close();
             } catch (IOException ignored) {
                 // 关闭失败不改变已完成的删除，也不会影响 owner。
@@ -253,6 +272,13 @@ final class PaimonSpillReclaimer {
         return Outcome.reclaimed(io.bytesDeleted);
     }
 
+    private void inspectionFailed(Path root, Path lease, String reason, Throwable failure, Result result) {
+        result.failed++;
+        audit.recordRateLimited(PaimonSpillAudit.Event.RECLAIM_INSPECTION_FAILED, root + "|" + reason,
+                PaimonSpillAudit.details("root", root, "lease", lease, "reason", reason,
+                        "directoryState", PaimonLocalDirectories.describe(root)), failure);
+    }
+
     private void skip(Path root, Path lease, String reason, Result result) {
         result.skipped++;
         audit.recordRateLimited(PaimonSpillAudit.Event.RECLAIM_SKIPPED, root + "|" + reason,
@@ -262,10 +288,12 @@ final class PaimonSpillReclaimer {
     /** 旧平铺布局只列清单，不打开、不删除（INV-09）。 */
     private void reportLegacyLayout(Path root, Result result) {
         int legacy = 0;
+        PaimonLegacySpillSize size = new PaimonLegacySpillSize();
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(root, LEGACY_PREFIX + "*")) {
             for (Path entry : entries) {
                 if (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) {
                     legacy++;
+                    size.inspect(entry);
                 }
             }
         } catch (IOException | RuntimeException unreadable) {
@@ -273,8 +301,11 @@ final class PaimonSpillReclaimer {
         }
         if (legacy > 0) {
             result.legacyDirectories += legacy;
+            result.legacyBytes += size.bytes;
+            result.legacySizeIncomplete |= size.incomplete;
             audit.recordRateLimited(PaimonSpillAudit.Event.LEGACY_LAYOUT_FOUND, root.toString(),
-                    PaimonSpillAudit.details("root", root, "legacyDirectories", legacy));
+                    PaimonSpillAudit.details("root", root, "legacyDirectories", legacy,
+                            "observedBytes", size.bytes, "sizeIncomplete", size.incomplete));
         }
     }
 
@@ -335,6 +366,8 @@ final class PaimonSpillReclaimer {
         int skipped;
         int failed;
         int legacyDirectories;
+        long legacyBytes;
+        boolean legacySizeIncomplete;
         boolean budgetExhausted;
     }
 }
