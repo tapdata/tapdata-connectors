@@ -203,6 +203,11 @@ public class MongodbMergeOperate {
 					// 父 DELETE 级联清理必须在 updateIntoArrayUnsetMerge 之前判断：该方法在父级为 updateWrite/updateIntoArray 时
 					// 会把 operation 改成 INSERT，导致子孙数组既不 $pull 也不 $unset
 					mergeResult = addMergeResults(mergeResults, mergeResult);
+					if (isNestedInParentArrayElement(properties, parentProperties)) {
+						// 嵌套在父数组元素内（如 parts.attrList）：父级已 $pull/$unset 整个元素，子孙随之移除；
+						// 再按子表关联值 arrayFilters 去 $pull 会误删同一主文档中其他关联值相同的父元素下的数组元素
+						break;
+					}
 					mergeResult = appendArrayDeleteOnParentDelete(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
 					break;
 				}
@@ -317,6 +322,11 @@ public class MongodbMergeOperate {
 			mergeResult.getUpdate().put("$unset", unsetDoc);
 		}
 		return mergeResult;
+	}
+
+	private static boolean isNestedInParentArrayElement(MergeTableProperties properties, MergeTableProperties parentProperties) {
+		return null != properties && properties.getIsArray()
+				&& null != parentProperties && MergeTableProperties.MergeType.updateIntoArray == parentProperties.getMergeType();
 	}
 
 	private static MergeResult appendArrayDeleteOnParentDelete(MergeBundle mergeBundle, MergeTableProperties properties,
