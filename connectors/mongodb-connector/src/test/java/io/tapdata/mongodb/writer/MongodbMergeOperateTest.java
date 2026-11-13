@@ -487,6 +487,61 @@ class MongodbMergeOperateTest {
 			assertTrue(childCleaned, "expected cleanup write for attrList, actual writes: " + mergeResults);
 		}
 
+		@Test
+		@DisplayName("U8: parent array DELETE with nested array child (parts.attrList) must scope child cleanup to parent document")
+		void testParentArrayDeleteNestedArrayChildScopedToParentDocument() {
+			Map<String, Object> before = new HashMap<>();
+			before.put("PROD_ID", 101);
+			before.put("itemId", 1);
+			before.put("attrCode", "IRON");
+			MergeTableProperties parent = new MergeTableProperties();
+			parent.setId("parts");
+			parent.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			parent.setTargetPath("parts");
+			parent.setIsArray(false);
+			parent.setArrayKeys(new ArrayList<>(Collections.singletonList("PROD_ID")));
+			parent.setJoinKeys(joinKeys("itemId", "itemId"));
+			MergeTableProperties nested = new MergeTableProperties();
+			nested.setId("nestedArr");
+			nested.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			nested.setTargetPath("parts.attrList");
+			nested.setArrayPath("parts");
+			nested.setIsArray(true);
+			nested.setArrayKeys(new ArrayList<>(Collections.singletonList("attrId")));
+			nested.setJoinKeys(joinKeys("referenceCode", "parts.attrCode"));
+			List<MergeLookupResult> lookups = new ArrayList<>();
+			lookups.add(lookup(nested, "attr_arr", new Document("_id", 11).append("attrId", 11).append("referenceCode", "IRON")));
+			lookups.add(lookup(nested, "attr_arr", new Document("_id", 12).append("attrId", 12).append("referenceCode", "IRON")));
+			List<MergeResult> mergeResults = new ArrayList<>();
+			assertDoesNotThrow(() -> MongodbMergeOperate.recursiveMerge(
+					new MergeBundle(MergeBundle.EventOperation.DELETE, before, null),
+					parent,
+					mergeResults,
+					lookups,
+					new HashMap<>(),
+					null,
+					new MergeFilter(false),
+					2,
+					null
+			));
+			boolean parentPulled = false;
+			for (MergeResult result : mergeResults) {
+				if (result == null || result.getOperation() == null) {
+					continue;
+				}
+				assertEquals(MergeResult.Operation.UPDATE, result.getOperation());
+				Document update = result.getUpdate();
+				assertFalse(update.containsKey("$set"), "parent DELETE must not $set child data: " + update.toJson());
+				// 任何清理写都必须限定到父文档，空 filter + arrayFilters 会跨文档误删同 attrCode 的数组元素
+				assertEquals(1, result.getFilter().get("itemId"), "cleanup write must be scoped to parent document: filter=" + result.getFilter().toJson() + " update=" + update.toJson());
+				Document pull = update.get("$pull", Document.class);
+				if (pull != null && pull.containsKey("parts")) {
+					parentPulled = true;
+				}
+			}
+			assertTrue(parentPulled, "expected $pull parts, actual writes: " + mergeResults);
+		}
+
 		private List<Map<String, String>> joinKeys(String source, String target) {
 			List<Map<String, String>> keys = new ArrayList<>();
 			Map<String, String> key = new HashMap<>();
