@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** T09：回收者协议（Spec §4.5–4.6；AC-02、AC-05、AC-07、AC-08、AC-18、AC-19 的单进程部分）。 */
 @DisabledOnOs(OS.WINDOWS)
@@ -185,8 +186,27 @@ class PaimonSpillReclaimerTest {
 
         assertEquals(2, first.reclaimed.size());
         assertTrue(first.budgetExhausted);
+        assertTrue(events.contains(PaimonSpillAudit.Event.RECLAIM_BUDGET_EXHAUSTED),
+                "预算耗尽必须留下 warn 审计");
         assertEquals(1, second.reclaimed.size());
         assertFalse(second.budgetExhausted);
+    }
+
+    /** 列举失败的命名空间不再静默消失：留下限流审计，剩余回收继续。 */
+    @Test
+    void unreadableNamespaceIsReportedNotSilentlyIgnored(@TempDir Path root) throws Exception {
+        assumeTrue(!"root".equals(System.getProperty("user.name")), "root 不受目录权限约束");
+        Path lease = lease(root, FOREIGN, new byte[] {1});
+        Path namespace = lease.getParent();
+        Files.setPosixFilePermissions(namespace, java.nio.file.attribute.PosixFilePermissions.fromString("---------"));
+        try {
+            PaimonSpillReclaimer.Result result = reclaimer().reclaim(roots(root));
+
+            assertTrue(events.contains(PaimonSpillAudit.Event.NAMESPACE_LIST_FAILED));
+            assertEquals(0, result.reclaimed.size());
+        } finally {
+            Files.setPosixFilePermissions(namespace, java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"));
+        }
     }
 
     /** AC-05（线程）：同一 JVM 两个回收者并发处理同一 ORPHANED lease，无异常逃逸、至多一次成功。 */

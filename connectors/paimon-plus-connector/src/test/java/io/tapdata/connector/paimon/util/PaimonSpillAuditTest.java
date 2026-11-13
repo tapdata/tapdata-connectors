@@ -82,6 +82,26 @@ class PaimonSpillAuditTest {
                 .record(PaimonSpillAudit.Event.LEASE_CREATED, PaimonSpillAudit.details("lease", "test")));
     }
 
+    /** severity 三态：生命周期事件 info、保留/准入 warn、真正失败 error。 */
+    @Test
+    void eventsMapToInfoWarnErrorSeverities() {
+        assertEquals(PaimonSpillAudit.Severity.INFO, PaimonSpillAudit.Event.LEASE_CREATED.severity);
+        assertEquals(PaimonSpillAudit.Severity.INFO, PaimonSpillAudit.Event.LEASE_RETIRED.severity);
+        assertEquals(PaimonSpillAudit.Severity.INFO, PaimonSpillAudit.Event.IO_MANAGER_CREATED.severity);
+        assertEquals(PaimonSpillAudit.Severity.INFO, PaimonSpillAudit.Event.PROVISION_RETRY.severity);
+        assertEquals(PaimonSpillAudit.Severity.WARN, PaimonSpillAudit.Event.LEASE_RETAINED.severity);
+        assertEquals(PaimonSpillAudit.Severity.WARN, PaimonSpillAudit.Event.RELEASE_INCOMPLETE.severity);
+        assertEquals(PaimonSpillAudit.Severity.WARN, PaimonSpillAudit.Event.PROVISION_ROLLED_BACK.severity);
+        assertEquals(PaimonSpillAudit.Severity.WARN, PaimonSpillAudit.Event.RECLAIM_BUDGET_EXHAUSTED.severity);
+        assertEquals(PaimonSpillAudit.Severity.WARN, PaimonSpillAudit.Event.NAMESPACE_LIST_FAILED.severity);
+        assertEquals(PaimonSpillAudit.Severity.ERROR, PaimonSpillAudit.Event.RECLAIM_FAILED.severity);
+        assertEquals(PaimonSpillAudit.Severity.ERROR, PaimonSpillAudit.Event.IO_MANAGER_BUILD_FAILED.severity);
+        assertEquals(PaimonSpillAudit.Severity.ERROR, PaimonSpillAudit.Event.SPILL_REGISTRATION_INCOMPLETE.severity);
+        assertEquals(PaimonSpillAudit.Severity.ERROR, PaimonSpillAudit.Event.UNREGISTERED_SPILL_DIR.severity);
+        assertEquals(PaimonSpillAudit.Severity.ERROR, PaimonSpillAudit.Event.PROVISION_LOCK_HELD.severity);
+        assertEquals(PaimonSpillAudit.Severity.ERROR, PaimonSpillAudit.Event.PROVISION_EXHAUSTED.severity);
+    }
+
     private void capture(PaimonSpillAudit.Event event, Map<String, Object> fields, Throwable failure) {
         emitted.add(new Object[] {event, fields, failure});
     }

@@ -130,6 +130,9 @@ public final class PaimonSpillDirCleaner {
             manager = scope.create("allocate IOManager", () -> created[0] = IOManager.create(lease.ioRoots()));
         } catch (Exception | Error failure) {
             if (created[0] == null) {
+                PaimonSpillAudit.defaultAudit().record(PaimonSpillAudit.Event.IO_MANAGER_BUILD_FAILED,
+                        PaimonSpillAudit.details("owner", ownerLabel, "roots",
+                                Arrays.asList(lease.ioRoots())), failure);
                 // 尚无 IOManager，也就没有任何使用者：立即退役全部根（Spec §4.4 第 4 步）。
                 for (PaimonSpillLease.Root root : lease.roots()) {
                     Throwable rollback = root.retire();
@@ -150,9 +153,13 @@ public final class PaimonSpillDirCleaner {
             List<String> paths = spillDirPaths(ioManager);
             Map<String, PaimonSpillLease.Root> owned = ownedRoots(paths, lease);
             scope.run("register spill owners", () -> OWNERS.putAll(owned));
+            PaimonSpillAudit.defaultAudit().record(PaimonSpillAudit.Event.IO_MANAGER_CREATED,
+                    PaimonSpillAudit.details("owner", lease.ownerLabel(), "spillDirs", paths));
             return new IOManagerBuildResult(ioManager, paths);
         } catch (Exception | Error failure) {
             // IOManager 已构造：按 V1.2 语义保留租约与锁，不 close、不递归删除（Spec D6）。
+            PaimonSpillAudit.defaultAudit().record(PaimonSpillAudit.Event.SPILL_REGISTRATION_INCOMPLETE,
+                    PaimonSpillAudit.details("owner", lease.ownerLabel()), failure);
             scope.retain(failure);
             if (failure instanceof Error) { throw (Error) failure; }
             throw new IllegalStateException("Paimon spill registration incomplete; lease retained", failure);
@@ -292,6 +299,8 @@ public final class PaimonSpillDirCleaner {
                 PaimonSpillLease.Root root = OWNERS.get(path);
                 if (root == null) {
                     // 生产中的 IOManager 都经租约创建；未登记即调用方不变量被破坏，不能静默报告成功（Spec D5）。
+                    PaimonSpillAudit.defaultAudit().record(PaimonSpillAudit.Event.UNREGISTERED_SPILL_DIR,
+                            PaimonSpillAudit.details("dir", path));
                     retained.add(path);
                     failure = PaimonFailures.append(failure,
                             new IllegalStateException("Unregistered Paimon spill directory: " + path));
@@ -316,6 +325,8 @@ public final class PaimonSpillDirCleaner {
             }
         }
         if (!retained.isEmpty() && failure == null) {
+            PaimonSpillAudit.defaultAudit().record(PaimonSpillAudit.Event.RELEASE_INCOMPLETE,
+                    PaimonSpillAudit.details("retained", retained, "reason", "missing-close-proof"));
             failure = new IOException("Paimon spill release lacks close proof: " + retained);
         }
         return new ReleaseResult(retained, failure);

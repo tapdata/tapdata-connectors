@@ -26,21 +26,35 @@ public final class PaimonSpillAudit {
     static final long RATE_LIMIT_NANOS = TimeUnit.MINUTES.toNanos(10);
     private static final int MAX_RATE_LIMIT_KEYS = 1024;
 
+    /** 日志级别；协议事件之外的操作性事件（构建/释放/回滚）与协议事件共用同一 severity 语义。 */
+    enum Severity { INFO, WARN, ERROR }
+
     enum Event {
-        LEASE_CREATED(false),
-        LEASE_RETIRED(false),
-        LEASE_RETAINED(true),
-        LEASE_RESIDUE(true),
-        LEASE_RECLAIMED(false),
-        RECLAIM_FAILED(true),
-        RECLAIM_SKIPPED(false),
-        ADMISSION_DENIED(true),
-        LEGACY_LAYOUT_FOUND(true);
+        LEASE_CREATED(Severity.INFO),
+        LEASE_RETIRED(Severity.INFO),
+        LEASE_RETAINED(Severity.WARN),
+        LEASE_RESIDUE(Severity.WARN),
+        LEASE_RECLAIMED(Severity.INFO),
+        RECLAIM_FAILED(Severity.ERROR),
+        RECLAIM_SKIPPED(Severity.INFO),
+        ADMISSION_DENIED(Severity.WARN),
+        LEGACY_LAYOUT_FOUND(Severity.WARN),
+        IO_MANAGER_CREATED(Severity.INFO),
+        IO_MANAGER_BUILD_FAILED(Severity.ERROR),
+        SPILL_REGISTRATION_INCOMPLETE(Severity.ERROR),
+        UNREGISTERED_SPILL_DIR(Severity.ERROR),
+        RELEASE_INCOMPLETE(Severity.WARN),
+        PROVISION_RETRY(Severity.INFO),
+        PROVISION_ROLLED_BACK(Severity.WARN),
+        PROVISION_LOCK_HELD(Severity.ERROR),
+        PROVISION_EXHAUSTED(Severity.ERROR),
+        RECLAIM_BUDGET_EXHAUSTED(Severity.WARN),
+        NAMESPACE_LIST_FAILED(Severity.WARN);
 
-        final boolean warning;
+        final Severity severity;
 
-        Event(boolean warning) {
-            this.warning = warning;
+        Event(Severity severity) {
+            this.severity = severity;
         }
     }
 
@@ -90,6 +104,10 @@ public final class PaimonSpillAudit {
 
     /** 同一（事件, key）在 {@link #RATE_LIMIT_NANOS} 内只输出一次；返回本次是否输出。 */
     boolean recordRateLimited(Event event, String key, Map<String, Object> details) {
+        return recordRateLimited(event, key, details, null);
+    }
+
+    boolean recordRateLimited(Event event, String key, Map<String, Object> details, Throwable failure) {
         long now = nanoClock.getAsLong();
         String rateKey = event + "|" + key;
         boolean[] emitted = {false};
@@ -104,7 +122,7 @@ public final class PaimonSpillAudit {
             return now;
         });
         if (emitted[0]) {
-            record(event, details);
+            record(event, details, failure);
         }
         return emitted[0];
     }
@@ -138,14 +156,26 @@ public final class PaimonSpillAudit {
             return (event, fields, failure) -> { };
         }
         return (event, fields, failure) -> {
-            if (!event.warning) {
-                logger.info("Paimon spill {} {}", event, fields);
-            } else if (failure == null) {
-                logger.warn("Paimon spill {} {}", event, fields);
+            if (failure == null) {
+                log(logger, event, "Paimon spill {} {}", event, fields);
             } else {
-                logger.warn("Paimon spill {} {}", event, fields, failure);
+                log(logger, event, "Paimon spill {} {}", event, fields, failure);
             }
         };
+    }
+
+    private static void log(Logger logger, Event event, String format, Object... arguments) {
+        switch (event.severity) {
+            case ERROR:
+                logger.error(format, arguments);
+                break;
+            case WARN:
+                logger.warn(format, arguments);
+                break;
+            default:
+                logger.info(format, arguments);
+                break;
+        }
     }
 
     /** 进程号与 ClassLoader 标识在审计中只做诊断，读取失败不影响协议。 */

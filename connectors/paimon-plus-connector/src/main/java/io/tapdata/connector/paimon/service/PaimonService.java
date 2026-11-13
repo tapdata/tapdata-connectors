@@ -961,6 +961,9 @@ public class PaimonService implements AutoCloseable {
         CatalogUtils.tableDefaultOptions(catalog.options())
                 .forEach(finalSchema.options()::putIfAbsent);
         // 界面开关在属性合并后生效，避免 false 被原生默认 true 或自定义属性覆盖。
+        log.info("Paimon write-buffer spill options for new table {}: spillable={}, maxDiskSize={}gb",
+                identifier.getFullName(), PaimonWriteOptions.spillValue(config),
+                Boolean.TRUE.equals(config.getDiskOverflowWrite()) ? config.getDiskMaxSize() : null);
         finalSchema.options().put(
                 CoreOptions.WRITE_BUFFER_SPILLABLE.key(), PaimonWriteOptions.spillValue(config));
         PaimonExpireMode.validate(identifier.getFullName(), finalSchema.options());
@@ -1789,6 +1792,8 @@ public class PaimonService implements AutoCloseable {
             }
             FileStoreTable fileStoreTable = PaimonWriteOptions.runtimeWriteTable(
                     requireWriteTable(identifier, table), config);
+            log.info("Paimon write-buffer spill decision for table {}: spillable={}, diskTmpDir={}",
+                    tableKey, PaimonWriteOptions.spillValue(config), config.getDiskTmpDir(tableName));
             List<DataField> paimonFields = fileStoreTable.rowType().getFields();
             // Contract resolution must precede commit-state binding and the HASH_DYNAMIC
             // RocksDB pollution preflight, not merely raw writer construction.
@@ -3590,6 +3595,7 @@ public class PaimonService implements AutoCloseable {
                     operation.discardedTables++;
                 }
             } catch (Throwable contextFailure) {
+                PaimonStopLog.offerError(log, closeLogFields(operation, "table-close-failed"), contextFailure);
                 failure = appendFailure(failure, contextFailure);
             } finally {
                 if (context.cleanupComplete() && !operation.isRetained()) {

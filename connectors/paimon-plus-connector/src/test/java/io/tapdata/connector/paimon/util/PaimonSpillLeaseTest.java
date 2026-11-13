@@ -94,6 +94,7 @@ class PaimonSpillLeaseTest {
         assertNotEquals(removed.get(0), owned, "重试必须使用新的 leaseId");
         assertFalse(Files.exists(removed.get(0)));
         assertTrue(Files.isRegularFile(owned.resolve("owner.lock")));
+        assertTrue(events.contains(PaimonSpillAudit.Event.PROVISION_RETRY), "ENOENT 竞态重试必须留下 info 审计");
         assertNull(lease.roots().get(0).retire());
     }
 
@@ -130,6 +131,7 @@ class PaimonSpillLeaseTest {
                 () -> provision(Collections.singletonList(root.toString()), alwaysRemoved));
 
         assertTrue(failure.getMessage().contains("after 3 attempts"), failure.getMessage());
+        assertTrue(events.contains(PaimonSpillAudit.Event.PROVISION_EXHAUSTED), "重试耗尽必须留下 error 审计");
         assertTrue(leasesUnder(root).isEmpty());
     }
 
@@ -156,6 +158,7 @@ class PaimonSpillLeaseTest {
         assertThrows(IOException.class,
                 () -> provision(Arrays.asList(good.toString(), bad.toString()), PaimonSpillLease.NO_HOOK));
 
+        assertTrue(events.contains(PaimonSpillAudit.Event.PROVISION_ROLLED_BACK), "部分失败回滚必须留下 warn 审计");
         assertTrue(leasesUnder(good).isEmpty(), "已就绪的根必须被退役");
     }
 

@@ -72,6 +72,9 @@ class PaimonSpillFilesTest {
         });
 
         assertFalse(failed.success);
+        assertFalse(failed.failures.isEmpty(), "失败明细必须记录到具体条目");
+        assertEquals(stuck, failed.failures.get(0).path, "首个失败必须是删除被注入失败的文件");
+        assertTrue(failed.failureSummaries().get(0).contains("injected"), "摘要须含失败原因");
         assertTrue(Files.exists(stuck));
         assertTrue(PaimonSpillFiles.deleteTree(tree, PaimonSpillFiles.FILES_DELETE).success);
     }

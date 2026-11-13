@@ -121,6 +121,8 @@ final class PaimonSpillReclaimer {
             for (Path lease : list(namespace)) {
                 if (result.reclaimed.size() >= budget) {
                     result.budgetExhausted = true;
+                    audit.record(PaimonSpillAudit.Event.RECLAIM_BUDGET_EXHAUSTED, PaimonSpillAudit.details(
+                            "root", root, "budget", budget));
                     return;
                 }
                 if (PaimonSpillLease.LEASE_NAME.matcher(lease.getFileName().toString()).matches()
@@ -239,7 +241,9 @@ final class PaimonSpillReclaimer {
         PaimonSpillFiles.DeletionResult io = PaimonSpillFiles.deleteTreeIfPresent(
                 lease.resolve(PaimonSpillLease.IO_DIR), deleteAction);
         if (!io.success) {
-            return Outcome.failed(new IOException("Cannot delete orphaned Paimon spill io under " + lease));
+            String failedEntries = String.join("; ", io.failureSummaries());
+            return Outcome.failed(new IOException("Cannot delete orphaned Paimon spill io under " + lease
+                    + (failedEntries.isEmpty() ? "" : ": " + failedEntries)));
         }
         try {
             Files.deleteIfExists(lockFile);
@@ -274,14 +278,16 @@ final class PaimonSpillReclaimer {
         }
     }
 
-    /** 先完整列出再处理，避免在遍历目录的同时修改它。 */
-    private static List<Path> list(Path directory) {
+    /** 先完整列出再处理，避免在遍历目录的同时修改它。列举失败不静默：该命名空间本次启动不可见。 */
+    private List<Path> list(Path directory) {
         List<Path> entries = new ArrayList<>();
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
             for (Path entry : stream) {
                 entries.add(entry);
             }
         } catch (IOException | RuntimeException unreadable) {
+            audit.recordRateLimited(PaimonSpillAudit.Event.NAMESPACE_LIST_FAILED, directory.toString(),
+                    PaimonSpillAudit.details("directory", directory), unreadable);
             return Collections.emptyList();
         }
         return entries;

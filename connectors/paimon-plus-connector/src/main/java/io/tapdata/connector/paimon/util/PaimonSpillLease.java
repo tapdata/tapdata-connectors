@@ -98,6 +98,8 @@ final class PaimonSpillLease {
                 provisioned.add(provisionRoot(root, namespace, tag, hook, audit));
             }
         } catch (IOException | RuntimeException | Error failure) {
+            audit.record(PaimonSpillAudit.Event.PROVISION_ROLLED_BACK, PaimonSpillAudit.details(
+                    "roots", roots, "rolledBack", provisioned.size(), "tag", tag, "owner", label), failure);
             for (Root ready : provisioned) {
                 Throwable rollback = ready.retire(PaimonSpillFiles.FILES_DELETE, NO_RETIRE_HOOK);
                 if (rollback != null) {
@@ -134,6 +136,8 @@ final class PaimonSpillLease {
             } catch (NoSuchFileException removedByReclaimer) {
                 // 其他参与者只会 rmdir 空的子根、命名空间或 lease（外部回收者，或本进程刚退役最后一个
                 // lease 的 owner，Spec §4.3）；此时尚无任何资源，换新 leaseId 从头重试。
+                audit.record(PaimonSpillAudit.Event.PROVISION_RETRY, PaimonSpillAudit.details(
+                        "root", root, "attempt", attempt, "reason", "enoent-race"));
                 lastRace = removedByReclaimer;
                 continue;
             }
@@ -141,7 +145,11 @@ final class PaimonSpillLease {
             try {
                 FileLock lock = channel.tryLock();
                 if (lock == null) {
-                    throw new IOException("Fresh Paimon spill owner lock is held by another process: " + lease);
+                    IOException contended = new IOException(
+                            "Fresh Paimon spill owner lock is held by another process: " + lease);
+                    audit.record(PaimonSpillAudit.Event.PROVISION_LOCK_HELD, PaimonSpillAudit.details(
+                            "lease", lease), contended);
+                    throw contended;
                 }
                 provisioned = new Root(root, lease, channel, lock, audit);
                 hook.afterOwnerLock(lease);
@@ -159,6 +167,8 @@ final class PaimonSpillLease {
                 throw failure;
             }
         }
+        audit.record(PaimonSpillAudit.Event.PROVISION_EXHAUSTED, PaimonSpillAudit.details(
+                "root", root, "attempts", MAX_PROVISION_ATTEMPTS), lastRace);
         throw new IOException("Cannot provision a Paimon spill lease under " + root + " after "
                 + MAX_PROVISION_ATTEMPTS + " attempts", lastRace);
     }
@@ -268,7 +278,8 @@ final class PaimonSpillLease {
             if (!ioDeletion.success) {
                 IOException failure = new IOException("Cannot delete Paimon spill io directory " + io);
                 audit.record(PaimonSpillAudit.Event.LEASE_RETAINED,
-                        PaimonSpillAudit.details("lease", lease, "reason", "io-deletion-failed"), failure);
+                        PaimonSpillAudit.details("lease", lease, "reason", "io-deletion-failed",
+                                "failedEntries", ioDeletion.failureSummaries()), failure);
                 return failure;
             }
             try {
