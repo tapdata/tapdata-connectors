@@ -542,6 +542,64 @@ class MongodbMergeOperateTest {
 			assertTrue(parentPulled, "expected $pull parts, actual writes: " + mergeResults);
 		}
 
+		@Test
+		@DisplayName("U9: parent array DELETE must not pull nested array elements of sibling parent elements sharing the same join value")
+		void testParentArrayDeleteKeepsSiblingNestedArray() {
+			Map<String, Object> before = new HashMap<>();
+			before.put("PROD_ID", 102);
+			before.put("itemId", 2);
+			before.put("attrCode", "GOLD");
+			MergeTableProperties parent = new MergeTableProperties();
+			parent.setId("parts");
+			parent.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			parent.setTargetPath("parts");
+			parent.setIsArray(false);
+			parent.setArrayKeys(new ArrayList<>(Collections.singletonList("PROD_ID")));
+			parent.setJoinKeys(joinKeys("itemId", "itemId"));
+			MergeTableProperties nested = new MergeTableProperties();
+			nested.setId("nestedArr");
+			nested.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			nested.setTargetPath("parts.attrList");
+			nested.setArrayPath("parts");
+			nested.setIsArray(true);
+			nested.setArrayKeys(new ArrayList<>(Collections.singletonList("attrId")));
+			nested.setJoinKeys(joinKeys("referenceCode", "parts.attrCode"));
+			List<MergeLookupResult> lookups = new ArrayList<>();
+			lookups.add(lookup(nested, "attr_arr", new Document("_id", 21).append("attrId", 21).append("referenceCode", "GOLD")));
+			List<MergeResult> mergeResults = new ArrayList<>();
+			assertDoesNotThrow(() -> MongodbMergeOperate.recursiveMerge(
+					new MergeBundle(MergeBundle.EventOperation.DELETE, before, null),
+					parent,
+					mergeResults,
+					lookups,
+					new HashMap<>(),
+					null,
+					new MergeFilter(false),
+					2,
+					null
+			));
+			// 目标文档 itemId=2 中 parts 还有另一个 attrCode=GOLD 的元素 PROD_ID=104（attrList 同样含 attrId 21）
+			// 父元素 $pull 已连同其嵌套 attrList 一起移除；任何按 element1.attrCode 匹配的嵌套 $pull 都会误删 PROD_ID=104 的 attrList[21]
+			boolean parentPulled = false;
+			for (MergeResult result : mergeResults) {
+				if (result == null || result.getOperation() == null) {
+					continue;
+				}
+				Document update = result.getUpdate();
+				Document pull = update.get("$pull", Document.class);
+				if (pull != null && pull.containsKey("parts")) {
+					parentPulled = true;
+				}
+				for (String op : update.keySet()) {
+					Document body = update.get(op, Document.class);
+					for (String path : body.keySet()) {
+						assertFalse(path.startsWith("parts.$[element1].attrList"), "nested cleanup inside pulled parent element would hit sibling elements: " + update.toJson() + " arrayFilters=" + result.getUpdateOptions().getArrayFilters());
+					}
+				}
+			}
+			assertTrue(parentPulled, "expected $pull parts, actual writes: " + mergeResults);
+		}
+
 		private List<Map<String, String>> joinKeys(String source, String target) {
 			List<Map<String, String>> keys = new ArrayList<>();
 			Map<String, String> key = new HashMap<>();
