@@ -108,8 +108,9 @@ public final class PaimonLocalDirectories {
                 } finally {
                     try {
                         Files.deleteIfExists(probe);
-                    } catch (IOException ignore) {
+                    } catch (IOException | RuntimeException ignore) {
                         // A leftover probe file is harmless; the writability answer is already known.
+                        // RuntimeException 也必须吞掉：SecurityException 从这里抛出会顶掉待传播的失败原因。
                     }
                 }
                 verified.add(dir.toString());
@@ -119,8 +120,9 @@ public final class PaimonLocalDirectories {
             for (int i = created.size() - 1; i >= 0; i--) {
                 try {
                     Files.deleteIfExists(created.get(i));
-                } catch (IOException ignore) {
+                } catch (IOException | RuntimeException ignore) {
                     // Directory is in use: leave it alone.
+                    // RuntimeException（如 SecurityException）不能在此逃逸，否则回滚会顶掉原始失败原因。
                 }
             }
             throw failure;

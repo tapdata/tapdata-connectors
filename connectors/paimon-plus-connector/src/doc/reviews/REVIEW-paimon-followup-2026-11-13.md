@@ -54,3 +54,17 @@ Hadoop 在 S3A 初始化时把 fs.s3a.bucket.<bucket>.buffer.dir 传播到全局
 验证包含启动超时/忙时跳过、引擎 sink 故障时的任务日志、旧目录估算不跟随 symlink、多级目录回滚、无效全局与有效 bucket 共存、每目录限频以及覆盖类兼容检查；保留跨进程/跨 ClassLoader 的真实 OS 锁回归和 DROP/recreate 端到端验证。
 
 最终全量验证（2026-11-13，Linux overlay / Temurin 17）：`mvn -o -pl connectors/paimon-plus-connector test`：**1338 项，0 failures，0 errors，2 skipped，BUILD SUCCESS**。原有 `reclaimerHasNoTemporalInput` 守卫保持不变；时间预算仅在独立体积观察类与启动等待中使用。尚未进行真实客户 S3/挂载环境或 300 任务并发验收。
+
+## 三次 Review 后的追加修复（S1–S3）
+
+第三轮评审（PR #1023 head `554de594`）判定的三处应修问题，均属可观测性与诊断正确性，不改变回收协议：
+
+- **S1 扫描线程沿用提交方 TCCL 并获得唯一名**：`PaimonSpillDirCleaner.newReclaimThread` 显式 `setContextClassLoader` 并追加递增后缀（`paimon-spill-reclaim-<n>`），与 `PaimonCompactionExecutor` 既有约定一致。此前线程只是隐式继承创建者，且所有实例同名，几百个连接器 ClassLoader 下无法从线程名/堆栈归属到具体实例。新增 `PaimonStartupReclaimTest.reclaimWorkerThreadKeepsCallerTcclAndGetsUniqueName`。
+- **S2 目录回滚不再吞掉失败原因**：`PaimonLocalDirectories` 中探针删除与回滚删除的 `catch` 由 `IOException` 扩为 `IOException | RuntimeException`。`SecurityException`（`RuntimeException`）此前会从 `finally`/回滚循环逃逸，顶掉待传播的 `IllegalStateException`，导致 `fs.s3a.buffer.dir` 的真实失败原因丢失。
+- **S3 正常路径降级为 INFO**：`reclaim deferred`（同一 ClassLoader 已有扫描在跑）与 `reclaim continues in background after 200 ms`（慢盘或多任务同时启动）是设计内的正常路径，改用 `PaimonStopLog.offer`（INFO）。原 WARN 在 300 任务启动时成片出现，会被现场当作故障上报。失败类事件仍为 ERROR。
+
+`PaimonStartupReclaimTest` 相应断言由 `warn(...)` 改为 `info(...)`，并对 `reclaim deferred` 额外断言不得走 WARN。
+
+第四轮全量验证（2026-11-13，Linux / Temurin 17）：`mvn -o -pl connectors/paimon-plus-connector test`：**1339 项，0 failures，0 errors，2 skipped，BUILD SUCCESS**（较上轮 +1，为新增线程属性用例）。
+
+仍未处理、且不阻塞合并的边缘项：旧布局根列举失败时静默 return；`busyWorkerDefersWithoutQueueing` 用 shutdown 而非真正 busy 的池验证「无积压」；`PaimonLegacySpillSize` 的 deadline 在构造时求值；`PaimonSpillAudit` 限频表整表 `clear()`。
