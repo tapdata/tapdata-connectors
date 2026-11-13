@@ -31,8 +31,13 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 @DisabledOnOs(OS.WINDOWS)
 class PaimonSpillLeaseTest {
 
-    private static final String JVM_ID = PaimonJvmIdentity.derive(4242L, 1700000000000L);
-    private static final Supplier<String> IDENTITY = () -> JVM_ID;
+    private static final AtomicInteger TEST_SEQUENCE = new AtomicInteger(0);
+
+    // 为每个测试实例生成唯一的 JVM ID，避免 CI 环境中的文件冲突
+    private final String jvmId = PaimonJvmIdentity.derive(
+            4242L + TEST_SEQUENCE.getAndIncrement(),
+            1700000000000L + System.nanoTime());
+    private final Supplier<String> identity = () -> jvmId;
 
     private final List<PaimonSpillAudit.Event> events = new ArrayList<>();
     private final PaimonSpillAudit audit = new PaimonSpillAudit(
@@ -43,7 +48,7 @@ class PaimonSpillLeaseTest {
         PaimonSpillLease lease = provision(Collections.singletonList(root.toString()), PaimonSpillLease.NO_HOOK);
         PaimonSpillLease.Root owned = lease.roots().get(0);
 
-        Path namespace = root.toRealPath().resolve("tapdata-paimon-v2").resolve(JVM_ID);
+        Path namespace = root.toRealPath().resolve("tapdata-paimon-v2").resolve(jvmId);
         assertEquals(namespace, owned.lease.getParent());
         assertTrue(PaimonSpillLease.LEASE_NAME.matcher(owned.lease.getFileName().toString()).matches());
         assertTrue(owned.lease.getFileName().toString().startsWith(PaimonSpillLease.tag("default.orders") + "-"));
@@ -140,7 +145,7 @@ class PaimonSpillLeaseTest {
         Path root = Files.createDirectory(base.resolve("spill"));
         Path elsewhere = Files.createDirectory(base.resolve("elsewhere"));
         Files.createDirectories(root.resolve("tapdata-paimon-v2"));
-        assumeTrue(createSymbolicLink(root.resolve("tapdata-paimon-v2").resolve(JVM_ID), elsewhere));
+        assumeTrue(createSymbolicLink(root.resolve("tapdata-paimon-v2").resolve(jvmId), elsewhere));
 
         assertThrows(IOException.class, () -> provision(Collections.singletonList(root.toString()), PaimonSpillLease.NO_HOOK));
         try (Stream<Path> entries = Files.list(elsewhere)) {
@@ -278,11 +283,11 @@ class PaimonSpillLeaseTest {
     }
 
     private PaimonSpillLease provision(List<String> roots, PaimonSpillLease.ProvisionHook hook) throws IOException {
-        return PaimonSpillLease.provision(roots, "default.orders", IDENTITY, audit, hook);
+        return PaimonSpillLease.provision(roots, "default.orders", identity, audit, hook);
     }
 
-    private static List<Path> leasesUnder(Path root) throws IOException {
-        Path namespace = root.toRealPath().resolve("tapdata-paimon-v2").resolve(JVM_ID);
+    private List<Path> leasesUnder(Path root) throws IOException {
+        Path namespace = root.toRealPath().resolve("tapdata-paimon-v2").resolve(jvmId);
         if (!Files.isDirectory(namespace)) {
             return Collections.emptyList();
         }
