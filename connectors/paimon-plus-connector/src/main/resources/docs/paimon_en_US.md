@@ -230,3 +230,13 @@ WARN/ERROR reclaim events also use the bounded asynchronous task logger. Under l
 blockage or queue saturation, events can still be dropped; check `droppedLogs` at shutdown.
 For capacity/mount issues, run `df -hT`, `df -i`, `findmnt -T <directory>` and
 `namei -l <directory>` as the engine account in the same mount namespace.
+
+The first runtime write/commit failure and table close failures log `Paimon runtime failure`
+with the original stack trace and spill/effective warehouse S3A buffer directory state (up to
+8 directories per category): existence, filesystem, read-only status and usable bytes.
+These are observations at failure time, not capacity reservations or proof of the cause.
+In reclaim summaries, `scanComplete` describes inspection of eligible foreign v2 leases;
+`scanFailures` counts directory read failures, `scanSkipped` counts identity/filesystem admission
+denials, and `skipped` counts leases whose reclaimability could not be confirmed.
+Neither `failed=0` nor `reclaimed=0` alone proves there is no residue: also check completeness,
+`live`, the reclaim budget and legacy layout warnings.

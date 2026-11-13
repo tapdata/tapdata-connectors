@@ -265,3 +265,10 @@ SUM/AVG 对所有数值类型返回 BigDecimal，AVG 使用 DECIMAL128 舍入。
 回收 WARN/ERROR 同时转发到有界异步任务日志；日志后端阻塞或队列饱和仍可能丢失事件，
 关闭摘要中的 `droppedLogs` 可辅助观察。容量或挂载问题需使用引擎账号，在相同挂载命名空间下
 结合 `df -hT`、`df -i`、`findmnt -T <directory>`、`namei -l <directory>` 检查。
+
+运行期首次写入/提交失败和表关闭失败会记录 `Paimon runtime failure`，附原始异常栈、
+spill 与当前 warehouse 生效的 S3A 缓存目录状态（每类最多采样 8 个目录），包括是否存在、
+文件系统、只读状态和可用字节。状态是失败时的观察值，不是容量预留或故障根因证明。
+回收摘要的 `scanComplete` 仅表示外部 v2 租约的检查是否完整；`scanFailures` 是目录读取失败数，
+`scanSkipped` 是身份/文件系统准入阻止的扫描数，`skipped` 是未能确认可回收的租约数。
+`failed=0` 或 `reclaimed=0` 不能单独证明无遗留；还须检查完整性、`live`、预算和旧布局告警。

@@ -56,6 +56,64 @@ class PaimonDirectoryEvidenceTest {
     }
 
     @Test
+    void newRootNotYetProvisionedIsAnEmptyScanWithoutWarning() {
+        Path missing = root.resolve("new-root");
+        java.util.List<PaimonSpillAudit.Event> events = new java.util.ArrayList<>();
+        PaimonSpillAudit audit = new PaimonSpillAudit((event, fields, failure) -> events.add(event),
+                System::nanoTime, k -> null);
+        PaimonSpillReclaimer.Result result = new PaimonSpillReclaimer(PaimonJvmIdentity::current,
+                p -> "ext4", PaimonSpillReclaimer.DEFAULT_OPENER, PaimonSpillFiles.FILES_DELETE,
+                audit, 64).reclaim(Collections.singletonList(missing.toString()));
+        assertTrue(result.scanComplete());
+        assertTrue(events.isEmpty());
+        assertFalse(Files.exists(missing));
+    }
+
+    @Test
+    void scanSummaryDistinguishesEmptyRootFromUnreadableRoot() throws Exception {
+        PaimonSpillDirCleaner.ReclaimSummary empty = PaimonSpillDirCleaner.reclaimOrphanedLeases(
+                Collections.singletonList(root.toString()), null);
+        assertTrue(empty.scanComplete());
+        assertEquals(0, empty.scanFailures());
+
+        Path file = Files.write(root.resolve("not-a-directory"), new byte[0]);
+        PaimonSpillDirCleaner.ReclaimSummary unreadable = PaimonSpillDirCleaner.reclaimOrphanedLeases(
+                Collections.singletonList(file.toString()), null);
+        assertEquals(0, unreadable.reclaimed());
+        assertEquals(0, unreadable.failed(), "deletion failures are distinct from scan failures");
+        assertTrue(unreadable.scanFailures() > 0);
+        assertFalse(unreadable.scanComplete());
+    }
+
+    @Test
+    void namespaceListingFailurePreservesCauseAndMarksScanIncomplete() throws Exception {
+        Path subroot = Files.createDirectories(root.resolve(PaimonSpillLease.SUBROOT));
+        AtomicReference<Throwable> observed = new AtomicReference<>();
+        PaimonSpillAudit audit = new PaimonSpillAudit((event, fields, failure) -> {
+            if (event == PaimonSpillAudit.Event.NAMESPACE_LIST_FAILED) {
+                observed.set(failure);
+                assertTrue(fields.containsKey("directoryState"));
+            }
+        }, System::nanoTime, k -> null);
+        PaimonSpillReclaimer.Result result = new PaimonSpillReclaimer(PaimonJvmIdentity::current,
+                p -> { Files.delete(subroot); return "ext4"; }, PaimonSpillReclaimer.DEFAULT_OPENER,
+                PaimonSpillFiles.FILES_DELETE, audit, 64).reclaim(Collections.singletonList(root.toString()));
+        assertEquals(1, result.scanFailures);
+        assertFalse(result.scanComplete());
+        assertTrue(observed.get() instanceof java.nio.file.NoSuchFileException);
+    }
+
+    @Test
+    void unsupportedFilesystemIsAnIncompleteScanRatherThanAnEmptyRoot() throws Exception {
+        Files.createDirectories(root.resolve(PaimonSpillLease.SUBROOT));
+        PaimonSpillReclaimer.Result result = new PaimonSpillReclaimer(PaimonJvmIdentity::current,
+                p -> "nfs", PaimonSpillReclaimer.DEFAULT_OPENER, PaimonSpillFiles.FILES_DELETE,
+                PaimonSpillAudit.defaultAudit(), 64).reclaim(Collections.singletonList(root.toString()));
+        assertEquals(1, result.scanSkipped);
+        assertFalse(result.scanComplete());
+    }
+
+    @Test
     void nonexistentDirectoryReportsNearestExistingFilesystemWithoutCreatingIt() {
         Path missing = root.resolve("missing/spill");
         Map<String, Object> evidence = PaimonLocalDirectories.describe(missing);

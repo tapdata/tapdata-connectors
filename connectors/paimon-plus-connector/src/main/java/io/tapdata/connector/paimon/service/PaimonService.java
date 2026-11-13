@@ -1,6 +1,7 @@
 package io.tapdata.connector.paimon.service;
 
 import io.tapdata.connector.paimon.util.PaimonFailures;
+import io.tapdata.connector.paimon.util.PaimonLocalDirectories;
 import io.tapdata.connector.paimon.config.PaimonExpireMode;
 import io.tapdata.connector.paimon.write.PaimonNativeCommitterClose;
 
@@ -88,6 +89,7 @@ public class PaimonService implements AutoCloseable {
 
     /** Hadoop S3A fast-upload scratch directory; also settable from S3 advanced properties. */
     static final String S3A_BUFFER_DIR = "fs.s3a.buffer.dir";
+    private volatile List<String> effectiveS3ABufferDirs = Collections.emptyList();
 
 
     /** 日志和异常信息中使用的当前 Service 类标识。 */
@@ -530,12 +532,14 @@ public class PaimonService implements AutoCloseable {
                 Configuration verified = io.tapdata.connector.paimon.fs.PaimonS3AFileSystem
                         .verifiedConfiguration(warehouse, conf);
                 conf.set(bucketKey, verified.get(S3A_BUFFER_DIR));
+                effectiveS3ABufferDirs = Arrays.asList(conf.getTrimmed(bucketKey).split(","));
                 // Other buckets validate their effective directory when their filesystem opens.
                 return;
             }
         }
         String configured = conf.getTrimmed(S3A_BUFFER_DIR);
         conf.set(S3A_BUFFER_DIR, verifyS3ABufferDirs(configured));
+        effectiveS3ABufferDirs = Arrays.asList(conf.getTrimmed(S3A_BUFFER_DIR).split(","));
     }
 
     /**
@@ -1633,8 +1637,30 @@ public class PaimonService implements AutoCloseable {
         if (failure == null) {
             return;
         }
-        stickyWriteFailure.compareAndSet(null, failure);
+        boolean first = stickyWriteFailure.compareAndSet(null, failure);
         lifecycle.fail(stickyWriteFailure.get());
+        if (first) {
+            logRuntimeDirectoryFailure("write-failed", null, failure);
+        }
+    }
+
+    private void logRuntimeDirectoryFailure(String stage, List<String> spillDirs, Throwable failure) {
+        try {
+            if (spillDirs == null) {
+                spillDirs = new ArrayList<>();
+                for (PaimonTableWriteContext context : tableWriteContexts.values()) {
+                    spillDirs.addAll(context.spillDirs());
+                }
+            }
+            PaimonStopLog.offerError(log, "Paimon runtime failure: stage=" + stage
+                    + ", spillDirectoryCount=" + spillDirs.size() + ", directorySampleLimit=8"
+                    + ", spillDirectoryState=" + PaimonLocalDirectories.describeRoots(spillDirs)
+                    + ", s3aBufferDirectoryCount=" + effectiveS3ABufferDirs.size()
+                    + ", s3aBufferDirectoryState=" + PaimonLocalDirectories.describeRoots(effectiveS3ABufferDirs),
+                    failure);
+        } catch (RuntimeException | LinkageError ignored) {
+            // Observation must not replace the original write/commit/close failure.
+        }
     }
 
     private static void rethrow(Throwable failure) throws Exception {
@@ -3622,6 +3648,7 @@ public class PaimonService implements AutoCloseable {
                     operation.discardedTables++;
                 }
             } catch (Throwable contextFailure) {
+                logRuntimeDirectoryFailure("table-close-failed", context.spillDirs(), contextFailure);
                 PaimonStopLog.offerError(log, closeLogFields(operation, "table-close-failed"), contextFailure);
                 failure = appendFailure(failure, contextFailure);
             } finally {

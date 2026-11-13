@@ -116,6 +116,8 @@ class PaimonSpillReclaimerTest {
         assertEquals(0, result.reclaimed.size());
         assertFalse(Files.exists(empty));
         assertTrue(Files.isDirectory(withData), "无锁文件的非空 lease 不具备删除证明");
+        assertEquals(1, result.skipped);
+        assertFalse(result.scanComplete(), "缺少锁文件且留有数据不能报告检查完整");
         assertTrue(opened.isEmpty());
     }
 
@@ -201,6 +203,7 @@ class PaimonSpillReclaimerTest {
 
         assertEquals(2, first.reclaimed.size());
         assertTrue(first.budgetExhausted);
+        assertFalse(first.scanComplete());
         assertTrue(events.contains(PaimonSpillAudit.Event.RECLAIM_BUDGET_EXHAUSTED),
                 "预算耗尽必须留下 warn 审计");
         assertEquals(1, second.reclaimed.size());

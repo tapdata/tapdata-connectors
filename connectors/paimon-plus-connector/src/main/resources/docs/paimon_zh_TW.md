@@ -224,3 +224,10 @@ ORDER BY CAST(CreationTime AS DATE)
 回收 WARN/ERROR 同時轉發到有界异步任務日誌；日誌後端阻塞或佇列饱和仍可能丢失事件，
 关闭摘要中的 `droppedLogs` 可辅助观察。容量或挂載问题需使用引擎账号，在相同挂載命名空間下
 结合 `df -hT`、`df -i`、`findmnt -T <directory>`、`namei -l <directory>` 檢查。
+
+執行期首次寫入/提交失敗和表關閉失敗會記錄 `Paimon runtime failure`，附原始例外堆疊、
+spill 與目前 warehouse 生效的 S3A 快取目錄狀態（每類最多取樣 8 個目錄），包括是否存在、
+檔案系統、唯讀狀態及可用位元組。這是失敗時的觀察值，並非容量預留或根因證明。
+回收摘要的 `scanComplete` 僅表示外部 v2 租約的檢查是否完整；`scanFailures` 是目錄讀取失敗數，
+`scanSkipped` 是身分/檔案系統准入阻止的掃描數，`skipped` 是未能確認可回收的租約數。
+`failed=0` 或 `reclaimed=0` 不能單獨證明無殘留；還須檢查完整性、`live`、預算與舊佈局警告。

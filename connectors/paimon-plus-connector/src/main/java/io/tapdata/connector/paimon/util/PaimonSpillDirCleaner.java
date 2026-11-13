@@ -378,8 +378,7 @@ public final class PaimonSpillDirCleaner {
                 onReclaimed.accept(reclaimed.lease, reclaimed.bytes);
             }
         }
-        return new ReclaimSummary(result.reclaimed.size(), result.failed, result.legacyDirectories,
-                result.budgetExhausted);
+        return new ReclaimSummary(result);
     }
 
     private static final PaimonBackgroundThreads RECLAIM_THREADS =
@@ -419,6 +418,10 @@ public final class PaimonSpillDirCleaner {
                     io.tapdata.connector.paimon.service.PaimonStopLog.offer(log,
                             "Paimon spill reclaim finished: roots=" + snapshot + ", reclaimed="
                                     + result.reclaimed.size() + ", failed=" + result.failed
+                                    + ", live=" + result.live + ", skipped=" + result.skipped
+                                    + ", scanFailures=" + result.scanFailures + ", scanSkipped=" + result.scanSkipped
+                                    + ", scanComplete=" + result.scanComplete()
+                                    + ", scanScope=foreign-v2-leases"
                                     + ", legacyDirectories=" + result.legacyDirectories
                                     + ", budgetExhausted=" + result.budgetExhausted, null);
                     if (result.legacyDirectories > 0) {
@@ -471,18 +474,27 @@ public final class PaimonSpillDirCleaner {
         private final int failed;
         private final int legacyDirectories;
         private final boolean budgetExhausted;
+        private final int scanFailures;
+        private final int scanSkipped;
+        private final boolean scanComplete;
 
-        private ReclaimSummary(int reclaimed, int failed, int legacyDirectories, boolean budgetExhausted) {
-            this.reclaimed = reclaimed;
-            this.failed = failed;
-            this.legacyDirectories = legacyDirectories;
-            this.budgetExhausted = budgetExhausted;
+        private ReclaimSummary(PaimonSpillReclaimer.Result result) {
+            this.reclaimed = result.reclaimed.size();
+            this.failed = result.failed;
+            this.legacyDirectories = result.legacyDirectories;
+            this.budgetExhausted = result.budgetExhausted;
+            this.scanFailures = result.scanFailures;
+            this.scanSkipped = result.scanSkipped;
+            this.scanComplete = result.scanComplete();
         }
 
         public int reclaimed() { return reclaimed; }
         public int failed() { return failed; }
         public int legacyDirectories() { return legacyDirectories; }
         public boolean budgetExhausted() { return budgetExhausted; }
+        public int scanFailures() { return scanFailures; }
+        public int scanSkipped() { return scanSkipped; }
+        public boolean scanComplete() { return scanComplete; }
     }
 
     static String canonical(File file) {

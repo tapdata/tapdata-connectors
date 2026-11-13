@@ -93,12 +93,14 @@ final class PaimonSpillReclaimer {
         try {
             self = selfIdentity.get();
         } catch (RuntimeException failure) {
+            result.scanSkipped++;
             // 身份不可用时不知道哪些命名空间属于本进程，必须完全关闭回收（Spec §4.2）。
             audit.record(PaimonSpillAudit.Event.ADMISSION_DENIED,
                     PaimonSpillAudit.details("reason", "identity-unavailable"), failure);
             return result;
         }
         if (!PaimonJvmIdentity.isNamespaceName(self)) {
+            result.scanSkipped++;
             audit.record(PaimonSpillAudit.Event.ADMISSION_DENIED,
                     PaimonSpillAudit.details("reason", "identity-malformed"));
             return result;
@@ -115,21 +117,22 @@ final class PaimonSpillReclaimer {
     private void reclaimRoot(Path root, String self, Result result) {
         reportLegacyLayout(root, result);
         Path subroot = root.resolve(PaimonSpillLease.SUBROOT);
-        if (!Files.isDirectory(subroot, LinkOption.NOFOLLOW_LINKS)) {
+        if (!isDirectory(subroot, result)) {
             return;
         }
         if (!admitted(root, subroot)) {
+            result.scanSkipped++;
             return;
         }
-        for (Path namespace : list(subroot)) {
+        for (Path namespace : list(subroot, result)) {
             String name = namespace.getFileName().toString();
             if (name.equals(self)) {
                 continue;
             }
-            if (!PaimonJvmIdentity.isNamespaceName(name) || !Files.isDirectory(namespace, LinkOption.NOFOLLOW_LINKS)) {
+            if (!PaimonJvmIdentity.isNamespaceName(name) || !isDirectory(namespace, result)) {
                 continue;
             }
-            for (Path lease : list(namespace)) {
+            for (Path lease : list(namespace, result)) {
                 if (result.reclaimed.size() >= budget) {
                     result.budgetExhausted = true;
                     audit.record(PaimonSpillAudit.Event.RECLAIM_BUDGET_EXHAUSTED, PaimonSpillAudit.details(
@@ -137,7 +140,7 @@ final class PaimonSpillReclaimer {
                     return;
                 }
                 if (PaimonSpillLease.LEASE_NAME.matcher(lease.getFileName().toString()).matches()
-                        && Files.isDirectory(lease, LinkOption.NOFOLLOW_LINKS)) {
+                        && isDirectory(lease, result)) {
                     reclaimLease(root, lease, result);
                 }
             }
@@ -176,7 +179,9 @@ final class PaimonSpillReclaimer {
             before = Files.readAttributes(lockFile, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         } catch (NoSuchFileException noLock) {
             // PROVISIONING 或 owner 退役中途崩溃：只允许 rmdir 空目录（Spec §4.3）。
-            PaimonSpillFiles.removeEmptyDirectory(lease);
+            if (PaimonSpillFiles.removeEmptyDirectory(lease) == PaimonSpillFiles.EmptyDirectoryRemoval.KEPT) {
+                skip(root, lease, "missing-lock-with-residue", result);
+            }
             return;
         } catch (IOException | RuntimeException failure) {
             inspectionFailed(root, lease, "lock-attributes-unreadable", failure, result);
@@ -296,8 +301,12 @@ final class PaimonSpillReclaimer {
                     size.inspect(entry);
                 }
             }
-        } catch (IOException | RuntimeException unreadable) {
+        } catch (NoSuchFileException absent) {
+            // A new root may not exist until the first lease is provisioned.
             return;
+        } catch (IOException | RuntimeException unreadable) {
+            scanFailed(root, unreadable, result);
+            size.incomplete = true;
         }
         if (legacy > 0) {
             result.legacyDirectories += legacy;
@@ -310,18 +319,35 @@ final class PaimonSpillReclaimer {
     }
 
     /** 先完整列出再处理，避免在遍历目录的同时修改它。列举失败不静默：该命名空间本次启动不可见。 */
-    private List<Path> list(Path directory) {
+    private List<Path> list(Path directory, Result result) {
         List<Path> entries = new ArrayList<>();
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
             for (Path entry : stream) {
                 entries.add(entry);
             }
         } catch (IOException | RuntimeException unreadable) {
-            audit.recordRateLimited(PaimonSpillAudit.Event.NAMESPACE_LIST_FAILED, directory.toString(),
-                    PaimonSpillAudit.details("directory", directory), unreadable);
+            scanFailed(directory, unreadable, result);
             return Collections.emptyList();
         }
         return entries;
+    }
+
+    private boolean isDirectory(Path path, Result result) {
+        try {
+            return Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).isDirectory();
+        } catch (NoSuchFileException absent) {
+            return false;
+        } catch (IOException | RuntimeException unreadable) {
+            scanFailed(path, unreadable, result);
+            return false;
+        }
+    }
+
+    private void scanFailed(Path directory, Throwable failure, Result result) {
+        result.scanFailures++;
+        audit.recordRateLimited(PaimonSpillAudit.Event.NAMESPACE_LIST_FAILED, directory.toString(),
+                PaimonSpillAudit.details("directory", directory,
+                        "directoryState", PaimonLocalDirectories.describe(directory)), failure);
     }
 
     private enum Kind { RECLAIMED, FAILED, LIVE, OVERLAPPING, RETIRED, REPLACED }
@@ -369,5 +395,12 @@ final class PaimonSpillReclaimer {
         long legacyBytes;
         boolean legacySizeIncomplete;
         boolean budgetExhausted;
+        int scanFailures;
+        int scanSkipped;
+
+        // Completeness covers eligible foreign v2 leases, not self-owned or unknown layouts.
+        boolean scanComplete() {
+            return scanFailures == 0 && scanSkipped == 0 && failed == 0 && skipped == 0 && !budgetExhausted;
+        }
     }
 }
