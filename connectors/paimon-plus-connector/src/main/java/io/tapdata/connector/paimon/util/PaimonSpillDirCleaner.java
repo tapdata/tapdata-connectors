@@ -382,25 +382,15 @@ public final class PaimonSpillDirCleaner {
                 result.budgetExhausted);
     }
 
-    private static final java.util.concurrent.atomic.AtomicInteger RECLAIM_THREAD_SEQ =
-            new java.util.concurrent.atomic.AtomicInteger();
+    private static final PaimonBackgroundThreads RECLAIM_THREADS =
+            new PaimonBackgroundThreads("paimon-spill-reclaim");
 
     /**
-     * 与 PaimonCompactionExecutor 保持同一约定：扫描线程显式沿用提交方的 TCCL，并在线程名里带上实例标识。
-     * 计数器只在一个 ClassLoader 内递增，因此名字里再加提交方 ClassLoader 的 identity hash，
-     * 否则几百个连接器实例都叫 paimon-spill-reclaim-1，线程栈无法归属到具体实例。
-     * 显式设置 TCCL 而不是依赖 new Thread 的隐式继承：行为相同，但意图可见，
-     * 将来改用非继承的线程工厂/线程组时不会静默改变。空闲 worker 会在 30s 内被下一个提交复用，
-     * 那时携带的是最初的提交方 loader。
+     * Shared scans run outside task groups so task teardown cannot interrupt deletion.
+     * The worker retains its creator's TCCL until its 30-second idle timeout.
      */
     static Thread newReclaimThread(Runnable task) {
-        ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
-        Thread thread = new Thread(task, "paimon-spill-reclaim-"
-                + Integer.toHexString(System.identityHashCode(contextLoader))
-                + "-" + RECLAIM_THREAD_SEQ.incrementAndGet());
-        thread.setContextClassLoader(contextLoader);
-        thread.setDaemon(true);
-        return thread;
+        return RECLAIM_THREADS.newThread(task);
     }
 
     private static final java.util.concurrent.ThreadPoolExecutor RECLAIM_WORKER =
