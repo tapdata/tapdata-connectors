@@ -382,13 +382,26 @@ public final class PaimonSpillDirCleaner {
                 result.budgetExhausted);
     }
 
+    private static final java.util.concurrent.atomic.AtomicInteger RECLAIM_THREAD_SEQ =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /**
+     * 与 PaimonCompactionExecutor 保持同一约定：扫描线程显式沿用提交方的 TCCL，并用递增后缀命名。
+     * 不设 TCCL 时线程只是隐式继承创建者，部署几百个连接器 ClassLoader 后堆栈里会出现同名线程，
+     * 无法归属到具体实例。
+     */
+    static Thread newReclaimThread(Runnable task) {
+        ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
+        Thread thread = new Thread(task, "paimon-spill-reclaim-" + RECLAIM_THREAD_SEQ.incrementAndGet());
+        thread.setContextClassLoader(contextLoader);
+        thread.setDaemon(true);
+        return thread;
+    }
+
     private static final java.util.concurrent.ThreadPoolExecutor RECLAIM_WORKER =
             new java.util.concurrent.ThreadPoolExecutor(0, 1, 30, java.util.concurrent.TimeUnit.SECONDS,
-                    new java.util.concurrent.SynchronousQueue<>(), task -> {
-                        Thread thread = new Thread(task, "paimon-spill-reclaim");
-                        thread.setDaemon(true);
-                        return thread;
-                    }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+                    new java.util.concurrent.SynchronousQueue<>(), PaimonSpillDirCleaner::newReclaimThread,
+                    new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
 
     /**
      * Bound task startup waiting to 200 ms. At most one scan per ClassLoader is in flight,
@@ -429,14 +442,16 @@ public final class PaimonSpillDirCleaner {
                 }
             });
         } catch (java.util.concurrent.RejectedExecutionException busy) {
-            io.tapdata.connector.paimon.service.PaimonStopLog.offerWarn(log,
+            // 正常路径：同一 ClassLoader 一次只跑一个扫描，后续启动顺延到下次。
+            io.tapdata.connector.paimon.service.PaimonStopLog.offer(log,
                     "Paimon spill reclaim deferred: another scan is running; roots=" + snapshot, null);
             return;
         }
         try {
             scan.get(waitMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
         } catch (java.util.concurrent.TimeoutException pending) {
-            io.tapdata.connector.paimon.service.PaimonStopLog.offerWarn(log,
+            // 正常路径：慢盘或多任务同时启动时每次都会走到这里，不应记 WARN。
+            io.tapdata.connector.paimon.service.PaimonStopLog.offer(log,
                     "Paimon spill reclaim continues in background after " + waitMillis
                             + " ms; task startup proceeds; roots=" + snapshot, null);
         } catch (InterruptedException interrupted) {

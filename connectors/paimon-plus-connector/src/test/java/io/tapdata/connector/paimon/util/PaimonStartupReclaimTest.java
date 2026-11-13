@@ -22,7 +22,7 @@ class PaimonStartupReclaimTest {
             assertTrue(started.await(5, TimeUnit.SECONDS));
             assertTimeoutPreemptively(java.time.Duration.ofSeconds(2), () ->
                     PaimonSpillDirCleaner.reclaimForStartup(Collections.emptyList(), log, worker, 20));
-            verify(log, timeout(5000)).warn(contains("continues in background"));
+            verify(log, timeout(5000)).info(contains("continues in background"));
             release.countDown();
             worker.shutdown();
             assertTrue(worker.awaitTermination(5, TimeUnit.SECONDS));
@@ -54,7 +54,30 @@ class PaimonStartupReclaimTest {
         Log log = mock(Log.class);
         assertDoesNotThrow(() -> PaimonSpillDirCleaner.reclaimForStartup(
                 Collections.emptyList(), log, rejected, 20));
-        verify(log, timeout(5000)).warn(contains("reclaim deferred"));
+        verify(log, timeout(5000)).info(contains("reclaim deferred"));
+        verify(log, never()).warn(contains("reclaim deferred"));
+    }
+
+    @Test
+    void reclaimWorkerThreadKeepsCallerTcclAndGetsUniqueName() throws Exception {
+        ClassLoader caller = new java.net.URLClassLoader(new java.net.URL[0], getClass().getClassLoader());
+        ClassLoader original = Thread.currentThread().getContextClassLoader();
+        Thread first;
+        try {
+            Thread.currentThread().setContextClassLoader(caller);
+            first = PaimonSpillDirCleaner.newReclaimThread(() -> { });
+        } finally {
+            Thread.currentThread().setContextClassLoader(original);
+        }
+        try {
+            assertSame(caller, first.getContextClassLoader(), "扫描线程必须沿用提交方的 TCCL");
+            assertTrue(first.isDaemon());
+            assertTrue(first.getName().startsWith("paimon-spill-reclaim-"), first.getName());
+            Thread second = PaimonSpillDirCleaner.newReclaimThread(() -> { });
+            assertNotEquals(first.getName(), second.getName(), "多实例线程名必须可区分");
+        } finally {
+            ((java.net.URLClassLoader) caller).close();
+        }
     }
 
     @Test
