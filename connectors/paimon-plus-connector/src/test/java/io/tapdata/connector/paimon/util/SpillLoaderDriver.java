@@ -31,19 +31,14 @@ public final class SpillLoaderDriver {
         return reclaimer.reclaim(roots).reclaimed.size();
     }
 
-    /** 与 {@link #reclaim} 相同，但在打开锁文件后于 barrier 处会合，用于制造两个 loader 的并发回收。 */
+    /** 与 {@link #reclaim} 相同，但在开始回收前于 barrier 处会合，用于制造两个 loader 的并发回收。 */
     public static int reclaimAfterBarrier(Collection<String> roots, CyclicBarrier bothOpened) {
-        PaimonSpillReclaimer reclaimer = new PaimonSpillReclaimer(PaimonJvmIdentity::current,
-                PaimonSpillReclaimer.DEFAULT_TYPE_PROBE, lockFile -> {
-                    FileChannel channel = PaimonSpillReclaimer.DEFAULT_OPENER.open(lockFile);
-                    try {
-                        bothOpened.await(10, TimeUnit.SECONDS);
-                    } catch (Exception barrier) {
-                        channel.close();
-                        throw new java.io.IOException(barrier);
-                    }
-                    return channel;
-                }, PaimonSpillFiles.FILES_DELETE, PaimonSpillAudit.defaultAudit(), PaimonSpillReclaimer.DEFAULT_BUDGET);
+        try {
+            bothOpened.await(10, TimeUnit.SECONDS);
+        } catch (Exception barrier) {
+            throw new IllegalStateException(barrier);
+        }
+        PaimonSpillReclaimer reclaimer = PaimonSpillReclaimer.standard();
         return reclaimer.reclaim(roots).reclaimed.size();
     }
 

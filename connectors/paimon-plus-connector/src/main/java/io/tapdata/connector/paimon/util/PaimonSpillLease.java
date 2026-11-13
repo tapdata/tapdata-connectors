@@ -85,10 +85,20 @@ final class PaimonSpillLease {
      */
     static PaimonSpillLease provision(List<String> configuredRoots, String ownerLabel, Supplier<String> jvmId,
             PaimonSpillAudit audit, ProvisionHook hook) throws IOException {
-        List<Path> roots = normalizeRoots(configuredRoots);
-        String namespace = jvmId.get();
-        if (!PaimonJvmIdentity.isNamespaceName(namespace)) {
-            throw new IllegalStateException("Invalid Paimon spill namespace identity");
+        List<Path> roots;
+        String namespace;
+        try {
+            roots = normalizeRoots(configuredRoots);
+            namespace = jvmId.get();
+            if (!PaimonJvmIdentity.isNamespaceName(namespace)) {
+                throw new IllegalStateException("Invalid Paimon spill namespace identity");
+            }
+        } catch (IOException | RuntimeException failure) {
+            audit.record(PaimonSpillAudit.Event.PROVISION_FAILED, PaimonSpillAudit.details(
+                    "owner", ownerLabel, "stage", "normalize-roots-or-identity", "roots", configuredRoots,
+                    "directoryState", configuredRoots == null ? null
+                            : PaimonLocalDirectories.describeRoots(configuredRoots)), failure);
+            throw failure;
         }
         String label = ownerLabel == null ? "unlabeled" : ownerLabel;
         String tag = tag(label);
@@ -99,7 +109,9 @@ final class PaimonSpillLease {
             }
         } catch (IOException | RuntimeException | Error failure) {
             audit.record(PaimonSpillAudit.Event.PROVISION_ROLLED_BACK, PaimonSpillAudit.details(
-                    "roots", roots, "rolledBack", provisioned.size(), "tag", tag, "owner", label), failure);
+                    "roots", roots, "rolledBack", provisioned.size(), "tag", tag, "owner", label,
+                    "directoryState", roots.stream().map(PaimonLocalDirectories::describe)
+                            .collect(java.util.stream.Collectors.toList())), failure);
             for (Root ready : provisioned) {
                 Throwable rollback = ready.retire(PaimonSpillFiles.FILES_DELETE, NO_RETIRE_HOOK);
                 if (rollback != null) {

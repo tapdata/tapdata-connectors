@@ -214,22 +214,15 @@ class PaimonSpillReclaimerTest {
     void concurrentReclaimersInOneJvmReclaimAtMostOnce(@TempDir Path root) throws Exception {
         Path lease = lease(root, FOREIGN, new byte[] {1, 2});
         CyclicBarrier bothOpened = new CyclicBarrier(2);
-        PaimonSpillReclaimer.LockFileOpener synchronizedOpener = lockFile -> {
-            FileChannel channel = PaimonSpillReclaimer.DEFAULT_OPENER.open(lockFile);
-            try {
-                bothOpened.await(10, TimeUnit.SECONDS);
-            } catch (Exception barrier) {
-                channel.close();
-                throw new IOException(barrier);
-            }
-            return channel;
-        };
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
             List<Future<PaimonSpillReclaimer.Result>> results = new ArrayList<>();
             for (int i = 0; i < 2; i++) {
-                results.add(pool.submit(() -> new PaimonSpillReclaimer(() -> SELF, path -> "apfs",
-                        synchronizedOpener, PaimonSpillFiles.FILES_DELETE, audit, 64).reclaim(roots(root))));
+                results.add(pool.submit(() -> {
+                    bothOpened.await(10, TimeUnit.SECONDS);
+                    return new PaimonSpillReclaimer(() -> SELF, path -> "apfs",
+                            countingOpener(), PaimonSpillFiles.FILES_DELETE, audit, 64).reclaim(roots(root));
+                }));
             }
             int reclaimed = 0;
             for (Future<PaimonSpillReclaimer.Result> result : results) {
