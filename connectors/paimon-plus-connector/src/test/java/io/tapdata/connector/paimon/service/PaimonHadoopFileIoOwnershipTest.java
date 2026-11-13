@@ -197,8 +197,8 @@ class PaimonHadoopFileIoOwnershipTest {
 
             inTaskGroup(oldTask, first::close);
             assertFalse(pool.isShutdown(), "单个 Service 不拥有共享 S3A 的关闭权");
-            // oldTask.destroy() 会在 finally 中的 destroyTaskGroup() 处理
-            // 如果有 daemon 线程（如回收线程）还在运行，直接 destroy() 会抛出 IllegalThreadStateException
+            destroyTaskGroup(oldTask);
+            assertTrue(oldTask.isDestroyed());
 
             inTaskGroup(newTask, second::init);
             assertSame(shared, hadoopFileSystem(second), "缓存打开时，新代必须沿用原 Hadoop FS 身份");
@@ -340,25 +340,15 @@ class PaimonHadoopFileIoOwnershipTest {
             return;
         }
         // 模拟宿主销毁任务组。HDFS 首次 RPC 的 Connection 线程是懒创建的，允许其响应中断退出。
-        // Daemon 回收线程和日志分发线程按设计不应被取消，可能需要更长时间完成。
         group.interrupt();
         Thread[] threads = new Thread[Math.max(16, group.activeCount() * 2 + 1)];
         int count = group.enumerate(threads, true);
-        boolean hasDaemonThreads = false;
         for (int index = 0; index < count; index++) {
             Thread thread = threads[index];
-            if (thread.isDaemon() && (thread.getName().startsWith("paimon-spill-reclaim-")
-                    || thread.getName().startsWith("paimon-stop-log-"))) {
-                // Paimon daemon 线程可以继续在后台运行，不阻塞任务组销毁
-                hasDaemonThreads = true;
-                continue;
-            }
             thread.join(5_000L);
             assertFalse(thread.isAlive(), "Task group still owns " + thread.getName());
         }
-        if (!hasDaemonThreads) {
-            group.destroy();
-        }
+        group.destroy();
     }
 
     private static void closeTestResources(AutoCloseable... resources) throws Exception {

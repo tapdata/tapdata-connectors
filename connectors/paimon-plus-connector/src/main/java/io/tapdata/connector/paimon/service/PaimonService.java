@@ -522,7 +522,7 @@ public class PaimonService implements AutoCloseable {
         if (StringUtils.isBlank(conf.getTrimmed(S3A_BUFFER_DIR))) {
             conf.set(S3A_BUFFER_DIR, PaimonSpillDirCleaner.resolveTmpDirs(config.getDiskTmpDir()));
         }
-        String warehousePath = config.getWarehouse();
+        String warehousePath = StringUtils.isBlank(config.getWarehouse()) ? null : config.getFullWarehousePath();
         if (warehousePath != null && warehousePath.regionMatches(true, 0, "s3a://", 0, 6)) {
             java.net.URI warehouse = java.net.URI.create(warehousePath);
             String bucketKey = "fs.s3a.bucket." + warehouse.getHost() + ".buffer.dir";
@@ -530,22 +530,11 @@ public class PaimonService implements AutoCloseable {
                 Configuration verified = io.tapdata.connector.paimon.fs.PaimonS3AFileSystem
                         .verifiedConfiguration(warehouse, conf);
                 conf.set(bucketKey, verified.get(S3A_BUFFER_DIR));
-                try {
-                    conf.set(S3A_BUFFER_DIR, verifyS3ABufferDirs(conf.getTrimmed(S3A_BUFFER_DIR)));
-                } catch (RuntimeException unusedGlobal) {
-                    PaimonStopLog.offerWarn(log,
-                            "Unused global fs.s3a.buffer.dir is invalid; warehouse bucket override is valid. "
-                                    + "Other buckets must pass their own validation: " + unusedGlobal.getMessage(),
-                            unusedGlobal);
-                }
+                // Other buckets validate their effective directory when their filesystem opens.
                 return;
             }
         }
         String configured = conf.getTrimmed(S3A_BUFFER_DIR);
-        if (StringUtils.isBlank(configured)) {
-            // 用户把属性覆盖成空值时退回 spill 根目录，避免 S3A 悄悄用回 ${hadoop.tmp.dir}/s3a。
-            configured = PaimonSpillDirCleaner.resolveTmpDirs(config.getDiskTmpDir());
-        }
         conf.set(S3A_BUFFER_DIR, verifyS3ABufferDirs(configured));
     }
 
