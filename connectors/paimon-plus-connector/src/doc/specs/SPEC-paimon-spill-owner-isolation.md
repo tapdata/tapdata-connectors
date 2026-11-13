@@ -494,7 +494,8 @@ git diff --check
 
 service 启动扫描由 ClassLoader 内单 worker 执行，SynchronousQueue 不保存待运行扫描。
 调用方最多等待 200ms；超时后运行中的扫描不取消，继续持有既有 JVM 共享监视器，
-直到 channel 关闭才放行。忙时只输出任务 WARN 并延后回收。
+直到 channel 关闭才放行。忙时只输出任务 INFO（`reclaim deferred`）并延后回收；
+只有 worker 已关闭这类异常情况才记 WARN。
 单调时钟只约束等待及旧布局 metadata-only 体积观察（100ms/10000 entries），
 不能作为 owner 存活判据，也不能使持锁中的删除提前释放锁。
 旧布局观察不跟随 symlink、不打开锁文件，估算不完整必须标记。

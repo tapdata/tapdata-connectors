@@ -59,11 +59,11 @@ Hadoop 在 S3A 初始化时把 fs.s3a.bucket.<bucket>.buffer.dir 传播到全局
 
 第三轮评审（PR #1023 head `554de594`）判定的三处应修问题，均属可观测性与诊断正确性，不改变回收协议：
 
-- **S1 扫描线程沿用提交方 TCCL 并获得唯一名**：`PaimonSpillDirCleaner.newReclaimThread` 显式 `setContextClassLoader` 并追加递增后缀（`paimon-spill-reclaim-<n>`），与 `PaimonCompactionExecutor` 既有约定一致。此前线程只是隐式继承创建者，且所有实例同名，几百个连接器 ClassLoader 下无法从线程名/堆栈归属到具体实例。新增 `PaimonStartupReclaimTest.reclaimWorkerThreadKeepsCallerTcclAndGetsUniqueName`。
+- **S1 扫描线程沿用提交方 TCCL 并获得可区分名**：`PaimonSpillDirCleaner.newReclaimThread` 显式 `setContextClassLoader`，名字为 `paimon-spill-reclaim-<TCCL identityHash>-<seq>`。计数器按 ClassLoader 递增，只靠它会让几百个连接器实例都叫 `...-1`；加上 loader 的 identity hash 才能在异常堆栈里区分实例（`PaimonCompactionExecutor` 用的是 tableKey，回收侧没有表名可用）。显式设置 TCCL 与 `new Thread` 的隐式继承行为相同，属意图显式化：将来换成非继承的线程工厂不会静默改变；空闲 worker 在 30s 内复用，届时携带最初的提交方 loader。新增 `PaimonStartupReclaimTest.reclaimWorkerThreadKeepsCallerTcclAndGetsUniqueName`。
 - **S2 目录回滚不再吞掉失败原因**：`PaimonLocalDirectories` 中探针删除与回滚删除的 `catch` 由 `IOException` 扩为 `IOException | RuntimeException`。`SecurityException`（`RuntimeException`）此前会从 `finally`/回滚循环逃逸，顶掉待传播的 `IllegalStateException`，导致 `fs.s3a.buffer.dir` 的真实失败原因丢失。
-- **S3 正常路径降级为 INFO**：`reclaim deferred`（同一 ClassLoader 已有扫描在跑）与 `reclaim continues in background after 200 ms`（慢盘或多任务同时启动）是设计内的正常路径，改用 `PaimonStopLog.offer`（INFO）。原 WARN 在 300 任务启动时成片出现，会被现场当作故障上报。失败类事件仍为 ERROR。
+- **S3 正常路径降级为 INFO**：`reclaim deferred`（同一 ClassLoader 已有扫描在跑）与 `reclaim continues in background after 200 ms`（慢盘或多任务同时启动）是设计内的正常路径，改用 `PaimonStopLog.offer`（INFO）。原 WARN 在 300 任务启动时成片出现，会被现场当作故障上报。`RejectedExecutionException` 不再一律当作“另一个扫描在跑”：`worker.isShutdown()` 时输出 `reclaim worker unavailable` 并保持 WARN（生产池不关闭，此分支不可达）。失败类事件仍为 ERROR。
 
-`PaimonStartupReclaimTest` 相应断言由 `warn(...)` 改为 `info(...)`，并对 `reclaim deferred` 额外断言不得走 WARN。
+`PaimonStartupReclaimTest` 相应调整：后台继续/超时走 INFO；新增真实 busy 池（core=0 + SynchronousQueue + AbortPolicy）用例断言 INFO 且队列为空、无 WARN 混入；worker 已关闭用例改为断言 WARN `reclaim worker unavailable`。SPEC 中“忙时只输出任务 WARN”同步改为 INFO。
 
 第四轮全量验证（2026-11-13，Linux / Temurin 17）：`mvn -o -pl connectors/paimon-plus-connector test`：**1339 项，0 failures，0 errors，2 skipped，BUILD SUCCESS**（较上轮 +1，为新增线程属性用例）。
 

@@ -48,35 +48,66 @@ class PaimonStartupReclaimTest {
     }
 
     @Test
-    void busyWorkerDefersWithoutQueueing() throws Exception {
+    void shutDownWorkerIsReportedAsUnavailable() throws Exception {
         ExecutorService rejected = Executors.newSingleThreadExecutor();
         rejected.shutdown();
         Log log = mock(Log.class);
         assertDoesNotThrow(() -> PaimonSpillDirCleaner.reclaimForStartup(
                 Collections.emptyList(), log, rejected, 20));
-        verify(log, timeout(5000)).info(contains("reclaim deferred"));
-        verify(log, never()).warn(contains("reclaim deferred"));
+        verify(log, timeout(5000)).warn(contains("reclaim worker unavailable"));
+    }
+
+    @Test
+    void busyWorkerDefersAsInfoWithoutQueueing() throws Exception {
+        // 真正的 busy：core=0 + SynchronousQueue + AbortPolicy，与生产池同构。
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch started = new CountDownLatch(1);
+        ThreadPoolExecutor worker = new ThreadPoolExecutor(0, 1, 1, TimeUnit.SECONDS,
+                new SynchronousQueue<>(), new ThreadPoolExecutor.AbortPolicy());
+        Log log = mock(Log.class);
+        try {
+            worker.submit(() -> {
+                started.countDown();
+                try { release.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            });
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            assertDoesNotThrow(() -> PaimonSpillDirCleaner.reclaimForStartup(
+                    Collections.emptyList(), log, worker, 20));
+            verify(log, timeout(5000)).info(contains("another scan is running"));
+            Thread.sleep(200); // PaimonStopLog 是异步派发，给误记的 WARN 一个到达窗口
+            verify(log, never()).warn(anyString());
+            assertEquals(0, worker.getQueue().size(), "被拒的扫描不能排队");
+        } finally {
+            release.countDown();
+            worker.shutdownNow();
+            worker.awaitTermination(5, TimeUnit.SECONDS);
+        }
     }
 
     @Test
     void reclaimWorkerThreadKeepsCallerTcclAndGetsUniqueName() throws Exception {
         ClassLoader caller = new java.net.URLClassLoader(new java.net.URL[0], getClass().getClassLoader());
+        ClassLoader other = new java.net.URLClassLoader(new java.net.URL[0], getClass().getClassLoader());
         ClassLoader original = Thread.currentThread().getContextClassLoader();
         Thread first;
+        Thread second;
         try {
             Thread.currentThread().setContextClassLoader(caller);
             first = PaimonSpillDirCleaner.newReclaimThread(() -> { });
+            Thread.currentThread().setContextClassLoader(other);
+            second = PaimonSpillDirCleaner.newReclaimThread(() -> { });
         } finally {
             Thread.currentThread().setContextClassLoader(original);
         }
         try {
             assertSame(caller, first.getContextClassLoader(), "扫描线程必须沿用提交方的 TCCL");
+            assertSame(other, second.getContextClassLoader());
             assertTrue(first.isDaemon());
-            assertTrue(first.getName().startsWith("paimon-spill-reclaim-"), first.getName());
-            Thread second = PaimonSpillDirCleaner.newReclaimThread(() -> { });
-            assertNotEquals(first.getName(), second.getName(), "多实例线程名必须可区分");
+            assertTrue(first.getName().matches("paimon-spill-reclaim-[0-9a-f]+-\\d+"), first.getName());
+            assertNotEquals(first.getName(), second.getName(), "不同 ClassLoader 实例的线程名必须可区分");
         } finally {
             ((java.net.URLClassLoader) caller).close();
+            ((java.net.URLClassLoader) other).close();
         }
     }
 
