@@ -526,9 +526,9 @@ class MongodbMergeOperateTest {
 			));
 			boolean parentPulled = false;
 			for (MergeResult result : mergeResults) {
-				if (result == null || result.getOperation() == null) {
-					continue;
-				}
+				// 写入端按 operation 生成 WriteModel，operation 为空会 NPE（M1 r4g 实测 Error code 15019）
+				assertNotNull(result, "merge results must not contain null: " + mergeResults);
+				assertNotNull(result.getOperation(), "merge results must not contain operation-less entries: " + mergeResults);
 				assertEquals(MergeResult.Operation.UPDATE, result.getOperation());
 				Document update = result.getUpdate();
 				assertFalse(update.containsKey("$set"), "parent DELETE must not $set child data: " + update.toJson());
@@ -582,9 +582,9 @@ class MongodbMergeOperateTest {
 			// 父元素 $pull 已连同其嵌套 attrList 一起移除；任何按 element1.attrCode 匹配的嵌套 $pull 都会误删 PROD_ID=104 的 attrList[21]
 			boolean parentPulled = false;
 			for (MergeResult result : mergeResults) {
-				if (result == null || result.getOperation() == null) {
-					continue;
-				}
+				// 写入端按 operation 生成 WriteModel，operation 为空会 NPE（M1 r4g 实测 Error code 15019）
+				assertNotNull(result, "merge results must not contain null: " + mergeResults);
+				assertNotNull(result.getOperation(), "merge results must not contain operation-less entries: " + mergeResults);
 				Document update = result.getUpdate();
 				Document pull = update.get("$pull", Document.class);
 				if (pull != null && pull.containsKey("parts")) {
