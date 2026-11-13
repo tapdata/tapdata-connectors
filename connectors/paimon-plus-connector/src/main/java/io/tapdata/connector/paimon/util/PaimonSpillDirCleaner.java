@@ -132,7 +132,8 @@ public final class PaimonSpillDirCleaner {
             if (created[0] == null) {
                 PaimonSpillAudit.defaultAudit().record(PaimonSpillAudit.Event.IO_MANAGER_BUILD_FAILED,
                         PaimonSpillAudit.details("owner", ownerLabel, "roots",
-                                Arrays.asList(lease.ioRoots())), failure);
+                                Arrays.asList(lease.ioRoots()), "directoryState",
+                                PaimonLocalDirectories.describeRoots(Arrays.asList(lease.ioRoots()))), failure);
                 // 尚无 IOManager，也就没有任何使用者：立即退役全部根（Spec §4.4 第 4 步）。
                 for (PaimonSpillLease.Root root : lease.roots()) {
                     Throwable rollback = root.retire();
@@ -158,8 +159,12 @@ public final class PaimonSpillDirCleaner {
             return new IOManagerBuildResult(ioManager, paths);
         } catch (Exception | Error failure) {
             // IOManager 已构造：按 V1.2 语义保留租约与锁，不 close、不递归删除（Spec D6）。
+            List<java.util.Map<String, Object>> state =
+                    PaimonLocalDirectories.describeRoots(Arrays.asList(lease.ioRoots()));
+            failure.addSuppressed(new IOException("Paimon spill directory evidence: owner="
+                    + lease.ownerLabel() + ", directoryState=" + state));
             PaimonSpillAudit.defaultAudit().record(PaimonSpillAudit.Event.SPILL_REGISTRATION_INCOMPLETE,
-                    PaimonSpillAudit.details("owner", lease.ownerLabel()), failure);
+                    PaimonSpillAudit.details("owner", lease.ownerLabel(), "directoryState", state), failure);
             scope.retain(failure);
             if (failure instanceof Error) { throw (Error) failure; }
             throw new IllegalStateException("Paimon spill registration incomplete; lease retained", failure);

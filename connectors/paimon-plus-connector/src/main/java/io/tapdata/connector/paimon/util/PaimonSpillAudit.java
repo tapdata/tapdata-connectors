@@ -36,6 +36,8 @@ public final class PaimonSpillAudit {
         LEASE_RESIDUE(Severity.WARN),
         LEASE_RECLAIMED(Severity.INFO),
         RECLAIM_FAILED(Severity.ERROR),
+        RECLAIM_INSPECTION_FAILED(Severity.WARN),
+        PROVISION_FAILED(Severity.ERROR),
         RECLAIM_SKIPPED(Severity.INFO),
         ADMISSION_DENIED(Severity.WARN),
         LEGACY_LAYOUT_FOUND(Severity.WARN),

@@ -199,9 +199,9 @@
 
 1. 对每个根：`<sub>` 不存在或是符号链接则跳过；文件系统未通过准入（§4.6）则审计一次后跳过。
 2. 列出 `<sub>` 下的命名空间：名称等于自身 jvmId、不符合正则、或是符号链接的，一律跳过；**自身命名空间不列出其内容，不打开其中任何文件**。
-3. 对外部命名空间中名称合规的 lease：
+3. 对外部命名空间中名称合规的 lease：先取得 JVM 全局互斥监视器，覆盖属性读取、open、tryLock、删除、close 的整个周期。所有插件 ClassLoader 共享同一个固定 intern 字符串监视器；不能使用类内独立 static 锁。单次 lease 处理结束后释放监视器。
    - `<lock>` 不存在：仅执行 `rmdir(<lease>)`，失败即跳过。
-   - `<lock>` 存在：先记录 fileKey（NOFOLLOW），再以不带 CREATE、带 NOFOLLOW 的方式打开并 `tryLock`。返回 null、`OverlappingFileLockException` 或任何异常都跳过（Overlapping 只可能来自本 JVM 另一个 ClassLoader 的回收者，见 INV-05）。
+   - `<lock>` 存在：先记录 fileKey（NOFOLLOW），再以不带 CREATE、带 NOFOLLOW 的方式打开并 `tryLock`。返回 null 则视为活跃；锁异常保守跳过。权限/读取异常保留原始 cause、计入 failed 并限频 WARN。遵守全局互斥的回收者之间不应出现 `OverlappingFileLockException`。
    - 取得锁后复核：路径仍存在，且 fileKey 与先前一致；否则释放并跳过。
    - 按 §4.3 的 RECLAIMING → ABSENT 执行删除。
 4. 命名空间内的 lease 处理完后，尝试 `rmdir(<ns>)`（非空时自然失败）。
@@ -231,7 +231,7 @@
 | INV-02 | 处于 ACTIVE/RETAINED 的 lease，其锁对象的可达性不短于 lease 内任何资源使用者的生命周期 |
 | INV-03 | 唯一的存活证明是 OS 记录锁；mtime、目录年龄、pid 存在性、心跳、取消结果、PDK unregister、ClassLoader.close、写入 API 返回值均不参与删除判定 |
 | INV-04 | 回收者不创建、不重建锁文件；leaseId 一次性使用；回收者持锁后必须复核路径存在且 fileKey 一致 |
-| INV-05 | jvmId 在同一 JVM 内唯一且稳定（§4.2）；因此回收者遇到的 Overlapping 只可能来自本 JVM 另一个 ClassLoader 的回收者，关闭探测 channel 只影响已处于 ORPHANED 的 lease |
+| INV-05 | 同 JVM 所有 ClassLoader 的回收者在 open 前取得共享监视器，直到 close 后才允许下一回收者打开锁文件；禁止通过 Overlapping 后 close 的方式协调。因为第二个 channel 的 close 可能释放第一个回收者的真实 OS 锁，PROVISIONING owner 随后可能取得锁进入 ACTIVE |
 | INV-06 | 实际使用者退出的证明先于 writer.close；writer/committer/IOManager 关闭成功先于 Retire（沿用 V1.2） |
 | INV-07 | RETAINED 不迁移到其他状态，直至进程退出；迟到完成不改写为 SUCCESS |
 | INV-08 | 准入失败、路径或身份无法确定时，关闭回收并保留现状，不回退到时间判断 |
@@ -244,13 +244,13 @@
 
 - 删除 `<io>` 只发生在两处：Retire（只由 owner 在 RETIRING 中执行）和 RECLAIMING（要求回收者持有 `<lock>` 的记录锁，并复核路径与 fileKey）。
 - 在 ACTIVE/RETAINED 期间，owner 进程持有该锁。由 A1，其他进程无法取得锁。
-- 由 INV-01 与 INV-05，本进程内没有代码打开该锁文件，A2 所描述的唯一失效路径不会出现。
+- 由 INV-01，owner 进程中的回收者不打开本命名空间锁文件；由 INV-05，回收进程中不会有另一个回收者打开并关闭正在被持锁的 inode。A2 所描述的失效路径被排除。
 - 因此任何回收者都无法进入 RECLAIMING。
 - 已经打开旧 inode 的迟到回收者，由 A6 与 INV-04 的复核排除。
 
 **活性（L1）**：若 owner 进程终止，且之后某个 jvmId 不同、文件系统通过准入的进程在调用回收时预算未用尽，该 lease 最终会被回收。依据：进程退出时内核释放其全部记录锁。
 
-**有界性（L2）**：Provision 在 3 次尝试内结束；Reclaim 每次调用至多处理 budget 个 lease。
+**有界性（L2）**：Provision 在 3 次尝试内结束；Reclaim 每次调用至多成功回收 budget 个 lease；该预算不限制扫描数、单个目录删除耗时或等待 JVM 互斥的时间。
 
 ## 6. 功能要求
 

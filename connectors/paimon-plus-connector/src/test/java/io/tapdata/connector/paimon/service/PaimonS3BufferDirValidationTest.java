@@ -115,6 +115,34 @@ class PaimonS3BufferDirValidationTest {
         assertTrue(empty.getMessage().contains("not an empty entry"), empty.getMessage());
     }
 
+    @Test
+    void warehouseBucketOverrideIsValidatedInsteadOfAnUnusedGlobalPath() throws Exception {
+        PaimonConfig config = s3Config(tempDir.resolve("default"));
+        config.setWarehouse("s3a://customer/warehouse");
+        Path blocker = Files.write(tempDir.resolve("unused-global"), new byte[]{1});
+        List<LinkedHashMap<String, String>> values = properties("fs.s3a.buffer.dir", blocker.resolve("buffer").toString());
+        values.addAll(properties("fs.s3a.bucket.customer.buffer.dir", tempDir.resolve("bucket-buffer").toString()));
+        config.setS3Properties(values);
+        Configuration hadoop = buildHadoopConfiguration(config);
+        assertEquals(tempDir.resolve("bucket-buffer").toString(),
+                org.apache.hadoop.fs.s3a.S3AUtils.propagateBucketOptions(hadoop, "customer").get("fs.s3a.buffer.dir"));
+        assertTrue(Files.isDirectory(tempDir.resolve("bucket-buffer")));
+    }
+
+    @Test
+    void blankGlobalAndBucketValuesBothFallBackToConfiguredSpillRoot() throws Exception {
+        Path spill = tempDir.resolve("custom-spill");
+        PaimonConfig config = s3Config(spill);
+        config.setWarehouse("s3a://customer/warehouse");
+        List<LinkedHashMap<String, String>> values = properties("fs.s3a.buffer.dir", "  ");
+        values.addAll(properties("fs.s3a.bucket.customer.buffer.dir", "  "));
+        config.setS3Properties(values);
+        Configuration hadoop = buildHadoopConfiguration(config);
+        assertEquals(spill.toString(), org.apache.hadoop.fs.s3a.S3AUtils
+                .propagateBucketOptions(hadoop, "customer").getTrimmed("fs.s3a.buffer.dir"));
+        assertTrue(Files.isDirectory(spill));
+    }
+
     private PaimonConfig s3Config(Path diskTmpDir) {
         PaimonConfig config = new PaimonConfig();
         config.setStorageType("s3");

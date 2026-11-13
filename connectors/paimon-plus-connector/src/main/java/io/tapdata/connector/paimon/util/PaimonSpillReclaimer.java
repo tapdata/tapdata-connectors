@@ -32,6 +32,13 @@ import java.util.function.Supplier;
  */
 final class PaimonSpillReclaimer {
 
+    // String.intern is shared by all ClassLoaders in this JVM. A class-local monitor is
+    // insufficient: closing ANY fd for an inode releases this process's POSIX locks on it.
+    // Keep this key stable across connector releases using this protocol. Serialize the
+    // entire attribute/open/lock/delete/close cycle, even when roots alias the same inode.
+    private static final Object RECLAIM_MONITOR =
+            "io.tapdata.connector.paimon.spill.v2.reclaimer.open-close".intern();
+
     static final int DEFAULT_BUDGET = 64;
     static final Set<String> SUPPORTED_FILE_STORE_TYPES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
             "ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "tmpfs", "overlay", "apfs")));
@@ -136,21 +143,29 @@ final class PaimonSpillReclaimer {
 
     private boolean admitted(Path root, Path subroot) {
         String type;
+        Throwable probeFailure = null;
         try {
             type = typeProbe.type(subroot);
         } catch (IOException | RuntimeException failure) {
             type = null;
+            probeFailure = failure;
         }
         String normalized = type == null ? "unknown" : type.trim().toLowerCase(Locale.ROOT);
         if (SUPPORTED_FILE_STORE_TYPES.contains(normalized)) {
             return true;
         }
         audit.recordRateLimited(PaimonSpillAudit.Event.ADMISSION_DENIED, root.toString(),
-                PaimonSpillAudit.details("root", root, "fileStoreType", normalized));
+                PaimonSpillAudit.details("root", root, "fileStoreType", normalized), probeFailure);
         return false;
     }
 
     private void reclaimLease(Path root, Path lease, Result result) {
+        synchronized (RECLAIM_MONITOR) {
+            reclaimLeaseExclusively(root, lease, result);
+        }
+    }
+
+    private void reclaimLeaseExclusively(Path root, Path lease, Result result) {
         Path lockFile = lease.resolve(PaimonSpillLease.LOCK_FILE);
         BasicFileAttributes before;
         try {
@@ -160,7 +175,7 @@ final class PaimonSpillReclaimer {
             PaimonSpillFiles.removeEmptyDirectory(lease);
             return;
         } catch (IOException | RuntimeException failure) {
-            skip(root, lease, "lock-attributes-unreadable", result);
+            inspectionFailed(root, lease, "lock-attributes-unreadable", failure, result);
             return;
         }
         if (!before.isRegularFile() || before.fileKey() == null) {
@@ -173,7 +188,7 @@ final class PaimonSpillReclaimer {
         } catch (NoSuchFileException retiredMeanwhile) {
             return;
         } catch (IOException | RuntimeException failure) {
-            skip(root, lease, "lock-open-failed", result);
+            inspectionFailed(root, lease, "lock-open-failed", failure, result);
             return;
         }
         Outcome outcome;
@@ -181,7 +196,7 @@ final class PaimonSpillReclaimer {
             outcome = reclaimLocked(lease, lockFile, before, channel);
         } finally {
             try {
-                // 只释放本回收者的锁：本进程不持有任何外部命名空间中的 owner 锁（INV-01、INV-05）。
+                // JVM-wide monitor prevents another reclaimer from opening/closing this inode until here.
                 channel.close();
             } catch (IOException ignored) {
                 // 关闭失败不改变已完成的删除，也不会影响 owner。
@@ -251,6 +266,13 @@ final class PaimonSpillReclaimer {
             return Outcome.failed(failure);
         }
         return Outcome.reclaimed(io.bytesDeleted);
+    }
+
+    private void inspectionFailed(Path root, Path lease, String reason, Throwable failure, Result result) {
+        result.failed++;
+        audit.recordRateLimited(PaimonSpillAudit.Event.RECLAIM_INSPECTION_FAILED, root + "|" + reason,
+                PaimonSpillAudit.details("root", root, "lease", lease, "reason", reason,
+                        "directoryState", PaimonLocalDirectories.describe(root)), failure);
     }
 
     private void skip(Path root, Path lease, String reason, Result result) {

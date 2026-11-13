@@ -527,7 +527,22 @@ public class PaimonService implements AutoCloseable {
      * message cannot distinguish a bad path from a full disk, so an operator reading it tends to
      * chase capacity. Failing here reports the concrete path and the concrete reason instead.
      */
-    private void applyVerifiedS3ABufferDir(Configuration conf) {
+    private void applyVerifiedS3ABufferDir(Configuration conf) throws IOException {
+        // Normalize a blank global value before a blank bucket override inherits it.
+        if (StringUtils.isBlank(conf.getTrimmed(S3A_BUFFER_DIR))) {
+            conf.set(S3A_BUFFER_DIR, PaimonSpillDirCleaner.resolveTmpDirs(config.getDiskTmpDir()));
+        }
+        String warehousePath = config.getWarehouse();
+        if (warehousePath != null && warehousePath.regionMatches(true, 0, "s3a://", 0, 6)) {
+            java.net.URI warehouse = java.net.URI.create(warehousePath);
+            String bucketKey = "fs.s3a.bucket." + warehouse.getHost() + ".buffer.dir";
+            if (warehouse.getHost() != null && conf.get(bucketKey) != null) {
+                Configuration verified = io.tapdata.connector.paimon.fs.PaimonS3AFileSystem
+                        .verifiedConfiguration(warehouse, conf);
+                conf.set(bucketKey, verified.get(S3A_BUFFER_DIR));
+                return;
+            }
+        }
         String configured = conf.getTrimmed(S3A_BUFFER_DIR);
         if (StringUtils.isBlank(configured)) {
             // 用户把属性覆盖成空值时退回 spill 根目录，避免 S3A 悄悄用回 ${hadoop.tmp.dir}/s3a。
@@ -543,73 +558,7 @@ public class PaimonService implements AutoCloseable {
      * {@link File#canWrite()} cannot see read-only mounts, quotas or ACL denials.
      */
     static String verifyS3ABufferDirs(String configured) {
-        List<Path> roots = new ArrayList<>();
-        for (String raw : configured.split(",", -1)) {
-            int index = roots.size() + 1;
-            String dir = raw.trim();
-            if (dir.isEmpty()) {
-                throw new IllegalArgumentException("fs.s3a.buffer.dir entry " + index
-                        + " must be an absolute local directory, not an empty entry");
-            }
-            Path candidate;
-            try {
-                candidate = Paths.get(dir);
-            } catch (RuntimeException invalid) {
-                throw new IllegalArgumentException("fs.s3a.buffer.dir entry " + index
-                        + " is not a usable local directory path: " + dir);
-            }
-            if (!candidate.isAbsolute()) {
-                throw new IllegalArgumentException("fs.s3a.buffer.dir entry " + index
-                        + " must be an absolute local directory: " + dir);
-            }
-            roots.add(candidate);
-        }
-        List<String> verified = new ArrayList<>(roots.size());
-        List<Path> created = new ArrayList<>();
-        try {
-            for (int i = 0; i < roots.size(); i++) {
-                Path path = roots.get(i);
-                File dir = path.toFile();
-                if (dir.exists() && !dir.isDirectory()) {
-                    throw new IllegalStateException("fs.s3a.buffer.dir entry " + (i + 1) + " (" + dir
-                            + ") exists but is not a directory");
-                }
-                if (!dir.isDirectory()) {
-                    if (!dir.mkdirs() && !dir.isDirectory()) {
-                        throw new IllegalStateException("fs.s3a.buffer.dir entry " + (i + 1) + " (" + dir
-                                + ") does not exist and cannot be created; S3A upload buffering requires"
-                                + " a writable local directory on the engine host");
-                    }
-                    created.add(path);
-                }
-                Path probe = path.resolve(".tapdata-s3a-buffer-probe-"
-                        + UUID.randomUUID().toString().replace("-", ""));
-                try {
-                    Files.write(probe, new byte[] {0});
-                } catch (IOException | RuntimeException failure) {
-                    throw new IllegalStateException("fs.s3a.buffer.dir entry " + (i + 1) + " (" + dir
-                            + ") is not writable by the engine process: " + failure, failure);
-                } finally {
-                    try {
-                        Files.deleteIfExists(probe);
-                    } catch (IOException ignore) {
-                        // A leftover probe file is harmless; the writability answer is already known.
-                    }
-                }
-                verified.add(dir.toString());
-            }
-        } catch (RuntimeException failure) {
-            // 只回收本次新建的目录；非空目录删除会抛异常并被忽略，不会误删其他进程的数据。
-            for (int i = created.size() - 1; i >= 0; i--) {
-                try {
-                    Files.deleteIfExists(created.get(i));
-                } catch (IOException ignore) {
-                    // Directory is in use: leave it alone.
-                }
-            }
-            throw failure;
-        }
-        return String.join(",", verified);
+        return io.tapdata.connector.paimon.util.PaimonLocalDirectories.verifyS3ABufferDirs(configured);
     }
 
     /**
@@ -1843,6 +1792,13 @@ public class PaimonService implements AutoCloseable {
                 });
                 return writeContext;
             } catch (Exception | Error e) {
+                // Task-log outlet as well as the engine audit; preserve lifecycle decisions even
+                // when the logging backend itself fails.
+                try {
+                    PaimonStopLog.offerError(log, "Paimon writer initialization failed: table=" + tableKey
+                            + ", bucketMode=" + fileStoreTable.bucketMode() + ", diskTmpDir="
+                            + config.getDiskTmpDir(tableName) + ", cause=" + e, e);
+                } catch (RuntimeException | LinkageError ignored) { }
                 if (construction.hasResources() || stopController.isRetained() || stopController.expired() || e instanceof io.tapdata.connector.paimon.write.PaimonTableWriteContextFactory.IncompleteCleanupException) {
                     unsafeResourceOwners.add(tableKey);
                     retainClose(stopController, e);

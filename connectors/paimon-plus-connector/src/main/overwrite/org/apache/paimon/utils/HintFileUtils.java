@@ -40,6 +40,10 @@ import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
  */
 public class HintFileUtils {
 
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(HintFileUtils.class);
+    private static final java.util.concurrent.atomic.AtomicLong LAST_ORPHAN_LOG =
+            new java.util.concurrent.atomic.AtomicLong();
+
     public static final String EARLIEST = "EARLIEST";
     public static final String LATEST = "LATEST";
 
@@ -55,9 +59,23 @@ public class HintFileUtils {
             // A hint is only an optimization: DROP/recreate can leave LATEST behind
             // after its target was deleted. Fall back to listing actual versions in that
             // case, for both recovery and native writer/committer snapshot discovery.
-            if (fileIO.exists(file.apply(snapshotId))
-                    && !fileIO.exists(file.apply(nextSnapshot))) {
+            boolean targetExists = fileIO.exists(file.apply(snapshotId));
+            if (targetExists && !fileIO.exists(file.apply(nextSnapshot))) {
                 return snapshotId;
+            }
+            if (!targetExists) {
+                Long actual = findByListFiles(fileIO, Math::max, dir, prefix);
+                // Bound noisy recovery logs across tables without retaining table paths in memory.
+                long now = System.nanoTime();
+                long previous = LAST_ORPHAN_LOG.get();
+                if ((previous == 0 || now - previous >= TimeUnit.MINUTES.toNanos(1))
+                        && LAST_ORPHAN_LOG.compareAndSet(previous, now)) {
+                    try {
+                        LOG.warn("Paimon orphan LATEST hint ignored: directory={}, hint={}, actualLatest={}",
+                                dir, snapshotId, actual);
+                    } catch (RuntimeException | LinkageError ignored) { }
+                }
+                return actual;
             }
         }
         return findByListFiles(fileIO, Math::max, dir, prefix);
