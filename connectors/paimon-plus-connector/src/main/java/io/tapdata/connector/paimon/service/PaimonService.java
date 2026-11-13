@@ -351,19 +351,9 @@ public class PaimonService implements AutoCloseable {
                     }
                 }
             }
-            PaimonSpillDirCleaner.ReclaimSummary summary = PaimonSpillDirCleaner.reclaimOrphanedLeases(roots,
-                    (lease, bytes) -> log.info("Reclaimed orphaned Paimon spill lease {} ({} bytes)", lease, bytes));
-            if (summary.reclaimed() > 0 || summary.failed() > 0) {
-                log.info("Reclaimed {} orphaned Paimon spill lease(s) under {}; failed {}{}", summary.reclaimed(),
-                        roots, summary.failed(), summary.budgetExhausted() ? "; remaining leases deferred" : "");
-            }
-            if (summary.legacyDirectories() > 0) {
-                log.info("Found {} legacy flat Paimon spill director(ies) under {}; this version never opens or "
-                        + "deletes them, see the connector documentation for one-off cleanup",
-                        summary.legacyDirectories(), roots);
-            }
+            PaimonSpillDirCleaner.reclaimForStartup(roots, log);
         } catch (Exception e) {
-            log.warn("Failed to reclaim orphaned Paimon spill leases: {}", e.getMessage());
+            PaimonStopLog.offerWarn(log, "Failed to schedule Paimon spill reclaim", e);
         }
     }
 
@@ -540,6 +530,14 @@ public class PaimonService implements AutoCloseable {
                 Configuration verified = io.tapdata.connector.paimon.fs.PaimonS3AFileSystem
                         .verifiedConfiguration(warehouse, conf);
                 conf.set(bucketKey, verified.get(S3A_BUFFER_DIR));
+                try {
+                    conf.set(S3A_BUFFER_DIR, verifyS3ABufferDirs(conf.getTrimmed(S3A_BUFFER_DIR)));
+                } catch (RuntimeException unusedGlobal) {
+                    PaimonStopLog.offerWarn(log,
+                            "Unused global fs.s3a.buffer.dir is invalid; warehouse bucket override is valid. "
+                                    + "Other buckets must pass their own validation: " + unusedGlobal.getMessage(),
+                            unusedGlobal);
+                }
                 return;
             }
         }

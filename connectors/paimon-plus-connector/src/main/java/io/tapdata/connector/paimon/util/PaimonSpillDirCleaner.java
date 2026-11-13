@@ -382,6 +382,73 @@ public final class PaimonSpillDirCleaner {
                 result.budgetExhausted);
     }
 
+    private static final java.util.concurrent.ThreadPoolExecutor RECLAIM_WORKER =
+            new java.util.concurrent.ThreadPoolExecutor(0, 1, 30, java.util.concurrent.TimeUnit.SECONDS,
+                    new java.util.concurrent.SynchronousQueue<>(), task -> {
+                        Thread thread = new Thread(task, "paimon-spill-reclaim");
+                        thread.setDaemon(true);
+                        return thread;
+                    }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+
+    /**
+     * Bound task startup waiting to 200 ms. At most one scan per ClassLoader is in flight,
+     * with no pending queue; busy callers defer to the next startup. A running scan is never
+     * cancelled: its OS lock and the cross-ClassLoader monitor protect deletion to completion.
+     */
+    public static void reclaimForStartup(Collection<String> roots, io.tapdata.entity.logger.Log log) {
+        reclaimForStartup(roots, log, RECLAIM_WORKER, 200);
+    }
+
+    static void reclaimForStartup(Collection<String> roots, io.tapdata.entity.logger.Log log,
+            java.util.concurrent.ExecutorService worker, long waitMillis) {
+        final List<String> snapshot = new ArrayList<>(roots);
+        java.util.concurrent.Future<?> scan;
+        try {
+            scan = worker.submit(() -> {
+                try {
+                    PaimonSpillReclaimer.Result result = PaimonSpillReclaimer
+                            .standard(PaimonSpillAudit.withTaskLog(log)).reclaim(snapshot);
+                    io.tapdata.connector.paimon.service.PaimonStopLog.offer(log,
+                            "Paimon spill reclaim finished: roots=" + snapshot + ", reclaimed="
+                                    + result.reclaimed.size() + ", failed=" + result.failed
+                                    + ", legacyDirectories=" + result.legacyDirectories
+                                    + ", budgetExhausted=" + result.budgetExhausted, null);
+                    if (result.legacyDirectories > 0) {
+                        io.tapdata.connector.paimon.service.PaimonStopLog.offerWarn(log,
+                                "Legacy Paimon spill directories remain under " + snapshot
+                                        + "; observedBytes=" + result.legacyBytes
+                                        + ", sizeIncomplete=" + result.legacySizeIncomplete
+                                        + "; upgrade does not free their disk space. Stop all engines and old tasks "
+                                        + "using these roots, inspect du -sh -- <root>/paimon-io-*, then remove only "
+                                        + "confirmed unused directories. See connector documentation.", null);
+                    }
+                } catch (RuntimeException | LinkageError failure) {
+                    // The caller may already have timed out: the Future alone is not a log outlet.
+                    io.tapdata.connector.paimon.service.PaimonStopLog.offerError(log,
+                            "Paimon spill background reclaim failed: roots=" + snapshot, failure);
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException busy) {
+            io.tapdata.connector.paimon.service.PaimonStopLog.offerWarn(log,
+                    "Paimon spill reclaim deferred: another scan is running; roots=" + snapshot, null);
+            return;
+        }
+        try {
+            scan.get(waitMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException pending) {
+            io.tapdata.connector.paimon.service.PaimonStopLog.offerWarn(log,
+                    "Paimon spill reclaim continues in background after " + waitMillis
+                            + " ms; task startup proceeds; roots=" + snapshot, null);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            io.tapdata.connector.paimon.service.PaimonStopLog.offerWarn(log,
+                    "Paimon spill reclaim wait interrupted; scan keeps its lock until finished", interrupted);
+        } catch (java.util.concurrent.ExecutionException failure) {
+            io.tapdata.connector.paimon.service.PaimonStopLog.offerError(log,
+                    "Paimon spill reclaim failed: roots=" + snapshot, failure.getCause());
+        }
+    }
+
     /** 一次启动回收的摘要，供任务 TapLog 输出；逐条审计已写入引擎日志。 */
     public static final class ReclaimSummary {
         private final int reclaimed;

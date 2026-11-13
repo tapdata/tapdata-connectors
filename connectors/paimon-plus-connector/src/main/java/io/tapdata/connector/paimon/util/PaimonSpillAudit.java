@@ -83,6 +83,24 @@ public final class PaimonSpillAudit {
         return DEFAULT;
     }
 
+    static PaimonSpillAudit withTaskLog(io.tapdata.entity.logger.Log log) {
+        return withTaskLog(log, DEFAULT.sink);
+    }
+
+    static PaimonSpillAudit withTaskLog(io.tapdata.entity.logger.Log log, Sink engineSink) {
+        return new PaimonSpillAudit((event, fields, failure) -> {
+            // Enqueue before calling the engine sink: a blocked appender cannot hide this outlet.
+            if (event.severity == Severity.ERROR) {
+                io.tapdata.connector.paimon.service.PaimonStopLog.offerError(log,
+                        "Paimon spill " + event + " " + fields, failure);
+            } else if (event.severity == Severity.WARN) {
+                io.tapdata.connector.paimon.service.PaimonStopLog.offerWarn(log,
+                        "Paimon spill " + event + " " + fields, failure);
+            }
+            engineSink.emit(event, fields, failure);
+        }, System::nanoTime, System::getenv);
+    }
+
     void record(Event event, Map<String, Object> details) {
         record(event, details, null);
     }

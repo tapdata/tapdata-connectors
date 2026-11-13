@@ -91,12 +91,11 @@ public final class PaimonLocalDirectories {
                 }
                 if (!dir.isDirectory()) {
                     try {
-                        Files.createDirectories(path);
+                        createDirectories(path, created);
                     } catch (IOException | RuntimeException failure) {
                         throw new IllegalStateException("fs.s3a.buffer.dir entry " + (i + 1) + " (" + dir
                                 + ") does not exist and cannot be created; " + describe(path), failure);
                     }
-                    created.add(path);
                 }
                 Path probe = path.resolve(".tapdata-s3a-buffer-probe-"
                         + UUID.randomUUID().toString().replace("-", ""));
@@ -127,6 +126,18 @@ public final class PaimonLocalDirectories {
             throw failure;
         }
         return String.join(",", verified);
+    }
+
+    private static void createDirectories(Path path, List<Path> created) throws IOException {
+        if (Files.isDirectory(path)) { return; }
+        Path parent = path.getParent();
+        if (parent != null) { createDirectories(parent, created); }
+        try {
+            Files.createDirectory(path);
+            created.add(path);
+        } catch (java.nio.file.FileAlreadyExistsException raced) {
+            if (!Files.isDirectory(path)) { throw raced; }
+        }
     }
 
 }
