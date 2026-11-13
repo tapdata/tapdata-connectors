@@ -1,5 +1,30 @@
 # Connector distribution
 
+Batch builds create an independent local clone of the already checked-out source
+and detach at the immutable release-plan commit. This does not fetch from GitHub.
+The normal `.git` directory supports legacy `git-commit-id-plugin`/JGit versions
+used by enterprise connectors, which cannot read linked worktree `commondir`
+layouts. Git copies local objects with `--no-hardlinks` so the workspace and
+temporary directory can reside on separate filesystems. Temporary clones
+are removed on success or failure without altering the source checkout.
+
+## Transfer limits and progress
+
+Every Nexus request logs its target name, method, artifact path, completion time,
+and retries. Downloads report byte progress every ten seconds while data arrives.
+Requests have a ten-minute wall-clock limit covering connection setup, transfer,
+and all retries, in addition to socket inactivity timeouts. This uses POSIX timers
+in the publisher's main thread on the Linux CI runner; continuously trickling
+responses cannot extend the deadline. Upload steps default to 120 minutes and final inventory verification/BOM
+publication to 180 minutes. Override these with positive integer Actions Variables
+`CONNECTOR_UPLOAD_TIMEOUT_MINUTES` and `CONNECTOR_FINALIZE_TIMEOUT_MINUTES`
+respectively (both must fit within the 480-minute job limit). A timeout fails the
+run; rerun the workflow to resume its immutable Nexus release plan.
+
+Final verification still downloads and compares the actual JAR bytes from both
+Nexus installations. Once a remote JAR has been verified in that pass, checksum
+repair does not download that same JAR again. Existing bytes are never replaced.
+
 This directory contains the automated connector release workflow. CI compares
 the selected source ref with the source commit recorded in the latest Nexus
 BOM, finds connector modules affected by changes, versions them according to
@@ -9,18 +34,62 @@ full connector set.
 ## Running the release
 
 `.github/workflows/publish-connectors.yml` can be started with
-`workflow_dispatch` or called with `workflow_call`. The only optional input is
-`source_ref`; when omitted, CI uses the selected workflow branch. Both the
-workflow and caller must run on the explicitly trusted, protected `develop`
-branch in `tapdata/tapdata-connectors`. The source may be any protected branch
-in that repository. The reusable batch workflow independently checks the caller,
+`workflow_dispatch` or called with `workflow_call`. The `source_ref` input
+defaults to the selected workflow branch; enterprise inputs are described below. Both the
+workflow and caller must run on the explicitly trusted, protected `main` or
+`develop` branch in `tapdata/tapdata-connectors`. The source may be any protected
+branch in that repository. The reusable batch workflow independently checks the caller,
 branch protection, and that each pinned commit belongs to its validated branch
-history (scripts from `develop`, source from the selected source branch).
+history (scripts from the workflow branch, source from the selected source branch).
 Tags, commit refs, and unprotected branches are rejected before checkout or
 Nexus credential setup. CI resolves the validated source branch to a commit SHA
 and checks out that exact commit.
 
+For a manual release, select **main** (or **develop**) in the Actions **Run workflow**
+branch selector. Leave `source_ref` blank to release that branch, or enter a
+protected source branch such as `develop`. Changing `source_ref` alone does not
+change the branch that supplies the workflow and publishing scripts.
+
 Configure these repository/organization Actions variables and secrets:
+
+### Include enterprise connectors
+
+Enable `include_enterprise` when starting this same workflow to publish both
+repositories, sequentially on the configured runner. Existing callers default to
+OSS only. Set `enterprise_source_ref` to a protected branch in
+`tapdata/tapdata-connectors-enterprise`; if blank it follows `source_ref`, or the
+selected workflow branch. The enterprise branch is validated independently and
+its exact commit is pinned before checkout. Publishing scripts always come from
+the protected OSS workflow branch, never from the enterprise source checkout.
+
+Add the Actions Secret `CONNECTOR_ENTERPRISE_READ_TOKEN` to this repository (or
+an organization secret accessible here). Use a token with read access to repository
+contents and metadata for `tapdata/tapdata-connectors-enterprise` and the public
+OSS repository. The default `GITHUB_TOKEN` cannot read a different private repo.
+Reusable callers must pass this secret or use `secrets: inherit`. Do not put a
+token in workflow inputs. The token is scoped to validation and source checkout,
+is not persisted by checkout, and is not passed to Maven.
+
+Both distributions use the existing internal/external Nexus settings. Enterprise
+JARs retain their declared `io.tapdata:<artifactId>` coordinates and use the same
+PDK-based version rules and batches of at most ten. Their full inventory is
+published as `io.tapdata:connectors-enterprise-bom`, with independent metadata and
+`io.tapdata:connector-enterprise-release-plan` recovery plans. OSS continues to use
+`connectors-bom` and `connector-release-plan`. A failed or resumed enterprise
+release does not advance the OSS baseline (or vice versa). Initial enterprise
+publication builds every connector declared in its `connectors/pom.xml`.
+
+Example reusable invocation inputs:
+
+```yaml
+with:
+  source_ref: main
+  include_enterprise: true
+  enterprise_source_ref: main
+secrets: inherit
+```
+
+### Nexus settings
 
 | Kind | Name | Purpose |
 | --- | --- | --- |
@@ -31,6 +100,14 @@ Configure these repository/organization Actions variables and secrets:
 | Variable | `CONNECTOR_PUBLISH_RUNNER` | Optional runner label; defaults to `ubuntu-latest` |
 | Secret | `NEXUS_INTERNAL_USERNAME`, `NEXUS_INTERNAL_PASSWORD` | Internal repository credentials |
 | Secret | `NEXUS_EXTERNAL_USERNAME`, `NEXUS_EXTERNAL_PASSWORD` | External repository credentials |
+
+The planning job validates these settings before source checkout and recovery tests.
+If settings are missing or blank, it lists all missing names without printing values.
+Configuration validation does not test Nexus connectivity or upload permissions.
+Set them under **Settings → Secrets and variables → Actions**, using the Variables
+and Secrets tabs respectively, or organization settings accessible to this repository.
+These jobs do not select a GitHub Environment, so Environment-only settings are not
+available. A missing URL is a configuration error, not an HTTPS server error.
 
 Reusable workflow callers pass all four secrets explicitly (or use
 `secrets: inherit`); URLs and the runner label come from the caller repository's
@@ -65,9 +142,9 @@ external IP blank, ensure its DNS/hosts resolves `nexus.tapdata.net` to the publ
 installation (remove the internal hosts override from that runner). Alternatively,
 set `NEXUS_EXTERNAL_CONNECT_IP` to a stable public IP to pin both destinations.
 
-Publishing scripts are checked out from a pinned commit of protected `develop`,
-where this workflow is installed. Planning, batch preparation, upload, and BOM
-publication run separately from Maven. Each batch builds on a disposable
+Publishing scripts are checked out from a pinned commit of the protected workflow
+branch (`main` or `develop`), where this workflow is installed. Planning, batch
+preparation, upload, and BOM publication run separately from Maven. Each batch builds on a disposable
 GitHub-hosted `ubuntu-latest` runner without Nexus secrets; the upload job checks
 out the trusted scripts again. Source builds never execute on the internal Nexus
 runner. The build runner needs access to the Maven dependencies used for packaging.

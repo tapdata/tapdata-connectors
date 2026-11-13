@@ -35,6 +35,8 @@ def main():
                         help="new immutable BOM version")
     parser.add_argument("--source-commit", required=True,
                         help="Git commit used as the source baseline for this BOM")
+    parser.add_argument("--artifact-id", choices=["connectors-bom", "connectors-enterprise-bom"],
+                        default="connectors-bom")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
@@ -72,7 +74,7 @@ def main():
     project = ET.Element(f"{{{NS}}}project")
     sub(project, "modelVersion", "4.0.0")
     sub(project, "groupId", "io.tapdata")
-    sub(project, "artifactId", "connectors-bom")
+    sub(project, "artifactId", args.artifact_id)
     sub(project, "version", args.bom_version)
     sub(project, "packaging", "pom")
     sub(project, "name", "Tapdata Connectors BOM")

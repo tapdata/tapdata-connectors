@@ -4,6 +4,9 @@
 import argparse
 import base64
 import hashlib
+import io
+import signal
+from contextlib import contextmanager
 import http.client
 import ipaddress
 import json
@@ -25,6 +28,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BATCH_SIZE = 10
 ATTEMPTS = 3
+REQUEST_TOTAL_TIMEOUT = 600
+PROGRESS_INTERVAL = 10
 VERSION_RE = re.compile(r"^\d+(?:\.\d+)*$")
 NS = {"m": "http://maven.apache.org/POM/4.0.0"}
 
@@ -35,6 +40,16 @@ def run(command, *, cwd=None):
 
 
 def repositories():
+    required = [f"NEXUS_{name}_{suffix}"
+                for name in ("INTERNAL", "EXTERNAL")
+                for suffix in ("URL", "USERNAME", "PASSWORD")]
+    missing = [key for key in required if not os.environ.get(key, "").strip()]
+    if missing:
+        raise ValueError(
+            "Missing Actions configuration: " + ", ".join(missing) +
+            ". Configure *_URL under Settings > Secrets and variables > Actions > Variables "
+            "and *_USERNAME/*_PASSWORD under Secrets (or grant repository access to "
+            "organization configuration). Publishing jobs do not select an Environment.")
     targets = []
     for name in ("INTERNAL", "EXTERNAL"):
         prefix = f"NEXUS_{name}"
@@ -85,8 +100,11 @@ class RejectRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def open_request(repo, req):
+    # Large connector JARs need more time to send than metadata reads. This is
+    # a socket inactivity timeout, not a limit on the whole release operation.
+    timeout = 600 if req.get_method() == "PUT" else 45
     if not repo.get("connect_ip"):
-        return urllib.request.urlopen(req, timeout=45)
+        return urllib.request.urlopen(req, timeout=timeout)
     # Never let a proxy or redirect route a pinned request to another installation.
     target = urllib.parse.urlsplit(repo["url"])
     requested = urllib.parse.urlsplit(req.full_url)
@@ -95,7 +113,7 @@ def open_request(repo, req):
         raise ValueError("Pinned Nexus request must retain the configured HTTPS origin")
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({}), PinnedHTTPSHandler(repo["connect_ip"]), RejectRedirects())
-    return opener.open(req, timeout=45)
+    return opener.open(req, timeout=timeout)
 
 
 def artifact_url(group_id, artifact_id, version, repo, extension="jar"):
@@ -104,29 +122,79 @@ def artifact_url(group_id, artifact_id, version, repo, extension="jar"):
             f"{artifact_id}-{version}.{extension}")
 
 
-def request(repo, url, *, data=None, destination=None):
-    """Retry transient failures; only a GET 404 denotes an absent file."""
+class RequestDeadlineExceeded(RuntimeError):
+    """A transfer exceeded its wall-clock budget, including retries."""
+
+
+@contextmanager
+def transfer_deadline(label):
+    # Publishing runs in the main thread on Linux CI. Unlike socket timeouts,
+    # SIGALRM also bounds DNS, TLS, uploads, and continuously trickling reads.
+    started = time.monotonic()
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+
+    def expired(*_):
+        raise RequestDeadlineExceeded(f"{label} exceeded {REQUEST_TOTAL_TIMEOUT}s total transfer limit")
+
+    signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, REQUEST_TOTAL_TIMEOUT)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer[0]:
+            signal.setitimer(signal.ITIMER_REAL,
+                             max(0.001, previous_timer[0] - (time.monotonic() - started)),
+                             previous_timer[1])
+
+
+def request(repo, url, *, data=None, destination=None, method=None):
+    method = method or ("GET" if data is None else "PUT")
+    label = f"Nexus {repo['name']} {method} {urllib.parse.urlsplit(url).path}"
+    started = time.monotonic()
+    print(f"{label}: start" + (f" ({len(data)} bytes)" if data is not None else ""), flush=True)
+    try:
+        with transfer_deadline(label):
+            result = _request(repo, url, data=data, destination=destination, method=method)
+    except Exception as error:
+        print(f"{label}: failed after {time.monotonic() - started:.1f}s ({type(error).__name__})", flush=True)
+        raise
+    print(f"{label}: {'not found' if result is None else 'complete'} in {time.monotonic() - started:.1f}s", flush=True)
+    return result
+
+
+def _request(repo, url, *, data=None, destination=None, method=None):
+    """Retry transient failures; only a GET or HEAD 404 denotes an absent file."""
+    method = method or ("GET" if data is None else "PUT")
     credentials = base64.b64encode(
         f"{repo['username']}:{repo['password']}".encode()
     ).decode()
     for attempt in range(ATTEMPTS):
         req = urllib.request.Request(url, data=data,
-                                     method="GET" if data is None else "PUT",
+                                     method=method,
                                      headers={"Authorization": f"Basic {credentials}",
                                               "Content-Type": "application/octet-stream"})
         try:
             with open_request(repo, req) as response:
-                if destination is None:
-                    return response.read()
+                if method == "HEAD":
+                    return True
                 received = 0
-                with destination.open("wb") as output:
-                    while chunk := response.read(1024 * 1024):
+                last_progress = time.monotonic()
+                expected = response.headers.get("Content-Length")
+                output = destination.open("wb") if destination is not None else io.BytesIO()
+                with output:
+                    while chunk := response.read1(64 * 1024):
                         output.write(chunk)
                         received += len(chunk)
-                expected = response.headers.get("Content-Length")
-                if expected is not None and received != int(expected):
-                    raise http.client.IncompleteRead(b"", int(expected) - received)
-                return True
+                        if time.monotonic() - last_progress >= PROGRESS_INTERVAL:
+                            print(f"Nexus {repo['name']} {req.get_method()} {urllib.parse.urlsplit(url).path}: "
+                                  f"{received}/{expected or '?'} bytes received", flush=True)
+                            last_progress = time.monotonic()
+                    if expected is not None and received != int(expected):
+                        raise http.client.IncompleteRead(b"", int(expected) - received)
+                    return output.getvalue() if destination is None else True
         except urllib.error.HTTPError as error:
             if data is None and error.code == 404:
                 return None
@@ -135,6 +203,8 @@ def request(repo, url, *, data=None, destination=None):
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError):
             if attempt == ATTEMPTS - 1:
                 raise
+        print(f"Nexus {repo['name']} {req.get_method()} {urllib.parse.urlsplit(url).path}: "
+              f"retry {attempt + 2}/{ATTEMPTS}", flush=True)
         time.sleep(2 ** attempt)
 
 
@@ -161,9 +231,39 @@ def put_immutable(repo, url, content):
 def upload_file(repo, url, path):
     content = path.read_bytes()
     put_immutable(repo, url, content)
+    upload_checksums(repo, url, content)
+
+
+def upload_checksums(repo, url, content):
     for algorithm in ("sha1", "sha256"):
         checksum = hashlib.new(algorithm, content).hexdigest().encode()
         put_immutable(repo, f"{url}.{algorithm}", checksum)
+
+
+def sidecar_digest(repo, url):
+    """Return the normalized Maven .sha256 sidecar digest for url, or None.
+
+    A missing or malformed sidecar cannot stand in for the JAR bytes and
+    sends the caller back to a full download.
+    """
+    content = request(repo, f"{url}.sha256")
+    if content is None:
+        return None
+    try:
+        digest = content.decode("ascii").strip().lower()
+    except UnicodeDecodeError:
+        digest = ""
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        print(f"::warning::Ignoring malformed SHA-256 sidecar in {repo['name']}: "
+              f"{urllib.parse.urlsplit(url).path}.sha256", flush=True)
+        return None
+    return digest
+
+
+def jar_exists(repo, url):
+    # A surviving .sha256 sidecar does not prove the JAR itself is still
+    # stored; detached checksums can outlive a deleted artifact.
+    return request(repo, url, method="HEAD") is not None
 
 
 def pom_dependencies(pom_path):
@@ -187,20 +287,34 @@ def connector_modules():
     return modules
 
 
+def distribution_artifact(kind):
+    distribution = os.environ.get("CONNECTOR_DISTRIBUTION", "opensource")
+    if distribution not in ("opensource", "enterprise"):
+        raise ValueError("CONNECTOR_DISTRIBUTION must be opensource or enterprise")
+    return {
+        "bom": "connectors-enterprise-bom" if distribution == "enterprise" else "connectors-bom",
+        "plan": "connector-enterprise-release-plan" if distribution == "enterprise" else "connector-release-plan",
+    }[kind]
+
+
+def bom_metadata_url(repo):
+    return f"{repo['url']}io/tapdata/{distribution_artifact('bom')}/maven-metadata.xml"
+
+
 def bom_url(version, repo):
-    return artifact_url("io.tapdata", "connectors-bom", version, repo, "pom")
+    return artifact_url("io.tapdata", distribution_artifact("bom"), version, repo, "pom")
 
 
 def ensure_bom_available(version, repo):
     if nexus_read(bom_url(version, repo), repo) is not None:
         raise RuntimeError(
-            f"BOM io.tapdata:connectors-bom:{version} already exists in {repo['name']}; "
+            f"BOM io.tapdata:{distribution_artifact('bom')}:{version} already exists in {repo['name']}; "
             "stopping before connector builds or uploads."
         )
 
 
 def latest_bom(repo):
-    metadata_url = f"{repo['url']}io/tapdata/connectors-bom/maven-metadata.xml"
+    metadata_url = bom_metadata_url(repo)
     body = nexus_read(metadata_url, repo)
     if body is None:
         return None
@@ -218,7 +332,7 @@ def latest_bom(repo):
 
 
 def plan_url(base_version, repo):
-    return artifact_url("io.tapdata", "connector-release-plan", base_version or "bootstrap",
+    return artifact_url("io.tapdata", distribution_artifact("plan"), base_version or "bootstrap",
                         repo, "json")
 
 
@@ -574,45 +688,146 @@ def set_build_version(module, version):
     tree = ET.parse(pom_path)
     version_node = tree.find("m:version", ns)
     if version_node is None:
-        raise ValueError(f"connector POM needs a direct project version: {module}/pom.xml")
+        artifact_id = tree.find("m:artifactId", ns)
+        if artifact_id is None:
+            raise ValueError(f"connector POM needs a direct artifactId: {module}/pom.xml")
+        version_node = ET.Element(f"{{{ns['m']}}}version")
+        tree.getroot().insert(list(tree.getroot()).index(artifact_id) + 1, version_node)
     version_node.text = version
     tree.write(pom_path, encoding="UTF-8", xml_declaration=True)
 
 
 def sync_connector(item, targets, temp, *, jar=None):
-    """Use an existing remote JAR as canonical; repair missing files on either side."""
-    existing = []
+    """Use an existing remote JAR as canonical; repair missing files on either side.
+
+    Immutable releases keep Maven's .sha256 sidecar next to each JAR, so a
+    connector that every environment already stores is verified by comparing
+    those tiny files instead of downloading hundreds of megabytes per side.
+    A sidecar only substitutes for the JAR once a HEAD request confirms the
+    artifact is still stored; detached checksums can outlive a deleted file.
+    Missing, malformed, or disagreeing sidecars fall back to full downloads.
+    """
+    print(f"Verify connector {item['artifactId']}:{item['version']}", flush=True)
+    urls = {repo['name']: artifact_url(item["groupId"], item["artifactId"], item["version"], repo)
+            for repo in targets}
+    by_name = {repo['name']: repo for repo in targets}
+
+    def download(name):
+        path = temp / f"{item['artifactId']}-{name}.jar"
+        if request(by_name[name], urls[name], destination=path) is not None:
+            return path
+        path.unlink(missing_ok=True)
+        return None
+
+    existing = {}  # environment -> JAR downloaded and verified byte for byte
+    sidecars = {}  # environment -> .sha256 sidecar digest; JAR left in place
     for repo in targets:
-        path = temp / f"{item['artifactId']}-{repo['name']}.jar"
-        url = artifact_url(item["groupId"], item["artifactId"], item["version"], repo)
-        if request(repo, url, destination=path) is not None:
-            existing.append(path)
-    if existing:
-        canonical = existing[0]
-        digest = hashlib.sha256(canonical.read_bytes()).hexdigest()
-        if any(hashlib.sha256(path.read_bytes()).hexdigest() != digest for path in existing[1:]):
-            raise RuntimeError(f"Immutable JAR differs between Nexus environments: {item['artifactId']}")
-        if jar and hashlib.sha256(jar.read_bytes()).hexdigest() != digest:
-            print(f"::warning::SHA-256 mismatch for {item['artifactId']}:{item['version']}; "
-                  "reusing Nexus bytes in both environments.")
-    elif jar:
+        name = repo['name']
+        digest = sidecar_digest(repo, urls[name])
+        if digest is not None:
+            # A surviving sidecar does not prove the JAR is still stored; a
+            # deleted artifact must fall through to the repair upload instead.
+            if jar_exists(repo, urls[name]):
+                sidecars[name] = digest
+            continue
+        path = download(name)
+        if path is not None:
+            existing[name] = path
+    present = set(existing) | set(sidecars)
+    canonical = None
+    digest = None
+    if present:
+        digests = {name: hashlib.sha256(path.read_bytes()).hexdigest()
+                   for name, path in existing.items()}
+        digests.update(sidecars)
+        if len(set(digests.values())) > 1:
+            # Sidecars disagree: only the JAR bytes can distinguish stale
+            # metadata from real drift between the environments.
+            sidecars = {}
+            for name in sorted(present):
+                if name not in existing:
+                    path = download(name)
+                    if path is None:
+                        present.discard(name)
+                        digests.pop(name, None)
+                        continue
+                    existing[name] = path
+                digests[name] = hashlib.sha256(existing[name].read_bytes()).hexdigest()
+            if len({digests[name] for name in present}) > 1:
+                raise RuntimeError(f"Immutable JAR differs between Nexus environments: {item['artifactId']}")
+        if present:
+            digest = digests[next(iter(present))]
+            if jar and hashlib.sha256(jar.read_bytes()).hexdigest() != digest:
+                print(f"::warning::SHA-256 mismatch for {item['artifactId']}:{item['version']}; "
+                      "reusing Nexus bytes in both environments.")
+    if digest is None:
+        if jar is None:
+            return None
         canonical = jar
         digest = hashlib.sha256(jar.read_bytes()).hexdigest()
-    else:
-        return None
+
+    def ensure_canonical_bytes():
+        nonlocal canonical
+        if canonical is None:
+            if existing:
+                canonical = existing[sorted(existing)[0]]
+            else:
+                # The sidecar comparison skipped every download; fetch the JAR
+                # once, only because it must be uploaded somewhere.
+                for name in sorted(present):
+                    path = download(name)
+                    if path is None:
+                        continue
+                    existing[name] = path
+                    if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                        raise RuntimeError(
+                            f"Immutable JAR differs between Nexus environments: {item['artifactId']}")
+                    canonical = path
+                    break
+        if canonical is None:
+            raise RuntimeError(f"no Nexus environment can provide {item['artifactId']}:{item['version']}")
+        return canonical
+
+    if sidecars:
+        # Repair checksum sidecars for JARs verified without their bytes. The
+        # sha256 value is proven by the cross-environment comparison; sha1
+        # cannot be synthesized without the JAR, so identical existing sha1
+        # sidecars are adopted and anything else re-verifies through one
+        # download instead of one per environment.
+        sha1s = {}
+        for name in sorted(sidecars):
+            content = request(by_name[name], f"{urls[name]}.sha1")
+            if content is None:
+                break
+            sha1s[name] = content
+        if len(sha1s) == len(sidecars) and len(set(sha1s.values())) == 1:
+            for name in sorted(sidecars):
+                put_immutable(by_name[name], f"{urls[name]}.sha256", digest.encode())
+        else:
+            content = ensure_canonical_bytes().read_bytes()
+            for name in sorted(sidecars):
+                upload_checksums(by_name[name], urls[name], content)
+
     pom = temp / f"{item['artifactId']}.pom"
     write_artifact_pom(pom, item)
     for repo in targets:
-        upload_file(repo, artifact_url(item["groupId"], item["artifactId"], item["version"], repo), canonical)
+        name = repo['name']
+        url = urls[name]
+        if name in present and name not in sidecars:
+            # This JAR was verified byte for byte. Only repair sidecars; do not
+            # download the same immutable JAR again in put_immutable.
+            upload_checksums(repo, url, existing[name].read_bytes())
+        elif name not in present:
+            upload_file(repo, url, ensure_canonical_bytes())
         upload_file(repo, artifact_url(item["groupId"], item["artifactId"], item["version"], repo, "pom"), pom)
-    for path in existing:
-        path.unlink()
+    for path in existing.values():
+        path.unlink(missing_ok=True)
     return {**{key: item[key] for key in ("groupId", "artifactId", "version", "pdkApiVersion")},
             "sha256": digest}
 
 
 def repair_metadata_checksums(repo):
-    url = f"{repo['url']}io/tapdata/connectors-bom/maven-metadata.xml"
+    url = bom_metadata_url(repo)
     content = nexus_read(url, repo)
     if content is None:
         return
@@ -627,12 +842,12 @@ def repair_metadata_checksums(repo):
 
 
 def update_bom_metadata(repo, version):
-    url = f"{repo['url']}io/tapdata/connectors-bom/maven-metadata.xml"
+    url = bom_metadata_url(repo)
     body = nexus_read(url, repo)
     metadata = ET.fromstring(body) if body else ET.Element("metadata")
     if body is None:
         ET.SubElement(metadata, "groupId").text = "io.tapdata"
-        ET.SubElement(metadata, "artifactId").text = "connectors-bom"
+        ET.SubElement(metadata, "artifactId").text = distribution_artifact("bom")
     versioning = metadata.find("versioning")
     if versioning is None:
         versioning = ET.SubElement(metadata, "versioning")
@@ -713,7 +928,7 @@ def publish_plan(plan, targets, temp, artifacts_path, scripts_dir, *, batch_inde
     trusted_bom_script = Path(scripts_dir).resolve() / "connector-distribution" / "generate_bom.py"
     run([sys.executable, "-I", str(trusted_bom_script), "--inventory", str(inventory_path),
          "--bom-version", plan["bomVersion"], "--source-commit", plan["sourceCommit"],
-         "--output", str(bom)])
+         "--artifact-id", distribution_artifact("bom"), "--output", str(bom)])
     # Both environments have every JAR and connector POM before publishing BOMs.
     for repo in targets:
         upload_file(repo, bom_url(plan["bomVersion"], repo), bom)
@@ -794,14 +1009,20 @@ def upload_artifacts(source_dir=".", artifacts_dir="build-output", scripts_dir=N
 
 def cli():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["plan", "prepare", "upload", "finalize"])
+    parser.add_argument("mode", choices=["validate-config", "plan", "prepare", "upload", "finalize"])
     parser.add_argument("--source", default="source")
     parser.add_argument("--plan", default="release_plan.json")
     parser.add_argument("--artifacts", default="build-output")
     parser.add_argument("--batch", type=int)
     parser.add_argument("--output", default="build-request.json")
     args = parser.parse_args()
-    if args.mode == "plan":
+    if args.mode == "validate-config":
+        try:
+            repositories()
+        except ValueError as error:
+            parser.exit(1, str(error) + "\n")
+        print("Nexus configuration is complete and valid; connectivity is not checked.")
+    elif args.mode == "plan":
         plan = main(args.source, args.plan)
         count = sum(item["publish"] for item in plan["items"]) if plan else 0
         batches = list(range(max(1, (count + BATCH_SIZE - 1) // BATCH_SIZE))) if plan else []

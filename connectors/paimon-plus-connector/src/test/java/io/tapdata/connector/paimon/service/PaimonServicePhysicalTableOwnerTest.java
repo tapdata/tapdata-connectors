@@ -701,8 +701,8 @@ class PaimonServicePhysicalTableOwnerTest {
         private final PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
         private final IOManager ioManager = mock(IOManager.class);
         private final List<CommitMessage> messages = Collections.singletonList(mock(CommitMessage.class));
-        private final List<String> spillDirs = Collections.singletonList(
-                "/tmp/paimon-io-ddl-owner-" + UUID.randomUUID());
+        // mock IOManager 不拥有任何真实目录；虚构路径在租约协议下属于未登记目录（Spec D5）。
+        private final List<String> spillDirs = Collections.emptyList();
         private final PaimonTableWriteContext context;
         private final PaimonMicroBatchCoordinator coordinator;
 

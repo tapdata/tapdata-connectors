@@ -2,14 +2,71 @@
 
 import os
 import ssl
+import signal
+import time
 import tempfile
 import unittest
 import urllib.error
+import urllib.request
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import publish_connectors as publisher
 from test_publish_connectors import Nexus
+
+
+class RequestTimeoutTests(unittest.TestCase):
+    def test_deadline_interrupts_blocked_put(self):
+        repo = {'name': 'test', 'url': 'https://nexus.example/',
+                'username': 'test', 'password': 'test'}
+        with patch.object(publisher, 'REQUEST_TOTAL_TIMEOUT', 0.08), \
+             patch.object(publisher, 'open_request', side_effect=lambda *_: time.sleep(5)):
+            with self.assertRaises(publisher.RequestDeadlineExceeded):
+                publisher.request(repo, repo['url'] + 'connector.jar', data=b'jar')
+
+    def test_deadline_interrupts_blocked_open_and_trickling_body(self):
+        repo = {'name': 'test', 'url': 'https://nexus.example/',
+                'username': 'test', 'password': 'test'}
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        for blocked_open in (True, False):
+            with self.subTest(blocked_open=blocked_open):
+                response = MagicMock()
+                response.__enter__.return_value = response
+                response.headers = {}
+
+                def trickle(_):
+                    time.sleep(0.02)
+                    return b'x'
+
+                response.read1.side_effect = trickle
+
+                def open_response(*_):
+                    if blocked_open:
+                        time.sleep(5)
+                    return response
+
+                started = time.monotonic()
+                with patch.object(publisher, 'REQUEST_TOTAL_TIMEOUT', 0.08), \
+                     patch.object(publisher, 'open_request', side_effect=open_response):
+                    with self.assertRaises(publisher.RequestDeadlineExceeded):
+                        publisher.request(repo, repo['url'] + 'connector.jar')
+                self.assertLess(time.monotonic() - started, 1)
+                self.assertEqual(signal.getsignal(signal.SIGALRM), previous_handler)
+                self.assertEqual(signal.getitimer(signal.ITIMER_REAL)[0], 0)
+
+    def test_upload_timeout_for_dns_and_pinned_routes(self):
+        for pinned in (False, True):
+            for method, timeout in (("GET", 45), ("PUT", 600)):
+                with self.subTest(pinned=pinned, method=method):
+                    repo = {'url': 'https://nexus.example/repository/releases/'}
+                    if pinned:
+                        repo['connect_ip'] = '127.0.0.1'
+                    req = urllib.request.Request(repo['url'] + 'connector.jar', method=method)
+                    with patch.object(publisher.urllib.request, 'urlopen') as direct, \
+                         patch.object(publisher.urllib.request, 'build_opener') as factory:
+                        publisher.open_request(repo, req)
+                        transport = factory.return_value.open if pinned else direct
+                        transport.assert_called_once_with(req, timeout=timeout)
 
 
 class RepositoryConfigurationTests(unittest.TestCase):
@@ -22,6 +79,27 @@ class RepositoryConfigurationTests(unittest.TestCase):
         self.environment = patch.dict(os.environ, environment, clear=True)
         self.environment.start()
         self.addCleanup(self.environment.stop)
+
+    def test_missing_configuration_lists_all_required_names(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, 'Missing Actions configuration') as failure:
+                publisher.repositories()
+        for name in ('INTERNAL', 'EXTERNAL'):
+            for suffix in ('URL', 'USERNAME', 'PASSWORD'):
+                self.assertIn(f'NEXUS_{name}_{suffix}', str(failure.exception))
+        self.assertNotIn('CONNECT_IP', str(failure.exception))
+
+    def test_empty_configuration_names_only_without_secret_values(self):
+        os.environ['NEXUS_INTERNAL_URL'] = '  '
+        os.environ['NEXUS_EXTERNAL_PASSWORD'] = ''
+        os.environ['NEXUS_INTERNAL_PASSWORD'] = 'private-test-value'
+        with self.assertRaises(ValueError) as failure:
+            publisher.repositories()
+        message = str(failure.exception)
+        self.assertIn('NEXUS_INTERNAL_URL', message)
+        self.assertIn('NEXUS_EXTERNAL_PASSWORD', message)
+        self.assertNotIn('private-test-value', message)
+        self.assertNotIn('NEXUS_INTERNAL_PASSWORD', message)
 
     def test_same_url_with_internal_pin_and_external_dns(self):
         os.environ['NEXUS_INTERNAL_CONNECT_IP'] = '192.168.1.184'

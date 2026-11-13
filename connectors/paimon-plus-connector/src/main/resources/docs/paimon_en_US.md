@@ -51,6 +51,30 @@ When using OSS storage:
 ### Database Name
 The Paimon database name (default: default)
 
+### Local Temporary Directory and Spill Reclamation
+
+The connector keeps Paimon's local spill and index files under `diskTmpDir` in the following layout. Each written table has its own lease directory:
+
+```text
+<diskTmpDir>/tapdata-paimon-v2/<process-id>/<lease>/owner.lock
+<diskTmpDir>/tapdata-paimon-v2/<process-id>/<lease>/io/paimon-io-<UUID>/
+```
+
+- **Liveness:** A directory is considered in use only while its operating-system file lock is held; modification times are never used. Directories of running tasks are never deleted by other tasks or other engines.
+- **Normal stop:** When a task stops normally, all of its directories are deleted and no empty directories remain.
+- **Abnormal exit:** Directories left behind by a crashed process (OOM, `kill -9`) are reclaimed by the next engine on the same host that starts a Paimon task, including the same engine after a restart. At most 64 are reclaimed per start; the rest are handled on the next start.
+- **Deployment:** Give each engine process its own `diskTmpDir`. On Kubernetes use a per-Pod emptyDir or a dedicated subPath; on Docker use a dedicated volume.
+- **Network or FUSE file systems:** When `diskTmpDir` is on NFS, CIFS, FUSE, Ceph or similar, file locks are not reliable across hosts, so the connector does not reclaim leftover directories and only logs a warning. Use a local disk, or clean up manually as shown below.
+- **Upgrade:** Restart the engine after upgrading the connector so that old and new versions do not run in the same process. Directories `paimon-io-*` and files `.paimon-io-*.tapdata-owner.lock` created by older versions directly under `diskTmpDir` are never opened or deleted by this version. After every engine using the directory has been upgraded and restarted, they can be removed once:
+
+  ```sh
+  # List first; delete only after confirming no engine running an older version uses the directory
+  find <diskTmpDir> -maxdepth 1 \( -name 'paimon-io-*' -o -name '.paimon-io-*.tapdata-owner.lock' \) -print
+  find <diskTmpDir> -maxdepth 1 \( -name 'paimon-io-*' -o -name '.paimon-io-*.tapdata-owner.lock' \) -exec rm -rf {} +
+  ```
+
+- **Troubleshooting:** Lease creation, retirement, retention, reclamation and skips are written to the engine log under the logger `io.tapdata.connector.paimon.spill`; task logs contain only summaries.
+
 ## Data Type Mapping
 
 | Paimon Type | Tapdata Type |
