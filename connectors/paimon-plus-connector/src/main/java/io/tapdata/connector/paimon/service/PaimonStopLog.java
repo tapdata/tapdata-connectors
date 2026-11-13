@@ -21,7 +21,11 @@ public final class PaimonStopLog {
                         event.failure.printStackTrace(new PrintWriter(stack));
                         message += " cause=" + stack;
                     }
-                    event.log.info(message);
+                    if (event.error) {
+                        event.log.error(message);
+                    } else {
+                        event.log.info(message);
+                    }
                 } catch (Throwable ignored) { /* 观察失败不能影响关闭终态；下一事件继续尝试。 */ }
             }
         }, "paimon-stop-log-dispatcher");
@@ -30,14 +34,23 @@ public final class PaimonStopLog {
     }
     private PaimonStopLog() {}
     public static void offer(Log log, String message, Throwable failure) {
-        if (log != null && !EVENTS.offer(new Event(log, message, failure))) { DROPPED.incrementAndGet(); }
+        offer(log, message, failure, false);
+    }
+
+    /** 失败类事件：队列与丢弃语义不变，仅以 error 级别输出，保证关闭失败即时可见。 */
+    public static void offerError(Log log, String message, Throwable failure) {
+        offer(log, message, failure, true);
+    }
+
+    private static void offer(Log log, String message, Throwable failure, boolean error) {
+        if (log != null && !EVENTS.offer(new Event(log, message, failure, error))) { DROPPED.incrementAndGet(); }
     }
     public static long droppedCount() { return DROPPED.get(); }
     static int queuedCount() { return EVENTS.size(); }
     private static final class Event {
-        final Log log; final String message; final Throwable failure;
-        Event(Log log, String message, Throwable failure) {
-            this.log = log; this.message = message; this.failure = failure;
+        final Log log; final String message; final Throwable failure; final boolean error;
+        Event(Log log, String message, Throwable failure, boolean error) {
+            this.log = log; this.message = message; this.failure = failure; this.error = error;
         }
     }
 }
