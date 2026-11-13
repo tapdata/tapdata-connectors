@@ -80,6 +80,9 @@ public class MongodbMergeOperate {
 				if (CollectionUtils.isNotEmpty(mergeResults)) {
 					for (MergeResult mergeResult : mergeResults) {
 						final MergeResult.Operation operation = mergeResult.getOperation();
+						if (null == operation) {
+							continue;
+						}
 						switch (operation) {
 							case INSERT:
 								writeModels.add(new InsertOneModel<>(mergeResult.getInsert()));
@@ -268,7 +271,8 @@ public class MongodbMergeOperate {
 			return;
 		}
 
-		Optional.ofNullable(mergeResult).ifPresent(mergeResults::add);
+		// 没有 operation 的结果不产生写入；写入端按 operation 生成 WriteModel，放进来会 NPE（如父 DELETE 级联中跳过/无法定位父文档的子孙）
+		Optional.ofNullable(mergeResult).filter(result -> null != result.getOperation()).ifPresent(mergeResults::add);
 		Optional.ofNullable(updateKeyDiff).ifPresent(mergeResults::add);
 		if (mergeFilter.isAppend()) {
 			mergeFilter.removeLast();
