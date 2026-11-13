@@ -42,6 +42,21 @@ class PaimonSpillReclaimerTest {
             (event, fields, failure) -> events.add(event), System::nanoTime, name -> null);
 
     @Test
+    void legacySizeEstimateDoesNotFollowLinksOrOpenLocks(@TempDir Path root) throws Exception {
+        Path legacy = Files.createDirectory(root.resolve("paimon-io-old"));
+        Files.write(legacy.resolve("data"), new byte[]{1, 2, 3});
+        Path outside = Files.createDirectory(root.resolve("outside"));
+        Files.write(outside.resolve("data"), new byte[100]);
+        assumeTrue(link(legacy.resolve("external"), outside));
+        PaimonSpillReclaimer.Result result = reclaimer().reclaim(roots(root));
+        assertEquals(1, result.legacyDirectories);
+        assertEquals(3, result.legacyBytes);
+        assertTrue(opened.isEmpty());
+        assertTrue(Files.exists(legacy.resolve("data")));
+        assertTrue(Files.exists(outside.resolve("data")));
+    }
+
+    @Test
     void reclaimsOrphanedForeignLeaseAndItsEmptyNamespace(@TempDir Path root) throws Exception {
         Path lease = lease(root, FOREIGN, new byte[] {1, 2, 3});
 

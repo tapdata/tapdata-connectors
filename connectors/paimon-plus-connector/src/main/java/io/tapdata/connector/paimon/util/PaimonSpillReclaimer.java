@@ -28,7 +28,7 @@ import java.util.function.Supplier;
  *
  * <p>安全性只依赖 OS 记录锁：本 JVM 的命名空间按目录名整体跳过，在任何文件打开之前完成（INV-01），因此本进程
  * 永不探测、也就永不会因关闭探测 channel 而释放自己的锁；外部 lease 只有在锁可取得、且持锁后路径与 fileKey
- * 复核一致时才删除（INV-04）。本类不读取 mtime 或任何时钟（INV-03）。
+ * 复核一致时才删除（INV-04）。存活判断不读取 mtime 或时钟（INV-03）；单调时钟仅限制旧目录体积观察预算。
  */
 final class PaimonSpillReclaimer {
 
@@ -79,8 +79,12 @@ final class PaimonSpillReclaimer {
     }
 
     static PaimonSpillReclaimer standard() {
+        return standard(PaimonSpillAudit.defaultAudit());
+    }
+
+    static PaimonSpillReclaimer standard(PaimonSpillAudit audit) {
         return new PaimonSpillReclaimer(PaimonJvmIdentity::current, DEFAULT_TYPE_PROBE, DEFAULT_OPENER,
-                PaimonSpillFiles.FILES_DELETE, PaimonSpillAudit.defaultAudit(), DEFAULT_BUDGET);
+                PaimonSpillFiles.FILES_DELETE, audit, DEFAULT_BUDGET);
     }
 
     Result reclaim(Collection<String> roots) {
@@ -284,10 +288,12 @@ final class PaimonSpillReclaimer {
     /** 旧平铺布局只列清单，不打开、不删除（INV-09）。 */
     private void reportLegacyLayout(Path root, Result result) {
         int legacy = 0;
+        PaimonLegacySpillSize size = new PaimonLegacySpillSize();
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(root, LEGACY_PREFIX + "*")) {
             for (Path entry : entries) {
                 if (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) {
                     legacy++;
+                    size.inspect(entry);
                 }
             }
         } catch (IOException | RuntimeException unreadable) {
@@ -295,8 +301,11 @@ final class PaimonSpillReclaimer {
         }
         if (legacy > 0) {
             result.legacyDirectories += legacy;
+            result.legacyBytes += size.bytes;
+            result.legacySizeIncomplete |= size.incomplete;
             audit.recordRateLimited(PaimonSpillAudit.Event.LEGACY_LAYOUT_FOUND, root.toString(),
-                    PaimonSpillAudit.details("root", root, "legacyDirectories", legacy));
+                    PaimonSpillAudit.details("root", root, "legacyDirectories", legacy,
+                            "observedBytes", size.bytes, "sizeIncomplete", size.incomplete));
         }
     }
 
@@ -357,6 +366,8 @@ final class PaimonSpillReclaimer {
         int skipped;
         int failed;
         int legacyDirectories;
+        long legacyBytes;
+        boolean legacySizeIncomplete;
         boolean budgetExhausted;
     }
 }

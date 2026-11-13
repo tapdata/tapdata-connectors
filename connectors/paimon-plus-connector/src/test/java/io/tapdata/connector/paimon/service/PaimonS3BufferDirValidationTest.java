@@ -93,13 +93,15 @@ class PaimonS3BufferDirValidationTest {
 
     @Test
     void directoriesCreatedForARejectedListMustBeRolledBack() throws Exception {
-        Path created = tempDir.resolve("valid-root");
+        Path created = tempDir.resolve("valid-root").resolve("nested").resolve("buffer");
         Path blocker = Files.write(tempDir.resolve("blocker-file"), new byte[] {1});
         assertThrows(IllegalStateException.class,
                 () -> PaimonService.verifyS3ABufferDirs(created + "," + blocker.resolve("x")));
 
         assertFalse(Files.exists(created),
                 "配置有问题时不能留下本次新建的半成品目录");
+        assertFalse(Files.exists(tempDir.resolve("valid-root")), "本次创建的中间层目录也必须回滚");
+        assertTrue(Files.isDirectory(tempDir), "已存在的祖先目录必须保留");
         assertTrue(Files.exists(blocker), "已存在的文件不能被清理逻辑误删");
     }
 
@@ -123,7 +125,12 @@ class PaimonS3BufferDirValidationTest {
         List<LinkedHashMap<String, String>> values = properties("fs.s3a.buffer.dir", blocker.resolve("buffer").toString());
         values.addAll(properties("fs.s3a.bucket.customer.buffer.dir", tempDir.resolve("bucket-buffer").toString()));
         config.setS3Properties(values);
-        Configuration hadoop = buildHadoopConfiguration(config);
+        Log taskLog = mock(Log.class);
+        Method build = PaimonService.class.getDeclaredMethod("buildHadoopConfiguration");
+        build.setAccessible(true);
+        Configuration hadoop = (Configuration) build.invoke(new PaimonService(config, taskLog));
+        org.mockito.Mockito.verify(taskLog, org.mockito.Mockito.timeout(5000))
+                .warn(org.mockito.ArgumentMatchers.contains("Unused global fs.s3a.buffer.dir is invalid"));
         assertEquals(tempDir.resolve("bucket-buffer").toString(),
                 org.apache.hadoop.fs.s3a.S3AUtils.propagateBucketOptions(hadoop, "customer").get("fs.s3a.buffer.dir"));
         assertTrue(Files.isDirectory(tempDir.resolve("bucket-buffer")));

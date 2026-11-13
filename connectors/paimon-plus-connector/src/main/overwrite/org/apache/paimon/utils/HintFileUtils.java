@@ -41,8 +41,9 @@ import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 public class HintFileUtils {
 
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(HintFileUtils.class);
-    private static final java.util.concurrent.atomic.AtomicLong LAST_ORPHAN_LOG =
-            new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.Map<String, Long> LAST_ORPHAN_LOG =
+            new java.util.LinkedHashMap<>();
+    private static final int MAX_ORPHAN_LOG_KEYS = 1024;
 
     public static final String EARLIEST = "EARLIEST";
     public static final String LATEST = "LATEST";
@@ -65,11 +66,7 @@ public class HintFileUtils {
             }
             if (!targetExists) {
                 Long actual = findByListFiles(fileIO, Math::max, dir, prefix);
-                // Bound noisy recovery logs across tables without retaining table paths in memory.
-                long now = System.nanoTime();
-                long previous = LAST_ORPHAN_LOG.get();
-                if ((previous == 0 || now - previous >= TimeUnit.MINUTES.toNanos(1))
-                        && LAST_ORPHAN_LOG.compareAndSet(previous, now)) {
+                if (shouldLogOrphan(dir.toString(), System.nanoTime())) {
                     try {
                         LOG.warn("Paimon orphan LATEST hint ignored: directory={}, hint={}, actualLatest={}",
                                 dir, snapshotId, actual);
@@ -79,6 +76,18 @@ public class HintFileUtils {
             }
         }
         return findByListFiles(fileIO, Math::max, dir, prefix);
+    }
+
+    // Per-directory rate limiting: a noisy table must not hide another table's recovery.
+    static synchronized boolean shouldLogOrphan(String directory, long now) {
+        Long previous = LAST_ORPHAN_LOG.get(directory);
+        if (previous != null && now - previous < TimeUnit.MINUTES.toNanos(1)) { return false; }
+        LAST_ORPHAN_LOG.remove(directory);
+        if (LAST_ORPHAN_LOG.size() >= MAX_ORPHAN_LOG_KEYS) {
+            LAST_ORPHAN_LOG.remove(LAST_ORPHAN_LOG.keySet().iterator().next());
+        }
+        LAST_ORPHAN_LOG.put(directory, now);
+        return true;
     }
 
     @Nullable

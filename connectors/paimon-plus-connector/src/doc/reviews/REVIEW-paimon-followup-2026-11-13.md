@@ -39,3 +39,18 @@ Hadoop 在 S3A 初始化时把 fs.s3a.bucket.<bucket>.buffer.dir 传播到全局
 建议每个引擎使用独占、容量充足、持久的本地 scratch 目录；配置 diskTmpDir 与 S3A buffer 后，同时检查实际 bucket 覆盖。/tmp 可能受 systemd-tmpfiles 或容器生命周期清理，应用文件锁不能阻止外部删除者。NFS/FUSE 等不在白名单的文件系统不会自动回收；旧 paimon-io-* 只告警不删除。升级不会自动腾出这些残留空间。
 
 遇到故障，在相同容器/挂载命名空间和引擎账号下检查日志中的目录：df -hT、df -i、findmnt -T、namei -l，并检查 systemd-tmpfiles 规则及容器 volume。容量不足、配额、inode 耗尽和挂载丢失需结合这些证据判断；应用观察不能标识执行 rm 的具体进程。外部删除者的识别需要事先开启系统审计。
+
+
+## 二次 Review 后的追加修复
+
+- 启动回收改由每个 ClassLoader 一个 daemon worker 执行，无排队积压；调用方最多等待 200ms。超过等待预算后不取消扫描，继续持有原有跨 ClassLoader 监视器和 OS 锁直到删除完成；忙时下一启动再尝试。没有用路径分锁，以免别名/hardlink 让同 inode 再次被并发 open/close。慢盘本身仍可能阻塞 worker，但不会无限阻塞任务启动。
+- 回收 WARN/ERROR 除专用引擎 logger 外，独立转发到有界异步任务日志（保留 WARN 级别与原始 cause）；引擎 sink 抛异常也不阻断转发。没有用 isInfoEnabled 作为 appender 自检，因为该值不能证明日志落地。日志队列饱和仍可能丢弃，现有 droppedLogs 可观察。租约关闭失败仍由 service 关闭日志出口报告。
+- 旧布局任务摘要升 WARN，增加 metadata-only 字节估算（最多 100ms/10000 entries，每根独立预算，标明 sizeIncomplete）。不跟随 symlink、不打开旧锁文件、不删除旧目录。文档给出停掉全部相关引擎后的人工检查和逐目录清理指引。
+- 命中有效 bucket override 时，也验证未使用的全局 buffer 值；全局失败只走任务 WARN，其他 authority 在初始化时仍必须独立验证。
+- S3A 多级目录创建逐层登记，失败时逆序只删除本次真正创建且仍为空的目录；保留原有祖先与其他进程已占用的目录。
+- 孤儿 LATEST 告警改为每目录一分钟一次，最多保存 1024 个 key，避免一个表遮蔽其他表。限频不影响快照扫描/异常传播。
+- 测试期守卫核对实际 paimon-core jar 版本必须是 1.3.2、公开 API 与上游一致、测试加载的是覆盖类。升级时必须审查上游实现并显式更新 pin；跳过测试的构建不会执行该守卫。
+
+验证包含启动超时/忙时跳过、引擎 sink 故障时的任务日志、旧目录估算不跟随 symlink、多级目录回滚、无效全局与有效 bucket 共存、每目录限频以及覆盖类兼容检查；保留跨进程/跨 ClassLoader 的真实 OS 锁回归和 DROP/recreate 端到端验证。
+
+最终全量验证（2026-11-13，Linux overlay / Temurin 17）：`mvn -o -pl connectors/paimon-plus-connector test`：**1338 项，0 failures，0 errors，2 skipped，BUILD SUCCESS**。原有 `reclaimerHasNoTemporalInput` 守卫保持不变；时间预算仅在独立体积观察类与启动等待中使用。尚未进行真实客户 S3/挂载环境或 300 任务并发验收。

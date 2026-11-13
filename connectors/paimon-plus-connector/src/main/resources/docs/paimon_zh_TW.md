@@ -202,3 +202,25 @@ WHERE TransactionDatetime BETWEEN '2025-01-01 00:00:00' AND '2025-07-01 00:00:00
 GROUP BY CAST(CreationTime AS DATE)
 ORDER BY CAST(CreationTime AS DATE)
 ```
+
+
+### 本機暫存目錄與升級
+
+建议每個引擎使用獨佔、持久且容量充足的本地暫存目錄。設定 `diskTmpDir` 時，同時檢查
+`fs.s3a.buffer.dir` 和 `fs.s3a.bucket.<bucket>.buffer.dir` 覆盖值。初始化寫入探針只验证
+當時能寫入一字节，不预留上传块，也不保证執行期间空間始终充足。
+
+升級後必须重启引擎：旧任務的 ClassLoader 不遵守新增的回收同步协议。
+`systemd-tmpfiles` 对 `/tmp` 的清理以及容器卷刪除，都可能越过应用檔案鎖刪除活跃目錄。
+请在主机或容器中設定暫存目錄的保留规则。NFS/FUSE 等不在准入白名单内的檔案系統不自动回收。
+
+旧平铺 `paimon-io-*` 目錄只告警、不自动刪除，升級不会自动释放這些空間。
+先停止所有使用這些根目錄的引擎和任務，再用
+`find <root> -maxdepth 1 -type d -name 'paimon-io-*'` 列出候选，
+用 `du -sh -- <specific-directory>` 檢查体积，僅逐個刪除已确认不再使用的目錄。
+引擎執行時不得刪除 `tapdata-paimon-v2` 或其他仍在使用的暫存目錄。
+
+啟動最多等待回收 200ms；超時後背景扫描继续持锁完成，忙時不积压後续扫描。
+回收 WARN/ERROR 同時轉發到有界异步任務日誌；日誌後端阻塞或佇列饱和仍可能丢失事件，
+关闭摘要中的 `droppedLogs` 可辅助观察。容量或挂載问题需使用引擎账号，在相同挂載命名空間下
+结合 `df -hT`、`df -i`、`findmnt -T <directory>`、`namei -l <directory>` 檢查。

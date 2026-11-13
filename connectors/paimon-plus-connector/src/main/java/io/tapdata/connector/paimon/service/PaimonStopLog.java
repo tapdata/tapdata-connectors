@@ -23,6 +23,8 @@ public final class PaimonStopLog {
                     }
                     if (event.error) {
                         event.log.error(message);
+                    } else if (event.warn) {
+                        event.log.warn(message);
                     } else {
                         event.log.info(message);
                     }
@@ -34,23 +36,27 @@ public final class PaimonStopLog {
     }
     private PaimonStopLog() {}
     public static void offer(Log log, String message, Throwable failure) {
-        offer(log, message, failure, false);
+        offer(log, message, failure, false, false);
     }
 
     /** 失败类事件：队列与丢弃语义不变，仅以 error 级别输出，保证关闭失败即时可见。 */
     public static void offerError(Log log, String message, Throwable failure) {
-        offer(log, message, failure, true);
+        offer(log, message, failure, true, false);
     }
 
-    private static void offer(Log log, String message, Throwable failure, boolean error) {
-        if (log != null && !EVENTS.offer(new Event(log, message, failure, error))) { DROPPED.incrementAndGet(); }
+    public static void offerWarn(Log log, String message, Throwable failure) {
+        offer(log, message, failure, false, true);
+    }
+
+    private static void offer(Log log, String message, Throwable failure, boolean error, boolean warn) {
+        if (log != null && !EVENTS.offer(new Event(log, message, failure, error, warn))) { DROPPED.incrementAndGet(); }
     }
     public static long droppedCount() { return DROPPED.get(); }
     static int queuedCount() { return EVENTS.size(); }
     private static final class Event {
-        final Log log; final String message; final Throwable failure; final boolean error;
-        Event(Log log, String message, Throwable failure, boolean error) {
-            this.log = log; this.message = message; this.failure = failure; this.error = error;
+        final Log log; final String message; final Throwable failure; final boolean error; final boolean warn;
+        Event(Log log, String message, Throwable failure, boolean error, boolean warn) {
+            this.log = log; this.message = message; this.failure = failure; this.error = error; this.warn = warn;
         }
     }
 }
