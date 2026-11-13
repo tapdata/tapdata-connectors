@@ -196,7 +196,11 @@ final class PaimonSpillLease {
             if (!root.isAbsolute()) {
                 throw new IllegalArgumentException("Paimon spill root must be absolute");
             }
-            Files.createDirectories(root);
+            try {
+                Files.createDirectories(root);
+            } catch (java.nio.file.FileAlreadyExistsException exists) {
+                // 并发创建或目录已存在但作为符号链接，toRealPath 会解析真实路径去重
+            }
             unique.add(root.toRealPath());
         }
         return new ArrayList<>(unique);

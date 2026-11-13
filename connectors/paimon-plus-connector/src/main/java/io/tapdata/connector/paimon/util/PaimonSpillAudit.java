@@ -51,6 +51,7 @@ public final class PaimonSpillAudit {
         PROVISION_LOCK_HELD(Severity.ERROR),
         PROVISION_EXHAUSTED(Severity.ERROR),
         RECLAIM_BUDGET_EXHAUSTED(Severity.WARN),
+        RECLAIM_INTERRUPTED(Severity.INFO),
         NAMESPACE_LIST_FAILED(Severity.WARN);
 
         final Severity severity;

@@ -122,6 +122,12 @@ final class PaimonSpillReclaimer {
             return;
         }
         for (Path namespace : list(subroot)) {
+            if (Thread.interrupted()) {
+                audit.record(PaimonSpillAudit.Event.RECLAIM_INTERRUPTED,
+                        PaimonSpillAudit.details("root", root, "reclaimed", result.reclaimed.size()));
+                Thread.currentThread().interrupt();
+                return;
+            }
             String name = namespace.getFileName().toString();
             if (name.equals(self)) {
                 continue;
@@ -130,6 +136,12 @@ final class PaimonSpillReclaimer {
                 continue;
             }
             for (Path lease : list(namespace)) {
+                if (Thread.interrupted()) {
+                    audit.record(PaimonSpillAudit.Event.RECLAIM_INTERRUPTED,
+                            PaimonSpillAudit.details("root", root, "reclaimed", result.reclaimed.size()));
+                    Thread.currentThread().interrupt();
+                    return;
+                }
                 if (result.reclaimed.size() >= budget) {
                     result.budgetExhausted = true;
                     audit.record(PaimonSpillAudit.Event.RECLAIM_BUDGET_EXHAUSTED, PaimonSpillAudit.details(
@@ -170,6 +182,10 @@ final class PaimonSpillReclaimer {
     }
 
     private void reclaimLeaseExclusively(Path root, Path lease, Result result) {
+        if (Thread.interrupted()) {
+            Thread.currentThread().interrupt();
+            return;
+        }
         Path lockFile = lease.resolve(PaimonSpillLease.LOCK_FILE);
         BasicFileAttributes before;
         try {
