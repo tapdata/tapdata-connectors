@@ -386,13 +386,18 @@ public final class PaimonSpillDirCleaner {
             new java.util.concurrent.atomic.AtomicInteger();
 
     /**
-     * 与 PaimonCompactionExecutor 保持同一约定：扫描线程显式沿用提交方的 TCCL，并用递增后缀命名。
-     * 不设 TCCL 时线程只是隐式继承创建者，部署几百个连接器 ClassLoader 后堆栈里会出现同名线程，
-     * 无法归属到具体实例。
+     * 与 PaimonCompactionExecutor 保持同一约定：扫描线程显式沿用提交方的 TCCL，并在线程名里带上实例标识。
+     * 计数器只在一个 ClassLoader 内递增，因此名字里再加提交方 ClassLoader 的 identity hash，
+     * 否则几百个连接器实例都叫 paimon-spill-reclaim-1，线程栈无法归属到具体实例。
+     * 显式设置 TCCL 而不是依赖 new Thread 的隐式继承：行为相同，但意图可见，
+     * 将来改用非继承的线程工厂/线程组时不会静默改变。空闲 worker 会在 30s 内被下一个提交复用，
+     * 那时携带的是最初的提交方 loader。
      */
     static Thread newReclaimThread(Runnable task) {
         ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
-        Thread thread = new Thread(task, "paimon-spill-reclaim-" + RECLAIM_THREAD_SEQ.incrementAndGet());
+        Thread thread = new Thread(task, "paimon-spill-reclaim-"
+                + Integer.toHexString(System.identityHashCode(contextLoader))
+                + "-" + RECLAIM_THREAD_SEQ.incrementAndGet());
         thread.setContextClassLoader(contextLoader);
         thread.setDaemon(true);
         return thread;
@@ -442,6 +447,12 @@ public final class PaimonSpillDirCleaner {
                 }
             });
         } catch (java.util.concurrent.RejectedExecutionException busy) {
+            if (worker.isShutdown()) {
+                // 异常路径：worker 已关闭，本次没有扫描。生产路径不会走到（RECLAIM_WORKER 不关闭）。
+                io.tapdata.connector.paimon.service.PaimonStopLog.offerWarn(log,
+                        "Paimon spill reclaim skipped: reclaim worker unavailable; roots=" + snapshot, null);
+                return;
+            }
             // 正常路径：同一 ClassLoader 一次只跑一个扫描，后续启动顺延到下次。
             io.tapdata.connector.paimon.service.PaimonStopLog.offer(log,
                     "Paimon spill reclaim deferred: another scan is running; roots=" + snapshot, null);
