@@ -200,6 +200,461 @@ class MongodbMergeOperateTest {
 			);
 			assertEquals(3, mergeResults.size());
 		}
+
+		@Test
+		@DisplayName("U1 parent flatten DELETE should $unset child document targetPath and keep update not delete")
+		void testParentDeleteUnsetChildTargetPath() {
+			Map<String, Object> before = new HashMap<>();
+			before.put("id", 1);
+			before.put("colB", "b1");
+			MergeTableProperties parent = new MergeTableProperties();
+			parent.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			parent.setJoinKeys(new ArrayList<Map<String, String>>() {{
+				add(new HashMap<String, String>() {{
+					put("source", "id");
+					put("target", "id");
+				}});
+			}});
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.DELETE, before, null);
+			List<MergeResult> mergeResults = new ArrayList<>();
+			MergeLookupResult child = new MergeLookupResult();
+			child.setDataExists(true);
+			child.setData(new HashMap<String, Object>() {{
+				put("idC", 11);
+				put("name", "part");
+			}});
+			child.setTapTable(new TapTable("level3"));
+			MergeTableProperties childProp = new MergeTableProperties();
+			childProp.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			childProp.setTargetPath("productPart");
+			childProp.setJoinKeys(new ArrayList<Map<String, String>>() {{
+				add(new HashMap<String, String>() {{
+					put("source", "idC");
+					put("target", "idC");
+				}});
+			}});
+			child.setProperty(childProp);
+			List<MergeLookupResult> lookups = new ArrayList<>();
+			lookups.add(child);
+			MongodbMergeOperate.recursiveMerge(
+					mergeBundle,
+					parent,
+					mergeResults,
+					lookups,
+					null,
+					null,
+					new MergeFilter(false),
+					1,
+					null
+			);
+			assertFalse(mergeResults.isEmpty());
+			boolean unsetChildPath = false;
+			boolean setChildPath = false;
+			boolean deletedMain = false;
+			for (MergeResult result : mergeResults) {
+				if (result == null || result.getOperation() == null) {
+					continue;
+				}
+				assertEquals(MergeResult.Operation.UPDATE, result.getOperation());
+				assertEquals(1, result.getFilter().get("id"));
+				Document update = result.getUpdate();
+				if (update != null && update.containsKey("$unset") && update.get("$unset", Document.class).containsKey("productPart")) {
+					unsetChildPath = true;
+				}
+				if (update != null && update.containsKey("$set") && update.get("$set", Document.class).keySet().stream().anyMatch(k -> k.equals("productPart") || k.startsWith("productPart."))) {
+					setChildPath = true;
+				}
+				if (result.getOperation() == MergeResult.Operation.DELETE) {
+					deletedMain = true;
+				}
+			}
+			assertTrue(unsetChildPath);
+			assertFalse(setChildPath);
+			assertFalse(deletedMain);
+		}
+
+		@Test
+		@DisplayName("U2 parent DELETE must not rewrite existing child lookup data as INSERT/$set")
+		void testParentDeleteMustNotInsertChildLookup() {
+			testParentDeleteUnsetChildTargetPath();
+		}
+
+		@Test
+		@DisplayName("U5 parent flatten DELETE then descendant $unset/$pull executed in order must clean productPart and attrList of main doc")
+		void testParentDeleteCleanDescendantsWhenExecutedInOrder() {
+			Map<String, Object> before = new HashMap<>();
+			before.put("_id", 101);
+			before.put("PROD_ID", 101);
+			before.put("itemId", 1);
+			before.put("attrCode", "IRON");
+			before.put("partName", "part-101");
+			MergeTableProperties parent = new MergeTableProperties();
+			parent.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			parent.setTargetPath("");
+			parent.setJoinKeys(joinKeys("itemId", "itemId"));
+			MergeTableProperties docChild = new MergeTableProperties();
+			docChild.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			docChild.setTargetPath("productPart");
+			docChild.setJoinKeys(joinKeys("referenceCode", "attrCode"));
+			MergeTableProperties arrChild = new MergeTableProperties();
+			arrChild.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			arrChild.setTargetPath("attrList");
+			arrChild.setIsArray(false);
+			arrChild.setArrayKeys(new ArrayList<>(Collections.singletonList("attrId")));
+			arrChild.setJoinKeys(joinKeys("referenceCode", "attrCode"));
+			List<MergeLookupResult> lookups = new ArrayList<>();
+			lookups.add(lookup(docChild, "level3_doc", new Document("_id", 1).append("attrId", 1).append("referenceCode", "IRON").append("attrName", "Iron")));
+			lookups.add(lookup(arrChild, "level3_arr", new Document("_id", 11).append("attrId", 11).append("referenceCode", "IRON").append("v", "a")));
+			lookups.add(lookup(arrChild, "level3_arr", new Document("_id", 12).append("attrId", 12).append("referenceCode", "IRON").append("v", "b")));
+			List<MergeResult> mergeResults = new ArrayList<>();
+			MongodbMergeOperate.recursiveMerge(
+					new MergeBundle(MergeBundle.EventOperation.DELETE, before, null),
+					parent,
+					mergeResults,
+					lookups,
+					null,
+					new HashSet<>(Collections.singletonList("itemId")),
+					new MergeFilter(true),
+					2,
+					null
+			);
+
+			Document main = new Document("itemId", 1).append("name", "item-1")
+					.append("PROD_ID", 101).append("attrCode", "IRON").append("partName", "part-101")
+					.append("productPart", new Document("_id", 1).append("attrId", 1).append("referenceCode", "IRON").append("attrName", "Iron"))
+					.append("attrList", new ArrayList<>(Arrays.asList(
+							new Document("_id", 11).append("attrId", 11).append("referenceCode", "IRON").append("v", "a"),
+							new Document("_id", 12).append("attrId", 12).append("referenceCode", "IRON").append("v", "b"))));
+			Document other = new Document("itemId", 2).append("name", "item-2")
+					.append("PROD_ID", 102).append("attrCode", "GOLD").append("partName", "part-102")
+					.append("productPart", new Document("_id", 2).append("attrId", 2).append("referenceCode", "GOLD"))
+					.append("attrList", new ArrayList<>(Collections.singletonList(new Document("_id", 21).append("attrId", 21).append("referenceCode", "GOLD"))));
+			List<Document> collection = Arrays.asList(main, other);
+			for (MergeResult result : mergeResults) {
+				if (result == null || result.getOperation() == null) {
+					continue;
+				}
+				assertEquals(MergeResult.Operation.UPDATE, result.getOperation());
+				applyInOrder(collection, result.getFilter(), result.getUpdate());
+			}
+
+			assertEquals(1, main.get("itemId"));
+			assertEquals("item-1", main.get("name"));
+			assertFalse(main.containsKey("PROD_ID"));
+			assertFalse(main.containsKey("attrCode"));
+			assertFalse(main.containsKey("partName"));
+			assertFalse(main.containsKey("productPart"));
+			Object attrList = main.get("attrList");
+			assertTrue(null == attrList || ((List<?>) attrList).isEmpty(), "attrList should be pulled, actual: " + attrList);
+			assertEquals("GOLD", other.get("attrCode"));
+			assertTrue(other.containsKey("productPart"));
+			assertEquals(1, ((List<?>) other.get("attrList")).size());
+		}
+
+		@Test
+		@DisplayName("U6 parent flatten DELETE with array child as first lookup and its updateJoinKey before missing must still $pull attrList")
+		void testParentDeleteArrayChildFirstLookupWithoutUpdateJoinKeyBefore() {
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys = new HashMap<>();
+			updateJoinKeys.put("arr", new MergeInfo.UpdateJoinKey(null, null, null));
+			assertParentDeleteCleansArrayChildFirst(updateJoinKeys);
+		}
+
+		@Test
+		@DisplayName("U6 parent flatten DELETE with array child as first lookup and updateJoinKeys null must still $pull attrList without NPE")
+		void testParentDeleteArrayChildFirstLookupWithNullUpdateJoinKeys() {
+			assertParentDeleteCleansArrayChildFirst(null);
+		}
+
+		private void assertParentDeleteCleansArrayChildFirst(Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys) {
+			Map<String, Object> before = new HashMap<>();
+			before.put("_id", 101);
+			before.put("PROD_ID", 101);
+			before.put("itemId", 1);
+			before.put("attrCode", "IRON");
+			MergeTableProperties parent = new MergeTableProperties();
+			parent.setId("parent");
+			parent.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			parent.setTargetPath("");
+			parent.setJoinKeys(joinKeys("itemId", "itemId"));
+			MergeTableProperties arrChild = new MergeTableProperties();
+			arrChild.setId("arr");
+			arrChild.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			arrChild.setTargetPath("attrList");
+			arrChild.setIsArray(false);
+			arrChild.setArrayKeys(new ArrayList<>(Collections.singletonList("attrId")));
+			arrChild.setJoinKeys(joinKeys("referenceCode", "attrCode"));
+			MergeTableProperties docChild = new MergeTableProperties();
+			docChild.setId("doc");
+			docChild.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			docChild.setTargetPath("productPart");
+			docChild.setJoinKeys(joinKeys("referenceCode", "attrCode"));
+			List<MergeLookupResult> lookups = new ArrayList<>();
+			lookups.add(lookup(arrChild, "level3_arr", new Document("_id", 11).append("attrId", 11).append("referenceCode", "IRON")));
+			lookups.add(lookup(docChild, "level3_doc", new Document("_id", 1).append("attrId", 1).append("referenceCode", "IRON")));
+			List<MergeResult> mergeResults = new ArrayList<>();
+			assertDoesNotThrow(() -> MongodbMergeOperate.recursiveMerge(
+					new MergeBundle(MergeBundle.EventOperation.DELETE, before, null),
+					parent,
+					mergeResults,
+					lookups,
+					updateJoinKeys,
+					new HashSet<>(Collections.singletonList("itemId")),
+					new MergeFilter(true),
+					2,
+					null
+			));
+
+			Document main = new Document("itemId", 1).append("PROD_ID", 101).append("attrCode", "IRON")
+					.append("productPart", new Document("_id", 1).append("attrId", 1).append("referenceCode", "IRON"))
+					.append("attrList", new ArrayList<>(Collections.singletonList(new Document("_id", 11).append("attrId", 11).append("referenceCode", "IRON"))));
+			Document other = new Document("itemId", 2).append("attrCode", "GOLD")
+					.append("attrList", new ArrayList<>(Collections.singletonList(new Document("_id", 21).append("attrId", 21).append("referenceCode", "GOLD"))));
+			boolean pulled = false;
+			for (MergeResult result : mergeResults) {
+				if (result == null || result.getOperation() == null) {
+					continue;
+				}
+				assertEquals(MergeResult.Operation.UPDATE, result.getOperation());
+				Document update = result.getUpdate();
+				assertFalse(update.containsKey("$set"), "parent DELETE must not $set child data: " + update.toJson());
+				if (update.containsKey("$pull") && update.get("$pull", Document.class).containsKey("attrList")) {
+					pulled = true;
+				}
+				applyInOrder(Arrays.asList(main, other), result.getFilter(), update);
+			}
+			assertTrue(pulled, "expected $pull attrList, actual writes: " + mergeResults);
+			assertTrue(((List<?>) main.get("attrList")).isEmpty(), "attrList should be pulled, actual: " + main.get("attrList"));
+			assertFalse(main.containsKey("productPart"));
+			assertEquals(1, ((List<?>) other.get("attrList")).size());
+		}
+
+		@Test
+		@DisplayName("U7 parent array DELETE with array child (both updateIntoArray) must still produce cleanup write for child, never INSERT/$set")
+		void testParentArrayDeleteWithArrayChildStillCleans() {
+			Map<String, Object> before = new HashMap<>();
+			before.put("partId", 101);
+			before.put("itemId", 1);
+			before.put("attrCode", "IRON");
+			MergeTableProperties parent = new MergeTableProperties();
+			parent.setId("parentArr");
+			parent.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			parent.setTargetPath("parts");
+			parent.setIsArray(false);
+			parent.setArrayKeys(new ArrayList<>(Collections.singletonList("partId")));
+			parent.setJoinKeys(joinKeys("itemId", "itemId"));
+			MergeTableProperties arrChild = new MergeTableProperties();
+			arrChild.setId("arr");
+			arrChild.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			arrChild.setTargetPath("attrList");
+			arrChild.setIsArray(false);
+			arrChild.setArrayKeys(new ArrayList<>(Collections.singletonList("attrId")));
+			arrChild.setJoinKeys(joinKeys("referenceCode", "attrCode"));
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys = new HashMap<>();
+			updateJoinKeys.put("arr", new MergeInfo.UpdateJoinKey(null, null, null));
+			List<MergeLookupResult> lookups = new ArrayList<>();
+			lookups.add(lookup(arrChild, "level3_arr", new Document("_id", 11).append("attrId", 11).append("referenceCode", "IRON")));
+			List<MergeResult> mergeResults = new ArrayList<>();
+			assertDoesNotThrow(() -> MongodbMergeOperate.recursiveMerge(
+					new MergeBundle(MergeBundle.EventOperation.DELETE, before, null),
+					parent,
+					mergeResults,
+					lookups,
+					updateJoinKeys,
+					null,
+					new MergeFilter(true),
+					2,
+					null
+			));
+			boolean parentPulled = false;
+			boolean childCleaned = false;
+			for (MergeResult result : mergeResults) {
+				if (result == null || result.getOperation() == null) {
+					continue;
+				}
+				assertEquals(MergeResult.Operation.UPDATE, result.getOperation());
+				Document update = result.getUpdate();
+				assertFalse(update.containsKey("$set"), "parent DELETE must not $set child data: " + update.toJson());
+				Document pull = update.get("$pull", Document.class);
+				Document unset = update.get("$unset", Document.class);
+				if (pull != null && pull.containsKey("parts")) {
+					parentPulled = true;
+				}
+				if ((pull != null && pull.containsKey("attrList")) || (unset != null && unset.containsKey("attrList"))) {
+					childCleaned = true;
+				}
+			}
+			assertTrue(parentPulled, "expected $pull parts, actual writes: " + mergeResults);
+			assertTrue(childCleaned, "expected cleanup write for attrList, actual writes: " + mergeResults);
+		}
+
+		@Test
+		@DisplayName("U8: parent array DELETE with nested array child (parts.attrList) must scope child cleanup to parent document")
+		void testParentArrayDeleteNestedArrayChildScopedToParentDocument() {
+			Map<String, Object> before = new HashMap<>();
+			before.put("PROD_ID", 101);
+			before.put("itemId", 1);
+			before.put("attrCode", "IRON");
+			MergeTableProperties parent = new MergeTableProperties();
+			parent.setId("parts");
+			parent.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			parent.setTargetPath("parts");
+			parent.setIsArray(false);
+			parent.setArrayKeys(new ArrayList<>(Collections.singletonList("PROD_ID")));
+			parent.setJoinKeys(joinKeys("itemId", "itemId"));
+			MergeTableProperties nested = new MergeTableProperties();
+			nested.setId("nestedArr");
+			nested.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			nested.setTargetPath("parts.attrList");
+			nested.setArrayPath("parts");
+			nested.setIsArray(true);
+			nested.setArrayKeys(new ArrayList<>(Collections.singletonList("attrId")));
+			nested.setJoinKeys(joinKeys("referenceCode", "parts.attrCode"));
+			List<MergeLookupResult> lookups = new ArrayList<>();
+			lookups.add(lookup(nested, "attr_arr", new Document("_id", 11).append("attrId", 11).append("referenceCode", "IRON")));
+			lookups.add(lookup(nested, "attr_arr", new Document("_id", 12).append("attrId", 12).append("referenceCode", "IRON")));
+			List<MergeResult> mergeResults = new ArrayList<>();
+			assertDoesNotThrow(() -> MongodbMergeOperate.recursiveMerge(
+					new MergeBundle(MergeBundle.EventOperation.DELETE, before, null),
+					parent,
+					mergeResults,
+					lookups,
+					new HashMap<>(),
+					null,
+					new MergeFilter(false),
+					2,
+					null
+			));
+			boolean parentPulled = false;
+			for (MergeResult result : mergeResults) {
+				// 写入端按 operation 生成 WriteModel，operation 为空会 NPE（M1 r4g 实测 Error code 15019）
+				assertNotNull(result, "merge results must not contain null: " + mergeResults);
+				assertNotNull(result.getOperation(), "merge results must not contain operation-less entries: " + mergeResults);
+				assertEquals(MergeResult.Operation.UPDATE, result.getOperation());
+				Document update = result.getUpdate();
+				assertFalse(update.containsKey("$set"), "parent DELETE must not $set child data: " + update.toJson());
+				// 任何清理写都必须限定到父文档，空 filter + arrayFilters 会跨文档误删同 attrCode 的数组元素
+				assertEquals(1, result.getFilter().get("itemId"), "cleanup write must be scoped to parent document: filter=" + result.getFilter().toJson() + " update=" + update.toJson());
+				Document pull = update.get("$pull", Document.class);
+				if (pull != null && pull.containsKey("parts")) {
+					parentPulled = true;
+				}
+			}
+			assertTrue(parentPulled, "expected $pull parts, actual writes: " + mergeResults);
+		}
+
+		@Test
+		@DisplayName("U9: parent array DELETE must not pull nested array elements of sibling parent elements sharing the same join value")
+		void testParentArrayDeleteKeepsSiblingNestedArray() {
+			Map<String, Object> before = new HashMap<>();
+			before.put("PROD_ID", 102);
+			before.put("itemId", 2);
+			before.put("attrCode", "GOLD");
+			MergeTableProperties parent = new MergeTableProperties();
+			parent.setId("parts");
+			parent.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			parent.setTargetPath("parts");
+			parent.setIsArray(false);
+			parent.setArrayKeys(new ArrayList<>(Collections.singletonList("PROD_ID")));
+			parent.setJoinKeys(joinKeys("itemId", "itemId"));
+			MergeTableProperties nested = new MergeTableProperties();
+			nested.setId("nestedArr");
+			nested.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			nested.setTargetPath("parts.attrList");
+			nested.setArrayPath("parts");
+			nested.setIsArray(true);
+			nested.setArrayKeys(new ArrayList<>(Collections.singletonList("attrId")));
+			nested.setJoinKeys(joinKeys("referenceCode", "parts.attrCode"));
+			List<MergeLookupResult> lookups = new ArrayList<>();
+			lookups.add(lookup(nested, "attr_arr", new Document("_id", 21).append("attrId", 21).append("referenceCode", "GOLD")));
+			List<MergeResult> mergeResults = new ArrayList<>();
+			assertDoesNotThrow(() -> MongodbMergeOperate.recursiveMerge(
+					new MergeBundle(MergeBundle.EventOperation.DELETE, before, null),
+					parent,
+					mergeResults,
+					lookups,
+					new HashMap<>(),
+					null,
+					new MergeFilter(false),
+					2,
+					null
+			));
+			// 目标文档 itemId=2 中 parts 还有另一个 attrCode=GOLD 的元素 PROD_ID=104（attrList 同样含 attrId 21）
+			// 父元素 $pull 已连同其嵌套 attrList 一起移除；任何按 element1.attrCode 匹配的嵌套 $pull 都会误删 PROD_ID=104 的 attrList[21]
+			boolean parentPulled = false;
+			for (MergeResult result : mergeResults) {
+				// 写入端按 operation 生成 WriteModel，operation 为空会 NPE（M1 r4g 实测 Error code 15019）
+				assertNotNull(result, "merge results must not contain null: " + mergeResults);
+				assertNotNull(result.getOperation(), "merge results must not contain operation-less entries: " + mergeResults);
+				Document update = result.getUpdate();
+				Document pull = update.get("$pull", Document.class);
+				if (pull != null && pull.containsKey("parts")) {
+					parentPulled = true;
+				}
+				for (String op : update.keySet()) {
+					Document body = update.get(op, Document.class);
+					for (String path : body.keySet()) {
+						assertFalse(path.startsWith("parts.$[element1].attrList"), "nested cleanup inside pulled parent element would hit sibling elements: " + update.toJson() + " arrayFilters=" + result.getUpdateOptions().getArrayFilters());
+					}
+				}
+			}
+			assertTrue(parentPulled, "expected $pull parts, actual writes: " + mergeResults);
+		}
+
+		private List<Map<String, String>> joinKeys(String source, String target) {
+			List<Map<String, String>> keys = new ArrayList<>();
+			Map<String, String> key = new HashMap<>();
+			key.put("source", source);
+			key.put("target", target);
+			keys.add(key);
+			return keys;
+		}
+
+		private MergeLookupResult lookup(MergeTableProperties property, String table, Map<String, Object> data) {
+			MergeLookupResult lookupResult = new MergeLookupResult();
+			lookupResult.setDataExists(true);
+			lookupResult.setData(data);
+			lookupResult.setTapTable(new TapTable(table));
+			lookupResult.setProperty(property);
+			return lookupResult;
+		}
+
+		/**
+		 * 按 Mongo 语义顺序执行合并写出的 UpdateOne（仅支持本场景用到的等值过滤、$unset、$pull），
+		 * 用于发现「前序 $unset 掉的字段被后续写入当过滤条件」这类只有顺序执行才暴露的问题。
+		 */
+		private void applyInOrder(List<Document> collection, Document filter, Document update) {
+			for (Document doc : collection) {
+				boolean matched = true;
+				for (Map.Entry<String, Object> condition : filter.entrySet()) {
+					assertFalse(condition.getValue() instanceof Document, "unsupported filter operator: " + condition);
+					if (!doc.containsKey(condition.getKey()) || !Objects.equals(doc.get(condition.getKey()), condition.getValue())) {
+						matched = false;
+						break;
+					}
+				}
+				if (!matched) {
+					continue;
+				}
+				for (Map.Entry<String, Object> op : update.entrySet()) {
+					Document body = (Document) op.getValue();
+					if ("$unset".equals(op.getKey())) {
+						body.keySet().forEach(doc::remove);
+					} else if ("$pull".equals(op.getKey())) {
+						for (Map.Entry<String, Object> pull : body.entrySet()) {
+							Object array = doc.get(pull.getKey());
+							if (!(array instanceof List)) {
+								continue;
+							}
+							Map<?, ?> condition = (Map<?, ?>) pull.getValue();
+							((List<?>) array).removeIf(element -> element instanceof Map && condition.entrySet().stream()
+									.allMatch(c -> Objects.equals(((Map<?, ?>) element).get(c.getKey()), c.getValue())));
+						}
+					} else {
+						fail("unsupported update operator in parent DELETE cleanup: " + op.getKey());
+					}
+				}
+			}
+		}
 	}
 
 	@Nested
@@ -525,6 +980,23 @@ class MongodbMergeOperateTest {
 	@Nested
 	@DisplayName("Method updateIntoArrayUnsetMerge test")
 	class updateIntoArrayUnsetMergeTest {
+		@Test
+		@DisplayName("U6 updateJoinKeys null with existing mergeResult under updateWrite parent must not NPE")
+		void testNullUpdateJoinKeysNoNpe() {
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.DELETE, new HashMap<String, Object>() {{
+				put("attrId", 11);
+			}}, null);
+			MergeTableProperties currentProperty = new MergeTableProperties();
+			currentProperty.setId("arr");
+			currentProperty.setTargetPath("attrList");
+			currentProperty.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			MergeTableProperties parentProperties = new MergeTableProperties();
+			parentProperties.setId("parent");
+			parentProperties.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			MergeResult mergeResult = new MergeResult();
+			assertDoesNotThrow(() -> MongodbMergeOperate.updateIntoArrayUnsetMerge(mergeBundle, currentProperty, null, mergeResult, parentProperties, new MergeFilter(true), 1));
+		}
+
 		@Test
 		@DisplayName("test data exists")
 		void test1() {
