@@ -91,12 +91,12 @@ public class OceanbaseConnector extends MysqlConnector {
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
-        connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
+        connectorFunctions.supportGetTableInfoFunction(this::getOceanbaseTableInfo);
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
-        connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
-        connectorFunctions.supportStreamRead(this::streamRead);
+        connectorFunctions.supportTimestampToStreamOffset(this::oceanbaseTimestampToStreamOffset);
+        connectorFunctions.supportStreamRead(this::oceanbaseStreamRead);
         //If database need insert record before table created, then please implement the below two methods.
         connectorFunctions.supportCreateTableV2(this::createTableV2);
         connectorFunctions.supportDropTable(this::dropTable);
@@ -237,7 +237,7 @@ public class OceanbaseConnector extends MysqlConnector {
         EmptyKit.closeQuietly(mysqlJdbcContext);
     }
 
-    private TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
+    private TableInfo getOceanbaseTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
         DataMap dataMap = mysqlJdbcContext.getTableInfo(tableName);
         TableInfo tableInfo = TableInfo.create();
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("TABLE_ROWS")));
@@ -245,7 +245,7 @@ public class OceanbaseConnector extends MysqlConnector {
         return tableInfo;
     }
 
-    private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws SQLException {
+    private Object oceanbaseTimestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws SQLException {
         if (EmptyKit.isNotNull(offsetStartTime)) {
             return offsetStartTime / 1000L;
         }
@@ -256,7 +256,7 @@ public class OceanbaseConnector extends MysqlConnector {
         return offset.get();
     }
 
-    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
+    private void oceanbaseStreamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
         OceanbaseConfig oceanbaseConfig = (OceanbaseConfig) mysqlConfig;
         OceanbaseReaderV2 oceanbaseReader;
         if (Boolean.TRUE.equals(oceanbaseConfig.getUseNativeCdc())) {

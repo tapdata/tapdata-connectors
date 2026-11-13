@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -24,6 +25,8 @@ class Nexus:
     def __init__(self, *, host='127.0.0.1', port=0, tls_context=None):
         self.files = {}
         self.puts = []
+        self.gets = []
+        self.heads = []
         self.fail_path = None
         self.fail_status = 403
         self.fail_count = 0
@@ -38,6 +41,7 @@ class Nexus:
                 pass
 
             def do_GET(self):
+                nexus.gets.append(self.path)
                 nexus.hosts.append(self.headers.get('Host'))
                 if self.headers.get('Authorization') != 'Basic dGVzdDp0ZXN0':
                     self.send_error(401)
@@ -55,6 +59,18 @@ class Nexus:
                     self.close_connection = True
                 else:
                     self.wfile.write(content)
+
+            def do_HEAD(self):
+                nexus.heads.append(self.path)
+                if self.headers.get('Authorization') != 'Basic dGVzdDp0ZXN0':
+                    self.send_error(401)
+                    return
+                if self.path not in nexus.files:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(nexus.files[self.path])))
+                self.end_headers()
 
             def do_PUT(self):
                 nexus.hosts.append(self.headers.get('Host'))
@@ -96,6 +112,11 @@ class Nexus:
 
 class PublishingTests(unittest.TestCase):
     def setUp(self):
+        # CI runs this suite in both distribution legs. Each fixture starts with
+        # OSS coordinates; enterprise cases explicitly override this baseline.
+        distribution = patch.dict(os.environ, {'CONNECTOR_DISTRIBUTION': 'opensource'})
+        distribution.start()
+        self.addCleanup(distribution.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / 'repo'
         self.root.mkdir()
@@ -188,6 +209,65 @@ class PublishingTests(unittest.TestCase):
         self.publish()
         self.assertEqual([len(n.puts) for n in self.nexuses], count)
         self.assertEqual(len(self.builds), 3)
+
+    def test_sync_reads_each_existing_jar_once_and_repairs_checksums(self):
+        self.seed(1)
+        self.publish()
+        plan = json.loads((Path(self.temp.name) / 'release_plan.json').read_text())
+        item = plan['items'][0]
+        jar_path = self.nexuses[0].path(item['artifactId'], item['version'], 'jar')
+        for nexus in self.nexuses:
+            nexus.gets.clear()
+            del nexus.files[jar_path + '.sha256']
+        with tempfile.TemporaryDirectory() as temp:
+            publisher.sync_connector(item, self.targets, Path(temp))
+        for nexus in self.nexuses:
+            self.assertEqual(nexus.gets.count(jar_path), 1)
+            self.assertEqual(nexus.files[jar_path + '.sha256'],
+                             hashlib.sha256(nexus.files[jar_path]).hexdigest().encode())
+
+    def test_enterprise_plan_bom_metadata_and_resume_are_isolated(self):
+        self.seed(1)
+        # An existing OSS BOM/plan must not become the enterprise baseline.
+        oss_metadata = '/repository/releases/io/tapdata/connectors-bom/maven-metadata.xml'
+        oss_plan = '/repository/releases/io/tapdata/connector-release-plan/bootstrap/connector-release-plan-bootstrap.json'
+        for nexus in self.nexuses:
+            nexus.files[oss_metadata] = b'OSS metadata must remain untouched'
+            nexus.files[oss_plan] = b'OSS plan must remain untouched'
+        with patch.dict(os.environ, {'CONNECTOR_DISTRIBUTION': 'enterprise'}):
+            self.publish()
+            self.assert_replicated()
+            for nexus in self.nexuses:
+                version, bom = publisher.latest_bom(nexus.repo)
+                self.assertEqual(bom.findtext('m:artifactId', namespaces=publisher.NS), 'connectors-enterprise-bom')
+                self.assertIn('/connectors-enterprise-bom/', publisher.bom_url(version, nexus.repo))
+                self.assertIn('/connector-enterprise-release-plan/', publisher.plan_url(None, nexus.repo))
+                self.assertEqual(nexus.files[oss_metadata], b'OSS metadata must remain untouched')
+                self.assertEqual(nexus.files[oss_plan], b'OSS plan must remain untouched')
+            puts = [len(n.puts) for n in self.nexuses]
+            self.publish()
+            self.assertEqual([len(n.puts) for n in self.nexuses], puts)
+            self.assertEqual(len(self.builds), 1)
+
+    def test_enterprise_partial_upload_resumes_original_source(self):
+        source = self.seed(2)
+        external = self.nexuses[1]
+        external.fail_path = external.path('c01', '2.11.0', 'pom')
+        external.fail_count = 1
+        with patch.dict(os.environ, {'CONNECTOR_DISTRIBUTION': 'enterprise'}):
+            with self.assertRaisesRegex(RuntimeError, 'HTTP 403'):
+                self.publish()
+            self.assertTrue(all(publisher.latest_bom(n.repo) is None for n in self.nexuses))
+            (self.root / 'connectors/c00/source.txt').write_text('newer source')
+            self.git('add', '.')
+            self.git('commit', '-qm', 'advance enterprise source')
+            self.publish()
+            self.assertTrue(all(sha == source for sha in self.build_sources))
+            self.assertEqual(len(self.builds), 1)
+            self.assert_replicated()
+            for nexus in self.nexuses:
+                bom = publisher.latest_bom(nexus.repo)[1]
+                self.assertEqual(bom.findtext('m:properties/m:tapdata.source.commit', namespaces=publisher.NS), source)
 
     def test_last_metadata_checksum_failure_is_repaired_even_when_no_source_changes(self):
         self.seed(1)
@@ -404,6 +484,107 @@ class PublishingTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'differs between'):
             publisher.sync_connector(item, self.targets, Path(self.temp.name))
         self.assertTrue(all(not n.puts for n in self.nexuses))
+
+    def seeded_sidecar_jar(self, jar):
+        for nexus in self.nexuses:
+            path = nexus.path('c00', '2.11.0', 'jar')
+            nexus.files[path] = jar
+            nexus.files[path + '.sha1'] = hashlib.sha1(jar).hexdigest().encode()
+            nexus.files[path + '.sha256'] = hashlib.sha256(jar).hexdigest().encode()
+            nexus.gets.clear()
+            nexus.puts.clear()
+        return path
+
+    def test_matching_sidecars_verify_without_downloading_jars(self):
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
+                'pdkApiVersion': '2.0.11'}
+        jar = b'x' * 1024
+        jar_path = self.seeded_sidecar_jar(jar)
+        with contextlib.redirect_stdout(io.StringIO()):
+            record = publisher.sync_connector(item, self.targets, Path(self.temp.name))
+        self.assertEqual(record['sha256'], hashlib.sha256(jar).hexdigest())
+        for nexus in self.nexuses:
+            # Neither the JAR nor its bytes move: verification used the sidecars.
+            self.assertNotIn(jar_path, nexus.gets)
+            self.assertTrue(all('.pom' in path for path in nexus.puts))
+        self.assert_replicated()
+
+    def test_conflicting_sidecars_fall_back_to_jar_bytes(self):
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
+                'pdkApiVersion': '2.0.11'}
+        jar_path = self.seeded_sidecar_jar(b'x' * 1024)
+        self.nexuses[1].files[jar_path + '.sha256'] = b'0' * 64
+        # The JARs are identical, so the drift is a stale immutable sidecar and
+        # repair must stay strict rather than overwrite it silently.
+        with self.assertRaisesRegex(RuntimeError, 'Immutable file differs'):
+            publisher.sync_connector(item, self.targets, Path(self.temp.name))
+        self.assertIn(jar_path, self.nexuses[1].gets)
+
+    def test_conflicting_sidecars_with_different_jars_fail(self):
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
+                'pdkApiVersion': '2.0.11'}
+        jar_path = self.seeded_sidecar_jar(b'x' * 1024)
+        other = b'y' * 1024
+        self.nexuses[1].files[jar_path] = other
+        self.nexuses[1].files[jar_path + '.sha256'] = hashlib.sha256(other).hexdigest().encode()
+        with self.assertRaisesRegex(RuntimeError, 'differs between'):
+            publisher.sync_connector(item, self.targets, Path(self.temp.name))
+        self.assertTrue(all(not n.puts for n in self.nexuses))
+
+    def test_missing_sha1_sidecar_is_repaired_with_one_jar_download(self):
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
+                'pdkApiVersion': '2.0.11'}
+        jar = b'x' * 1024
+        jar_path = self.seeded_sidecar_jar(jar)
+        del self.nexuses[1].files[jar_path + '.sha1']
+        with contextlib.redirect_stdout(io.StringIO()):
+            record = publisher.sync_connector(item, self.targets, Path(self.temp.name))
+        self.assertEqual(record['sha256'], hashlib.sha256(jar).hexdigest())
+        # sha1 cannot be synthesized from a peer sidecar, so exactly one
+        # environment downloads the JAR to rebuild it.
+        self.assertEqual(sum(nexus.gets.count(jar_path) for nexus in self.nexuses), 1)
+        self.assertEqual(self.nexuses[1].files[jar_path + '.sha1'],
+                         hashlib.sha1(jar).hexdigest().encode())
+        self.assert_replicated()
+
+    def test_deleted_jar_is_reuploaded_despite_surviving_sidecars(self):
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
+                'pdkApiVersion': '2.0.11'}
+        jar = b'x' * 1024
+        jar_path = self.seeded_sidecar_jar(jar)
+        # Maven's detached checksums can outlive a deleted artifact.
+        del self.nexuses[1].files[jar_path]
+        with contextlib.redirect_stdout(io.StringIO()):
+            record = publisher.sync_connector(item, self.targets, Path(self.temp.name))
+        self.assertEqual(record['sha256'], hashlib.sha256(jar).hexdigest())
+        # The missing JAR is re-uploaded from the verified peer, never skipped.
+        self.assertIn(jar_path, self.nexuses[1].puts)
+        self.assertEqual(self.nexuses[1].files[jar_path], jar)
+        self.assertNotIn(jar_path, self.nexuses[0].puts)
+        # Existence was probed with HEAD, and the repair downloaded the JAR
+        # once from the surviving peer; the repaired side's reads belong to
+        # put_immutable's pre-check and post-upload verification.
+        self.assertIn(jar_path, self.nexuses[0].heads)
+        self.assertEqual(self.nexuses[0].gets.count(jar_path), 1)
+        self.assert_replicated()
+
+    def test_deleted_jar_and_sha1_are_repaired_together(self):
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
+                'pdkApiVersion': '2.0.11'}
+        jar = b'x' * 1024
+        jar_path = self.seeded_sidecar_jar(jar)
+        del self.nexuses[1].files[jar_path]
+        del self.nexuses[1].files[jar_path + '.sha1']
+        with contextlib.redirect_stdout(io.StringIO()):
+            record = publisher.sync_connector(item, self.targets, Path(self.temp.name))
+        self.assertEqual(record['sha256'], hashlib.sha256(jar).hexdigest())
+        self.assertIn(jar_path, self.nexuses[1].puts)
+        # The JAR comes back before its sha1, never a checksum without a JAR.
+        self.assertEqual(self.nexuses[1].files[jar_path], jar)
+        self.assertEqual(self.nexuses[1].files[jar_path + '.sha1'],
+                         hashlib.sha1(jar).hexdigest().encode())
+        self.assertEqual(self.nexuses[0].gets.count(jar_path), 1)
+        self.assert_replicated()
 
     def test_http_auth_and_network_errors_never_mean_absent(self):
         repo = {**self.targets[0], 'password': 'wrong'}
