@@ -282,6 +282,36 @@ class PaimonSpillLeaseTest {
         assertTrue(PaimonSpillLease.tag("default.orders").matches("[0-9a-f]{12}"));
     }
 
+    @Test
+    void normalizeRootsAcceptsSymbolicLinkToDirectory(@TempDir Path temp) throws IOException {
+        Path realDir = temp.resolve("real");
+        Files.createDirectory(realDir);
+        Path symlink = temp.resolve("symlink");
+
+        assumeTrue(createSymbolicLink(symlink, realDir), "Symbolic links not supported on this platform");
+
+        // 符号链接指向目录应该被接受
+        List<Path> normalized = PaimonSpillLease.normalizeRoots(Collections.singletonList(symlink.toString()));
+
+        assertEquals(1, normalized.size());
+        // toRealPath 应该解析到真实目录
+        assertEquals(realDir.toRealPath(), normalized.get(0));
+    }
+
+    @Test
+    void normalizeRootsRejectsRegularFile(@TempDir Path temp) throws IOException {
+        Path regularFile = temp.resolve("file.txt");
+        Files.createFile(regularFile);
+
+        // 普通文件应该被拒绝，抛出明确的异常
+        IOException exception = assertThrows(IOException.class, () ->
+                PaimonSpillLease.normalizeRoots(Collections.singletonList(regularFile.toString())));
+
+        assertTrue(exception.getMessage().contains("Not a directory") ||
+                   exception.getMessage().contains("file.txt"),
+                "Exception should indicate the file is not a directory");
+    }
+
     private PaimonSpillLease provision(List<String> roots, PaimonSpillLease.ProvisionHook hook) throws IOException {
         return PaimonSpillLease.provision(roots, "default.orders", identity, audit, hook);
     }

@@ -5,6 +5,8 @@ import io.tapdata.entity.logger.Log;
 import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -117,10 +119,11 @@ class PaimonS3BufferDirValidationTest {
         assertTrue(empty.getMessage().contains("not an empty entry"), empty.getMessage());
     }
 
-    @Test
-    void warehouseBucketOverrideIsValidatedInsteadOfAnUnusedGlobalPath() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"s3a://customer/warehouse", "s3://customer/warehouse", "customer/warehouse"})
+    void warehouseBucketOverrideIsValidatedInsteadOfAnUnusedGlobalPath(String warehouse) throws Exception {
         PaimonConfig config = s3Config(tempDir.resolve("default"));
-        config.setWarehouse("s3a://customer/warehouse");
+        config.setWarehouse(warehouse);
         Path blocker = Files.write(tempDir.resolve("unused-global"), new byte[]{1});
         List<LinkedHashMap<String, String>> values = properties("fs.s3a.buffer.dir", blocker.resolve("buffer").toString());
         values.addAll(properties("fs.s3a.bucket.customer.buffer.dir", tempDir.resolve("bucket-buffer").toString()));
@@ -129,8 +132,7 @@ class PaimonS3BufferDirValidationTest {
         Method build = PaimonService.class.getDeclaredMethod("buildHadoopConfiguration");
         build.setAccessible(true);
         Configuration hadoop = (Configuration) build.invoke(new PaimonService(config, taskLog));
-        org.mockito.Mockito.verify(taskLog, org.mockito.Mockito.timeout(5000))
-                .warn(org.mockito.ArgumentMatchers.contains("Unused global fs.s3a.buffer.dir is invalid"));
+        org.mockito.Mockito.verifyNoInteractions(taskLog);
         assertEquals(tempDir.resolve("bucket-buffer").toString(),
                 org.apache.hadoop.fs.s3a.S3AUtils.propagateBucketOptions(hadoop, "customer").get("fs.s3a.buffer.dir"));
         assertTrue(Files.isDirectory(tempDir.resolve("bucket-buffer")));
