@@ -199,16 +199,19 @@ public class MongodbMergeOperate {
 				updateKeyDiff = keyDiffUnsetWhenUpdateWrite(mergeResult, updateKeyDiffInfos);
 				break;
 			case updateIntoArray:
+				if (MergeBundle.EventOperation.DELETE == mergeBundle.getOperation() && mergeBundle.isRecursive()) {
+					// 父 DELETE 级联清理必须在 updateIntoArrayUnsetMerge 之前判断：该方法在父级为 updateWrite/updateIntoArray 时
+					// 会把 operation 改成 INSERT，导致子孙数组既不 $pull 也不 $unset
+					mergeResult = addMergeResults(mergeResults, mergeResult);
+					mergeResult = appendArrayDeleteOnParentDelete(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
+					break;
+				}
 				unsetResult = updateIntoArrayUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, parentProperties, mergeFilter, loopTime);
 				if (unsetResultNull && addUnsetMerge(mergeResults, unsetResult)) {
 					mergeBundle.setOperation(MergeBundle.EventOperation.INSERT);
 				}
 				mergeResult = addMergeResults(mergeResults, mergeResult);
-				if (MergeBundle.EventOperation.DELETE == mergeBundle.getOperation()) {
-					mergeResult = appendArrayDeleteOnParentDelete(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
-				} else {
-					mergeResult = updateIntoArrayMergeIfNeed(mergeBundle, properties, mergeResult, mergeFilter);
-				}
+				mergeResult = updateIntoArrayMergeIfNeed(mergeBundle, properties, mergeResult, mergeFilter);
 				break;
 			default:
 				break;
@@ -217,10 +220,12 @@ public class MongodbMergeOperate {
 		boolean recursiveOnce = false;
 		int privateLoopTime = 0;
 		if (CollectionUtils.isNotEmpty(mergeLookupResults)) {
+			// 以当前节点的事件类型决定子孙处理方式；循环中 mergeBundle 会被替换为子 bundle，不能用上一个子节点被改写后的 operation 判断兄弟节点
+			final boolean parentDelete = MergeBundle.EventOperation.DELETE == mergeBundle.getOperation();
 			for (MergeLookupResult mergeLookupResult : mergeLookupResults) {
 				privateLoopTime++;
 				final Map<String, Object> data = mergeLookupResult.getData();
-				if (MergeBundle.EventOperation.DELETE == mergeBundle.getOperation()) {
+				if (parentDelete) {
 					// 父 DELETE 级联清理：不得把子孙 lookup 数据改写成 INSERT/$set
 					// 子孙 $unset/$pull 必须打在父文档上，因此无论 MergeFilter 是否 append，都把父 filter 传下去
 					if (null != mergeFilter && null != mergeResult && MapUtils.isNotEmpty(mergeResult.getFilter())) {
@@ -489,7 +494,7 @@ public class MongodbMergeOperate {
 			if (StringUtils.isBlank(targetPath)) {
 				return null;
 			}
-			MergeInfo.UpdateJoinKey updateJoinKey = updateJoinKeys.get(id);
+			MergeInfo.UpdateJoinKey updateJoinKey = null == updateJoinKeys ? null : updateJoinKeys.get(id);
 			if (null == updateJoinKey || MapUtils.isEmpty(updateJoinKey.getBefore())) {
 				return mergeResult;
 			}
@@ -522,7 +527,7 @@ public class MongodbMergeOperate {
 			}
 			return mergeResult;
 		}
-		MergeInfo.UpdateJoinKey updateJoinKey = updateJoinKeys.get(id);
+		MergeInfo.UpdateJoinKey updateJoinKey = null == updateJoinKeys ? null : updateJoinKeys.get(id);
 		if (null == updateJoinKey) {
 			return mergeResult;
 		}
