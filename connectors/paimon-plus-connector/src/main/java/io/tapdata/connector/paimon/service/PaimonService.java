@@ -64,6 +64,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -82,6 +85,10 @@ import java.util.stream.Collectors;
  * @author Tapdata
  */
 public class PaimonService implements AutoCloseable {
+
+    /** Hadoop S3A fast-upload scratch directory; also settable from S3 advanced properties. */
+    static final String S3A_BUFFER_DIR = "fs.s3a.buffer.dir";
+
 
     /** 日志和异常信息中使用的当前 Service 类标识。 */
     private static final String TAG = PaimonService.class.getName();
@@ -301,10 +308,9 @@ public class PaimonService implements AutoCloseable {
         }
             config.validate();
 
-        // Clean up stale paimon-io-* spill dirs left by abnormally terminated JVMs (OOM/crash/SIGKILL),
-        // which would otherwise accumulate and exhaust local disk. Live dirs owned by active sibling
-        // tasks in this JVM are protected and never deleted.
-        cleanupStaleSpillDirs();
+        // 回收其他 JVM 异常终止（OOM/crash/SIGKILL）后遗留的 Spill 租约，避免本地磁盘耗尽。本 JVM 的
+        // 命名空间按名称跳过、不打开任何文件；外部租约只在 OS 锁可取得时回收（SPEC-paimon-spill-owner-isolation §4.5）。
+        reclaimOrphanedSpillLeases();
 
         Options options = new Options();
         options.set("warehouse", config.getFullWarehousePath());
@@ -329,12 +335,11 @@ public class PaimonService implements AutoCloseable {
     }
 
     /**
-     * Remove stale {@code paimon-io-*} spill directories under every root the runtime can spill
-     * into: the global {@code diskTmpDir} plus each per-table override from the table node
-     * config, because contexts and the HASH_DYNAMIC preflight resolve their IOManager roots
-     * through the per-table value. Best-effort: failures are logged, never thrown.
+     * 回收覆盖运行时可能使用的全部根目录：全局 {@code diskTmpDir} 与表节点配置中的每个表级覆盖，
+     * 因为写上下文与 HASH_DYNAMIC 预检按表级值解析 IOManager 根。尽力而为：失败只记日志，不抛出。
+     * 逐条审计写入引擎日志（logger io.tapdata.connector.paimon.spill），任务日志只写摘要。
      */
-    private void cleanupStaleSpillDirs() {
+    private void reclaimOrphanedSpillLeases() {
         try {
             Set<String> roots = new LinkedHashSet<>();
             collectTmpDirRoots(config.getDiskTmpDir(), roots);
@@ -346,15 +351,9 @@ public class PaimonService implements AutoCloseable {
                     }
                 }
             }
-            int deleted = PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                    roots.toArray(new String[0]),
-                    PaimonSpillDirCleaner.DEFAULT_STALE_GRACE_MS,
-                    (path, bytes) -> log.info("Removed stale Paimon spill dir {} ({} bytes)", path, bytes));
-            if (deleted > 0) {
-                log.info("Cleaned up {} stale Paimon spill dir(s) under {}", deleted, roots);
-            }
+            PaimonSpillDirCleaner.reclaimForStartup(roots, log);
         } catch (Exception e) {
-            log.warn("Failed to clean up stale Paimon spill dirs: {}", e.getMessage());
+            PaimonStopLog.offerWarn(log, "Failed to schedule Paimon spill reclaim", e);
         }
     }
 
@@ -487,22 +486,15 @@ public class PaimonService implements AutoCloseable {
             // S3A fast-upload buffers each upload block to a local directory before sending to S3.
             // Defaults to ${hadoop.tmp.dir}/s3a under /tmp, which can run out of space and fail with
             // "Could not find any valid local directory for s3ablock-...". Redirect the buffer to the
-            // configured scratch dir (the same disk used for Paimon spill) and ensure it exists.
-            String s3aBufferDir = PaimonSpillDirCleaner.resolveTmpDirs(config.getDiskTmpDir());
-            for (String p : s3aBufferDir.split(",")) {
-                String dir = p.trim();
-                if (!dir.isEmpty()) {
-                    try {
-                        new File(dir).mkdirs();
-                    } catch (Exception ignore) {
-                        // best-effort directory creation
-                    }
-                }
-            }
-            conf.set("fs.s3a.buffer.dir", s3aBufferDir);
+            // configured scratch dir (the same disk used for Paimon spill).
+            conf.set(S3A_BUFFER_DIR, PaimonSpillDirCleaner.resolveTmpDirs(config.getDiskTmpDir()));
             if (EmptyKit.isNotEmpty(config.getS3Properties())) {
                 config.getS3Properties().forEach(v -> conf.set(v.get("propKey"), v.get("propValue")));
             }
+            // 用户属性可以覆盖 fs.s3a.buffer.dir，因此校验必须放在覆盖之后。
+            // 若只在覆盖前建目录，被覆盖的路径既不会创建也不会验证，S3A 会一直用它并在
+            // LocalDirAllocator 报 "max capacity ... is 0"，把配置/权限问题伪装成磁盘满（TAP-13250）。
+            applyVerifiedS3ABufferDir(conf);
         }
         // 用户属性可覆盖缓存/认证选项；仅替换标准实现的初始化入口，不覆盖自定义 FS。
         // Paimon HadoopFileIO 按 authority 懒创建 FS，单独移动 Catalog 构造线程不足以覆盖该路径。
@@ -514,6 +506,46 @@ public class PaimonService implements AutoCloseable {
                     org.apache.hadoop.fs.FileSystem.class);
         }
         return conf;
+    }
+
+    /**
+     * Validates the <em>effective</em> S3A fast-upload scratch directory, i.e. after user table
+     * properties have been applied, because {@code fs.s3a.buffer.dir} is user-overridable.
+     *
+     * <p>Hadoop only rejects the buffer directory deep inside {@code LocalDirAllocator}, where a
+     * missing, unwritable or full directory all surface as {@code max capacity ... is 0}. That
+     * message cannot distinguish a bad path from a full disk, so an operator reading it tends to
+     * chase capacity. Failing here reports the concrete path and the concrete reason instead.
+     */
+    private void applyVerifiedS3ABufferDir(Configuration conf) throws IOException {
+        // Normalize a blank global value before a blank bucket override inherits it.
+        if (StringUtils.isBlank(conf.getTrimmed(S3A_BUFFER_DIR))) {
+            conf.set(S3A_BUFFER_DIR, PaimonSpillDirCleaner.resolveTmpDirs(config.getDiskTmpDir()));
+        }
+        String warehousePath = StringUtils.isBlank(config.getWarehouse()) ? null : config.getFullWarehousePath();
+        if (warehousePath != null && warehousePath.regionMatches(true, 0, "s3a://", 0, 6)) {
+            java.net.URI warehouse = java.net.URI.create(warehousePath);
+            String bucketKey = "fs.s3a.bucket." + warehouse.getHost() + ".buffer.dir";
+            if (warehouse.getHost() != null && conf.get(bucketKey) != null) {
+                Configuration verified = io.tapdata.connector.paimon.fs.PaimonS3AFileSystem
+                        .verifiedConfiguration(warehouse, conf);
+                conf.set(bucketKey, verified.get(S3A_BUFFER_DIR));
+                // Other buckets validate their effective directory when their filesystem opens.
+                return;
+            }
+        }
+        String configured = conf.getTrimmed(S3A_BUFFER_DIR);
+        conf.set(S3A_BUFFER_DIR, verifyS3ABufferDirs(configured));
+    }
+
+    /**
+     * Verifies every entry of a comma-separated S3A buffer directory list and returns the list to
+     * configure. Paths are validated in full before anything is created so a rejected configuration
+     * leaves no half-built directories behind, and each root gets a real write probe because
+     * {@link File#canWrite()} cannot see read-only mounts, quotas or ACL denials.
+     */
+    static String verifyS3ABufferDirs(String configured) {
+        return io.tapdata.connector.paimon.util.PaimonLocalDirectories.verifyS3ABufferDirs(configured);
     }
 
     /**
@@ -865,6 +897,9 @@ public class PaimonService implements AutoCloseable {
         CatalogUtils.tableDefaultOptions(catalog.options())
                 .forEach(finalSchema.options()::putIfAbsent);
         // 界面开关在属性合并后生效，避免 false 被原生默认 true 或自定义属性覆盖。
+        log.info("Paimon write-buffer spill options for new table {}: spillable={}, maxDiskSize={}gb",
+                identifier.getFullName(), PaimonWriteOptions.spillValue(config),
+                Boolean.TRUE.equals(config.getDiskOverflowWrite()) ? config.getDiskMaxSize() : null);
         finalSchema.options().put(
                 CoreOptions.WRITE_BUFFER_SPILLABLE.key(), PaimonWriteOptions.spillValue(config));
         PaimonExpireMode.validate(identifier.getFullName(), finalSchema.options());
@@ -1693,6 +1728,8 @@ public class PaimonService implements AutoCloseable {
             }
             FileStoreTable fileStoreTable = PaimonWriteOptions.runtimeWriteTable(
                     requireWriteTable(identifier, table), config);
+            log.info("Paimon write-buffer spill decision for table {}: spillable={}, diskTmpDir={}",
+                    tableKey, PaimonWriteOptions.spillValue(config), config.getDiskTmpDir(tableName));
             List<DataField> paimonFields = fileStoreTable.rowType().getFields();
             // Contract resolution must precede commit-state binding and the HASH_DYNAMIC
             // RocksDB pollution preflight, not merely raw writer construction.
@@ -1742,6 +1779,13 @@ public class PaimonService implements AutoCloseable {
                 });
                 return writeContext;
             } catch (Exception | Error e) {
+                // Task-log outlet as well as the engine audit; preserve lifecycle decisions even
+                // when the logging backend itself fails.
+                try {
+                    PaimonStopLog.offerError(log, "Paimon writer initialization failed: table=" + tableKey
+                            + ", bucketMode=" + fileStoreTable.bucketMode() + ", diskTmpDir="
+                            + config.getDiskTmpDir(tableName) + ", cause=" + e, e);
+                } catch (RuntimeException | LinkageError ignored) { }
                 if (construction.hasResources() || stopController.isRetained() || stopController.expired() || e instanceof io.tapdata.connector.paimon.write.PaimonTableWriteContextFactory.IncompleteCleanupException) {
                     unsafeResourceOwners.add(tableKey);
                     retainClose(stopController, e);
@@ -3494,6 +3538,7 @@ public class PaimonService implements AutoCloseable {
                     operation.discardedTables++;
                 }
             } catch (Throwable contextFailure) {
+                PaimonStopLog.offerError(log, closeLogFields(operation, "table-close-failed"), contextFailure);
                 failure = appendFailure(failure, contextFailure);
             } finally {
                 if (context.cleanupComplete() && !operation.isRetained()) {

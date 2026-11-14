@@ -195,7 +195,7 @@ public final class PaimonTableWriteContextFactory {
             tableWrite = tableWrite.withCompactExecutor(compactionLifecycle.compactionExecutor());
             if (createIoManager) {
                 PaimonSpillDirCleaner.IOManagerBuildResult built =
-                        PaimonSpillDirCleaner.resolveAndCreateIOManager(configuredTmpDirs, scope);
+                        PaimonSpillDirCleaner.resolveAndCreateIOManager(configuredTmpDirs, tableKey, scope);
                 ioManager = built.ioManager();
                 spillDirs = built.spillDirs();
                 tableWrite = tableWrite.withIOManager(ioManager);
@@ -284,7 +284,8 @@ public final class PaimonTableWriteContextFactory {
     /** Service 不能在半构造资源未完整关闭时无条件释放物理 owner。 */
     public static final class IncompleteCleanupException extends Exception {
         public IncompleteCleanupException(String tableKey, Throwable cause) {
-            super("Paimon construction cleanup is incomplete for " + tableKey, cause);
+            super("Paimon construction cleanup is incomplete for " + tableKey
+                    + "; original failure: " + cause, cause);
         }
     }
 
