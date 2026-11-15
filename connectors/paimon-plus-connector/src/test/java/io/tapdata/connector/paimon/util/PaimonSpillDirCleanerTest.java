@@ -1,19 +1,15 @@
 package io.tapdata.connector.paimon.util;
 
 import org.apache.paimon.disk.IOManager;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -24,19 +20,6 @@ class PaimonSpillDirCleanerTest {
 
     @TempDir
     java.nio.file.Path tempDir;
-
-    @Test
-    void bareRocksdbMustRemainEvenWithOldOwnerMarker() throws Exception {
-        Path directory = Files.createDirectory(tempDir.resolve("rocksdb-orphan"));
-        Path data = Files.write(directory.resolve("index.sst"), new byte[] {1});
-        Path marker = Files.createFile(tempDir.resolve(".rocksdb-orphan.tapdata-owner.lock"));
-        assertTrue(data.toFile().setLastModified(0));
-        assertTrue(directory.toFile().setLastModified(0));
-        assertTrue(marker.toFile().setLastModified(0));
-        assertEquals(0, PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                new String[] {tempDir.toString()}, 0, (path, bytes) -> {}));
-        assertTrue(Files.exists(data)); assertTrue(Files.exists(marker));
-    }
 
     @Test
     void withConfinedTempDirsMustRedirectTempDirsButDelegateChannels() throws Exception {
@@ -62,266 +45,97 @@ class PaimonSpillDirCleanerTest {
         org.mockito.Mockito.verify(delegate, org.mockito.Mockito.never()).tempDirs();
     }
 
+    /** Spec D6：IOManager 已构造但目录不在租约内时，保留租约与锁，不 close、不递归删除。 */
     @Test
-    void partialRegistrationMustRetainAllOwnedRootsAndNeverCloseForeignDirectory() throws Exception {
-        IOManager foreign = IOManager.create(tempDir.toString());
-        List<String> foreignDirs = PaimonSpillDirCleaner.registerLiveDirs(foreign);
-        File ownFirst = Files.createDirectory(tempDir.resolve("paimon-io-owned-first")).toFile();
-        File ownLast = Files.createDirectory(tempDir.resolve("paimon-io-owned-last")).toFile();
-        AtomicInteger unsafeClose = new AtomicInteger();
-        org.apache.paimon.disk.IOManagerImpl partiallyOwned = new org.apache.paimon.disk.IOManagerImpl(tempDir.toString()) {
-            @Override
-            public File[] getSpillingDirectories() {
-                return new File[] {ownFirst, new File(foreignDirs.get(0)), ownLast};
-            }
-            @Override
-            public void close() { unsafeClose.incrementAndGet(); }
-        };
-        try {
-            org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
-                    () -> PaimonSpillDirCleaner.registerCreatedIOManager(partiallyOwned));
-            assertEquals(0, unsafeClose.get(), "整体 close 会越权删除冲突目录");
-            assertTrue(ownFirst.exists());
-            assertTrue(ownLast.exists(), "注册失败时所有已登记路径均保持保护");
-            assertTrue(ownerFile(ownFirst).exists());
-            assertTrue(ownerFile(ownLast).exists());
-            assertTrue(new File(foreignDirs.get(0)).exists());
-            assertTrue(ownerFile(new File(foreignDirs.get(0))).exists());
-        } finally {
-            // 仅测试夹具拆除：此 mock 不创建 channel，也没有任何真实 writer/worker。
-            Files.deleteIfExists(ownFirst.toPath()); Files.deleteIfExists(ownLast.toPath());
-            PaimonSpillDirCleaner.releaseAfterClose(java.util.Arrays.asList(
-                    ownFirst.getCanonicalPath(), ownLast.getCanonicalPath()), true);
-            foreign.close();
-            PaimonSpillDirCleaner.releaseAfterClose(foreignDirs, true);
+    void ioManagerOutsideItsLeaseIsRetainedWithoutClose() throws Exception {
+        Path root = tempDir.resolve("root");
+        Path misplaced = Files.createDirectory(tempDir.resolve("misplaced"));
+        AtomicInteger closes = new AtomicInteger();
+        io.tapdata.connector.paimon.service.PaimonStopResources.Scope scope =
+                io.tapdata.connector.paimon.service.PaimonStopResources.Scope.standalone("misplaced");
+        try (org.mockito.MockedStatic<IOManager> factory = org.mockito.Mockito.mockStatic(IOManager.class)) {
+            factory.when(() -> IOManager.create(org.mockito.ArgumentMatchers.any(String[].class)))
+                    .thenAnswer(call -> new org.apache.paimon.disk.IOManagerImpl(misplaced.toString()) {
+                        @Override
+                        public void close() {
+                            closes.incrementAndGet();
+                        }
+                    });
+            assertThrows(IllegalStateException.class,
+                    () -> PaimonSpillDirCleaner.resolveAndCreateIOManager(root.toString(), "default.t", scope));
         }
+        assertEquals(0, closes.get(), "构造后的登记失败只保留，不关闭 IOManager");
+        assertTrue(scope.controller().isRetained());
+        Path lockFile = onlyLockFileUnder(root);
+        assertFalse(SpillProbeProcess.otherProcessAcquires(lockFile), "保留的租约必须继续持有 OS 锁");
     }
 
     @Test
     void failedIoDeletionMustRetainOwnerAndRejectStaleCleanup() throws Exception {
         PaimonSpillDirCleaner.IOManagerBuildResult built =
-                PaimonSpillDirCleaner.resolveAndCreateIOManager(tempDir.toString());
+                PaimonSpillDirCleaner.resolveAndCreateIOManager(tempDir.toString(), "default.t");
         List<String> paths = built.spillDirs();
         File directory = new File(paths.get(0));
         try {
-            assertTrue(ownerFile(directory).exists());
-            // V1.2：没有实际删除证明，保留 owner/live/marker，不能依赖 stale 扫描解除占用。
+            assertTrue(Files.isRegularFile(SpillTestSupport.ownerLockFile(paths.get(0))));
+            // V1.2：没有实际删除证明，保留租约与锁，不能依赖启动清理解除占用。
             assertFalse(PaimonSpillDirCleaner.releaseAfterClose(paths, false).complete());
-            assertTrue(ownerFile(directory).exists());
-            assertEquals(0, PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                    new String[] {tempDir.toString()}, 0, null));
+            assertTrue(SpillTestSupport.ownerRegistered(paths.get(0)));
+            assertEquals(0, SpillTestSupport.runStartupCleanup(paths, null));
             assertTrue(directory.exists());
-            assertTrue(ownerFile(directory).exists());
+            assertFalse(SpillProbeProcess.otherProcessAcquires(SpillTestSupport.ownerLockFile(paths.get(0))));
         } finally {
             built.ioManager().close();
-            PaimonSpillDirCleaner.releaseAfterClose(paths, true);
+            assertTrue(PaimonSpillDirCleaner.releaseAfterClose(paths, true).complete());
         }
+        assertFalse(SpillTestSupport.ownerRegistered(paths.get(0)));
+        assertFalse(Files.exists(SpillTestSupport.ownerLockFile(paths.get(0)).getParent()), "退役后租约目录被删除");
     }
 
+    /** Spec D5：释放未登记的非空路径时报告不完整，而不是静默成功。 */
     @Test
-    void freshUnlockedDirectoryMustRetainOwnerMarkerForLaterCleanup() throws Exception {
-        File spillDir = Files.createDirectory(tempDir.resolve("paimon-io-fresh")).toFile();
-        File data = Files.write(spillDir.toPath().resolve("fresh.sst"), new byte[] {1})
-                .toFile();
-        File ownerFile = ownerFile(spillDir);
-        assertTrue(ownerFile.createNewFile());
-
-        assertEquals(
-                0,
-                PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                        new String[] {tempDir.toString()}, 60_000L, null));
-        assertTrue(spillDir.exists());
-        assertTrue(ownerFile.exists());
-
-        long old = System.currentTimeMillis() - 120_000L;
-        assertTrue(data.setLastModified(old));
-        assertTrue(spillDir.setLastModified(old));
-        assertEquals(
-                1,
-                PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                        new String[] {tempDir.toString()}, 60_000L, null));
-        assertFalse(spillDir.exists());
-        assertFalse(ownerFile.exists());
+    void releasingAnUnregisteredDirectoryIsIncomplete() {
+        PaimonSpillDirCleaner.ReleaseResult result = PaimonSpillDirCleaner.releaseAfterClose(
+                java.util.Collections.singletonList(tempDir.resolve("paimon-io-unknown").toString()), true);
+        assertFalse(result.complete());
+        assertTrue(result.failure() instanceof IllegalStateException, String.valueOf(result.failure()));
+        assertTrue(PaimonSpillDirCleaner.releaseAfterClose(java.util.Collections.emptyList(), true).complete());
     }
 
+    /** AC-20：重复或互为别名的根只建一个租约，IOManager 得到唯一的根。 */
     @Test
-    void nestedSymbolicLinkMustNotDeleteExternalTarget() throws Exception {
-        Path outsideDir = Files.createDirectory(tempDir.resolve("outside"));
-        Path outsideData = Files.write(outsideDir.resolve("keep.sst"), new byte[] {1, 2, 3});
-        File spillDir = Files.createDirectory(tempDir.resolve("paimon-io-symlink")).toFile();
-        createSymbolicLinkOrSkip(spillDir.toPath().resolve("outside-link"), outsideDir);
-        assertTrue(ownerFile(spillDir).createNewFile());
-
-        assertEquals(
-                1,
-                PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                        new String[] {tempDir.toString()}, 0L, null));
-
-        assertFalse(spillDir.exists());
-        assertTrue(Files.isDirectory(outsideDir));
-        assertTrue(Files.exists(outsideData));
-    }
-
-    @Test
-    void topLevelSymbolicLinkMustBeIgnored() throws Exception {
-        Path outsideDir = Files.createDirectory(tempDir.resolve("top-level-outside"));
-        Path outsideData = Files.write(outsideDir.resolve("keep.sst"), new byte[] {1});
-        Path spillLink = tempDir.resolve("paimon-io-top-level-link");
-        createSymbolicLinkOrSkip(spillLink, outsideDir);
-        File ownerFile =
-                new File(
-                        tempDir.toFile(),
-                        ".paimon-io-top-level-link"
-                                + PaimonSpillDirCleaner.OWNER_LOCK_SUFFIX);
-        assertTrue(ownerFile.createNewFile());
-
-        assertEquals(
-                0,
-                PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                        new String[] {tempDir.toString()}, 0L, null));
-
-        assertTrue(Files.isSymbolicLink(spillLink));
-        assertTrue(Files.exists(outsideData));
-        assertTrue(ownerFile.exists());
-    }
-
-    @Test
-    void partialDeletionFailureMustRetainOwnerMarkerAndAllowRetry() throws Exception {
-        File spillDir = Files.createDirectory(tempDir.resolve("paimon-io-partial")).toFile();
-        Path retainedFile =
-                Files.write(spillDir.toPath().resolve("retain.sst"), new byte[] {1, 2});
-        Files.write(spillDir.toPath().resolve("deleted.sst"), new byte[] {3});
-        File ownerFile = ownerFile(spillDir);
-        assertTrue(ownerFile.createNewFile());
-        AtomicInteger callbackCount = new AtomicInteger();
-
-        int deleted =
-                PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                        new String[] {tempDir.toString()},
-                        0L,
-                        (path, bytes) -> callbackCount.incrementAndGet(),
-                        path -> {
-                            if (path.equals(retainedFile)) {
-                                throw new IOException("injected delete failure");
-                            }
-                            Files.delete(path);
-                        });
-
-        assertEquals(0, deleted);
-        assertEquals(0, callbackCount.get());
-        assertTrue(spillDir.exists());
-        assertTrue(Files.exists(retainedFile));
-        assertTrue(ownerFile.exists());
-
-        assertEquals(
-                1,
-                PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                        new String[] {tempDir.toString()}, 0L, null));
-        assertFalse(spillDir.exists());
-        assertFalse(ownerFile.exists());
-    }
-
-    @Test
-    void successfulDeletionMustReportOnlyRegularFileBytes() throws Exception {
-        File spillDir = Files.createDirectory(tempDir.resolve("paimon-io-size")).toFile();
-        Files.write(spillDir.toPath().resolve("one.sst"), new byte[] {1, 2, 3});
-        Files.write(spillDir.toPath().resolve("two.sst"), new byte[] {4, 5, 6, 7});
-        assertTrue(ownerFile(spillDir).createNewFile());
-        AtomicInteger callbackCount = new AtomicInteger();
-        AtomicLong deletedBytes = new AtomicLong(-1L);
-
-        assertEquals(
-                1,
-                PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                        new String[] {tempDir.toString()},
-                        0L,
-                        (path, bytes) -> {
-                            callbackCount.incrementAndGet();
-                            deletedBytes.set(bytes);
-                        }));
-
-        assertEquals(1, callbackCount.get());
-        assertEquals(7L, deletedBytes.get());
-    }
-
-    @Test
-    void deeplyNestedDirectoryMustBeDeletedWithoutRecursion() throws Exception {
-        File spillDir = Files.createDirectory(tempDir.resolve("paimon-io-deep")).toFile();
-        Path nested = spillDir.toPath();
-        for (int depth = 0; depth < 256; depth++) {
-            nested = Files.createDirectory(nested.resolve("d"));
+    void duplicateRootsShareOneLeaseRoot() throws Exception {
+        PaimonSpillDirCleaner.IOManagerBuildResult built = PaimonSpillDirCleaner.resolveAndCreateIOManager(
+                tempDir + "," + tempDir, "default.t");
+        try {
+            assertEquals(1, built.spillDirs().size());
+        } finally {
+            built.ioManager().close();
+            assertTrue(PaimonSpillDirCleaner.releaseAfterClose(built.spillDirs(), true).complete());
         }
-        Files.write(nested.resolve("deep.sst"), new byte[] {1});
-        assertTrue(ownerFile(spillDir).createNewFile());
-
-        assertEquals(
-                1,
-                PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                        new String[] {tempDir.toString()}, 0L, null));
-        assertFalse(spillDir.exists());
-    }
-
-    @Test
-    void cleanupMustNotDeleteDirectoryLockedByAnotherProcessOwner() throws Exception {
-        File spillDir = Files.createDirectory(tempDir.resolve("paimon-io-external")).toFile();
-        File data = Files.write(spillDir.toPath().resolve("active.sst"), new byte[] {1, 2, 3})
-                .toFile();
-        long old = System.currentTimeMillis() - 60_000L;
-        assertTrue(data.setLastModified(old));
-        assertTrue(spillDir.setLastModified(old));
-
-        File ownerFile = new File(
-                tempDir.toFile(), ".paimon-io-external" + PaimonSpillDirCleaner.OWNER_LOCK_SUFFIX);
-        try (RandomAccessFile raf = new RandomAccessFile(ownerFile, "rw");
-             FileLock ignored = raf.getChannel().lock()) {
-            assertEquals(0, PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                    new String[] {tempDir.toString()}, 0L, null));
-            assertTrue(spillDir.exists());
-        }
-
-        assertEquals(1, PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                new String[] {tempDir.toString()}, 0L, null));
-        assertFalse(spillDir.exists());
-        assertFalse(ownerFile.exists());
     }
 
     @Test
     void registeredIoManagerDirectoryMustRemainProtectedUntilUnregistered() throws Exception {
-        IOManager ioManager = IOManager.create(new String[] {tempDir.toString()});
-        List<String> spillDirs = PaimonSpillDirCleaner.registerLiveDirs(ioManager);
+        PaimonSpillDirCleaner.IOManagerBuildResult built =
+                PaimonSpillDirCleaner.resolveAndCreateIOManager(tempDir.toString(), "default.t");
+        List<String> spillDirs = built.spillDirs();
         try {
             assertFalse(spillDirs.isEmpty());
-            assertEquals(0, PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                    new String[] {tempDir.toString()}, 0L, null));
+            assertEquals(0, SpillTestSupport.runStartupCleanup(spillDirs, null));
             for (String path : spillDirs) {
                 assertTrue(new File(path).exists());
+                assertTrue(SpillTestSupport.ownerRegistered(path));
             }
         } finally {
-            ioManager.close();
+            built.ioManager().close();
             PaimonSpillDirCleaner.releaseAfterClose(spillDirs, true);
         }
 
         for (String path : spillDirs) {
-            File spillDir = new File(path);
-            File ownerFile = new File(
-                    spillDir.getParentFile(),
-                    "." + spillDir.getName() + PaimonSpillDirCleaner.OWNER_LOCK_SUFFIX);
-            assertFalse(ownerFile.exists());
+            assertFalse(Files.exists(SpillTestSupport.ownerLockFile(path)));
+            assertFalse(SpillTestSupport.ownerRegistered(path));
         }
-    }
-
-    @Test
-    void locklessLegacyDirectoryMustNotBeDeletedDuringRollingUpgrade() throws Exception {
-        File spillDir = Files.createDirectory(tempDir.resolve("paimon-io-old-version")).toFile();
-        File data = Files.write(spillDir.toPath().resolve("possibly-active.sst"), new byte[] {1})
-                .toFile();
-        long old = System.currentTimeMillis() - 60_000L;
-        assertTrue(data.setLastModified(old));
-        assertTrue(spillDir.setLastModified(old));
-
-        assertEquals(0, PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                new String[] {tempDir.toString()}, 0L, null));
-        assertTrue(spillDir.exists());
     }
 
     @Test
@@ -361,7 +175,7 @@ class PaimonSpillDirCleanerTest {
                 ".", "relative", "file:///tmp/spill", "/tmp/spill,", "/tmp/spill,,/tmp/other",
                 validRoot + ", 'write-buffer-spillable' = 'true'"}) {
             IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-                    () -> PaimonSpillDirCleaner.resolveAndCreateIOManager(invalid), invalid);
+                    () -> PaimonSpillDirCleaner.resolveAndCreateIOManager(invalid, "default.t"), invalid);
             assertTrue(error.getMessage().contains("diskTmpDir"));
             assertFalse(Files.exists(validRoot));
         }
@@ -374,17 +188,20 @@ class PaimonSpillDirCleanerTest {
         String configured = " " + first + " , " + second + " ";
         assertEquals(first + "," + second, PaimonSpillDirCleaner.resolveTmpDirs(configured));
         PaimonSpillDirCleaner.IOManagerBuildResult built =
-                PaimonSpillDirCleaner.resolveAndCreateIOManager(configured);
+                PaimonSpillDirCleaner.resolveAndCreateIOManager(configured, "default.t");
         try {
             assertEquals(2, built.spillDirs().size());
             assertTrue(Files.isDirectory(first));
             assertTrue(Files.isDirectory(second));
+            assertTrue(built.spillDirs().get(0).startsWith(first.toRealPath().resolve("tapdata-paimon-v2").toString()));
+            assertTrue(built.spillDirs().get(1).startsWith(second.toRealPath().resolve("tapdata-paimon-v2").toString()));
         } finally {
             built.ioManager().close();
-            PaimonSpillDirCleaner.releaseAfterClose(built.spillDirs(), true);
+            assertTrue(PaimonSpillDirCleaner.releaseAfterClose(built.spillDirs(), true).complete());
         }
         for (String directory : built.spillDirs()) {
             assertFalse(Files.exists(java.nio.file.Paths.get(directory)));
+            assertFalse(Files.exists(SpillTestSupport.ownerLockFile(directory)));
         }
     }
 
@@ -402,17 +219,13 @@ class PaimonSpillDirCleanerTest {
         }
     }
 
-    private static File ownerFile(File spillDir) {
-        return new File(
-                spillDir.getParentFile(),
-                "." + spillDir.getName() + PaimonSpillDirCleaner.OWNER_LOCK_SUFFIX);
-    }
-
-    private static void createSymbolicLinkOrSkip(Path link, Path target) {
-        try {
-            Files.createSymbolicLink(link, target);
-        } catch (UnsupportedOperationException | IOException | SecurityException failure) {
-            Assumptions.assumeTrue(false, "Symbolic links are unavailable: " + failure);
+    private static Path onlyLockFileUnder(Path root) throws IOException {
+        try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+            List<Path> locks = paths.filter(path -> path.getFileName().toString().equals("owner.lock"))
+                    .collect(java.util.stream.Collectors.toList());
+            assertEquals(1, locks.size(), String.valueOf(locks));
+            return locks.get(0);
         }
     }
+
 }

@@ -17,9 +17,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileTime;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -32,10 +30,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 两个真实 JVM 在同一本机文件系统上验证 Spill 删除互斥与进程异常退出后的回收。
- * 这里只证明 advisory FileLock 保护目录，不证明跨 Engine writer fencing，也不外推 NFS 锁语义。
+ * T12：多个真实 JVM 在同一本机文件系统上验证租约协议（AC-06、AC-07、AC-09、AC-16、AC-17 跨进程部分）。
+ * 这里只证明 OS 记录锁保护本地目录，不证明跨 Engine writer fencing，也不外推 NFS 锁语义。
  */
-class PaimonSpillDirCleanerProcessIntegrationTest {
+class PaimonSpillProcessIntegrationTest {
 
     private static final byte[] CHANNEL_CONTENT = new byte[] {11, 22, 33, 44};
     private static final FileTime OLD_TIME = FileTime.fromMillis(1L);
@@ -51,20 +49,19 @@ class PaimonSpillDirCleanerProcessIntegrationTest {
             assertDoesNotThrow(() -> UUID.fromString(child.spill.getFileName().toString()
                     .substring(PaimonSpillDirCleaner.SPILL_DIR_PREFIX.length())));
 
-            Map<String, Long> deleted = new LinkedHashMap<>();
-            // 父 JVM 从未 registerLiveDirs；跳过子 JVM 的目录必须依赖实际 OS 文件锁。
-            assertEquals(0, PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                    new String[] {tempDir.toString()}, 0L, deleted::put));
+            // 父 JVM 没有子 JVM 的任何登记；跳过子 JVM 的租约只能依赖实际 OS 文件锁。
+            PaimonSpillReclaimer.Result result = reclaim(tempDir);
 
-            assertTrue(deleted.isEmpty());
+            assertTrue(result.reclaimed.isEmpty());
+            assertEquals(1, result.live);
             assertTrue(child.process.isAlive());
             assertTrue(Files.isDirectory(child.spill));
             assertTrue(Files.isRegularFile(child.marker));
             assertArrayEquals(CHANNEL_CONTENT, Files.readAllBytes(child.channel));
             assertArrayEquals(CHANNEL_CONTENT,
                     Files.readAllBytes(child.spill.resolve("rocksdb-test-index/data.sst")));
-            assertTrue(Files.exists(legacyData), "无 marker 的旧版本目录不能按年龄猜测为可删除");
-            assertFalse(Files.exists(ownerMarker(legacyData.getParent())));
+            assertTrue(Files.exists(legacyData), "旧平铺布局目录不由新协议删除");
+            assertFalse(Files.exists(legacyMarker(legacyData.getParent())));
 
             child.closeGracefully();
             assertFalse(Files.exists(child.spill), "正常退出应由原生 IOManager.close 删除自己的目录");
@@ -92,19 +89,18 @@ class PaimonSpillDirCleanerProcessIntegrationTest {
             assertArrayEquals(CHANNEL_CONTENT,
                     Files.readAllBytes(child.spill.resolve("rocksdb-test-index/data.sst")));
 
-            Map<String, Long> deleted = new LinkedHashMap<>();
-            // 这次扫描可代表恢复后的 A，也可代表能访问同一本地 root 的 B；不依赖 Engine 身份。
-            assertEquals(1, PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                    new String[] {tempDir.toString()}, 0L, deleted::put));
+            // 这次扫描可代表恢复后的 A（新 jvmId），也可代表能访问同一本地 root 的 B；不依赖 Engine 身份。
+            PaimonSpillReclaimer.Result result = reclaim(tempDir);
 
-            assertEquals(1, deleted.size());
-            assertEquals(Long.valueOf(2L * CHANNEL_CONTENT.length), deleted.get(child.spill.toString()));
+            assertEquals(1, result.reclaimed.size());
+            assertEquals(child.marker.getParent().getFileName().toString(),
+                    java.nio.file.Paths.get(result.reclaimed.get(0).lease).getFileName().toString());
+            assertEquals(2L * CHANNEL_CONTENT.length, result.reclaimed.get(0).bytes);
             assertFalse(Files.exists(child.spill));
             assertFalse(Files.exists(child.marker));
-            assertTrue(Files.exists(legacyData), "无 marker 残留仍不具备自动删除证明");
-            assertFalse(Files.exists(ownerMarker(legacyData.getParent())));
-            assertEquals(0, PaimonSpillDirCleaner.cleanupStaleSpillDirs(
-                    new String[] {tempDir.toString()}, 0L, null), "重复恢复扫描应幂等");
+            assertTrue(Files.exists(legacyData), "旧平铺布局残留不由新协议删除");
+            assertFalse(Files.exists(legacyMarker(legacyData.getParent())));
+            assertEquals(0, reclaim(tempDir).reclaimed.size(), "重复恢复扫描应幂等");
         }
     }
 
@@ -113,11 +109,11 @@ class PaimonSpillDirCleanerProcessIntegrationTest {
         try (ChildOwner child = ChildOwner.start(tempDir, true)) {
             child.awaitReady();
             assertCrossProcessLockHeld(child.marker);
-            assertEquals(0, PaimonSpillDirCleaner.cleanupStaleSpillDirs(new String[] {tempDir.toString()}, 0, null));
+            assertEquals(0, reclaim(tempDir).reclaimed.size());
             assertTrue(Files.exists(child.spill));
             child.process.destroyForcibly();
             assertTrue(child.process.waitFor(10, TimeUnit.SECONDS)); assertFalse(child.process.isAlive());
-            assertEquals(1, PaimonSpillDirCleaner.cleanupStaleSpillDirs(new String[] {tempDir.toString()}, 0, null));
+            assertEquals(1, reclaim(tempDir).reclaimed.size());
             assertFalse(Files.exists(child.spill)); assertFalse(Files.exists(child.marker));
         }
     }
@@ -130,9 +126,141 @@ class PaimonSpillDirCleanerProcessIntegrationTest {
         return data;
     }
 
-    private static Path ownerMarker(Path spill) {
-        return spill.resolveSibling("." + spill.getFileName()
-                + PaimonSpillDirCleaner.OWNER_LOCK_SUFFIX);
+    /** AC-06：两个回收者进程同时处理同一 ORPHANED lease，恰好一个完成，全程不新建锁文件。 */
+    @Test
+    void twoReclaimerProcessesReclaimTheSameOrphanOnce(@TempDir Path tempDir) throws Exception {
+        Path lease = orphanLease(tempDir);
+        int total;
+        try (SpillProbeProcess.Handle first = SpillProbeProcess.start(
+                java.util.Collections.emptyList(), "reclaim", tempDir.toString());
+             SpillProbeProcess.Handle second = SpillProbeProcess.start(
+                     java.util.Collections.emptyList(), "reclaim", tempDir.toString())) {
+            total = reclaimedCount(first.expectLine("reclaimed=")) + reclaimedCount(second.expectLine("reclaimed="));
+            first.awaitSuccess();
+            second.awaitSuccess();
+        }
+        assertEquals(1, total);
+        assertFalse(Files.exists(lease));
+        assertFalse(Files.exists(lease.resolve("owner.lock")), "回收者不得重建锁文件");
+    }
+
+    /** AC-09：同一引擎重启后的新 JVM（pid 与启动时间改变，jvmId 不同）回收上一实例被 SIGKILL 后的租约。 */
+    @Test
+    void restartedEngineReclaimsThePreviousInstanceLease(@TempDir Path tempDir) throws Exception {
+        try (ChildOwner previous = ChildOwner.start(tempDir)) {
+            previous.awaitReady();
+            assertCrossProcessLockHeld(previous.marker);
+            previous.process.destroyForcibly();
+            assertTrue(previous.process.waitFor(10L, TimeUnit.SECONDS), previous::diagnostics);
+            assertTrue(Files.isRegularFile(previous.marker), "SIGKILL 不执行退役");
+
+            assertEquals("reclaimed=1", SpillProbeProcess.reclaimInOtherJvm(tempDir));
+            assertFalse(Files.exists(previous.spill));
+            assertFalse(Files.exists(previous.marker));
+        }
+    }
+
+    /**
+     * AC-16：回收者进程已打开锁文件但尚未加锁时，owner 按“持锁 unlink → 释放”退役；回收者随后取得旧 inode
+     * 的锁，但路径复核失败，什么也不删除、也不重建锁文件。
+     */
+    @Test
+    void lateReclaimerProcessCannotActAfterOwnerRetires(@TempDir Path tempDir) throws Exception {
+        PaimonSpillDirCleaner.IOManagerBuildResult owner =
+                PaimonSpillDirCleaner.resolveAndCreateIOManager(tempDir.toString(), "late.orders");
+        Path lockFile = SpillTestSupport.ownerLockFile(owner.spillDirs().get(0));
+        try (SpillProbeProcess.Handle late = SpillProbeProcess.start(
+                java.util.Collections.emptyList(), "reclaim-paused", tempDir.toString())) {
+            String opened = late.expectLine("opened=").substring("opened=".length());
+            assertEquals(lockFile.getParent().getFileName(), Paths.get(opened).getParent().getFileName());
+
+            owner.ioManager().close();
+            assertTrue(PaimonSpillDirCleaner.releaseAfterClose(owner.spillDirs(), true).complete());
+            late.send("go");
+
+            assertEquals("reclaimed=0", late.expectLine("reclaimed="));
+            late.awaitSuccess();
+        }
+        assertFalse(Files.exists(lockFile), "迟到的回收者不得重建锁文件");
+        assertFalse(Files.exists(lockFile.getParent()));
+    }
+
+    /** AC-17（跨进程）：另一个进程在 owner 创建锁文件前删除了空 lease，Provision 换新 lease 名后成功。 */
+    @Test
+    void provisionSurvivesAnotherProcessRemovingItsEmptyLease(@TempDir Path tempDir) throws Exception {
+        java.util.List<Path> raced = new java.util.ArrayList<>();
+        java.util.List<String> outputs = new java.util.ArrayList<>();
+        PaimonSpillLease.ProvisionHook otherProcess = new PaimonSpillLease.ProvisionHook() {
+            @Override
+            public void afterLeaseDirectory(Path lease) throws IOException {
+                if (raced.isEmpty()) {
+                    raced.add(lease);
+                    try {
+                        outputs.add(SpillProbeProcess.reclaimInOtherJvm(tempDir));
+                    } catch (Exception failure) {
+                        throw new IOException(failure);
+                    }
+                }
+            }
+        };
+        PaimonSpillLease lease = PaimonSpillLease.provision(java.util.Collections.singletonList(tempDir.toString()),
+                "race.orders", PaimonJvmIdentity::current, PaimonSpillAudit.defaultAudit(), otherProcess);
+        try {
+            assertEquals(java.util.Collections.singletonList("reclaimed=0"), outputs, "空 lease 只被 rmdir，不计为回收");
+            assertFalse(Files.exists(raced.get(0)), "另一个进程删除了尚无锁文件的空 lease");
+            assertNotEquals(raced.get(0), lease.roots().get(0).lease);
+            assertFalse(SpillProbeProcess.otherProcessAcquires(lease.roots().get(0).lockFile),
+                    "本进程持有的锁只能由其他进程探测（同进程探测会释放它，见 C1）");
+        } finally {
+            assertNull(lease.roots().get(0).retire());
+        }
+    }
+
+    /** AC-17（跨进程）：owner 释放锁后、rmdir 前，另一个进程先删除了已清空的 lease，退役仍判定为完成。 */
+    @Test
+    void retireSurvivesAnotherProcessRemovingTheEmptiedLease(@TempDir Path tempDir) throws Exception {
+        PaimonSpillLease lease = PaimonSpillLease.provision(java.util.Collections.singletonList(tempDir.toString()),
+                "race.orders", PaimonJvmIdentity::current, PaimonSpillAudit.defaultAudit(), PaimonSpillLease.NO_HOOK);
+        PaimonSpillLease.Root owned = lease.roots().get(0);
+        java.util.List<String> observed = new java.util.ArrayList<>();
+        PaimonSpillLease.RetireHook otherProcess = new PaimonSpillLease.RetireHook() {
+            @Override
+            public void afterRelease(Path leaseDir) {
+                try {
+                    observed.add(SpillProbeProcess.reclaimInOtherJvm(tempDir));
+                    observed.add("lease-exists=" + Files.exists(leaseDir));
+                } catch (Exception failure) {
+                    observed.add("failure=" + failure);
+                }
+            }
+        };
+
+        assertNull(owned.retire(PaimonSpillFiles.FILES_DELETE, otherProcess));
+
+        assertEquals(java.util.Arrays.asList("reclaimed=0", "lease-exists=false"), observed);
+        assertFalse(Files.exists(owned.lease));
+    }
+
+    private static Path orphanLease(Path root) throws IOException {
+        Path lease = Files.createDirectories(root.resolve("tapdata-paimon-v2")
+                .resolve(PaimonJvmIdentity.derive(31L, 31L)).resolve("0123456789ab-" + UUID.randomUUID()));
+        Files.write(lease.resolve("owner.lock"), new byte[0]);
+        Files.write(Files.createDirectories(lease.resolve("io").resolve("paimon-io-x")).resolve("a.channel"),
+                CHANNEL_CONTENT);
+        return lease;
+    }
+
+    private static int reclaimedCount(String line) {
+        return Integer.parseInt(line.substring("reclaimed=".length()));
+    }
+
+    private static PaimonSpillReclaimer.Result reclaim(Path root) {
+        return PaimonSpillReclaimer.standard().reclaim(java.util.Collections.singletonList(root.toString()));
+    }
+
+    /** 旧平铺布局的旁置锁文件位置。 */
+    private static Path legacyMarker(Path spill) {
+        return spill.resolveSibling("." + spill.getFileName() + ".tapdata-owner.lock");
     }
 
     private static void assertCrossProcessLockHeld(Path marker) throws IOException {
@@ -187,7 +315,7 @@ class PaimonSpillDirCleanerProcessIntegrationTest {
             assertEquals(2, paths.size(), "握手必须同时发布已经持锁的目录与写完的 channel");
             spill = Paths.get(paths.get(0));
             channel = Paths.get(paths.get(1));
-            marker = ownerMarker(spill);
+            marker = SpillTestSupport.ownerLockFile(spill.toString());
             assertEquals(spill, channel.getParent());
             assertTrue(Files.isRegularFile(marker));
             assertTrue(Files.isRegularFile(channel));
@@ -233,7 +361,7 @@ class PaimonSpillDirCleanerProcessIntegrationTest {
             Path root = Paths.get(args[0]);
             Path ready = Paths.get(args[1]);
             PaimonSpillDirCleaner.IOManagerBuildResult built =
-                    PaimonSpillDirCleaner.resolveAndCreateIOManager(root.toString());
+                    PaimonSpillDirCleaner.resolveAndCreateIOManager(root.toString(), "process-owner");
             try {
                 if (built.spillDirs().size() != 1) {
                     throw new IllegalStateException("单一 root 必须只创建一个原生 Spill 目录");

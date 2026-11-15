@@ -51,6 +51,30 @@ When using OSS storage:
 ### Database Name
 The Paimon database name (default: default)
 
+### Local Temporary Directory and Spill Reclamation
+
+The connector keeps Paimon's local spill and index files under `diskTmpDir` in the following layout. Each written table has its own lease directory:
+
+```text
+<diskTmpDir>/tapdata-paimon-v2/<process-id>/<lease>/owner.lock
+<diskTmpDir>/tapdata-paimon-v2/<process-id>/<lease>/io/paimon-io-<UUID>/
+```
+
+- **Liveness:** A directory is considered in use only while its operating-system file lock is held; modification times are never used. Directories of running tasks are never deleted by other tasks or other engines.
+- **Normal stop:** When a task stops normally, all of its directories are deleted and no empty directories remain.
+- **Abnormal exit:** Directories left behind by a crashed process (OOM, `kill -9`) are reclaimed by the next engine on the same host that starts a Paimon task, including the same engine after a restart. At most 64 are reclaimed per start; the rest are handled on the next start.
+- **Deployment:** Give each engine process its own `diskTmpDir`. On Kubernetes use a per-Pod emptyDir or a dedicated subPath; on Docker use a dedicated volume.
+- **Network or FUSE file systems:** When `diskTmpDir` is on NFS, CIFS, FUSE, Ceph or similar, file locks are not reliable across hosts, so the connector does not reclaim leftover directories and only logs a warning. Use a local disk, or clean up manually as shown below.
+- **Upgrade:** Restart the engine after upgrading the connector so that old and new versions do not run in the same process. Directories `paimon-io-*` and files `.paimon-io-*.tapdata-owner.lock` created by older versions directly under `diskTmpDir` are never opened or deleted by this version. After every engine using the directory has been upgraded and restarted, they can be removed once:
+
+  ```sh
+  # List first; delete only after confirming no engine running an older version uses the directory
+  find <diskTmpDir> -maxdepth 1 \( -name 'paimon-io-*' -o -name '.paimon-io-*.tapdata-owner.lock' \) -print
+  find <diskTmpDir> -maxdepth 1 \( -name 'paimon-io-*' -o -name '.paimon-io-*.tapdata-owner.lock' \) -exec rm -rf {} +
+  ```
+
+- **Troubleshooting:** Lease creation, retirement, retention, reclamation and skips are written to the engine log under the logger `io.tapdata.connector.paimon.spill`; task logs contain only summaries.
+
 ## Data Type Mapping
 
 | Paimon Type | Tapdata Type |
@@ -116,3 +140,30 @@ values must be stored as JSON in STRING columns.
 
 - [Apache Paimon Documentation](https://paimon.apache.org/)
 - [Paimon GitHub Repository](https://github.com/apache/paimon)
+
+
+### Local scratch directories and upgrade
+
+Use a persistent local scratch directory with sufficient capacity, dedicated to each engine.
+Set `diskTmpDir` and check both `fs.s3a.buffer.dir` and any
+`fs.s3a.bucket.<bucket>.buffer.dir` override. The write probe verifies one byte at initialization;
+it does not reserve an upload block or guarantee free space during execution.
+
+Restart the engine after upgrading: tasks in old connector ClassLoaders do not participate
+in the new reclaimer synchronization. OS cleanup (including `systemd-tmpfiles` for `/tmp`)
+and container volume removal can delete active spill directories despite application locks.
+Configure scratch retention in the host/container; advisory locks do not prevent external deletion.
+NFS/FUSE and other filesystems outside the admission list are not automatically reclaimed.
+
+Legacy flat `paimon-io-*` directories are reported, never automatically deleted. Upgrading
+does not recover their disk space. Stop **all** engines/tasks using the scratch roots first.
+Inspect actual paths and size with `find <root> -maxdepth 1 -type d -name 'paimon-io-*'`
+and `du -sh -- <specific-directory>`. Remove only individually verified unused directories.
+Do not delete `tapdata-paimon-v2` or scratch directories while engines are running.
+
+Startup waits at most 200 ms for reclamation. A running scan continues in a daemon worker
+and keeps its locks until finished; busy callers defer scanning with no pending queue.
+WARN/ERROR reclaim events also use the bounded asynchronous task logger. Under log backend
+blockage or queue saturation, events can still be dropped; check `droppedLogs` at shutdown.
+For capacity/mount issues, run `df -hT`, `df -i`, `findmnt -T <directory>` and
+`namei -l <directory>` as the engine account in the same mount namespace.

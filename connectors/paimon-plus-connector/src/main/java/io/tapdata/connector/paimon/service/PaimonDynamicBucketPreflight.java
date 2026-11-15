@@ -89,7 +89,7 @@ public final class PaimonDynamicBucketPreflight {
         boolean cleanupComplete = false;
         try {
             PaimonSpillDirCleaner.IOManagerBuildResult built =
-                    PaimonSpillDirCleaner.resolveAndCreateIOManager(configuredTmpDirs, scope);
+                    PaimonSpillDirCleaner.resolveAndCreateIOManager(configuredTmpDirs, "preflight:" + tableKey, scope);
             ioManager = built.ioManager();
             spillDirs = built.spillDirs();
             FileStoreTable validationTable = withoutIndexTtl(table);

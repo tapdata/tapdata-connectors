@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.write;
 
+import io.tapdata.connector.paimon.util.SpillTestSupport;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContractResolver;
 import io.tapdata.connector.paimon.util.PaimonSpillDirCleaner;
@@ -273,7 +274,7 @@ class PaimonNativeStopContractTest {
         FileStoreTable table = table();
         CountDownLatch spillEntered = new CountDownLatch(1);
         CountDownLatch releaseSpill = new CountDownLatch(0);
-        BlockingSpillIOManager io = new BlockingSpillIOManager(ioTmpDir, spillEntered, releaseSpill);
+        BlockingSpillIOManager io = BlockingSpillIOManager.owned(ioTmpDir, spillEntered, releaseSpill);
         PaimonCompactionLifecycle lifecycle = PaimonCompactionLifecycle.forTable(TABLE_KEY);
         TableWriteImpl<?> rawWriter = null;
         StreamTableCommit rawCommitter = null;
@@ -291,7 +292,7 @@ class PaimonNativeStopContractTest {
                     new PaimonBucketWriterStrategyContext(
                             TABLE_KEY, table, rawWriter, commitUser, io, contract),
                     DefaultPaimonBucketWriterRuntimeFactory.INSTANCE);
-            spillDirectories = PaimonSpillDirCleaner.registerLiveDirs(io.delegate());
+            spillDirectories = SpillTestSupport.spillDirsOf(io.delegate());
             context = new PaimonTableWriteContext(
                     TABLE_KEY, TABLE_NAME, commitUser, strategy,
                     new PaimonStreamTableCommitter(rawCommitter), io, spillDirectories,

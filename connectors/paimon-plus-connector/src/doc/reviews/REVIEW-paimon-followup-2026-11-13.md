@@ -1,0 +1,70 @@
+# 三个 Paimon 工单的后续修复（基于 develop dedf5c26）
+
+本轮修正的是综合 Review 中有证据的缺口，不据此认定客户三张工单的所有触发条件均已覆盖。
+
+## TAP-12775：并发回收器释放彼此的 POSIX 锁
+
+同 JVM 的回收器 B 打开与 A 相同的 inode，在 tryLock 冲突后关闭自己的 channel，会释放 A 在内核中的记录锁；A 的 Java FileLock 仍可能显示有效。外部正在 provision 的 owner 随后可以取得锁创建 io，而 A 仍继续删除。
+
+修复在读取锁属性之前取得全 JVM 共享的 intern 字符串监视器，直到 channel 关闭后才放行。固定 key 跨 ClassLoader 共享；它保护所有根，覆盖别名路径和 inode 相同的情况。owner 仍按进程命名空间整体跳过，不探测自己的锁。没有依据 mtime、年龄或 FileLock.isValid() 判断存活。
+
+回归 PaimonReclaimerLockSafetyTest 让 A 在持锁删除前暂停，启动同 loader / 隔离 loader 的 B，并由真实外部 JVM 尝试加锁。修复后 B 在 open 前等待，外部 JVM 无法取锁。移除互斥的负向对照，两种测试都观察到 acquired=true，证明它们能捕捉真实 OS 锁失效。
+
+代价：同 JVM 的回收阶段按 lease 串行；大量残留/慢盘会增加任务启动等待，未做 300 任务压力验收。升级需重启引擎，避免旧 ClassLoader 的回收器仍在运行；旧代码不遵守新增监视器协议。
+
+## TAP-13250：验证实际 bucket 生效的缓冲目录
+
+Hadoop 在 S3A 初始化时把 fs.s3a.bucket.<bucket>.buffer.dir 传播到全局值。仅校验全局值会漏掉最终目录。
+
+现在在 warehouse 配置阶段识别 s3a 的 bucket 覆盖，并在 PaimonS3AFileSystem.initialize 中按实际 authority 再次传播、验证，早于网络访问。规范化空 bucket 值到全局目录，并同步规范化副本中的 bucket 值，避免 super.initialize 再传播时覆盖校验结果。原配置不被跨 authority 改写。目录校验复用 PaimonLocalDirectories；NIO 创建失败保留原始 OS 异常。
+
+测试覆盖无效 bucket 路径、两个 bucket 各自的目录、重复 Hadoop 传播、空值回退、无效但未使用的全局值与有效 bucket 覆盖。原有全局目录验证与回滚用例保留。
+
+边界：这是 Hadoop s3a:// 路径；原生 s3:// 插件的 shaded 实现不经此入口，不能承诺其所有配置规则已被覆盖。写入探针只验证当时能写一字节，不预留 64 MiB，也不证明并发时持续可用。
+
+## 环境诊断与 TAP-13254
+
+- 根目录创建/解析与 JVM identity 失败新增 PROVISION_FAILED，带 owner、阶段、目录状态、原始 cause。
+- 锁属性/打开失败不再记为普通 INFO 跳过：限频 WARN RECLAIM_INSPECTION_FAILED，计入失败摘要，保留 cause。
+- FileStore 探针失败保留异常；IOManager 创建/登记失败记录目录状态。登记失败将证据附到 suppressed，任务完整异常栈也能看到。
+- 目录状态包含 path、exists、directory、最近现存祖先的真实路径、FileStore 名称/类型、readOnly、usableBytes、totalBytes，观察失败单独记录。它们是现场观察，不能推断具体删除者或唯一根因；不采集连接密钥或整份配置。
+- writer 初始化失败另经任务 Log 输出表名、bucketMode、diskTmpDir、原始异常，避免仅依赖专用 SLF4J audit。复用现有有界异步日志队列，日志后端阻塞或异常不改变资源保留决策；队列满时仍可能丢弃，沿用 droppedCount 语义。
+- IncompleteCleanupException 保留类型和 cause，顶层消息增加原始失败，保持上层的关闭安全判断。
+- 孤立 LATEST 回退成功时，限频 WARN 记录 hint、物理目录、扫描发现的实际 latest。TAP-13254 既有修复与实际快照/数据损坏的边界不变。不删除提示或重置提交编号。
+
+仍需在实际引擎检查任务日志与 io.tapdata.connector.paimon.spill / PaimonS3AFileSystem / HintFileUtils 的 logger 路由。单元测试不能证明客户 appender 生效，也不能替代真实 S3 和客户挂载环境验收。
+
+## 部署与现场取证
+
+建议每个引擎使用独占、容量充足、持久的本地 scratch 目录；配置 diskTmpDir 与 S3A buffer 后，同时检查实际 bucket 覆盖。/tmp 可能受 systemd-tmpfiles 或容器生命周期清理，应用文件锁不能阻止外部删除者。NFS/FUSE 等不在白名单的文件系统不会自动回收；旧 paimon-io-* 只告警不删除。升级不会自动腾出这些残留空间。
+
+遇到故障，在相同容器/挂载命名空间和引擎账号下检查日志中的目录：df -hT、df -i、findmnt -T、namei -l，并检查 systemd-tmpfiles 规则及容器 volume。容量不足、配额、inode 耗尽和挂载丢失需结合这些证据判断；应用观察不能标识执行 rm 的具体进程。外部删除者的识别需要事先开启系统审计。
+
+
+## 二次 Review 后的追加修复
+
+- 启动回收改由每个 ClassLoader 一个 daemon worker 执行，无排队积压；调用方最多等待 200ms。超过等待预算后不取消扫描，继续持有原有跨 ClassLoader 监视器和 OS 锁直到删除完成；忙时下一启动再尝试。没有用路径分锁，以免别名/hardlink 让同 inode 再次被并发 open/close。慢盘本身仍可能阻塞 worker，但不会无限阻塞任务启动。
+- 回收 WARN/ERROR 除专用引擎 logger 外，独立转发到有界异步任务日志（保留 WARN 级别与原始 cause）；引擎 sink 抛异常也不阻断转发。没有用 isInfoEnabled 作为 appender 自检，因为该值不能证明日志落地。日志队列饱和仍可能丢弃，现有 droppedLogs 可观察。租约关闭失败仍由 service 关闭日志出口报告。
+- 旧布局任务摘要升 WARN，增加 metadata-only 字节估算（最多 100ms/10000 entries，每根独立预算，标明 sizeIncomplete）。不跟随 symlink、不打开旧锁文件、不删除旧目录。文档给出停掉全部相关引擎后的人工检查和逐目录清理指引。
+- 命中有效 bucket override 时，也验证未使用的全局 buffer 值；全局失败只走任务 WARN，其他 authority 在初始化时仍必须独立验证。
+- S3A 多级目录创建逐层登记，失败时逆序只删除本次真正创建且仍为空的目录；保留原有祖先与其他进程已占用的目录。
+- 孤儿 LATEST 告警改为每目录一分钟一次，最多保存 1024 个 key，避免一个表遮蔽其他表。限频不影响快照扫描/异常传播。
+- 测试期守卫核对实际 paimon-core jar 版本必须是 1.3.2、公开 API 与上游一致、测试加载的是覆盖类。升级时必须审查上游实现并显式更新 pin；跳过测试的构建不会执行该守卫。
+
+验证包含启动超时/忙时跳过、引擎 sink 故障时的任务日志、旧目录估算不跟随 symlink、多级目录回滚、无效全局与有效 bucket 共存、每目录限频以及覆盖类兼容检查；保留跨进程/跨 ClassLoader 的真实 OS 锁回归和 DROP/recreate 端到端验证。
+
+最终全量验证（2026-11-13，Linux overlay / Temurin 17）：`mvn -o -pl connectors/paimon-plus-connector test`：**1338 项，0 failures，0 errors，2 skipped，BUILD SUCCESS**。原有 `reclaimerHasNoTemporalInput` 守卫保持不变；时间预算仅在独立体积观察类与启动等待中使用。尚未进行真实客户 S3/挂载环境或 300 任务并发验收。
+
+## 三次 Review 后的追加修复（S1–S3）
+
+第三轮评审（PR #1023 head `554de594`）判定的三处应修问题，均属可观测性与诊断正确性，不改变回收协议：
+
+- **S1 扫描线程沿用提交方 TCCL 并获得可区分名**：`PaimonSpillDirCleaner.newReclaimThread` 显式 `setContextClassLoader`，名字为 `paimon-spill-reclaim-<TCCL identityHash>-<seq>`。计数器按 ClassLoader 递增，只靠它会让几百个连接器实例都叫 `...-1`；加上 loader 的 identity hash 才能在异常堆栈里区分实例（`PaimonCompactionExecutor` 用的是 tableKey，回收侧没有表名可用）。显式设置 TCCL 与 `new Thread` 的隐式继承行为相同，属意图显式化：将来换成非继承的线程工厂不会静默改变；空闲 worker 在 30s 内复用，届时携带最初的提交方 loader。新增 `PaimonStartupReclaimTest.reclaimWorkerThreadKeepsCallerTcclAndGetsUniqueName`。
+- **S2 目录回滚不再吞掉失败原因**：`PaimonLocalDirectories` 中探针删除与回滚删除的 `catch` 由 `IOException` 扩为 `IOException | RuntimeException`。`SecurityException`（`RuntimeException`）此前会从 `finally`/回滚循环逃逸，顶掉待传播的 `IllegalStateException`，导致 `fs.s3a.buffer.dir` 的真实失败原因丢失。
+- **S3 正常路径降级为 INFO**：`reclaim deferred`（同一 ClassLoader 已有扫描在跑）与 `reclaim continues in background after 200 ms`（慢盘或多任务同时启动）是设计内的正常路径，改用 `PaimonStopLog.offer`（INFO）。原 WARN 在 300 任务启动时成片出现，会被现场当作故障上报。`RejectedExecutionException` 不再一律当作“另一个扫描在跑”：`worker.isShutdown()` 时输出 `reclaim worker unavailable` 并保持 WARN（生产池不关闭，此分支不可达）。失败类事件仍为 ERROR。
+
+`PaimonStartupReclaimTest` 相应调整：后台继续/超时走 INFO；新增真实 busy 池（core=0 + SynchronousQueue + AbortPolicy）用例断言 INFO 且队列为空、无 WARN 混入；worker 已关闭用例改为断言 WARN `reclaim worker unavailable`。SPEC 中“忙时只输出任务 WARN”同步改为 INFO。
+
+第四轮全量验证（2026-11-13，Linux / Temurin 17）：`mvn -o -pl connectors/paimon-plus-connector test`：**1339 项，0 failures，0 errors，2 skipped，BUILD SUCCESS**（较上轮 +1，为新增线程属性用例）。
+
+仍未处理、且不阻塞合并的边缘项：旧布局根列举失败时静默 return；`busyWorkerDefersWithoutQueueing` 用 shutdown 而非真正 busy 的池验证「无积压」；`PaimonLegacySpillSize` 的 deadline 在构造时求值；`PaimonSpillAudit` 限频表整表 `clear()`。

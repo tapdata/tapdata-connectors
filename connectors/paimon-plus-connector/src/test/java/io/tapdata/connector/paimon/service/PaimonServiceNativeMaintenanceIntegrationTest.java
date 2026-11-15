@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.service;
 
+import io.tapdata.connector.paimon.util.SpillTestSupport;
 import io.tapdata.connector.paimon.commit.PaimonServiceLifecycle;
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContractResolver;
@@ -204,8 +205,8 @@ class PaimonServiceNativeMaintenanceIntegrationTest {
                         .partitionKeys("dt")
                         .options(options).build(), false);
                 table = (FileStoreTable) catalog.getTable(IDENTIFIER);
-                io = new IOManagerImpl(Files.createDirectory(tempDir.resolve("io")).toString());
-                spillDirectories = PaimonSpillDirCleaner.registerLiveDirs(io);
+                io = SpillTestSupport.ownedIOManager(Files.createDirectory(tempDir.resolve("io")).toString());
+                spillDirectories = SpillTestSupport.spillDirsOf(io);
                 compaction = PaimonCompactionLifecycle.forTable(TABLE_KEY);
                 writer = (TableWriteImpl<?>) table.newStreamWriteBuilder()
                         .withCommitUser(COMMIT_USER).newWrite().withIOManager(io);
@@ -400,7 +401,7 @@ class PaimonServiceNativeMaintenanceIntegrationTest {
     }
 
     private static File ownerMarker(File directory) {
-        return new File(directory.getParentFile(), "." + directory.getName() + ".tapdata-owner.lock");
+        return SpillTestSupport.ownerLockFile(directory);
     }
 
     private static PaimonStreamTableCommitter commitAdapter(StreamTableCommit committer) throws Exception {

@@ -51,6 +51,30 @@ Paimon 存儲數據的根路徑。可以是:
 ### 數據庫名稱
 Paimon 數據庫名稱（默認：default）
 
+### 本地臨時目錄與 Spill 回收
+
+連接器在 `diskTmpDir` 下按以下結構存放 Paimon 的本地 Spill 與索引文件，每個寫入表各有獨立的租約目錄：
+
+```text
+<diskTmpDir>/tapdata-paimon-v2/<進程標識>/<租約>/owner.lock
+<diskTmpDir>/tapdata-paimon-v2/<進程標識>/<租約>/io/paimon-io-<UUID>/
+```
+
+- **存活判定：** 只以作業系統文件鎖判斷目錄是否仍在使用，不按修改時間推斷。運行中任務的目錄不會被其他任務或其他引擎刪除。
+- **正常停止：** 任務正常停止後，其目錄全部刪除，不留空目錄。
+- **異常退出：** 進程崩潰（OOM、`kill -9`）後遺留的目錄，由同一台機器上下一次啟動 Paimon 任務的引擎回收（包括重啟後的同一引擎）；每次最多回收 64 個，其餘留到下一次。
+- **部署建議：** 每個引擎進程使用獨佔的 `diskTmpDir`。Kubernetes 使用每個 Pod 獨立的 emptyDir 或獨立的 subPath，Docker 使用獨立的 volume。
+- **網路或 FUSE 文件系統：** `diskTmpDir` 位於 NFS、CIFS、FUSE、Ceph 等文件系統時，跨主機文件鎖不可靠，連接器不自動回收遺留目錄，只記錄告警。請改用本地磁碟，或按下方步驟手動清理。
+- **升級：** 升級連接器後請重啟引擎，避免同一進程內新舊版本並存。舊版本在 `diskTmpDir` 根下創建的 `paimon-io-*` 目錄與 `.paimon-io-*.tapdata-owner.lock` 文件不會被新版本打開或刪除。確認使用該目錄的所有引擎都已升級並重啟後，可以一次性刪除：
+
+  ```sh
+  # 先列出，確認沒有任何舊版本引擎仍在使用該目錄後再刪除
+  find <diskTmpDir> -maxdepth 1 \( -name 'paimon-io-*' -o -name '.paimon-io-*.tapdata-owner.lock' \) -print
+  find <diskTmpDir> -maxdepth 1 \( -name 'paimon-io-*' -o -name '.paimon-io-*.tapdata-owner.lock' \) -exec rm -rf {} +
+  ```
+
+- **排查：** 租約的創建、退役、保留、回收與跳過事件寫入引擎日誌，logger 名為 `io.tapdata.connector.paimon.spill`；任務日誌只記錄摘要。
+
 ## 數據類型映射
 
 | Paimon 類型 | Tapdata 類型 |
@@ -115,3 +139,25 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目標欄位會被拒絕。複雜 CDC 值必須�
 
 - [Apache Paimon 文檔](https://paimon.apache.org/)
 - [Paimon GitHub 倉庫](https://github.com/apache/paimon)
+
+
+### 本機暫存目錄與升級
+
+建议每個引擎使用獨佔、持久且容量充足的本地暫存目錄。設定 `diskTmpDir` 時，同時檢查
+`fs.s3a.buffer.dir` 和 `fs.s3a.bucket.<bucket>.buffer.dir` 覆盖值。初始化寫入探針只验证
+當時能寫入一字节，不预留上传块，也不保证執行期间空間始终充足。
+
+升級後必须重启引擎：旧任務的 ClassLoader 不遵守新增的回收同步协议。
+`systemd-tmpfiles` 对 `/tmp` 的清理以及容器卷刪除，都可能越过应用檔案鎖刪除活跃目錄。
+请在主机或容器中設定暫存目錄的保留规则。NFS/FUSE 等不在准入白名单内的檔案系統不自动回收。
+
+旧平铺 `paimon-io-*` 目錄只告警、不自动刪除，升級不会自动释放這些空間。
+先停止所有使用這些根目錄的引擎和任務，再用
+`find <root> -maxdepth 1 -type d -name 'paimon-io-*'` 列出候选，
+用 `du -sh -- <specific-directory>` 檢查体积，僅逐個刪除已确认不再使用的目錄。
+引擎執行時不得刪除 `tapdata-paimon-v2` 或其他仍在使用的暫存目錄。
+
+啟動最多等待回收 200ms；超時後背景扫描继续持锁完成，忙時不积压後续扫描。
+回收 WARN/ERROR 同時轉發到有界异步任務日誌；日誌後端阻塞或佇列饱和仍可能丢失事件，
+关闭摘要中的 `droppedLogs` 可辅助观察。容量或挂載问题需使用引擎账号，在相同挂載命名空間下
+结合 `df -hT`、`df -i`、`findmnt -T <directory>`、`namei -l <directory>` 檢查。

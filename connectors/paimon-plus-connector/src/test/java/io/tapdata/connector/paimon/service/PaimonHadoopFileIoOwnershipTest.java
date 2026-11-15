@@ -197,7 +197,7 @@ class PaimonHadoopFileIoOwnershipTest {
 
             inTaskGroup(oldTask, first::close);
             assertFalse(pool.isShutdown(), "单个 Service 不拥有共享 S3A 的关闭权");
-            oldTask.destroy();
+            destroyTaskGroup(oldTask);
             assertTrue(oldTask.isDestroyed());
 
             inTaskGroup(newTask, second::init);
@@ -344,8 +344,9 @@ class PaimonHadoopFileIoOwnershipTest {
         Thread[] threads = new Thread[Math.max(16, group.activeCount() * 2 + 1)];
         int count = group.enumerate(threads, true);
         for (int index = 0; index < count; index++) {
-            threads[index].join(5_000L);
-            assertFalse(threads[index].isAlive(), "Task group still owns " + threads[index].getName());
+            Thread thread = threads[index];
+            thread.join(5_000L);
+            assertFalse(thread.isAlive(), "Task group still owns " + thread.getName());
         }
         group.destroy();
     }

@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.write;
 
+import io.tapdata.connector.paimon.util.SpillTestSupport;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContractResolver;
 import io.tapdata.connector.paimon.util.PaimonSpillDirCleaner;
@@ -119,8 +120,7 @@ class PaimonFinalPrepareBucketModeIntegrationTest {
             for (String spill : fixture.spillDirectories) {
                 File directory = new File(spill);
                 assertFalse(directory.exists());
-                assertFalse(new File(directory.getParentFile(),
-                        "." + directory.getName() + ".tapdata-owner.lock").exists());
+                assertFalse(SpillTestSupport.ownerLockFile(directory).exists());
             }
         }
     }
@@ -194,8 +194,8 @@ class PaimonFinalPrepareBucketModeIntegrationTest {
                 Identifier identifier = Identifier.create("default", tableName);
                 catalog.createTable(identifier, schema.build(), false);
                 table = (FileStoreTable) catalog.getTable(identifier);
-                io = IOManager.create(Files.createDirectory(tempDir.resolve("io")).toString());
-                spillDirectories = PaimonSpillDirCleaner.registerLiveDirs(io);
+                io = SpillTestSupport.ownedIOManager(Files.createDirectory(tempDir.resolve("io")).toString());
+                spillDirectories = SpillTestSupport.spillDirsOf(io);
                 lifecycle = PaimonCompactionLifecycle.forTable(tableKey);
                 String commitUser = "final-mode-" + tableName;
                 StreamWriteBuilder builder = table.newStreamWriteBuilder().withCommitUser(commitUser);

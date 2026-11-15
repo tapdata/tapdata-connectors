@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.service;
 
+import io.tapdata.connector.paimon.util.SpillTestSupport;
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContractTestFactory;
@@ -75,19 +76,12 @@ class PaimonDynamicBucketPreflightCleanupTest {
         KVMap<Object> state = stateMap(persisted);
         PaimonService first = service(tempDir, state);
         PaimonService second = service(tempDir, state);
-        IOManagerImpl io = spy(new IOManagerImpl(new String[] {tempDir.toString()}));
+        IOManagerImpl io = null;
         List<String> dirs = new ArrayList<>();
-        for (File dir : io.getSpillingDirectories()) {
-            dirs.add(dir.getCanonicalPath());
-        }
-        assertFalse(dirs.isEmpty());
         AssertionError bootstrapFailure = new AssertionError("原生 bootstrap Error");
         Throwable cleanupFailure = scenario.error
                 ? new AssertionError("预检关闭 Error: " + scenario)
                 : new IOException("预检关闭失败: " + scenario);
-        if (scenario.io) {
-            doThrow(cleanupFailure).when(io).close();
-        }
 
         // 只在原生边界注入失败；Service admission、commit-state binding、Spill 注册和删除均真实执行。
         // Paimon 1.3.2 GlobalIndexAssigner.close 先关闭 stateFactory，再删除自身路径；失败并非访问者退出证明。
@@ -104,17 +98,33 @@ class PaimonDynamicBucketPreflightCleanupTest {
              MockedConstruction<IndexBootstrap> bootstraps = mockConstruction(
                      IndexBootstrap.class, (bootstrap, ignored) ->
                              when(bootstrap.bootstrap(1, 0)).thenThrow(bootstrapFailure))) {
-            factory.when(() -> IOManager.create(any(String[].class))).thenReturn(io);
+            SpillTestSupport.CreatedIOManagers created = SpillTestSupport.spyOnIOManagerCreation(factory, spy -> {
+                if (scenario.io) {
+                    try {
+                        doThrow(cleanupFailure).when(spy).close();
+                    } catch (Exception impossible) {
+                        throw new AssertionError(impossible);
+                    }
+                }
+            });
 
             InvocationTargetException invocation = assertThrows(InvocationTargetException.class,
                     () -> admissionMethod().invoke(first, tableKey, "orders",
                             Identifier.create("default", "orders"), null, table,
                             PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_DYNAMIC)));
+            io = created.only();
+            dirs.addAll(created.spillDirs());
+            assertFalse(dirs.isEmpty());
             assertEquals(1, checkers.constructed().size());
             org.mockito.ArgumentCaptor<IOManager> view = org.mockito.ArgumentCaptor.forClass(IOManager.class);
             verify(checkers.constructed().get(0)).open(org.mockito.ArgumentMatchers.eq(0L),
                     view.capture(), org.mockito.ArgumentMatchers.eq(1), org.mockito.ArgumentMatchers.eq(0), any());
             org.junit.jupiter.api.Assertions.assertArrayEquals(dirs.toArray(new String[0]), view.getValue().tempDirs());
+            for (String confined : view.getValue().tempDirs()) {
+                // AC-14：GlobalIndexAssigner 经 tempDirs() 建 rocksdb-*，该路径必须位于租约的 io/ 内。
+                assertTrue(Paths.get(confined).getParent().getFileName().toString().equals("io")
+                        && confined.contains("tapdata-paimon-v2"), confined);
+            }
             org.junit.jupiter.api.Assertions.assertNotSame(io, view.getValue());
             assertEquals(1, bootstraps.constructed().size());
             verify(checkers.constructed().get(0), times(1)).close();
@@ -154,21 +164,28 @@ class PaimonDynamicBucketPreflightCleanupTest {
             for (String dir : dirs) {
                 assertEquals(scenario != CleanupFailure.NONE, Files.isDirectory(Paths.get(dir)),
                         "清理失败必须保留真实 Spill 目录");
-                assertEquals(scenario != CleanupFailure.NONE, Files.exists(ownerMarker(dir)),
+                assertEquals(scenario != CleanupFailure.NONE, Files.exists(SpillTestSupport.ownerLockFile(dir)),
                         "清理失败必须保留目录 owner marker");
-                assertEquals(scenario != CleanupFailure.NONE, liveDirs().contains(dir),
-                        "V1.2 任何关闭证明缺失均保留 live 保护");
-                assertEquals(scenario != CleanupFailure.NONE, ownerLocks().containsKey(dir),
-                        "checker 未证明关闭时不能释放目录文件锁");
+                assertEquals(scenario != CleanupFailure.NONE, SpillTestSupport.ownerRegistered(dir),
+                        "checker 未证明关闭时不能释放 owner 登记与目录文件锁");
+                if (scenario != CleanupFailure.NONE) {
+                    // AC-10：FAILED_RETAINED 保持持锁，其他 JVM 的反复回收都不能删除。
+                    assertTrue(SpillTestSupport.ownerLockHeld(dir));
+                    assertEquals(0, SpillTestSupport.reclaimInOtherJvm(dir));
+                    assertEquals(0, SpillTestSupport.reclaimInOtherJvm(dir));
+                    assertTrue(Files.isDirectory(Paths.get(dir)));
+                }
             }
         } finally {
             // 注入的 checker 没有真实后台访问者；退出构造 mock 作用域后才允许测试回收保留的资源。
             // 不使用生产 unregister 伪造成功证明，先执行真实 IO close，再释放测试持有的 owner。
-            doCallRealMethod().when(io).close();
-            io.close();
+            if (io != null) {
+                doCallRealMethod().when(io).close();
+                io.close();
+            }
             PaimonSpillDirCleaner.releaseAfterClose(dirs, true);
             for (String dir : dirs) {
-                Files.deleteIfExists(ownerMarker(dir));
+                Files.deleteIfExists(SpillTestSupport.ownerLockFile(dir));
             }
             PaimonStopTestSupport.releaseInjectedOwner(first, tableKey);
             PaimonStopTestSupport.releaseInjectedOwner(second, tableKey);
@@ -242,27 +259,10 @@ class PaimonDynamicBucketPreflightCleanupTest {
         return state;
     }
 
-    private static Path ownerMarker(String dir) {
-        Path path = Paths.get(dir);
-        return path.resolveSibling("." + path.getFileName() + ".tapdata-owner.lock");
-    }
-
     private static Object field(PaimonService service, String name) throws Exception {
         Field field = PaimonService.class.getDeclaredField(name);
         field.setAccessible(true);
         return field.get(service);
-    }
-
-    private static Set<?> liveDirs() throws Exception {
-        Field field = PaimonSpillDirCleaner.class.getDeclaredField("LIVE_DIRS");
-        field.setAccessible(true);
-        return (Set<?>) field.get(null);
-    }
-
-    private static Map<?, ?> ownerLocks() throws Exception {
-        Field field = PaimonSpillDirCleaner.class.getDeclaredField("OWNER_LOCKS");
-        field.setAccessible(true);
-        return (Map<?, ?>) field.get(null);
     }
 
     private static Method admissionMethod() throws Exception {

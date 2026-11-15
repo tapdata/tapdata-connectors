@@ -35,6 +35,30 @@ Paimon 存储数据的根路径。可以是:
 
 旧版本中关闭开关可能仍使用原生默认 `true`。本次修正后，重启任务会实际传入 `false`，可能改变内存使用、flush 频率和文件数量；不保证生产吞吐保持不变。临时目录仍须等相关使用者退出后才清理，超时则按既有规则保留。
 
+### 本地临时目录与 Spill 回收
+
+连接器在 `diskTmpDir` 下按以下结构存放 Paimon 的本地 Spill 与索引文件，每个写入表各有独立的租约目录：
+
+```text
+<diskTmpDir>/tapdata-paimon-v2/<进程标识>/<租约>/owner.lock
+<diskTmpDir>/tapdata-paimon-v2/<进程标识>/<租约>/io/paimon-io-<UUID>/
+```
+
+- **存活判定：** 只以操作系统文件锁判断目录是否仍在使用，不按修改时间推断。运行中任务的目录不会被其他任务或其他引擎删除。
+- **正常停止：** 任务正常停止后，其目录全部删除，不留空目录。
+- **异常退出：** 进程崩溃（OOM、`kill -9`）后遗留的目录，由同一台机器上下一次启动 Paimon 任务的引擎回收（包括重启后的同一引擎）；每次最多回收 64 个，其余留到下一次。
+- **部署建议：** 每个引擎进程使用独占的 `diskTmpDir`。Kubernetes 使用每个 Pod 独立的 emptyDir 或独立的 subPath，Docker 使用独立的 volume。
+- **网络或 FUSE 文件系统：** `diskTmpDir` 位于 NFS、CIFS、FUSE、Ceph 等文件系统时，跨主机文件锁不可靠，连接器不自动回收遗留目录，只记录告警。请改用本地磁盘，或按下方步骤手动清理。
+- **升级：** 升级连接器后请重启引擎，避免同一进程内新旧版本并存。旧版本在 `diskTmpDir` 根下创建的 `paimon-io-*` 目录与 `.paimon-io-*.tapdata-owner.lock` 文件不会被新版本打开或删除。确认使用该目录的所有引擎都已升级并重启后，可以一次性删除：
+
+  ```sh
+  # 先列出，确认没有任何旧版本引擎仍在使用该目录后再删除
+  find <diskTmpDir> -maxdepth 1 \( -name 'paimon-io-*' -o -name '.paimon-io-*.tapdata-owner.lock' \) -print
+  find <diskTmpDir> -maxdepth 1 \( -name 'paimon-io-*' -o -name '.paimon-io-*.tapdata-owner.lock' \) -exec rm -rf {} +
+  ```
+
+- **排查：** 租约的创建、退役、保留、回收与跳过事件写入引擎日志，logger 名为 `io.tapdata.connector.paimon.spill`；任务日志只记录摘要。
+
 ### 原生维护模式
 
 `snapshot.expire.execution-mode` 由 Paimon 解释：SYNC、ASYNC 均可使用，连接器不强制设置模式、不 ALTER 已有表，也不自行执行或重试维护。未配置时使用 Catalog 和 Paimon 的默认值。历史已改为 SYNC 的表不会自动恢复；连接器的 `enableAsyncCommit` 是另一个独立参数。
@@ -146,3 +170,25 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 J
 
 - [Apache Paimon 文档](https://paimon.apache.org/)
 - [Paimon GitHub 仓库](https://github.com/apache/paimon)
+
+
+### 本地临时目录与升级
+
+建议每个引擎使用独占、持久且容量充足的本地临时目录。配置 `diskTmpDir` 时，同时检查
+`fs.s3a.buffer.dir` 和 `fs.s3a.bucket.<bucket>.buffer.dir` 覆盖值。初始化写探针只验证
+当时能写入一字节，不预留上传块，也不保证运行期间空间始终充足。
+
+升级后必须重启引擎：旧任务的 ClassLoader 不遵守新增的回收同步协议。
+`systemd-tmpfiles` 对 `/tmp` 的清理以及容器卷删除，都可能越过应用文件锁删除活跃目录。
+请在主机或容器中配置临时目录的保留规则。NFS/FUSE 等不在准入白名单内的文件系统不自动回收。
+
+旧平铺 `paimon-io-*` 目录只告警、不自动删除，升级不会自动释放这些空间。
+先停止所有使用这些根目录的引擎和任务，再用
+`find <root> -maxdepth 1 -type d -name 'paimon-io-*'` 列出候选，
+用 `du -sh -- <specific-directory>` 检查体积，仅逐个删除已确认不再使用的目录。
+引擎运行时不得删除 `tapdata-paimon-v2` 或其他仍在使用的临时目录。
+
+启动最多等待回收 200ms；超时后后台扫描继续持锁完成，忙时不积压后续扫描。
+回收 WARN/ERROR 同时转发到有界异步任务日志；日志后端阻塞或队列饱和仍可能丢失事件，
+关闭摘要中的 `droppedLogs` 可辅助观察。容量或挂载问题需使用引擎账号，在相同挂载命名空间下
+结合 `df -hT`、`df -i`、`findmnt -T <directory>`、`namei -l <directory>` 检查。

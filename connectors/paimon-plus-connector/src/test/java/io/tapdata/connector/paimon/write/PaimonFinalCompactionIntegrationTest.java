@@ -1,5 +1,6 @@
 package io.tapdata.connector.paimon.write;
 
+import io.tapdata.connector.paimon.util.SpillTestSupport;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContract;
 import io.tapdata.connector.paimon.schema.PaimonWriteSemanticContractResolver;
 import io.tapdata.connector.paimon.util.PaimonSpillDirCleaner;
@@ -223,8 +224,7 @@ class PaimonFinalCompactionIntegrationTest {
         for (String spillDirectory : fixture.spillDirectories) {
             File directory = new File(spillDirectory);
             assertFalse(directory.exists(), "实际 termination 后必须删除 Spill 目录");
-            assertFalse(new File(directory.getParentFile(),
-                    "." + directory.getName() + ".tapdata-owner.lock").exists());
+            assertFalse(SpillTestSupport.ownerLockFile(directory).exists());
         }
     }
 
@@ -362,7 +362,7 @@ class PaimonFinalCompactionIntegrationTest {
                         new PaimonBucketWriterStrategyContext(
                                 TABLE_KEY, table, rawWriter, commitUser, io, contract),
                         DefaultPaimonBucketWriterRuntimeFactory.INSTANCE);
-                spillDirectories = PaimonSpillDirCleaner.registerLiveDirs(io.delegate);
+                spillDirectories = SpillTestSupport.spillDirsOf(io.delegate);
                 PaimonTableCommitter delegate = new PaimonStreamTableCommitter(rawCommitter);
                 PaimonTableCommitter countedCommitter = new PaimonTableCommitter() {
                     @Override
@@ -501,7 +501,7 @@ class PaimonFinalCompactionIntegrationTest {
         final List<String> spillStacks = new CopyOnWriteArrayList<>();
 
         FailingSpillIO(String tmpDir, int failingOrdinal, int blockedOrdinal) {
-            delegate = (IOManagerImpl) IOManager.create(tmpDir);
+            delegate = SpillTestSupport.ownedIOManager(tmpDir);
             this.failingOrdinal = failingOrdinal;
             this.blockedOrdinal = blockedOrdinal;
         }

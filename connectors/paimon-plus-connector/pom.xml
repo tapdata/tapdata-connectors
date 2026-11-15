@@ -224,6 +224,13 @@
                                         <exclude>**/org/slf4j/**</exclude>
                                     </excludes>
                                 </filter>
+                                <!-- Use the connector's TAP-13254 hint validation override. -->
+                                <filter>
+                                    <artifact>org.apache.paimon:paimon-core</artifact>
+                                    <excludes>
+                                        <exclude>org/apache/paimon/utils/HintFileUtils.class</exclude>
+                                    </excludes>
+                                </filter>
                                 <filter>
                                     <artifact>org.apache.paimon:paimon-api</artifact>
                                     <excludes>

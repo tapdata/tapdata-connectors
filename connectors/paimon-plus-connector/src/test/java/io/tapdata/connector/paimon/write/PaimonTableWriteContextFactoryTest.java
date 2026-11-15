@@ -11,6 +11,7 @@ import io.tapdata.connector.paimon.exception.PaimonFatalWriteException;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import io.tapdata.connector.paimon.util.SpillTestSupport;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
@@ -255,16 +256,22 @@ class PaimonTableWriteContextFactoryTest {
         } else {
             when(fixture.builder.newCommit()).thenThrow(original);
         }
-        org.apache.paimon.disk.IOManagerImpl io = org.mockito.Mockito.spy(
-                new org.apache.paimon.disk.IOManagerImpl(new String[] {tempDir.toString()}));
-        List<String> dirs = canonicalSpillDirs(io);
+        fixture.configuredTmpDirs = tempDir.toString();
+        org.apache.paimon.disk.IOManagerImpl io = null;
+        List<String> dirs = Collections.emptyList();
         try (org.mockito.MockedStatic<IOManager> factory = org.mockito.Mockito.mockStatic(IOManager.class)) {
-            factory.when(() -> IOManager.create(any(String[].class))).thenReturn(io);
+            SpillTestSupport.CreatedIOManagers created = SpillTestSupport.spyOnIOManagerCreation(factory, spy -> { });
 
             Throwable thrown = assertThrows(Throwable.class, fixture::create);
 
             assertSame(original, thrown);
-            InOrder order = inOrder(fixture.writer, fixture.committer, io);
+            assertEquals(stage.hasIo(), !created.isEmpty(), "只有到达 IO 阶段才创建 IOManager");
+            if (!created.isEmpty()) {
+                io = created.only();
+                dirs = created.spillDirs();
+            }
+            InOrder order = io == null ? inOrder(fixture.writer, fixture.committer)
+                    : inOrder(fixture.writer, fixture.committer, io);
             order.verify(fixture.writer).close();
             if (stage == ConstructionFailureStage.STRATEGY) {
                 order.verify(fixture.committer).close();
@@ -279,12 +286,13 @@ class PaimonTableWriteContextFactoryTest {
                     assertFalse(java.nio.file.Files.exists(ownerMarker(dir)));
                 }
             } else {
-                verify(io, never()).close();
                 verify(fixture.writer, never()).withIOManager(any());
             }
             verify(fixture.writer, org.mockito.Mockito.times(1)).close();
         } finally {
-            io.close();
+            if (io != null) {
+                io.close();
+            }
             PaimonSpillDirCleaner.releaseAfterClose(dirs, true);
         }
     }
@@ -298,21 +306,29 @@ class PaimonTableWriteContextFactoryTest {
         IllegalStateException original = new IllegalStateException("assigner 初始化失败");
         configureDynamicStrategyFailure(fixture, original);
         java.io.IOException cleanup = new java.io.IOException("回滚关闭失败: " + resource);
-        org.apache.paimon.disk.IOManagerImpl io = org.mockito.Mockito.spy(
-                new org.apache.paimon.disk.IOManagerImpl(new String[] {tempDir.toString()}));
-        List<String> dirs = canonicalSpillDirs(io);
+        fixture.configuredTmpDirs = tempDir.toString();
+        org.apache.paimon.disk.IOManagerImpl io = null;
+        List<String> dirs = Collections.emptyList();
         if (resource == RollbackResource.WRITER) {
             org.mockito.Mockito.doThrow(cleanup).when(fixture.writer).close();
         } else if (resource == RollbackResource.COMMITTER) {
             org.mockito.Mockito.doThrow(cleanup).when(fixture.committer).close();
-        } else {
-            org.mockito.Mockito.doThrow(cleanup).when(io).close();
         }
         try (org.mockito.MockedStatic<IOManager> factory = org.mockito.Mockito.mockStatic(IOManager.class)) {
-            factory.when(() -> IOManager.create(any(String[].class))).thenReturn(io);
+            SpillTestSupport.CreatedIOManagers created = SpillTestSupport.spyOnIOManagerCreation(factory, spy -> {
+                if (resource == RollbackResource.IO) {
+                    try {
+                        org.mockito.Mockito.doThrow(cleanup).when(spy).close();
+                    } catch (Exception impossible) {
+                        throw new AssertionError(impossible);
+                    }
+                }
+            });
 
             PaimonTableWriteContextFactory.IncompleteCleanupException failure = assertThrows(
                     PaimonTableWriteContextFactory.IncompleteCleanupException.class, fixture::create);
+            io = created.only();
+            dirs = created.spillDirs();
 
             assertSame(original, failure.getCause());
             assertTrue(Arrays.asList(original.getSuppressed()).contains(cleanup));
@@ -328,12 +344,17 @@ class PaimonTableWriteContextFactoryTest {
                 assertTrue(java.nio.file.Files.isDirectory(java.nio.file.Paths.get(dir)));
                 assertTrue(java.nio.file.Files.exists(ownerMarker(dir)),
                         "清理失败不能丢失残留目录的 owner marker");
+                // AC-13：回滚未取得关闭证明时，租约锁保持，其他 JVM 回收不到。
+                assertTrue(SpillTestSupport.ownerLockHeld(dir));
+                assertEquals(0, SpillTestSupport.reclaimInOtherJvm(dir));
             }
             verify(fixture.writer, org.mockito.Mockito.times(1)).close();
             verify(fixture.committer, org.mockito.Mockito.times(1)).close();
         } finally {
-            org.mockito.Mockito.doCallRealMethod().when(io).close();
-            io.close();
+            if (io != null) {
+                org.mockito.Mockito.doCallRealMethod().when(io).close();
+                io.close();
+            }
             PaimonSpillDirCleaner.releaseAfterClose(dirs, true);
         }
     }
@@ -366,13 +387,15 @@ class PaimonTableWriteContextFactoryTest {
         if (assignerCloseFails) {
             org.mockito.Mockito.doThrow(assignerClose).when(assigner).close();
         }
-        org.apache.paimon.disk.IOManagerImpl io = org.mockito.Mockito.spy(
-                new org.apache.paimon.disk.IOManagerImpl(new String[] {tempDir.toString()}));
-        List<String> dirs = canonicalSpillDirs(io);
+        fixture.configuredTmpDirs = tempDir.toString();
+        org.apache.paimon.disk.IOManagerImpl io = null;
+        List<String> dirs = Collections.emptyList();
         try (org.mockito.MockedStatic<IOManager> factory = org.mockito.Mockito.mockStatic(IOManager.class)) {
-            factory.when(() -> IOManager.create(any(String[].class))).thenReturn(io);
+            SpillTestSupport.CreatedIOManagers created = SpillTestSupport.spyOnIOManagerCreation(factory, spy -> { });
 
             Throwable failure = assertThrows(Throwable.class, fixture::create);
+            io = created.only();
+            dirs = created.spillDirs();
 
             if (assignerCloseFails) {
                 org.junit.jupiter.api.Assertions.assertInstanceOf(
@@ -383,6 +406,7 @@ class PaimonTableWriteContextFactoryTest {
                 for (String dir : dirs) {
                     assertTrue(java.nio.file.Files.isDirectory(java.nio.file.Paths.get(dir)));
                     assertTrue(java.nio.file.Files.exists(ownerMarker(dir)));
+                    assertTrue(SpillTestSupport.ownerLockHeld(dir), "assigner 未证明关闭时租约锁保持");
                 }
             } else {
                 assertSame(bootstrap, failure);
@@ -402,23 +426,15 @@ class PaimonTableWriteContextFactoryTest {
             verify(fixture.writer, org.mockito.Mockito.times(1)).close();
             verify(fixture.committer, org.mockito.Mockito.times(1)).close();
         } finally {
-            io.close();
+            if (io != null) {
+                io.close();
+            }
             PaimonSpillDirCleaner.releaseAfterClose(dirs, true);
         }
     }
 
     private static java.nio.file.Path ownerMarker(String dir) {
-        java.nio.file.Path path = java.nio.file.Paths.get(dir);
-        return path.resolveSibling("." + path.getFileName() + ".tapdata-owner.lock");
-    }
-
-    private static List<String> canonicalSpillDirs(org.apache.paimon.disk.IOManagerImpl io)
-            throws java.io.IOException {
-        List<String> dirs = new java.util.ArrayList<>();
-        for (java.io.File dir : io.getSpillingDirectories()) {
-            dirs.add(dir.getCanonicalPath());
-        }
-        return dirs;
+        return SpillTestSupport.ownerLockFile(dir);
     }
 
     private static void configureDynamicStrategyFailure(Fixture fixture, Throwable failure) throws Exception {
@@ -480,13 +496,15 @@ class PaimonTableWriteContextFactoryTest {
             when(builder.newCommit()).thenReturn(committer);
         }
 
+        private String configuredTmpDirs;
+
         private PaimonTableWriteContext create() throws Exception {
             return PaimonTableWriteContextFactory.create(
                     "default.t",
                     "t",
                     table,
                     COMMIT_USER,
-                    null,
+                    configuredTmpDirs,
                     0L,
                     PaimonTableWriteContext.CommitStateStore.NOOP,
                     runtimeFactory);
