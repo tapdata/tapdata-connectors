@@ -274,7 +274,7 @@ public class MongodbMergeOperate {
 		// 没有 operation 的结果不产生写入；写入端按 operation 生成 WriteModel，放进来会 NPE（如父 DELETE 级联中跳过/无法定位父文档的子孙）
 		Optional.ofNullable(mergeResult).filter(result -> null != result.getOperation()).ifPresent(mergeResults::add);
 		Optional.ofNullable(updateKeyDiff).ifPresent(mergeResults::add);
-		if (mergeFilter.isAppend()) {
+		if (null != mergeFilter && mergeFilter.isAppend()) {
 			mergeFilter.removeLast();
 		}
 	}
