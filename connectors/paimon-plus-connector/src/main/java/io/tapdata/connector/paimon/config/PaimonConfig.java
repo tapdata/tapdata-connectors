@@ -127,12 +127,40 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         }
         if (getTableConfig() != null) {
             for (Map<String, Object> properties : getTableConfig().values()) {
-                if (properties != null && (properties.containsKey("stopTimeoutSeconds")
-                        || properties.containsKey("finalCompactionTimeoutSeconds")
-                        || properties.containsKey("compactionCancelGraceSeconds"))) {
-                    throw new IllegalArgumentException("STOP budgets do not support table overrides");
+                if (properties == null) {
+                    continue;
+                }
+                for (Map.Entry<String, Object> entry : properties.entrySet()) {
+                    String key = entry.getKey();
+                    if (("stopTimeoutSeconds".equals(key)
+                            || "finalCompactionTimeoutSeconds".equals(key)
+                            || "compactionCancelGraceSeconds".equals(key))
+                            && !matchesNodeStopBudget(key, entry.getValue())) {
+                        throw new IllegalArgumentException("STOP budgets do not support table overrides");
+                    }
                 }
             }
+        }
+    }
+
+    private boolean matchesNodeStopBudget(String key, Object tableValue) {
+        if (tableValue == null) {
+            return false;
+        }
+        int nodeValue;
+        if ("stopTimeoutSeconds".equals(key)) {
+            nodeValue = getStopTimeoutSeconds();
+        } else if ("finalCompactionTimeoutSeconds".equals(key)) {
+            nodeValue = getFinalCompactionTimeoutSeconds();
+        } else if ("compactionCancelGraceSeconds".equals(key)) {
+            nodeValue = getCompactionCancelGraceSeconds();
+        } else {
+            return false;
+        }
+        try {
+            return new java.math.BigDecimal(tableValue.toString()).intValueExact() == nodeValue;
+        } catch (NumberFormatException | ArithmeticException invalid) {
+            return false;
         }
     }
 
