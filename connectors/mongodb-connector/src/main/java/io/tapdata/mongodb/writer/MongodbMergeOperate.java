@@ -161,7 +161,8 @@ public class MongodbMergeOperate {
 				}
 				mergeResult = addMergeResults(mergeResults, mergeResult);
 				mergeResult = updateMergeIfNeed(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
-				if (MergeBundle.EventOperation.DELETE == mergeBundle.getOperation()) {
+				if (MergeBundle.EventOperation.DELETE == mergeBundle.getOperation()
+						&& !(mergeBundle.isRecursive() && isNestedInParentArrayElement(properties, parentProperties))) {
 					mergeResult = appendDescendantUnsetOnParentDelete(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
 				}
 				updateKeyDiff = keyDiffUnsetWhenUpdateWrite(mergeResult, updateKeyDiffInfos);

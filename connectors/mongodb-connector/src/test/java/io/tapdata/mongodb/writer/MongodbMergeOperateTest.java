@@ -599,6 +599,45 @@ class MongodbMergeOperateTest {
 			assertTrue(parentPulled, "expected $pull parts, actual writes: " + mergeResults);
 		}
 
+		@Test
+		void testParentArrayDeleteKeepsSiblingUpdateWriteChild() {
+			Document before = new Document("partId", 101).append("itemId", 1);
+			MergeTableProperties parent = new MergeTableProperties();
+			parent.setId("parts");
+			parent.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			parent.setTargetPath("parts");
+			parent.setIsArray(false);
+			parent.setArrayKeys(Collections.singletonList("partId"));
+			parent.setJoinKeys(joinKeys("itemId", "itemId"));
+			MergeTableProperties child = new MergeTableProperties();
+			child.setId("productPart");
+			child.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			child.setTargetPath("parts.productPart");
+			child.setArrayPath("parts");
+			child.setIsArray(true);
+			child.setJoinKeys(joinKeys("partId", "parts.partId"));
+			List<MergeResult> results = new ArrayList<>();
+			MongodbMergeOperate.recursiveMerge(new MergeBundle(MergeBundle.EventOperation.DELETE, before, null),
+					parent, results, Collections.singletonList(lookup(child, "productPart", new Document("partId", 101))),
+					new HashMap<>(), null, new MergeFilter(false), 2, null);
+
+			Document sibling = new Document("partId", 102).append("productPart", new Document("name", "B"));
+			Document document = new Document("itemId", 1).append("parts", new ArrayList<>(Arrays.asList(
+					new Document("partId", 101).append("productPart", new Document("name", "A")), sibling)));
+			boolean parentPulled = false;
+			for (MergeResult result : results) {
+				Document update = result.getUpdate();
+				Document unset = update.get("$unset", Document.class);
+				assertTrue(unset == null || !unset.containsKey("parts.productPart"), update.toJson());
+				Document pull = update.get("$pull", Document.class);
+				parentPulled |= pull != null && pull.containsKey("parts");
+				applyInOrder(Collections.singletonList(document), result.getFilter(), update);
+			}
+			assertTrue(parentPulled);
+			assertEquals(Collections.singletonList(sibling), document.get("parts"));
+			assertEquals(new Document("name", "B"), sibling.get("productPart"));
+		}
+
 		private List<Map<String, String>> joinKeys(String source, String target) {
 			List<Map<String, String>> keys = new ArrayList<>();
 			Map<String, String> key = new HashMap<>();
