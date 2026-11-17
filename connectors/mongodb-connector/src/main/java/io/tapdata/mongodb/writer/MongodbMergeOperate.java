@@ -80,6 +80,9 @@ public class MongodbMergeOperate {
 				if (CollectionUtils.isNotEmpty(mergeResults)) {
 					for (MergeResult mergeResult : mergeResults) {
 						final MergeResult.Operation operation = mergeResult.getOperation();
+						if (null == operation) {
+							continue;
+						}
 						switch (operation) {
 							case INSERT:
 								writeModels.add(new InsertOneModel<>(mergeResult.getInsert()));
@@ -125,7 +128,8 @@ public class MongodbMergeOperate {
 				topLevel,
 				1,
 				updateKeyDiffInfos,
-				extractMainTableKeys(mergeBundle, topLevel)
+				extractMainTableKeys(mergeBundle, topLevel),
+				Collections.emptySet()
 		);
 	}
 
@@ -146,7 +150,7 @@ public class MongodbMergeOperate {
 	) {
 		recursiveMerge(mergeBundle, properties, mergeResults, mergeLookupResults, mergeResult, unsetResult,
 				updateJoinKeys, sharedJoinKeys, parentProperties, mergeFilter, topLevel, loopTime,
-				updateKeyDiffInfos, extractMainTableKeys(mergeBundle, topLevel));
+				updateKeyDiffInfos, extractMainTableKeys(mergeBundle, topLevel), Collections.emptySet());
 	}
 
 	private static Set<String> extractMainTableKeys(MergeBundle mergeBundle, int topLevel) {
@@ -175,10 +179,13 @@ public class MongodbMergeOperate {
 			int topLevel,
 			int loopTime,
 			List<MapDiffUtil.KeyDiffInfo> updateKeyDiffInfos,
-			Set<String> mainTableKeys
+			Set<String> mainTableKeys,
+			Set<String> deletedArrayPaths
 	) {
 		boolean unsetResultNull = null == unsetResult;
 		MergeResult updateKeyDiff = null;
+		boolean cascadeDelete = MergeBundle.EventOperation.DELETE == mergeBundle.getOperation() && mergeBundle.isRecursive();
+		boolean coveredByArrayDelete = cascadeDelete && isCoveredByArrayDelete(mergeBundle, properties, deletedArrayPaths);
 		switch (properties.getMergeType()) {
 			case updateOrInsert:
 				upsertMerge(mergeBundle, properties, mergeResult);
@@ -193,9 +200,22 @@ public class MongodbMergeOperate {
 				}
 				mergeResult = addMergeResults(mergeResults, mergeResult);
 				mergeResult = updateMergeIfNeed(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
+				if (cascadeDelete && !mergeBundle.isDataExists() && !coveredByArrayDelete) {
+					mergeResult = appendDescendantUnsetOnParentDelete(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
+				}
 				updateKeyDiff = keyDiffUnsetWhenUpdateWrite(mergeResult, updateKeyDiffInfos);
 				break;
 			case updateIntoArray:
+				if (cascadeDelete) {
+					// 父 DELETE 级联清理必须在 updateIntoArrayUnsetMerge 之前判断：该方法在父级为 updateWrite/updateIntoArray 时
+					// 会把 operation 改成 INSERT，导致子孙数组既不 $pull 也不 $unset
+					mergeResult = addMergeResults(mergeResults, mergeResult);
+					if (coveredByArrayDelete) {
+						break;
+					}
+					mergeResult = appendArrayDeleteOnParentDelete(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
+					break;
+				}
 				unsetResult = updateIntoArrayUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, parentProperties, mergeFilter, loopTime);
 				if (unsetResultNull && addUnsetMerge(mergeResults, unsetResult)) {
 					mergeBundle.setOperation(MergeBundle.EventOperation.INSERT);
@@ -210,14 +230,32 @@ public class MongodbMergeOperate {
 		boolean recursiveOnce = false;
 		int privateLoopTime = 0;
 		if (CollectionUtils.isNotEmpty(mergeLookupResults)) {
+			// 以当前节点的事件类型决定子孙处理方式；循环中 mergeBundle 会被替换为子 bundle，不能用上一个子节点被改写后的 operation 判断兄弟节点
+			final boolean parentDelete = MergeBundle.EventOperation.DELETE == mergeBundle.getOperation();
+			Set<String> childDeletedArrayPaths = deletedArrayPaths;
+			if (parentDelete && properties.getMergeType() == MergeTableProperties.MergeType.updateIntoArray) {
+				childDeletedArrayPaths = collectDeletedArrayPaths(deletedArrayPaths, mergeResult);
+			}
 			for (MergeLookupResult mergeLookupResult : mergeLookupResults) {
 				privateLoopTime++;
 				final Map<String, Object> data = mergeLookupResult.getData();
-				mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, data);
-				mergeBundle.setRecursive(true);
-				mergeBundle.setDataExists(mergeLookupResult.isDataExists());
-				if (mergeFilter.isAppend() && null != mergeResult) {
-					mergeFilter.addFilter(mergeResult.getFilter());
+				boolean addedDeleteFilter = parentDelete && mergeResult != null && MapUtils.isNotEmpty(mergeResult.getFilter());
+				if (parentDelete) {
+					// 父 DELETE 级联清理：不得把子孙 lookup 数据改写成 INSERT/$set
+					// 子孙 $unset/$pull 必须打在父文档上，因此无论 MergeFilter 是否 append，都把父 filter 传下去
+					if (addedDeleteFilter) {
+						mergeFilter.addFilter(mergeResult.getFilter());
+					}
+					mergeBundle = new MergeBundle(MergeBundle.EventOperation.DELETE, data, null);
+					mergeBundle.setRecursive(true);
+					mergeBundle.setDataExists(false);
+				} else {
+					mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, data);
+					mergeBundle.setRecursive(true);
+					mergeBundle.setDataExists(mergeLookupResult.isDataExists());
+					if (mergeFilter.isAppend() && null != mergeResult) {
+						mergeFilter.addFilter(mergeResult.getFilter());
+					}
 				}
 				recursiveMerge(
 						mergeBundle,
@@ -233,16 +271,21 @@ public class MongodbMergeOperate {
 						topLevel,
 						privateLoopTime,
 						null,
-						mainTableKeys
+						mainTableKeys,
+						childDeletedArrayPaths
 				);
+				if (addedDeleteFilter) {
+					mergeFilter.removeLast();
+				}
 				recursiveOnce = true;
 			}
 			return;
 		}
 
-		Optional.ofNullable(mergeResult).ifPresent(mergeResults::add);
+		// 没有 operation 的结果不产生写入；写入端按 operation 生成 WriteModel，放进来会 NPE（如父 DELETE 级联中跳过/无法定位父文档的子孙）
+		Optional.ofNullable(mergeResult).filter(result -> null != result.getOperation()).ifPresent(mergeResults::add);
 		Optional.ofNullable(updateKeyDiff).ifPresent(mergeResults::add);
-		if (mergeFilter.isAppend()) {
+		if (mergeFilter.isAppend() && !cascadeDelete) {
 			mergeFilter.removeLast();
 		}
 	}
@@ -259,6 +302,128 @@ public class MongodbMergeOperate {
 			return updateKeyDiffUnset;
 		}
 		return null;
+	}
+
+
+	private static MergeResult appendDescendantUnsetOnParentDelete(MergeBundle mergeBundle, MergeTableProperties properties,
+			MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter) {
+		Map<String, Object> value = MapUtils.isNotEmpty(mergeBundle.getAfter()) ? mergeBundle.getAfter() : mergeBundle.getBefore();
+		String targetPath = MergeUtils.dynamicKey(properties.getTargetPath(), value);
+		if (StringUtils.isBlank(targetPath) || isShareJoinKey(sharedJoinKeys, targetPath)) {
+			return mergeResult;
+		}
+		if (null == mergeResult) {
+			mergeResult = new MergeResult();
+		}
+		// 父文档定位必须来自父级 filter，不能用子孙自己的 joinKeys（否则会写成 {idC: ...} 而打不到主文档）
+		if (MapUtils.isEmpty(mergeResult.getFilter()) && null != mergeFilter) {
+			Document parentFilters = mergeFilter.appendFilters();
+			if (MapUtils.isNotEmpty(parentFilters)) {
+				mergeResult.getFilter().putAll(parentFilters);
+			}
+		} else {
+			appendAllParentMergeFilters(mergeResult, mergeFilter);
+		}
+		if (MapUtils.isEmpty(mergeResult.getFilter())) {
+			return mergeResult;
+		}
+		if (null == mergeResult.getOperation()) {
+			mergeResult.setOperation(MergeResult.Operation.UPDATE);
+		}
+		Document unsetDoc = new Document(targetPath, true);
+		if (mergeResult.getUpdate().containsKey("$unset")) {
+			mergeResult.getUpdate().get("$unset", Document.class).putAll(unsetDoc);
+		} else {
+			mergeResult.getUpdate().put("$unset", unsetDoc);
+		}
+		return mergeResult;
+	}
+
+	private static boolean isCoveredByArrayDelete(MergeBundle bundle, MergeTableProperties properties, Set<String> deletedArrayPaths) {
+		if (deletedArrayPaths.isEmpty()) {
+			return false;
+		}
+		String targetPath = MergeUtils.dynamicKey(properties.getTargetPath(), bundle.getBefore());
+		return StringUtils.isNotBlank(targetPath) && deletedArrayPaths.stream()
+				.anyMatch(path -> targetPath.startsWith(path + ".") || (properties.getIsArray() && targetPath.equals(path)));
+	}
+
+	private static Set<String> collectDeletedArrayPaths(Set<String> inheritedPaths, MergeResult result) {
+		if (result == null || result.getOperation() != MergeResult.Operation.UPDATE || MapUtils.isEmpty(result.getFilter())) {
+			return inheritedPaths;
+		}
+		// Follow the array paths actually written by this DELETE, including resolved dynamic paths.
+		Set<String> paths = new HashSet<>(inheritedPaths);
+		Document pull = result.getUpdate().get("$pull", Document.class);
+		if (pull != null) {
+			pull.forEach((path, condition) -> {
+				if (condition instanceof Document && !((Document) condition).isEmpty()) {
+					paths.add(path.replace(".$[element1]", ""));
+				}
+			});
+		}
+		Document unset = result.getUpdate().get("$unset", Document.class);
+		if (unset != null) {
+			paths.addAll(unset.keySet());
+		}
+		return paths;
+	}
+
+	private static MergeResult appendArrayDeleteOnParentDelete(MergeBundle mergeBundle, MergeTableProperties properties,
+			MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter) {
+		List<String> arrayKeys = properties.getArrayKeys();
+		Map<String, Object> before = mergeBundle.getBefore();
+		boolean canPull = CollectionUtils.isNotEmpty(arrayKeys) && MapUtils.isNotEmpty(before)
+				&& arrayKeys.stream().anyMatch(key -> MapUtil.getValueByKey(before, key) != null);
+		if (canPull) {
+			if (null == mergeResult) {
+				mergeResult = new MergeResult();
+			}
+			if (properties.getIsArray()) {
+				// 嵌套在父数组元素内的子孙（如 parts.attrList）：updateIntoArrayMerge 只生成 arrayFilters 不带主文档条件，
+				// 必须用父级 filter 限定主文档，否则 q:{} 会按 arrayFilters 跨文档误删其他主文档中同关联值的数组元素
+				Document parentFilters = null == mergeFilter ? null : mergeFilter.appendFilters();
+				if (MapUtils.isEmpty(parentFilters)) {
+					return mergeResult;
+				}
+				updateIntoArrayMerge(mergeBundle, properties, mergeResult, mergeFilter);
+				for (Map.Entry<String, Object> entry : parentFilters.entrySet()) {
+					if (!MergeFilterManager.test(entry)) {
+						mergeResult.getFilter().putIfAbsent(entry.getKey(), entry.getValue());
+					}
+				}
+				return mergeResult;
+			}
+			return appendArrayPullOnParentDelete(mergeBundle, properties, mergeResult, mergeFilter);
+		}
+		return appendDescendantUnsetOnParentDelete(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
+	}
+
+	private static MergeResult appendArrayPullOnParentDelete(MergeBundle mergeBundle, MergeTableProperties properties,
+			MergeResult mergeResult, MergeFilter mergeFilter) {
+		// 父 DELETE 时父行字段已在同批前序写入中被 $unset，不能再用子表 joinKeys 映射到父字段的条件定位主文档，
+		// 否则按序执行后 $pull 匹配 0 条；只用父级 filter 定位主文档，按 arrayKeys 拉取元素
+		if (MapUtils.isEmpty(mergeResult.getFilter()) && null != mergeFilter) {
+			Document parentFilters = mergeFilter.appendFilters();
+			if (MapUtils.isNotEmpty(parentFilters)) {
+				mergeResult.getFilter().putAll(parentFilters);
+			}
+		} else {
+			appendAllParentMergeFilters(mergeResult, mergeFilter);
+		}
+		if (MapUtils.isEmpty(mergeResult.getFilter())) {
+			return mergeResult;
+		}
+		if (null == mergeResult.getOperation()) {
+			mergeResult.setOperation(MergeResult.Operation.UPDATE);
+		}
+		Document pullDoc = buildPullDocument(mergeBundle.getBefore(), properties.getArrayKeys(), false, properties.getTargetPath());
+		if (mergeResult.getUpdate().containsKey("$pull")) {
+			mergeResult.getUpdate().get("$pull", Document.class).putAll(pullDoc);
+		} else {
+			mergeResult.getUpdate().put("$pull", pullDoc);
+		}
+		return mergeResult;
 	}
 
 	private static MergeResult updateIntoArrayMergeIfNeed(MergeBundle mergeBundle, MergeTableProperties properties, MergeResult mergeResult, MergeFilter mergeFilter) {
@@ -390,7 +555,7 @@ public class MongodbMergeOperate {
 			if (StringUtils.isBlank(targetPath)) {
 				return null;
 			}
-			MergeInfo.UpdateJoinKey updateJoinKey = updateJoinKeys.get(id);
+			MergeInfo.UpdateJoinKey updateJoinKey = null == updateJoinKeys ? null : updateJoinKeys.get(id);
 			if (null == updateJoinKey || MapUtils.isEmpty(updateJoinKey.getBefore())) {
 				return mergeResult;
 			}
@@ -423,7 +588,7 @@ public class MongodbMergeOperate {
 			}
 			return mergeResult;
 		}
-		MergeInfo.UpdateJoinKey updateJoinKey = updateJoinKeys.get(id);
+		MergeInfo.UpdateJoinKey updateJoinKey = null == updateJoinKeys ? null : updateJoinKeys.get(id);
 		if (null == updateJoinKey) {
 			return mergeResult;
 		}
