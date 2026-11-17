@@ -601,7 +601,25 @@ class MongodbMergeOperateTest {
 		}
 
 		@Test
-		void testParentArrayDeleteKeepsSiblingUpdateWriteChild() {
+		void testDirectUpdateWriteDeleteOnlyUnsetsNonSharedFields() {
+			MergeTableProperties child = new MergeTableProperties();
+			child.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			child.setTargetPath("productPart");
+			child.setJoinKeys(joinKeys("itemId", "itemId"));
+			Document before = new Document("itemId", 1).append("id", 101).append("name", "A");
+			List<MergeResult> results = new ArrayList<>();
+			MongodbMergeOperate.recursiveMerge(new MergeBundle(MergeBundle.EventOperation.DELETE, before, null),
+					child, results, Collections.emptyList(), Collections.emptyMap(),
+					new HashSet<>(Arrays.asList("productPart.itemId", "productPart.id")), new MergeFilter(true), 2, null);
+
+			assertEquals(1, results.size());
+			assertEquals(new Document("itemId", 1), results.get(0).getFilter());
+			assertEquals(Collections.singleton("productPart.name"),
+					results.get(0).getUpdate().get("$unset", Document.class).keySet());
+		}
+
+		@Test
+		void testParentArrayDeleteSkipsNestedWritesAtEveryDepth() {
 			Document before = new Document("partId", 101).append("itemId", 1);
 			MergeTableProperties parent = new MergeTableProperties();
 			parent.setId("parts");
@@ -617,26 +635,40 @@ class MongodbMergeOperateTest {
 			child.setArrayPath("parts");
 			child.setIsArray(true);
 			child.setJoinKeys(joinKeys("partId", "parts.partId"));
+			MergeTableProperties spec = new MergeTableProperties();
+			spec.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			spec.setTargetPath("parts.productPart.spec");
+			spec.setArrayPath("parts");
+			spec.setIsArray(true);
+			MergeTableProperties external = new MergeTableProperties();
+			external.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			external.setTargetPath("partsSummary");
+			MergeLookupResult childLookup = lookup(child, "productPart", new Document("partId", 101));
+			childLookup.setMergeLookupResults(Arrays.asList(
+					lookup(spec, "spec", new Document("partId", 101)),
+					lookup(external, "summary", new Document("partId", 101))));
 			List<MergeResult> results = new ArrayList<>();
 			MongodbMergeOperate.recursiveMerge(new MergeBundle(MergeBundle.EventOperation.DELETE, before, null),
-					parent, results, Collections.singletonList(lookup(child, "productPart", new Document("partId", 101))),
-					new HashMap<>(), null, new MergeFilter(false), 2, null);
+					parent, results, Collections.singletonList(childLookup), new HashMap<>(), null, new MergeFilter(true), 2, null);
 
-			Document sibling = new Document("partId", 102).append("productPart", new Document("name", "B"));
+			Document siblingPart = new Document("name", "B").append("spec", "B-spec");
+			Document sibling = new Document("partId", 102).append("productPart", new Document(siblingPart));
 			Document document = new Document("itemId", 1).append("parts", new ArrayList<>(Arrays.asList(
-					new Document("partId", 101).append("productPart", new Document("name", "A")), sibling)));
+					new Document("partId", 101).append("productPart", new Document("name", "A").append("spec", "A-spec")),
+					sibling))).append("partsSummary", "A");
 			boolean parentPulled = false;
 			for (MergeResult result : results) {
 				Document update = result.getUpdate();
 				Document unset = update.get("$unset", Document.class);
-				assertTrue(unset == null || !unset.containsKey("parts.productPart"), update.toJson());
+				assertTrue(unset == null || unset.keySet().stream().noneMatch(path -> path.startsWith("parts.")), update.toJson());
 				Document pull = update.get("$pull", Document.class);
 				parentPulled |= pull != null && pull.containsKey("parts");
 				applyInOrder(Collections.singletonList(document), result.getFilter(), update);
 			}
 			assertTrue(parentPulled);
 			assertEquals(Collections.singletonList(sibling), document.get("parts"));
-			assertEquals(new Document("name", "B"), sibling.get("productPart"));
+			assertEquals(siblingPart, sibling.get("productPart"));
+			assertFalse(document.containsKey("partsSummary"));
 		}
 
 		private List<Map<String, String>> joinKeys(String source, String target) {
