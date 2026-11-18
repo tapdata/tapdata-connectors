@@ -28,7 +28,10 @@ public class HttpUtil {
                                                          HttpContext context) throws java.io.IOException, HttpException {
                         // The request interceptor runs before connect; capture the actual peer here.
                         StreamLoadDiagnostics d = StreamLoadDiagnostics.get(context);
-                        if (d != null) d.lastPeer = StreamLoadDiagnostics.peer(context);
+                        if (d != null) {
+                            d.lastPeer = StreamLoadDiagnostics.peer(context);
+                            d.phase = "send_request";
+                        }
                         return super.doSendRequest(request, connection, context);
                     }
                 })
@@ -40,13 +43,17 @@ public class HttpUtil {
                 .addInterceptorLast((HttpRequestInterceptor) (request, context) -> {
                     StreamLoadDiagnostics d = StreamLoadDiagnostics.get(context);
                     if (d != null) d.lastPeer = StreamLoadDiagnostics.peer(context);
-                    if (d != null) d.requestStartedMs = d.elapsedMs();
+                    if (d != null) {
+                        d.requestStartedMs = d.elapsedMs();
+                        d.phase = "request_prepared";
+                    }
                     if (d != null) d.hops.add("request@" + d.elapsedMs() + "ms target="
                             + StreamLoadDiagnostics.endpoint(String.valueOf(context.getAttribute("http.target_host")))
                             + " method=" + request.getRequestLine().getMethod());
                 })
                 .addInterceptorLast((HttpResponseInterceptor) (response, context) -> {
                     StreamLoadDiagnostics d = StreamLoadDiagnostics.get(context);
+                    if (d != null) d.phase = "response_received";
                     Header location = response.getFirstHeader("Location");
                     if (d != null) d.hops.add("response@" + d.elapsedMs() + "ms status="
                             + response.getStatusLine().getStatusCode() + " peer=" + StreamLoadDiagnostics.peer(context)
@@ -70,14 +77,37 @@ public class HttpUtil {
                         if (!"PUT".equalsIgnoreCase(request.getRequestLine().getMethod())) {
                             return super.getRedirect(request, response, context);
                         }
-                        URI target = getLocationURI(request, response, context);
-                        if (target.getHost() == null || target.getUserInfo() != null || target.getFragment() != null
-                                || !("http".equalsIgnoreCase(target.getScheme()) || "https".equalsIgnoreCase(target.getScheme()))) {
-                            throw new ProtocolException("Invalid Stream Load redirect target");
+                        StreamLoadDiagnostics d = StreamLoadDiagnostics.get(context);
+                        if (d != null) d.phase = "redirect_validation";
+                        URI target;
+                        try {
+                            target = getLocationURI(request, response, context);
+                        } catch (org.apache.http.client.CircularRedirectException e) {
+                            if (d != null) d.redirectFailure = "circular_redirect";
+                            throw e;
+                        } catch (ProtocolException e) {
+                            if (d != null) d.redirectFailure = response.getFirstHeader("Location") == null
+                                    ? "missing_location" : "invalid_redirect_location";
+                            throw e;
                         }
+                        // Keep HttpClient's existing URI/routing compatibility. URI.getHost()
+                        // rejects authorities (e.g. underscore hostnames) that HttpClient can route.
+                        // Do not reject these authorities based on URI.getHost().
                         HttpHost source = (HttpHost) context.getAttribute("http.target_host");
-                        if (source != null && "https".equalsIgnoreCase(source.getSchemeName())
-                                && !"https".equalsIgnoreCase(target.getScheme())) {
+                        boolean httpsToHttp = source != null && "https".equalsIgnoreCase(source.getSchemeName())
+                                && "http".equalsIgnoreCase(target.getScheme());
+                        if (d != null) {
+                            d.hops.add("redirect@" + d.elapsedMs() + "ms target="
+                                    + StreamLoadDiagnostics.endpoint(target.toString())
+                                    + " javaHostMissing=" + (target.getHost() == null)
+                                    + " hasUserInfo=" + (target.getRawAuthority() != null && target.getRawAuthority().contains("@"))
+                                    + " hasFragment=" + (target.getRawFragment() != null)
+                                    + " httpsToHttp=" + httpsToHttp);
+                        }
+                        // Authorization is an explicit header and must accompany Doris BE uploads.
+                        // Reject before copying/sending rather than silently expose it over HTTP.
+                        if (httpsToHttp) {
+                            if (d != null) d.redirectFailure = "https_to_http_redirect_rejected";
                             throw new ProtocolException("Refusing HTTPS to HTTP Stream Load redirect");
                         }
                         return org.apache.http.client.methods.RequestBuilder.copy(request).setUri(target).build();
