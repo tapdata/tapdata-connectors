@@ -83,8 +83,8 @@ class StreamLoadRedirectTest {
     }
 
     @Test
-    void rejectsLoopsMissingAndUnsafeLocations() throws Exception {
-        for (String location : new String[]{"/fe", "", "ftp://localhost/file", "http://user:password@localhost/be"}) {
+    void rejectsLoopsAndMissingLocations() throws Exception {
+        for (String location : new String[]{"/fe", ""}) {
             try (ScriptServer server = new ScriptServer(307, false, 0, location);
                  CloseableHttpClient client = new HttpUtil().getHttpClient()) {
                 StreamLoadDiagnostics d = new StreamLoadDiagnostics();
@@ -143,6 +143,7 @@ class StreamLoadRedirectTest {
         assertEquals("https://example.com:8040", StreamLoadDiagnostics.endpoint("https://user:secret@example.com:8040/api/db/t?token=secret#secret"));
         assertEquals("invalid", StreamLoadDiagnostics.endpoint("http://bad host/secret"));
         assertEquals("missing", StreamLoadDiagnostics.endpoint(null));
+        assertEquals("http://be_node:8040", StreamLoadDiagnostics.endpoint("http://user:password@be_node:8040/api?token=secret#secret"));
     }
 
     @Test
@@ -219,22 +220,78 @@ class StreamLoadRedirectTest {
     }
 
     @Test
-    void httpsDowngradeReportsExplicitReasonWithoutLeakingLocation() throws Exception {
-        java.lang.reflect.Method factory = HttpUtil.class.getDeclaredMethod("builder");
-        factory.setAccessible(true);
-        org.apache.http.impl.client.HttpClientBuilder builder = (org.apache.http.impl.client.HttpClientBuilder) factory.invoke(null);
+    void httpsToHttpRetainsPreviousCompatibilityAndRecordsTransition() throws Exception {
         org.apache.http.client.RedirectStrategy strategy = (org.apache.http.client.RedirectStrategy)
-                org.springframework.test.util.ReflectionTestUtils.getField(builder, "redirectStrategy");
+                org.springframework.test.util.ReflectionTestUtils.getField(builder(), "redirectStrategy");
         org.apache.http.HttpResponse response = new org.apache.http.message.BasicHttpResponse(
                 org.apache.http.HttpVersion.HTTP_1_1, 307, "Temporary Redirect");
         response.setHeader("Location", "http://localhost:8040/api/db/t?token=secret");
         StreamLoadDiagnostics d = new StreamLoadDiagnostics();
         HttpClientContext context = context(d);
         context.setAttribute("http.target_host", new org.apache.http.HttpHost("localhost", 443, "https"));
-        org.apache.http.ProtocolException failure = assertThrows(org.apache.http.ProtocolException.class,
-                () -> strategy.getRedirect(new HttpPut("https://localhost/fe"), response, context));
-        assertTrue(d.failureSummary(failure).contains("redirectFailure=https_to_http_downgrade"));
-        assertFalse(d.failureSummary(failure).contains("secret"));
+        org.apache.http.client.methods.HttpUriRequest redirect = strategy.getRedirect(
+                new HttpPut("https://localhost/fe"), response, context);
+        assertEquals("PUT", redirect.getMethod());
+        assertEquals("http", redirect.getURI().getScheme());
+        assertTrue(d.toString().contains("httpsToHttp=true"), d.toString());
+        assertFalse(d.toString().contains("secret"));
+    }
+
+    @Test
+    void compatibleLocationsCompletePutWithIdenticalBodyAndLabel() throws Exception {
+        for (boolean tlsFactory : new boolean[]{false, true}) {
+            for (String location : new String[]{
+                    "http://localhost:PORT/be#fragment-secret",
+                    "http://user:password@localhost:PORT/be?token=query-secret"}) {
+                try (ScriptServer server = new ScriptServer(307, true, 0, "compat:" + location);
+                     CloseableHttpClient client = tlsFactory ? HttpUtil.generationHttpClient() : new HttpUtil().getHttpClient()) {
+                    StreamLoadDiagnostics d = new StreamLoadDiagnostics();
+                    try (CloseableHttpResponse response = client.execute(request(server, d), context(d))) {
+                        assertEquals(200, response.getStatusLine().getStatusCode());
+                    }
+                    List<Captured> requests = server.result.get(10, TimeUnit.SECONDS);
+                    assertEquals(2, requests.size());
+                    for (Captured captured : requests) {
+                        assertArrayEquals(DATA, captured.body);
+                        assertTrue(captured.headers.startsWith("PUT "));
+                        assertTrue(captured.headers.contains("label: same-label"));
+                    }
+                    assertFalse(d.toString().contains("password"));
+                    assertFalse(d.toString().contains("fragment-secret"));
+                    assertFalse(d.toString().contains("query-secret"));
+                }
+            }
+        }
+    }
+
+    @Test
+    void underscoreAuthorityRoutesEvenWhenJavaUriHostIsNull() throws Exception {
+        assertNull(URI.create("http://be_node:8040/be").getHost());
+        for (int code : new int[]{307, 308}) {
+            try (ScriptServer server = new ScriptServer(code, true, 0, "compat:http://be_node:PORT/be");
+                 CloseableHttpClient client = builder().setDnsResolver(host -> {
+                     assertTrue("be_node".equals(host) || "127.0.0.1".equals(host), host);
+                     return new InetAddress[]{InetAddress.getByName("127.0.0.1")};
+                 }).build()) {
+                StreamLoadDiagnostics d = new StreamLoadDiagnostics();
+                try (CloseableHttpResponse response = client.execute(request(server, d), context(d))) {
+                    assertEquals(200, response.getStatusLine().getStatusCode());
+                }
+                List<Captured> requests = server.result.get(10, TimeUnit.SECONDS);
+                assertEquals(2, requests.size());
+                assertTrue(requests.get(1).headers.startsWith("PUT /be HTTP/1.1"));
+                assertTrue(requests.get(1).headers.contains("label: same-label"));
+                assertArrayEquals(DATA, requests.get(1).body);
+                assertTrue(d.toString().contains("javaHostMissing=true"), d.toString());
+                assertTrue(d.toString().contains("http://be_node:"), d.toString());
+            }
+        }
+    }
+
+    private org.apache.http.impl.client.HttpClientBuilder builder() throws Exception {
+        java.lang.reflect.Method factory = HttpUtil.class.getDeclaredMethod("builder");
+        factory.setAccessible(true);
+        return (org.apache.http.impl.client.HttpClientBuilder) factory.invoke(null);
     }
 
     private HttpClientContext context(StreamLoadDiagnostics d) {
@@ -271,8 +328,9 @@ class StreamLoadRedirectTest {
         ScriptServer(int code, boolean sendContinue, long delay, String overrideLocation) throws IOException {
             socket.setSoTimeout(5000);
             result = executor.submit(() -> {
+                boolean compatible = overrideLocation != null && overrideLocation.startsWith("compat:");
                 List<Captured> captured = new ArrayList<>();
-                int count = "chain".equals(overrideLocation) ? HttpUtil.MAX_REDIRECTS + 1 : (code == 307 || code == 308) && (overrideLocation == null || "/fe".equals(overrideLocation)) ? 2 : 1;
+                int count = "chain".equals(overrideLocation) ? HttpUtil.MAX_REDIRECTS + 1 : (code == 307 || code == 308) && (overrideLocation == null || compatible || "/fe".equals(overrideLocation)) ? 2 : 1;
                 for (int i = 0; i < count; i++) {
                     try (Socket connection = socket.accept()) {
                         connection.setSoTimeout(5000);
@@ -297,7 +355,8 @@ class StreamLoadRedirectTest {
                         captured.add(new Captured(headers.toString(), body));
                         if (delay > 0 && i == 0) Thread.sleep(delay);
                         String location = "chain".equals(overrideLocation) ? "/hop" + i : overrideLocation == null ? "http://localhost:" + socket.getLocalPort() + "/be" : overrideLocation;
-                        String response = i > 0 && overrideLocation == null ? "200 OK" : code + " Redirect";
+                        if (compatible) location = overrideLocation.substring("compat:".length()).replace("PORT", String.valueOf(socket.getLocalPort()));
+                        String response = i > 0 && (overrideLocation == null || compatible) ? "200 OK" : code + " Redirect";
                         out.write(("HTTP/1.1 " + response + "\r\nConnection: close\r\nContent-Length: 0\r\n"
                                 + (location.isEmpty() ? "" : "Location: " + location + "\r\n") + "\r\n").getBytes(StandardCharsets.US_ASCII));
                         out.flush();

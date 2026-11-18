@@ -90,16 +90,18 @@ public class HttpUtil {
                                     ? "missing_location" : "invalid_redirect_location";
                             throw e;
                         }
-                        if (target.getHost() == null || target.getUserInfo() != null || target.getFragment() != null
-                                || !("http".equalsIgnoreCase(target.getScheme()) || "https".equalsIgnoreCase(target.getScheme()))) {
-                            if (d != null) d.redirectFailure = "unsupported_scheme_or_invalid_authority";
-                            throw new ProtocolException("Invalid Stream Load redirect target");
-                        }
-                        HttpHost source = (HttpHost) context.getAttribute("http.target_host");
-                        if (source != null && "https".equalsIgnoreCase(source.getSchemeName())
-                                && !"https".equalsIgnoreCase(target.getScheme())) {
-                            if (d != null) d.redirectFailure = "https_to_http_downgrade";
-                            throw new ProtocolException("Refusing HTTPS to HTTP Stream Load redirect");
+                        // Keep HttpClient's existing URI/routing compatibility. URI.getHost()
+                        // rejects authorities (e.g. underscore hostnames) that HttpClient can route.
+                        // Diagnostics must observe unusual targets, never introduce a new veto.
+                        if (d != null) {
+                            HttpHost source = (HttpHost) context.getAttribute("http.target_host");
+                            d.hops.add("redirect@" + d.elapsedMs() + "ms target="
+                                    + StreamLoadDiagnostics.endpoint(target.toString())
+                                    + " javaHostMissing=" + (target.getHost() == null)
+                                    + " hasUserInfo=" + (target.getRawAuthority() != null && target.getRawAuthority().contains("@"))
+                                    + " hasFragment=" + (target.getRawFragment() != null)
+                                    + " httpsToHttp=" + (source != null && "https".equalsIgnoreCase(source.getSchemeName())
+                                    && "http".equalsIgnoreCase(target.getScheme())));
                         }
                         return org.apache.http.client.methods.RequestBuilder.copy(request).setUri(target).build();
                     }

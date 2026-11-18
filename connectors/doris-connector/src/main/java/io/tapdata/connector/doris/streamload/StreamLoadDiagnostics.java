@@ -37,8 +37,9 @@ final class StreamLoadDiagnostics {
         if (value == null) return "missing";
         try {
             URI uri = URI.create(value);
-            if (uri.getHost() == null) return uri.isAbsolute() ? "invalid" : "relative";
-            return new URI(uri.getScheme(), null, uri.getHost(), uri.getPort(), null, null, null).toASCIIString();
+            org.apache.http.HttpHost host = org.apache.http.client.utils.URIUtils.extractHost(uri);
+            if (host == null) return uri.isAbsolute() ? "invalid" : "relative";
+            return host.toURI();
         } catch (Exception ignored) {
             return "invalid";
         }

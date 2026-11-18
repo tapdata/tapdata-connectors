@@ -8,8 +8,11 @@ active loader and is released after the request. No extra network retry is added
 existing connector retry handling still owns failed loads.
 
 PUT responses 301/302/303 are surfaced as failures to avoid method conversion.
-Missing/invalid Location, circular redirects, redirect limits and HTTPS-to-HTTP
-redirects fail explicitly. A BE redirect is expected to cross hosts, so the explicit
+Missing/invalid Location, circular redirects and redirect limits fail explicitly.
+Target URI interpretation and scheme routing are left to HttpClient, preserving
+its compatibility with underscore authorities, user-info and fragments, and
+HTTPS-to-HTTP FE/BE routing. The connector adds no target-URI or downgrade veto.
+A BE redirect is expected to cross hosts, so the explicit
 Doris Authorization header is preserved, as before. Existing TLS trust policy is
 unchanged.
 
@@ -20,6 +23,12 @@ body write count, accepted socket-stream bytes and a chronological list of hops:
 - `request`: elapsed milliseconds, target origin and method.
 - `bodyStart`: elapsed time and milliseconds since that hop's request began.
 - `response`: elapsed time, numeric status, peer IP/port, Location origin and body counters.
+- `redirect`: resolved target origin and boolean flags `javaHostMissing`,
+  `hasUserInfo`, `hasFragment`, `httpsToHttp`. Flags describe the resolved URI;
+  HttpClient may already have normalized it. They never block a request.
+
+Origins use HttpClient's host extraction, so underscore hostnames remain visible
+instead of being logged as `invalid`.
 
 A FE 307 with `bodyWrites=0` means no body was sent to that FE. A 307 with a body
 write followed by another body write means the batch was replayed. On a first hop,
@@ -35,7 +44,7 @@ require using the peer captured at request time. Failure summaries include the e
 protocol reason codes, even when `ClientProtocolException.getMessage()` is null.
 Original exception causes are preserved. Arbitrary exception messages are omitted
 because they can contain full redirect URLs or data. Reasons include
-`https_to_http_downgrade`, `missing_location`, `invalid_redirect_location`,
+`missing_location`, `invalid_redirect_location`,
 `circular_redirect`, `maximum_redirects_exceeded` and `duplicate_content_length`.
 The outer load exception also carries the label, summary and hop trace.
 Cause types distinguish protocol/redirect failures from DNS, connection and read failures;
@@ -43,6 +52,8 @@ the last Location origin identifies the destination when connection setup fails.
 
 Regression tests use local raw HTTP sockets, including early 100 followed by 307,
 a delayed FE response beyond the old three-second limit, cross-host authorization
-and label preservation, 308, rejected 302, missing/unsafe Location, redirect loops
-and maximum redirects. Both client factories are exercised over HTTP; these tests
+and label preservation, 308, rejected 302, missing Location, redirect loops
+and maximum redirects. Compatibility cases complete HTTP uploads through underscore
+hostnames (using a test DNS resolver), user-info and fragment URLs. HTTPS-to-HTTP
+compatibility is checked at redirect-strategy level. Both client factories are exercised over HTTP; these tests
 do not exercise a deployed Doris cluster, a real proxy or a TLS handshake.
