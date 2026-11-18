@@ -21,6 +21,31 @@ import static org.junit.jupiter.api.Assertions.*;
 class PaimonConfigTest {
 
     @Test
+    void deduplicateUpdateAfterCompletenessMustDefaultOnAndSupportPerTableOverride() {
+        PaimonConfig config = new PaimonConfig();
+        assertTrue(config.getEnableDeduplicateUpdateAfterCompletenessCheck());
+        assertTrue(config.getEnableDeduplicateUpdateAfterCompletenessCheck("orders"));
+
+        config.setEnableDeduplicateUpdateAfterCompletenessCheck(false);
+        assertFalse(config.getEnableDeduplicateUpdateAfterCompletenessCheck());
+        assertFalse(config.getEnableDeduplicateUpdateAfterCompletenessCheck("orders"));
+
+        config.setEnableDeduplicateUpdateAfterCompletenessCheck(true);
+        config.setTableConfig(Collections.singletonMap(
+                "orders",
+                DataMap.create().kv("enableDeduplicateUpdateAfterCompletenessCheck", false)));
+        assertFalse(config.getEnableDeduplicateUpdateAfterCompletenessCheck("orders"));
+        assertTrue(config.getEnableDeduplicateUpdateAfterCompletenessCheck("other"));
+
+        config.setEnableDeduplicateUpdateAfterCompletenessCheck(false);
+        config.setTableConfig(Collections.singletonMap(
+                "orders",
+                DataMap.create().kv("enableDeduplicateUpdateAfterCompletenessCheck", true)));
+        assertTrue(config.getEnableDeduplicateUpdateAfterCompletenessCheck("orders"));
+        assertFalse(config.getEnableDeduplicateUpdateAfterCompletenessCheck("other"));
+    }
+
+    @Test
     void effectiveGlobalNodeAndTableTmpDirsMustBeValidated() {
         PaimonConfig config = new PaimonConfig();
         config.setWarehouse("/tmp/paimon");
@@ -48,6 +73,25 @@ class PaimonConfigTest {
             assertThrows(IllegalArgumentException.class, config::validateStopBudgets);
             assertDoesNotThrow(() -> new PaimonConfig().load(Collections.singletonMap(key, Integer.MAX_VALUE)));
         }
+    }
+
+    @Test
+    void stopBudgetsMustAllowTableDefaultsThatMatchEffectiveNodeValues() {
+        PaimonConfig config = new PaimonConfig();
+        config.setTableConfig(Collections.singletonMap("orders", DataMap.create()
+                .kv("stopTimeoutSeconds", 180)
+                .kv("finalCompactionTimeoutSeconds", 120)
+                .kv("compactionCancelGraceSeconds", 30)));
+        assertDoesNotThrow(config::validateStopBudgets);
+
+        config.setStopTimeoutSeconds(45);
+        config.setFinalCompactionTimeoutSeconds(40);
+        config.setCompactionCancelGraceSeconds(15);
+        config.setTableConfig(Collections.singletonMap("orders", DataMap.create()
+                .kv("stopTimeoutSeconds", "45")
+                .kv("finalCompactionTimeoutSeconds", 40L)
+                .kv("compactionCancelGraceSeconds", 15.0)));
+        assertDoesNotThrow(config::validateStopBudgets);
     }
 
     @Test
