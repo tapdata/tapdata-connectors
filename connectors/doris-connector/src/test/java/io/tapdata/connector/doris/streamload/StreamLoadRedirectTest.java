@@ -220,21 +220,109 @@ class StreamLoadRedirectTest {
     }
 
     @Test
-    void httpsToHttpRetainsPreviousCompatibilityAndRecordsTransition() throws Exception {
+    void httpsToHttpRejectsBeforeCopyingHeadersEvenWithoutDiagnostics() throws Exception {
         org.apache.http.client.RedirectStrategy strategy = (org.apache.http.client.RedirectStrategy)
                 org.springframework.test.util.ReflectionTestUtils.getField(builder(), "redirectStrategy");
-        org.apache.http.HttpResponse response = new org.apache.http.message.BasicHttpResponse(
-                org.apache.http.HttpVersion.HTTP_1_1, 307, "Temporary Redirect");
-        response.setHeader("Location", "http://localhost:8040/api/db/t?token=secret");
-        StreamLoadDiagnostics d = new StreamLoadDiagnostics();
-        HttpClientContext context = context(d);
-        context.setAttribute("http.target_host", new org.apache.http.HttpHost("localhost", 443, "https"));
-        org.apache.http.client.methods.HttpUriRequest redirect = strategy.getRedirect(
-                new HttpPut("https://localhost/fe"), response, context);
-        assertEquals("PUT", redirect.getMethod());
-        assertEquals("http", redirect.getURI().getScheme());
-        assertTrue(d.toString().contains("httpsToHttp=true"), d.toString());
-        assertFalse(d.toString().contains("secret"));
+        for (int code : new int[]{307, 308}) {
+            for (boolean diagnostics : new boolean[]{false, true}) {
+                org.apache.http.HttpResponse response = new org.apache.http.message.BasicHttpResponse(
+                        org.apache.http.HttpVersion.HTTP_1_1, code, "Redirect");
+                response.setHeader("Location", "http://localhost:8040/api/db/t?token=secret");
+                StreamLoadDiagnostics d = new StreamLoadDiagnostics();
+                HttpClientContext context = diagnostics ? context(d) : HttpClientContext.create();
+                context.setTargetHost(new org.apache.http.HttpHost("localhost", 443, "https"));
+                HttpPut request = new HttpPut("https://localhost/fe");
+                request.setHeader("Authorization", "Basic test-secret");
+                org.apache.http.ProtocolException failure = assertThrows(org.apache.http.ProtocolException.class,
+                        () -> strategy.getRedirect(request, response, context));
+                assertEquals("Refusing HTTPS to HTTP Stream Load redirect", failure.getMessage());
+                if (diagnostics) {
+                    assertEquals("https_to_http_redirect_rejected", d.redirectFailure);
+                    assertTrue(d.failureSummary(failure).contains("ProtocolException[https_to_http_redirect_rejected]"));
+                    assertTrue(d.toString().contains("httpsToHttp=true"), d.toString());
+                    assertFalse(d.toString().contains("secret"));
+                }
+            }
+        }
+    }
+
+    @Test
+    void realTlsRedirectNeverConnectsToHttpTargetAndStillAllowsHttps() throws Exception {
+        // Public test fixture only: its key/password must never be used outside these loopback tests.
+        java.security.KeyStore keys = java.security.KeyStore.getInstance("PKCS12");
+        try (InputStream fixture = getClass().getResourceAsStream("/streamload/localhost.p12")) {
+            keys.load(fixture, "test-only".toCharArray());
+        }
+        javax.net.ssl.SSLContext tls = org.apache.http.ssl.SSLContexts.custom()
+                .loadKeyMaterial(keys, "test-only".toCharArray()).loadTrustMaterial(keys, null).build();
+        for (boolean tlsFactory : new boolean[]{false, true}) {
+            for (int code : new int[]{307, 308}) {
+                for (boolean downgrade : new boolean[]{true, false}) {
+                    try (ServerSocket httpTarget = new ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"));
+                         CloseableHttpClient client = tlsFactory ? HttpUtil.generationHttpClient()
+                                 : builder().setSSLContext(tls).build()) {
+                        com.sun.net.httpserver.HttpsServer fe = com.sun.net.httpserver.HttpsServer.create(
+                                new InetSocketAddress("127.0.0.1", 0), 0);
+                        fe.setHttpsConfigurator(new com.sun.net.httpserver.HttpsConfigurator(tls));
+                        java.util.concurrent.atomic.AtomicInteger beRequests = new java.util.concurrent.atomic.AtomicInteger();
+                        java.util.concurrent.atomic.AtomicReference<String> authorization = new java.util.concurrent.atomic.AtomicReference<>();
+                        java.util.concurrent.atomic.AtomicReference<byte[]> body = new java.util.concurrent.atomic.AtomicReference<>();
+                        fe.createContext("/fe", exchange -> {
+                            exchange.getRequestBody().close();
+                            exchange.getResponseHeaders().set("Location", downgrade
+                                    ? "http://localhost:" + httpTarget.getLocalPort() + "/be?token=secret"
+                                    : "https://localhost:" + fe.getAddress().getPort() + "/be");
+                            exchange.sendResponseHeaders(code, -1);
+                            exchange.close();
+                        });
+                        fe.createContext("/be", exchange -> {
+                            beRequests.incrementAndGet();
+                            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+                            ByteArrayOutputStream received = new ByteArrayOutputStream();
+                            byte[] buffer = new byte[1024];
+                            int count;
+                            while ((count = exchange.getRequestBody().read(buffer)) != -1) received.write(buffer, 0, count);
+                            body.set(received.toByteArray());
+                            exchange.sendResponseHeaders(200, -1);
+                            exchange.close();
+                        });
+                        fe.start();
+                        try {
+                            StreamLoadDiagnostics d = new StreamLoadDiagnostics();
+                            HttpPut request = new HttpPut("https://localhost:" + fe.getAddress().getPort() + "/fe");
+                            request.setHeader("Authorization", "Basic test-secret");
+                            request.setHeader("Expect", "100-continue");
+                            request.setEntity(entity(d));
+                            if (downgrade) {
+                                org.apache.http.client.ClientProtocolException failure = assertThrows(
+                                        org.apache.http.client.ClientProtocolException.class,
+                                        () -> client.execute(request, context(d)));
+                                assertEquals("https_to_http_redirect_rejected", d.redirectFailure);
+                                assertTrue(d.failureSummary(failure).contains("https_to_http_redirect_rejected"));
+                                assertFalse(d.toString().contains("secret"));
+                                assertEquals(0, beRequests.get());
+                            } else {
+                                try (CloseableHttpResponse response = client.execute(request, context(d))) {
+                                    assertEquals(200, response.getStatusLine().getStatusCode());
+                                }
+                                assertEquals(1, beRequests.get());
+                                assertEquals("Basic test-secret", authorization.get());
+                                assertArrayEquals(DATA, body.get());
+                            }
+                            // A queued connection would prove credentials/data could reach plaintext HTTP.
+                            httpTarget.setSoTimeout(100);
+                            assertThrows(SocketTimeoutException.class, () -> {
+                                try (Socket unexpected = httpTarget.accept()) {
+                                    fail("HTTP target received a connection");
+                                }
+                            });
+                        } finally {
+                            fe.stop(0);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @Test

@@ -77,6 +77,7 @@ final class StreamLoadDiagnostics {
                 if ("Content-Length header already present".equals(message)) chain.append("[duplicate_content_length]");
                 else if ("Transfer-encoding header already present".equals(message)) chain.append("[duplicate_transfer_encoding]");
                 else if (message != null && message.startsWith("Received redirect response") && message.endsWith("missing location header")) chain.append("[missing_location]");
+                else if ("Refusing HTTPS to HTTP Stream Load redirect".equals(message)) chain.append("[https_to_http_redirect_rejected]");
                 else if (failure.getCause() instanceof java.net.URISyntaxException) chain.append("[invalid_redirect_uri]");
                 else chain.append("[protocol_error]");
             }

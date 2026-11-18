@@ -92,16 +92,23 @@ public class HttpUtil {
                         }
                         // Keep HttpClient's existing URI/routing compatibility. URI.getHost()
                         // rejects authorities (e.g. underscore hostnames) that HttpClient can route.
-                        // Diagnostics must observe unusual targets, never introduce a new veto.
+                        // Do not reject these authorities based on URI.getHost().
+                        HttpHost source = (HttpHost) context.getAttribute("http.target_host");
+                        boolean httpsToHttp = source != null && "https".equalsIgnoreCase(source.getSchemeName())
+                                && "http".equalsIgnoreCase(target.getScheme());
                         if (d != null) {
-                            HttpHost source = (HttpHost) context.getAttribute("http.target_host");
                             d.hops.add("redirect@" + d.elapsedMs() + "ms target="
                                     + StreamLoadDiagnostics.endpoint(target.toString())
                                     + " javaHostMissing=" + (target.getHost() == null)
                                     + " hasUserInfo=" + (target.getRawAuthority() != null && target.getRawAuthority().contains("@"))
                                     + " hasFragment=" + (target.getRawFragment() != null)
-                                    + " httpsToHttp=" + (source != null && "https".equalsIgnoreCase(source.getSchemeName())
-                                    && "http".equalsIgnoreCase(target.getScheme())));
+                                    + " httpsToHttp=" + httpsToHttp);
+                        }
+                        // Authorization is an explicit header and must accompany Doris BE uploads.
+                        // Reject before copying/sending rather than silently expose it over HTTP.
+                        if (httpsToHttp) {
+                            if (d != null) d.redirectFailure = "https_to_http_redirect_rejected";
+                            throw new ProtocolException("Refusing HTTPS to HTTP Stream Load redirect");
                         }
                         return org.apache.http.client.methods.RequestBuilder.copy(request).setUri(target).build();
                     }
