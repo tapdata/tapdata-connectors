@@ -14,6 +14,8 @@ final class StreamLoadDiagnostics {
     static final String KEY = StreamLoadDiagnostics.class.getName();
     final long started = System.nanoTime();
     final List<String> hops = new ArrayList<>();
+    String phase = "prepare";
+    String redirectFailure = "none";
     long requestStartedMs;
     String lastPeer = "unknown";
     String initialEndpoint = "unknown";
@@ -54,6 +56,31 @@ final class StreamLoadDiagnostics {
         }
         StreamLoadDiagnostics d = get(context);
         return d == null ? "unknown" : d.lastPeer;
+    }
+
+    // Exception messages from HttpClient may contain full Location URLs, credentials or row data.
+    // Report the complete bounded type chain, but expose only recognized protocol messages.
+    String failureSummary(Throwable failure) {
+        StringBuilder chain = new StringBuilder();
+        java.util.Set<Throwable> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Throwable, Boolean>());
+        for (int i = 0; failure != null && i < 12 && seen.add(failure); i++, failure = failure.getCause()) {
+            if (chain.length() > 0) chain.append(" -> ");
+            chain.append(failure.getClass().getSimpleName());
+            String message = failure.getMessage();
+            if (failure instanceof org.apache.http.client.CircularRedirectException) {
+                chain.append("[circular_redirect]");
+            } else if (failure instanceof org.apache.http.client.RedirectException) {
+                chain.append(message != null && message.startsWith("Maximum redirects (")
+                        ? "[maximum_redirects_exceeded]" : "[redirect_rejected]");
+            } else if (failure instanceof org.apache.http.ProtocolException) {
+                if ("Content-Length header already present".equals(message)) chain.append("[duplicate_content_length]");
+                else if ("Transfer-encoding header already present".equals(message)) chain.append("[duplicate_transfer_encoding]");
+                else if (message != null && message.startsWith("Received redirect response") && message.endsWith("missing location header")) chain.append("[missing_location]");
+                else if (failure.getCause() instanceof java.net.URISyntaxException) chain.append("[invalid_redirect_uri]");
+                else chain.append("[protocol_error]");
+            }
+        }
+        return "phase=" + phase + ", redirectFailure=" + redirectFailure + ", causeChain=" + chain;
     }
 
     @Override

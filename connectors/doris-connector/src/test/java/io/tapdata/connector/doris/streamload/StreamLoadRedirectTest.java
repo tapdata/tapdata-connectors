@@ -88,7 +88,12 @@ class StreamLoadRedirectTest {
             try (ScriptServer server = new ScriptServer(307, false, 0, location);
                  CloseableHttpClient client = new HttpUtil().getHttpClient()) {
                 StreamLoadDiagnostics d = new StreamLoadDiagnostics();
-                assertThrows(IOException.class, () -> client.execute(request(server, d), context(d)));
+                IOException failure = assertThrows(IOException.class, () -> client.execute(request(server, d), context(d)));
+                String summary = d.failureSummary(failure);
+                assertTrue(summary.contains("ClientProtocolException"), summary);
+                assertFalse(summary.contains("redirectFailure=none"), summary);
+                assertTrue(summary.contains("phase=redirect_validation"), summary);
+                assertFalse(summary.contains("password"), summary);
                 assertTrue(d.hops.size() <= 6, d.toString());
                 assertFalse(d.toString().contains("password"));
             }
@@ -100,7 +105,8 @@ class StreamLoadRedirectTest {
         try (ScriptServer server = new ScriptServer(307, false, 0, "chain");
              CloseableHttpClient client = new HttpUtil().getHttpClient()) {
             StreamLoadDiagnostics d = new StreamLoadDiagnostics();
-            assertThrows(IOException.class, () -> client.execute(request(server, d), context(d)));
+            IOException failure = assertThrows(IOException.class, () -> client.execute(request(server, d), context(d)));
+            assertTrue(d.failureSummary(failure).contains("maximum_redirects_exceeded"), d.failureSummary(failure));
             assertEquals(HttpUtil.MAX_REDIRECTS + 1, server.result.get(10, TimeUnit.SECONDS).size());
         }
     }
@@ -151,6 +157,84 @@ class StreamLoadRedirectTest {
         assertEquals(DATA.length, entity.getContentLength());
         assertArrayEquals(DATA, first.toByteArray());
         assertArrayEquals(DATA, second.toByteArray());
+    }
+
+    @Test
+    void nullProtocolMessageStillReportsNestedReasonWithoutUrlSecrets() {
+        StreamLoadDiagnostics d = new StreamLoadDiagnostics();
+        Throwable duplicate = new org.apache.http.client.ClientProtocolException(
+                new org.apache.http.ProtocolException("Content-Length header already present"));
+        assertNull(duplicate.getMessage());
+        assertTrue(d.failureSummary(duplicate).contains("ClientProtocolException -> ProtocolException[duplicate_content_length]"));
+        Throwable unsafe = new org.apache.http.client.ClientProtocolException(
+                new org.apache.http.client.CircularRedirectException("http://user:password@host/api/table?token=secret"));
+        String summary = d.failureSummary(unsafe);
+        assertTrue(summary.contains("circular_redirect"));
+        assertFalse(summary.contains("password"));
+        assertFalse(summary.contains("secret"));
+        assertFalse(summary.contains("/api/table"));
+    }
+
+    @Test
+    void failureSummaryBoundsCyclesAndDoesNotLogUnrecognizedMessages() {
+        StreamLoadDiagnostics d = new StreamLoadDiagnostics();
+        Exception first = new Exception("Authorization: secret");
+        Exception second = new Exception("row data");
+        first.initCause(second);
+        second.initCause(first);
+        assertEquals("phase=prepare, redirectFailure=none, causeChain=Exception -> Exception", d.failureSummary(first));
+    }
+
+    @Test
+    void loaderExceptionIncludesSafeProtocolReasonAndPreservesCause() throws Exception {
+        io.tapdata.connector.doris.bean.DorisConfig config = org.mockito.Mockito.mock(io.tapdata.connector.doris.bean.DorisConfig.class);
+        org.mockito.Mockito.when(config.getWriteFormatEnum()).thenReturn(io.tapdata.connector.doris.bean.DorisConfig.WriteFormat.json);
+        org.mockito.Mockito.when(config.getWriteByteBufferCapacity()).thenReturn(1);
+        org.mockito.Mockito.when(config.getDorisHttp()).thenReturn("localhost:8030");
+        org.mockito.Mockito.when(config.getDatabase()).thenReturn("db");
+        io.tapdata.connector.doris.DorisJdbcContext jdbc = org.mockito.Mockito.mock(io.tapdata.connector.doris.DorisJdbcContext.class);
+        org.mockito.Mockito.when(jdbc.getConfig()).thenReturn(config);
+        CloseableHttpClient client = org.mockito.Mockito.mock(CloseableHttpClient.class);
+        IOException protocol = new org.apache.http.client.ClientProtocolException(
+                new org.apache.http.ProtocolException("Content-Length header already present"));
+        org.mockito.Mockito.when(client.execute(org.mockito.ArgumentMatchers.any(org.apache.http.client.methods.HttpUriRequest.class),
+                org.mockito.ArgumentMatchers.any(org.apache.http.protocol.HttpContext.class))).thenThrow(protocol);
+        DorisStreamLoader loader = new DorisStreamLoader(jdbc, client);
+        io.tapdata.entity.schema.TapTable table = org.mockito.Mockito.mock(io.tapdata.entity.schema.TapTable.class);
+        org.mockito.Mockito.when(table.getId()).thenReturn("t");
+        org.mockito.Mockito.when(table.getNameFieldMap()).thenReturn(new java.util.LinkedHashMap<>());
+        org.springframework.test.util.ReflectionTestUtils.setField(loader, "tapTable", table);
+        org.springframework.test.util.ReflectionTestUtils.setField(loader, "dataColumns",
+                new java.util.concurrent.atomic.AtomicReference<>(Collections.emptySet()));
+        RecordStream stream = (RecordStream) org.springframework.test.util.ReflectionTestUtils.getField(loader, "recordStream");
+        stream.startInput();
+        stream.write(DATA);
+        stream.endInput();
+        io.tapdata.connector.doris.streamload.exception.StreamLoadException failure = assertThrows(
+                io.tapdata.connector.doris.streamload.exception.StreamLoadException.class, () -> loader.put(table));
+        assertSame(protocol, failure.getCause());
+        assertTrue(failure.getMessage().contains("duplicate_content_length"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("phase=execute"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("label=tapdata_"), failure.getMessage());
+    }
+
+    @Test
+    void httpsDowngradeReportsExplicitReasonWithoutLeakingLocation() throws Exception {
+        java.lang.reflect.Method factory = HttpUtil.class.getDeclaredMethod("builder");
+        factory.setAccessible(true);
+        org.apache.http.impl.client.HttpClientBuilder builder = (org.apache.http.impl.client.HttpClientBuilder) factory.invoke(null);
+        org.apache.http.client.RedirectStrategy strategy = (org.apache.http.client.RedirectStrategy)
+                org.springframework.test.util.ReflectionTestUtils.getField(builder, "redirectStrategy");
+        org.apache.http.HttpResponse response = new org.apache.http.message.BasicHttpResponse(
+                org.apache.http.HttpVersion.HTTP_1_1, 307, "Temporary Redirect");
+        response.setHeader("Location", "http://localhost:8040/api/db/t?token=secret");
+        StreamLoadDiagnostics d = new StreamLoadDiagnostics();
+        HttpClientContext context = context(d);
+        context.setAttribute("http.target_host", new org.apache.http.HttpHost("localhost", 443, "https"));
+        org.apache.http.ProtocolException failure = assertThrows(org.apache.http.ProtocolException.class,
+                () -> strategy.getRedirect(new HttpPut("https://localhost/fe"), response, context));
+        assertTrue(d.failureSummary(failure).contains("redirectFailure=https_to_http_downgrade"));
+        assertFalse(d.failureSummary(failure).contains("secret"));
     }
 
     private HttpClientContext context(StreamLoadDiagnostics d) {

@@ -28,7 +28,10 @@ public class HttpUtil {
                                                          HttpContext context) throws java.io.IOException, HttpException {
                         // The request interceptor runs before connect; capture the actual peer here.
                         StreamLoadDiagnostics d = StreamLoadDiagnostics.get(context);
-                        if (d != null) d.lastPeer = StreamLoadDiagnostics.peer(context);
+                        if (d != null) {
+                            d.lastPeer = StreamLoadDiagnostics.peer(context);
+                            d.phase = "send_request";
+                        }
                         return super.doSendRequest(request, connection, context);
                     }
                 })
@@ -40,13 +43,17 @@ public class HttpUtil {
                 .addInterceptorLast((HttpRequestInterceptor) (request, context) -> {
                     StreamLoadDiagnostics d = StreamLoadDiagnostics.get(context);
                     if (d != null) d.lastPeer = StreamLoadDiagnostics.peer(context);
-                    if (d != null) d.requestStartedMs = d.elapsedMs();
+                    if (d != null) {
+                        d.requestStartedMs = d.elapsedMs();
+                        d.phase = "request_prepared";
+                    }
                     if (d != null) d.hops.add("request@" + d.elapsedMs() + "ms target="
                             + StreamLoadDiagnostics.endpoint(String.valueOf(context.getAttribute("http.target_host")))
                             + " method=" + request.getRequestLine().getMethod());
                 })
                 .addInterceptorLast((HttpResponseInterceptor) (response, context) -> {
                     StreamLoadDiagnostics d = StreamLoadDiagnostics.get(context);
+                    if (d != null) d.phase = "response_received";
                     Header location = response.getFirstHeader("Location");
                     if (d != null) d.hops.add("response@" + d.elapsedMs() + "ms status="
                             + response.getStatusLine().getStatusCode() + " peer=" + StreamLoadDiagnostics.peer(context)
@@ -70,14 +77,28 @@ public class HttpUtil {
                         if (!"PUT".equalsIgnoreCase(request.getRequestLine().getMethod())) {
                             return super.getRedirect(request, response, context);
                         }
-                        URI target = getLocationURI(request, response, context);
+                        StreamLoadDiagnostics d = StreamLoadDiagnostics.get(context);
+                        if (d != null) d.phase = "redirect_validation";
+                        URI target;
+                        try {
+                            target = getLocationURI(request, response, context);
+                        } catch (org.apache.http.client.CircularRedirectException e) {
+                            if (d != null) d.redirectFailure = "circular_redirect";
+                            throw e;
+                        } catch (ProtocolException e) {
+                            if (d != null) d.redirectFailure = response.getFirstHeader("Location") == null
+                                    ? "missing_location" : "invalid_redirect_location";
+                            throw e;
+                        }
                         if (target.getHost() == null || target.getUserInfo() != null || target.getFragment() != null
                                 || !("http".equalsIgnoreCase(target.getScheme()) || "https".equalsIgnoreCase(target.getScheme()))) {
+                            if (d != null) d.redirectFailure = "unsupported_scheme_or_invalid_authority";
                             throw new ProtocolException("Invalid Stream Load redirect target");
                         }
                         HttpHost source = (HttpHost) context.getAttribute("http.target_host");
                         if (source != null && "https".equalsIgnoreCase(source.getSchemeName())
                                 && !"https".equalsIgnoreCase(target.getScheme())) {
+                            if (d != null) d.redirectFailure = "https_to_http_downgrade";
                             throw new ProtocolException("Refusing HTTPS to HTTP Stream Load redirect");
                         }
                         return org.apache.http.client.methods.RequestBuilder.copy(request).setUri(target).build();

@@ -31,8 +31,14 @@ or transaction commit. Successful ordinary loads retain summaries at DEBUG.
 
 The trace records neither Authorization nor arbitrary headers, URL user-info,
 paths, queries, fragments, response bodies or row data. A closed connection may
-require using the peer captured at request time. Exception class and immediate cause
-class distinguish protocol/redirect failures from DNS, connection and read failures;
+require using the peer captured at request time. Failure summaries include the execution phase, a bounded cause-type chain and safe
+protocol reason codes, even when `ClientProtocolException.getMessage()` is null.
+Original exception causes are preserved. Arbitrary exception messages are omitted
+because they can contain full redirect URLs or data. Reasons include
+`https_to_http_downgrade`, `missing_location`, `invalid_redirect_location`,
+`circular_redirect`, `maximum_redirects_exceeded` and `duplicate_content_length`.
+The outer load exception also carries the label, summary and hop trace.
+Cause types distinguish protocol/redirect failures from DNS, connection and read failures;
 the last Location origin identifies the destination when connection setup fails.
 
 Regression tests use local raw HTTP sockets, including early 100 followed by 307,

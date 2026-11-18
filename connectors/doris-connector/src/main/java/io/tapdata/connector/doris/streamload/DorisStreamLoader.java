@@ -181,7 +181,9 @@ public class DorisStreamLoader {
             context.setAttribute(StreamLoadDiagnostics.KEY, diagnostics);
             TapLogger.debug(TAG, "Stream load start: label={}, endpoint={}, bytes={}, repeatable=true",
                     label, StreamLoadDiagnostics.endpoint(loadUrl), entity.getContentLength());
+            diagnostics.phase = "execute";
             try (CloseableHttpResponse execute = httpClient.execute(httpPut, context)) {
+                diagnostics.phase = "validate_load_response";
                 RespContent result = handlePreCommitResponse(execute);
                 if (diagnostics.bodyWrites > 1) {
                     TapLogger.warn(TAG, "Stream load recovered after body replay: label={}, {}", label, diagnostics);
@@ -191,12 +193,12 @@ public class DorisStreamLoader {
                 return result;
             }
         } catch (DorisRetryableException e) {
-            TapLogger.warn(TAG, "Stream load failed: label={}, exception={}, {}", label, e.getClass().getSimpleName(), diagnostics);
+            TapLogger.warn(TAG, "Stream load failed: label={}, failure={}, {}", label, diagnostics.failureSummary(e), diagnostics);
             throw e;
         } catch (Exception e) {
-            TapLogger.warn(TAG, "Stream load failed: label={}, exception={}, cause={}, {}", label,
-                    e.getClass().getSimpleName(), e.getCause() == null ? "none" : e.getCause().getClass().getSimpleName(), diagnostics);
-            throw new StreamLoadException(String.format("Call stream load error: %s", e.getMessage()), e);
+            String failure = diagnostics.failureSummary(e);
+            TapLogger.warn(TAG, "Stream load failed: label={}, failure={}, {}", label, failure, diagnostics);
+            throw new StreamLoadException("Call stream load error: label=" + label + ", " + failure + ", " + diagnostics, e);
         }
     }
 
