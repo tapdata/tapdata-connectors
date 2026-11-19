@@ -180,7 +180,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     // Validate complete UPDATE_AFTER images for primary-key Deduplicate tables by default.
     // Disabling this per-table escape hatch may let omitted columns be written as null/default.
-    private Boolean enableDeduplicateUpdateAfterCompletenessCheck = true;
+    private Boolean enableDeduplicateUpdateAfterCompletenessCheck = false;
 
     public String getWarehouse() {
         return warehouse;

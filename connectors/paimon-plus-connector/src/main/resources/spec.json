@@ -700,7 +700,7 @@
           "title": "${enableDeduplicateUpdateAfterCompletenessCheck}",
           "x-decorator": "FormItem",
           "x-component": "Switch",
-          "default": true,
+          "default": false,
           "x-index": 150,
           "x-perTable": true,
           "x-decorator-props": {
