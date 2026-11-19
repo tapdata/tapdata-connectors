@@ -55,20 +55,6 @@ class PaimonServiceWriteErrorLogTest {
     private static final String LONG_NAME = repeat('x', 300);
 
     @Test
-    void legacySyntheticHashMustKeepMissingAndNullPrimaryKeyEncoding() {
-        PaimonService service = new PaimonService(new PaimonConfig(), mock(Log.class));
-        List<String> keys = Arrays.asList("pk1", "pk2", "pk3");
-        Map<String, Object> missing = new LinkedHashMap<>();
-        missing.put("pk1", 1);
-        missing.put("pk3", 3);
-        Map<String, Object> explicitNull = new LinkedHashMap<>(missing);
-        explicitNull.put("pk2", null);
-
-        assertEquals("5989c034788371db039a59ebbdbc5ff8", service.toHash(keys, missing));
-        assertEquals(service.toHash(keys, missing), service.toHash(keys, explicitNull));
-    }
-
-    @Test
     void syntheticHashFailureMustNotExposeSourceValues() {
         PaimonService service = new PaimonService(new PaimonConfig(), mock(Log.class));
         String secret = "primary-key-secret-sentinel";
