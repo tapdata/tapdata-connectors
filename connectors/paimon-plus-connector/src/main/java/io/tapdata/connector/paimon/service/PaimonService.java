@@ -60,14 +60,11 @@ import org.apache.paimon.types.*;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
@@ -103,13 +100,9 @@ public class PaimonService implements AutoCloseable {
      * Spill 目录锁只保护本地删除，不能作为远端表写入的租约。
      */
     private static final Map<String, String> ACTIVE_PHYSICAL_TABLE_OWNERS = new ConcurrentHashMap<>();
-    /** legacy 合成主键使用的摘要算法；保留 MD5 是为了兼容已有表的主键编码。 */
-    public static final String HASH_ALGORITHM = "MD5";
-    /** legacy 合成主键编码多个原始主键值时使用的分隔符。 */
-    public static final byte SPLIT_CHAR = ',';
     /** 启用 hashKey 时，原始主键数量超过该阈值才改用合成 _hash_key，避免主键列过多。 */
     private static final int HASH_KEY_PRIMARY_KEY_THRESHOLD = 5;
-    /** 合成 _hash_key 列的宽度（MD5 摘要的十六进制长度，与 {@link #HASH_ALGORITHM} 匹配）。 */
+    /** 合成 _hash_key 列的宽度（MD5 摘要的十六进制长度）。 */
     private static final int HASH_KEY_COLUMN_LENGTH = 32;
     /** commit 重试次数上限。 */
     private static final int COMMIT_RETRY_LIMIT = 3;
@@ -753,8 +746,9 @@ public class PaimonService implements AutoCloseable {
 
         // Set primary keys
         Collection<String> primaryKeys = tapTable.primaryKeys(true);
+        boolean syntheticKey = usesSyntheticKey(tableName, primaryKeys);
         if (primaryKeys != null && !primaryKeys.isEmpty()) {
-            if (config.getHashKey(tableName) && primaryKeys.size() > HASH_KEY_PRIMARY_KEY_THRESHOLD) {
+            if (syntheticKey) {
                 schemaBuilder.primaryKey(Collections.singletonList(HASH_KEY));
             } else {
                 schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
@@ -764,7 +758,7 @@ public class PaimonService implements AutoCloseable {
         // Add fields
         Map<String, TapField> fields = tapTable.getNameFieldMap();
         if (fields != null) {
-            if (config.getHashKey(tableName) && EmptyKit.isNotEmpty(primaryKeys) && primaryKeys.size() > HASH_KEY_PRIMARY_KEY_THRESHOLD) {
+            if (syntheticKey) {
                 schemaBuilder.column(HASH_KEY, DataTypes.VARCHAR(HASH_KEY_COLUMN_LENGTH));
             }
             for (Map.Entry<String, TapField> entry : fields.entrySet()) {
@@ -884,6 +878,9 @@ public class PaimonService implements AutoCloseable {
                     schemaBuilder.option(v.get("propKey"), v.get("propValue"));
                 }
             });
+        }
+        if (syntheticKey) {
+            schemaBuilder.option(PaimonSyntheticHashKey.VERSION_OPTION, PaimonSyntheticHashKey.VERSION);
         }
         Schema finalSchema = schemaBuilder.build();
         // Paimon 1.3.2 AbstractCatalog#createTable copies Catalog table-default options into
@@ -1205,6 +1202,7 @@ public class PaimonService implements AutoCloseable {
                 Identifier identifier = Identifier.create(database, tableName);
                 Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
                 synchronized (lock) {
+                    cacheSourceDerivedState(tableName, tapTable);
                     PaimonTableWriteContext writeContext =
                             getOrCreateTableWriteContext(tableKey, tableName, identifier, connectorContext);
                     if (writeContext.hasPendingCommit()) {
@@ -1675,20 +1673,48 @@ public class PaimonService implements AutoCloseable {
     }
 
     /**
-     * Cache source metadata used by the Connector's legacy synthetic-key path.
+     * Cache source metadata used by the connector's synthetic-key path.
      *
      * <p>The caller holds the same per-table lifecycle lock as {@link #runTableDdl}. Keeping
      * population under that lock prevents an ingress waiting behind DDL from publishing metadata
-     * for the old table generation after the DDL finally block has invalidated it. This changes
-     * only cache timing; the legacy MD5 encoding and {@code VARCHAR(32)} contract are unchanged.
+     * for the old table generation after the DDL finally block has invalidated it.
      */
     private void cacheSourceDerivedState(String tableName, TapTable table) {
         Collection<String> primaryKeys = table.primaryKeys(true);
-        computeHashKey.computeIfAbsent(tableName,
-                ignored -> Boolean.TRUE.equals(config.getHashKey(tableName))
-                        && EmptyKit.isNotEmpty(primaryKeys)
-                        && primaryKeys.size() > HASH_KEY_PRIMARY_KEY_THRESHOLD);
-        primaryKeyMap.putIfAbsent(tableName, primaryKeys);
+        boolean generate = computeHashKey.computeIfAbsent(tableName,
+                ignored -> usesSyntheticKey(tableName, primaryKeys));
+        primaryKeyMap.computeIfAbsent(tableName, ignored -> {
+            if (!generate) {
+                return primaryKeys;
+            }
+            // TapTable may return an unordered collection of logical keys. Choose the same field
+            // order on every writer restart, regardless of the source metadata's iteration order.
+            List<String> ordered = new ArrayList<>(primaryKeys);
+            Collections.sort(ordered);
+            return Collections.unmodifiableList(ordered);
+        });
+    }
+
+    private boolean usesSyntheticKey(String tableName, Collection<String> primaryKeys) {
+        return Boolean.TRUE.equals(config.getHashKey(tableName))
+                && primaryKeys != null && primaryKeys.size() > HASH_KEY_PRIMARY_KEY_THRESHOLD;
+    }
+
+    private void validateHashKeyEncoding(String tableKey, String tableName, FileStoreTable target) {
+        String version = target.options().get(PaimonSyntheticHashKey.VERSION_OPTION);
+        boolean generate = Boolean.TRUE.equals(computeHashKey.get(tableName));
+        if (generate && target.primaryKeys().contains(HASH_KEY)
+                && !PaimonSyntheticHashKey.VERSION.equals(version)) {
+            // Deduplicate merges records by their physical key. Changing encoders on a populated
+            // table would orphan old keys on UPDATE/DELETE.
+            // https://paimon.apache.org/docs/1.3/primary-key-table/merge-engine/overview/#deduplicate
+            throw new PaimonFatalWriteException("Unsupported synthetic hash-key encoding for " + tableKey
+                    + ". Rebuild the target from source or migrate its stored keys before resuming writes.");
+        }
+        if (version != null && !generate) {
+            throw new PaimonFatalWriteException("Target " + tableKey
+                    + " requires synthetic hash keys. Check hashKey and the source primary-key fields.");
+        }
     }
 
     /**
@@ -1726,8 +1752,9 @@ public class PaimonService implements AutoCloseable {
                 throw new IllegalArgumentException(
                         "Only FileStoreTable supports connector writes for " + tableKey);
             }
-            FileStoreTable fileStoreTable = PaimonWriteOptions.runtimeWriteTable(
-                    requireWriteTable(identifier, table), config);
+            FileStoreTable target = requireWriteTable(identifier, table);
+            validateHashKeyEncoding(tableKey, tableName, target);
+            FileStoreTable fileStoreTable = PaimonWriteOptions.runtimeWriteTable(target, config);
             log.info("Paimon write-buffer spill decision for table {}: spillable={}, diskTmpDir={}",
                     tableKey, PaimonWriteOptions.spillValue(config), config.getDiskTmpDir(tableName));
             List<DataField> paimonFields = fileStoreTable.rowType().getFields();
@@ -2266,77 +2293,8 @@ public class PaimonService implements AutoCloseable {
         return genericRow;
     }
 
-    protected String toHash(Collection<String> keys, Map<String, Object> data) {
-        try {
-            MessageDigest md = MessageDigest.getInstance(HASH_ALGORITHM);
-            try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-                boolean isFirst = true;
-                baos.write('[');
-                for (String key : keys) {
-                    if (isFirst) {
-                        isFirst = false;
-                    } else {
-                        baos.write(SPLIT_CHAR);
-                    }
-
-                    Object val = data.get(key);
-                    byte[] bytes = toBytes(val);
-                    baos.write(bytes);
-                }
-                baos.write(']');
-
-                byte[] hashBytes = md.digest(baos.toByteArray());
-                StringBuilder hashHex = new StringBuilder();
-                for (byte b : hashBytes) {
-                    hashHex.append(String.format("%02x", b));
-                }
-                return hashHex.toString(); // 返回 128 位（32 个字符）的哈希值
-            }
-        } catch (Exception e) {
-            int fieldCount = keys == null ? 0 : keys.size();
-            throw new RuntimeException(
-                    "Failed to compute synthetic Paimon hash key for " + fieldCount
-                            + " field(s); causeType=" + e.getClass().getSimpleName());
-        }
-    }
-
-    protected byte[] toBytes(Object data) throws IOException {
-        if (null == data) return new byte[0];
-        if (data instanceof byte[]) return (byte[]) data;
-        if (data.getClass().isArray()) return arrayToBytes(Arrays.asList((Object[]) data));
-        if (data instanceof Collection) return arrayToBytes((Collection<?>) data);
-        if (data instanceof Map) return mapToBytes((Map<?, ?>) data);
-        return data.toString().getBytes(StandardCharsets.UTF_8);
-    }
-
-    protected byte[] arrayToBytes(Collection<?> collection) throws IOException {
-        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            boolean isFirst = true;
-            baos.write('[');
-            for (Object o : collection) {
-                if (isFirst) {
-                    isFirst = false;
-                } else {
-                    baos.write(SPLIT_CHAR);
-                }
-                baos.write(toBytes(o));
-            }
-            baos.write(']');
-            return baos.toByteArray();
-        }
-    }
-
-    protected byte[] mapToBytes(Map<?, ?> map) throws IOException {
-        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            baos.write('{');
-            for (Map.Entry<?, ?> en : map.entrySet()) {
-                baos.write(toBytes(en.getKey()));
-                baos.write(':');
-                baos.write(toBytes(en.getValue()));
-            }
-            baos.write('}');
-            return baos.toByteArray();
-        }
+    protected String toHash(Collection<String> orderedKeys, Map<String, Object> data) {
+        return PaimonSyntheticHashKey.encode(orderedKeys, data);
     }
 
     /**

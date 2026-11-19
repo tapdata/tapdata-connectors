@@ -31,10 +31,13 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -101,6 +104,87 @@ class PaimonServiceDynamicBucketIntegrationTest {
 
     @TempDir
     java.nio.file.Path tempDir;
+
+    @ParameterizedTest
+    @ValueSource(strings = {"fixed", "dynamic"})
+    void commaInCompositeKeyMustNotOverwriteOrDeleteAnotherRow(String mode) throws Exception {
+        String name = "comma_key";
+        PaimonConfig config = config(name);
+        config.setBucketMode(mode);
+        config.setHashKey(true);
+        TapTable source = new TapTable(name).add(new TapField("value", "STRING"));
+        for (int i = 1; i <= 6; i++) {
+            source.add(new TapField("pk" + i, "STRING").primaryKeyPos(i));
+        }
+        Map<String, Object> first = map("pk1", "a,b", "pk2", "c", "pk3", "", "pk4", "四",
+                "pk5", "[x]", "pk6", "x:y", "value", "first");
+        Map<String, Object> second = new LinkedHashMap<>(first);
+        second.put("pk1", "a");
+        second.put("pk2", "b,c");
+        second.put("value", "second");
+        TapConnectorContext context = context(stateMap());
+        try (PaimonService writer = service(config)) {
+            assertTrue(writer.createTable(source));
+            writer.writeRecords(Arrays.asList(cdcInsert(name, first), cdcInsert(name, second)),
+                    source, context);
+            FileStoreTable target = (FileStoreTable) catalog(writer).getTable(Identifier.create(DATABASE, name));
+            assertEquals("fixed".equals(mode) ? BucketMode.HASH_FIXED : BucketMode.HASH_DYNAMIC,
+                    target.bucketMode());
+            assertEquals(PaimonSyntheticHashKey.VERSION, target.options().get(PaimonSyntheticHashKey.VERSION_OPTION));
+            assertEquals(2, readRows(target).size());
+        }
+
+        source.setLogicPrimaries(Arrays.asList("pk6", "pk5", "pk4", "pk3", "pk2", "pk1"));
+        try (PaimonService restarted = service(config)) {
+            Map<String, Object> updated = new LinkedHashMap<>(second);
+            updated.put("value", "updated second");
+            restarted.writeRecords(Collections.singletonList(cdcUpdate(name, second, updated)), source, context);
+            restarted.writeRecords(Collections.singletonList(cdcDelete(name, first)), source, context);
+            Table target = catalog(restarted).getTable(Identifier.create(DATABASE, name));
+            List<InternalRow> remaining = readRows(target);
+            assertEquals(1, remaining.size());
+            int value = target.rowType().getFieldIndex("value");
+            assertEquals("updated second", remaining.get(0).getString(value).toString());
+        }
+    }
+
+    @Test
+    void unversionedSyntheticTableMustRejectWritesAndPreserveLegacyRow() throws Exception {
+        String name = "legacy_hash";
+        PaimonConfig config = config(name);
+        config.setBucketMode("fixed");
+        TapConnectorContext context = context(stateMap());
+        Map<String, Object> data = syntheticHashData("legacy");
+        TapTable oldTarget = new TapTable(name)
+                .add(new TapField("_hash_key", "VARCHAR(32)").primaryKeyPos(1))
+                .add(new TapField("value", "STRING"));
+        for (int i = 1; i <= 6; i++) {
+            oldTarget.add(new TapField("pk" + i, "INT"));
+        }
+        Map<String, Object> stored = new LinkedHashMap<>(data);
+        stored.put("_hash_key", "41d2396c50ba2f0304f98083541db0df"); // MD5 of [1,2,3,4,5,6]
+        try (PaimonService seed = service(config)) {
+            seed.createTable(oldTarget);
+            seed.writeRecords(Collections.singletonList(cdcInsert(name, stored)), oldTarget, context);
+        }
+
+        config.setHashKey(true);
+        PaimonService writer = service(config);
+        try {
+            FileStoreTable target = (FileStoreTable) catalog(writer).getTable(Identifier.create(DATABASE, name));
+            Long snapshot = target.snapshotManager().latestSnapshotIdFromFileSystem();
+            TapTable source = syntheticHashTapTable(name, false);
+            PaimonFatalWriteException error = assertThrows(PaimonFatalWriteException.class, () ->
+                    writer.writeRecords(Collections.singletonList(cdcDelete(name, data)), source, context));
+            assertTrue(error.getMessage().contains("Rebuild the target from source"));
+            assertEquals(snapshot, target.snapshotManager().latestSnapshotIdFromFileSystem());
+            List<InternalRow> rows = readRows(target);
+            assertEquals(1, rows.size());
+            assertEquals(stored.get("_hash_key"), rows.get(0).getString(0).toString());
+        } finally {
+            assertThrows(PaimonFatalWriteException.class, writer::close);
+        }
+    }
 
     @Test
     void syntheticHashKeyMustWriteThroughHashDynamicWithoutMutatingSource() throws Exception {
@@ -1586,8 +1670,6 @@ class PaimonServiceDynamicBucketIntegrationTest {
         Schema.Builder builder =
                 Schema.newBuilder()
                         .column("value", DataTypes.STRING())
-                        // Paimon stores the Connector's legacy MD5 key in the existing
-                        // VARCHAR(32) physical contract; F4 only refreshes its dependencies.
                         .column("_hash_key", DataTypes.VARCHAR(32));
         for (int i = 1; i <= 6; i++) {
             builder.column("pk" + i, DataTypes.INT());
@@ -1595,6 +1677,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
         catalog.createTable(
                 Identifier.create(DATABASE, tableName),
                 builder.primaryKey("_hash_key")
+                        .option(PaimonSyntheticHashKey.VERSION_OPTION, PaimonSyntheticHashKey.VERSION)
                         .option("bucket", "2")
                         .option("write-buffer-size", "8mb")
                         .build(),
@@ -1638,6 +1721,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
         catalog.createTable(
                 Identifier.create(DATABASE, tableName),
                 builder.primaryKey("_hash_key")
+                        .option(PaimonSyntheticHashKey.VERSION_OPTION, PaimonSyntheticHashKey.VERSION)
                         .option("bucket", "-1")
                         .option("dynamic-bucket.target-row-num", "1")
                         .option("write-buffer-size", "8mb")
@@ -1659,6 +1743,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
                 Identifier.create(DATABASE, tableName),
                 builder.partitionKeys("pt")
                         .primaryKey("_hash_key")
+                        .option(PaimonSyntheticHashKey.VERSION_OPTION, PaimonSyntheticHashKey.VERSION)
                         .option("bucket", "-1")
                         .option("dynamic-bucket.target-row-num", "1")
                         .option("write-buffer-size", "8mb")

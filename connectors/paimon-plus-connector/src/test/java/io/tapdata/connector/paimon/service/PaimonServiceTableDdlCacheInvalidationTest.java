@@ -223,7 +223,7 @@ class PaimonServiceTableDdlCacheInvalidationTest {
         PaimonService service = new PaimonService(config, mock(Log.class));
         TapTable table = mock(TapTable.class);
         Collection<String> primaryKeys =
-                Arrays.asList("pk_1", "pk_2", "pk_3", "pk_4", "pk_5", "pk_6");
+                Arrays.asList("pk_6", "pk_2", "pk_5", "pk_4", "pk_3", "pk_1");
         when(table.primaryKeys(true)).thenReturn(primaryKeys);
         Method cacheSourceDerivedState =
                 PaimonService.class.getDeclaredMethod(
@@ -234,7 +234,8 @@ class PaimonServiceTableDdlCacheInvalidationTest {
 
         verify(table, times(1)).primaryKeys(true);
         assertEquals(Boolean.TRUE, map(service, "computeHashKey").get(TABLE_NAME));
-        assertSame(primaryKeys, map(service, "primaryKeyMap").get(TABLE_NAME));
+        assertEquals(Arrays.asList("pk_1", "pk_2", "pk_3", "pk_4", "pk_5", "pk_6"),
+                map(service, "primaryKeyMap").get(TABLE_NAME));
     }
 
     @Test
