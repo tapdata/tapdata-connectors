@@ -25,6 +25,9 @@
         <grpc.version>1.43.0</grpc.version>
         <origin.driver.class>com.oceanbase.jdbc.Driver</origin.driver.class>
         <obcdc.runtime.version>4.4.2.1</obcdc.runtime.version>
+        <obcdc.helper.platform>linux-x86_64</obcdc.helper.platform>
+        <obcdc.helper.compiler>g++</obcdc.helper.compiler>
+        <obcdc.helper.libaio.dir>${obcdc.sdk.home}/lib64</obcdc.helper.libaio.dir>
         <skipITs>true</skipITs>
         <it.excludedGroups>tpcc,long-transaction,performance</it.excludedGroups>
         <it.groups></it.groups>
@@ -183,6 +186,16 @@
 
     <profiles>
         <profile>
+            <id>obcdc-helper-aarch64</id>
+            <activation><os><name>Linux</name><arch>aarch64</arch></os></activation>
+            <properties><obcdc.helper.platform>linux-aarch64</obcdc.helper.platform></properties>
+        </profile>
+        <profile>
+            <id>obcdc-helper-arm64</id>
+            <activation><os><name>Linux</name><arch>arm64</arch></os></activation>
+            <properties><obcdc.helper.platform>linux-aarch64</obcdc.helper.platform></properties>
+        </profile>
+        <profile>
             <id>tpcc-only</id>
             <properties>
                 <skipITs>false</skipITs>
@@ -234,7 +247,7 @@
                                     <goal>exec</goal>
                                 </goals>
                                 <configuration>
-                                    <executable>g++</executable>
+                                    <executable>${obcdc.helper.compiler}</executable>
                                     <workingDirectory>${project.basedir}</workingDirectory>
                                     <!-- libobcdc.so 静态打包并导出了自己的 libstdc++（std::cin、
                                          operator new/delete、COW string 单例等），若 helper 动态依赖
@@ -253,9 +266,11 @@
                                         -I${obcdc.cpp.dir}
                                         -static-libstdc++
                                         -static-libgcc
-                                        -o ${project.build.outputDirectory}/native/obcdc/${obcdc.runtime.version}/linux-x86_64/${obcdc.helper.name}
+                                        -o ${project.build.outputDirectory}/native/obcdc/${obcdc.runtime.version}/${obcdc.helper.platform}/${obcdc.helper.name}
                                         ${obcdc.cpp.dir}/obcdc_helper.cpp
+                                        -Wl,--exclude-libs,ALL
                                         -Wl,--push-state -Wl,-Bstatic -lstdc++ -Wl,--pop-state
+                                        -Wl,-rpath-link,${obcdc.helper.libaio.dir}
                                         -L${obcdc.sdk.home}/lib64
                                         -l:libobcdc.so.4
                                         -lpthread
@@ -338,6 +353,15 @@
                                     <type>zip</type>
                                     <classifier>linux-x86_64</classifier>
                                     <outputDirectory>${project.build.outputDirectory}/native/obcdc/${obcdc.runtime.version}/linux-x86_64</outputDirectory>
+                                    <destFileName>runtime.zip</destFileName>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>io.tapdata.native</groupId>
+                                    <artifactId>oceanbase-cdc-runtime</artifactId>
+                                    <version>${obcdc.runtime.version}</version>
+                                    <type>zip</type>
+                                    <classifier>linux-aarch64</classifier>
+                                    <outputDirectory>${project.build.outputDirectory}/native/obcdc/${obcdc.runtime.version}/linux-aarch64</outputDirectory>
                                     <destFileName>runtime.zip</destFileName>
                                 </artifactItem>
                             </artifactItems>

@@ -36,7 +36,6 @@ import java.util.stream.Collectors;
 public class OceanbaseNativeReader extends OceanbaseReaderV2 {
 
     private static final String HELPER_NAME = "obcdc-helper";
-    private static final String HELPER_RESOURCE = "/native/obcdc/4.4.2.1/linux-x86_64/obcdc-helper";
     private static final int HELPER_LAUNCH_TIMEOUT_SECONDS = 75;
     private static final int HELPER_READY_TIMEOUT_SECONDS = 90;
     private static final int NATIVE_LOG_TAIL_LINES = 80;
@@ -192,16 +191,17 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
         workDir = Files.createTempDirectory("obcdc-" + connectorId).toFile();
         File runtimeHome = OceanbaseCdcRuntime.prepare(OceanbaseNativeReader.class);
         Files.createSymbolicLink(new File(workDir, "obcdc").toPath(), runtimeHome.toPath());
+        String helperResource = OceanbaseCdcRuntime.resourcePath(HELPER_NAME);
         ClassLoader classLoader = OceanbaseNativeReader.class.getClassLoader();
         if (classLoader == null) {
             classLoader = ClassLoader.getSystemClassLoader();
         }
-        InputStream in = classLoader.getResourceAsStream(HELPER_RESOURCE.substring(1));
+        InputStream in = classLoader.getResourceAsStream(helperResource.substring(1));
         if (in == null) {
-            in = OceanbaseNativeReader.class.getResourceAsStream(HELPER_RESOURCE);
+            in = OceanbaseNativeReader.class.getResourceAsStream(helperResource);
         }
         if (in == null) {
-            throw new IOException(HELPER_RESOURCE + " not found in connector package");
+            throw new IOException(helperResource + " not found in connector package");
         }
         File helper = new File(workDir, HELPER_NAME);
         try (OutputStream out = new FileOutputStream(helper)) {

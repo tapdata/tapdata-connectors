@@ -29,7 +29,7 @@ import java.util.zip.ZipInputStream;
 public final class OceanbaseCdcRuntime {
 
     public static final String VERSION = "4.4.2.1";
-    public static final String PLATFORM = "linux-x86_64";
+    public static final String PLATFORM = "linux-" + normalizeArch(System.getProperty("os.arch", ""));
     public static final String CACHE_PROPERTY = "tapdata.native.cache.dir";
     public static final String RESOURCE = "/native/obcdc/" + VERSION + "/" + PLATFORM + "/runtime.zip";
 
@@ -48,6 +48,14 @@ public final class OceanbaseCdcRuntime {
         FILE_SIZES.put("etc/libobcdc.conf", 5000L);
         FILE_SIZES.put("etc/obcdc_compatiable_ob_info.yaml", 797L);
         FILE_SIZES.put("etc/timezone_info.conf", 11940260L);
+        if ("linux-aarch64".equals(PLATFORM)) {
+            FILE_HASHES.put("lib64/libobcdc.so.4.4.2.1", "7043856ba1e9739c67926cc34235a5c2a0417a9c88d8bf0159ebf4255aa42e1d");
+            FILE_HASHES.put("lib64/libaio.so.1.0.1", "db543aabc24abf97ba99965c31e947876023d1bba3277b81ffa5a9edff6c86a1");
+            FILE_HASHES.put("etc/libobcdc.conf", "2006d9c1545fc87e9a6f5ea584df4d5fd45411ded4387b9dca958f74a58b6b65");
+            FILE_SIZES.put("lib64/libobcdc.so.4.4.2.1", 1019803400L);
+            FILE_SIZES.put("lib64/libaio.so.1.0.1", 4936L);
+            FILE_SIZES.put("etc/libobcdc.conf", 5003L);
+        }
     }
 
     private OceanbaseCdcRuntime() {
@@ -114,13 +122,34 @@ public final class OceanbaseCdcRuntime {
         return new File(System.getProperty("java.io.tmpdir"), "tapdata-native").toPath();
     }
 
-    private static void validatePlatform() {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
-        if (!os.contains("linux") || !("amd64".equals(arch) || "x86_64".equals(arch))) {
-            throw new IllegalStateException("OceanBase CDC runtime " + VERSION
-                    + " supports Linux x86_64 only, current platform is " + os + " " + arch);
+    static String normalizeArch(String arch) {
+        String value = arch.toLowerCase(Locale.ROOT);
+        if ("amd64".equals(value) || "x86_64".equals(value)) {
+            return "x86_64";
         }
+        if ("arm64".equals(value) || "aarch64".equals(value)) {
+            return "aarch64";
+        }
+        return value;
+    }
+
+    static String platform(String os, String arch) {
+        String normalized = normalizeArch(arch);
+        if (!"linux".equals(os.toLowerCase(Locale.ROOT))
+                || !("x86_64".equals(normalized) || "aarch64".equals(normalized))) {
+            throw new IllegalStateException("OceanBase CDC runtime " + VERSION
+                    + " supports Linux x86_64 and aarch64 only, current platform is " + os + " " + arch);
+        }
+        return "linux-" + normalized;
+    }
+
+    public static String resourcePath(String fileName) {
+        validatePlatform();
+        return "/native/obcdc/" + VERSION + "/" + PLATFORM + "/" + fileName;
+    }
+
+    private static void validatePlatform() {
+        platform(System.getProperty("os.name", ""), System.getProperty("os.arch", ""));
         if (new File("/etc/alpine-release").isFile()) {
             throw new IllegalStateException("OceanBase CDC runtime " + VERSION
                     + " requires glibc and does not support Alpine Linux/musl");
