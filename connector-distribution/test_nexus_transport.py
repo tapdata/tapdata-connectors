@@ -168,9 +168,9 @@ class PinnedTransportTests(unittest.TestCase):
             self.assertEqual(set(nexus.hosts), {f'nexus.example:{nexus.server.server_port}'})
 
     def test_partial_upload_retry_keeps_destinations_and_bytes(self):
-        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
-                'pdkApiVersion': '2.0.11'}
-        self.external.fail_path = self.external.path('c00', '2.11.0', 'pom')
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.12.0',
+                'pdkApiVersion': '2.0.12'}
+        self.external.fail_path = self.external.path('c00', '2.12.0', 'pom')
         self.external.fail_count = 1
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
@@ -181,7 +181,7 @@ class PinnedTransportTests(unittest.TestCase):
             jar.unlink()  # Retry recovers bytes from Nexus without rebuilding.
             publisher.sync_connector(item, self.targets, temp)
         self.assertEqual(self.internal.files, self.external.files)
-        self.assertEqual(self.internal.puts.count(self.internal.path('c00', '2.11.0', 'jar')), 1)
+        self.assertEqual(self.internal.puts.count(self.internal.path('c00', '2.12.0', 'jar')), 1)
 
     def test_transient_failure_retries_pinned_destination(self):
         repo = self.targets[0]

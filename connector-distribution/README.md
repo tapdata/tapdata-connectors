@@ -155,8 +155,8 @@ Nexus installations before making changes. Build output is downloaded into a
 separate data directory and is never imported or executed as Python code.
 
 The first run publishes all connector modules. Each connector starts at
-`2.<api-generation>.0` (for example, PDK API `2.11` or `2.0.11-SNAPSHOT`
-maps to connector version `2.11.0`). CI records each connector's PDK API
+`2.<api-generation>.0` (for example, PDK API `2.12` or `2.0.12-SNAPSHOT`
+maps to connector version `2.12.0`). CI records each connector's PDK API
 version and the checked out Git commit inside the generated BOM. Later runs
 compare that commit with the selected source ref. Previous BOMs must use this
 version scheme and record the source commit and each connector's PDK API version;
@@ -172,16 +172,16 @@ conservatively select all connectors. Documentation and workflow-only changes
 do not create a connector release.
 
 Each selected connector gets a version based on its own PDK API generation.
-Within the same generation, the patch number increments (`2.11.0` becomes
-`2.11.1`). When that connector moves to a higher PDK API generation, its
-version starts at `2.<new-generation>.0` (`2.11.3` becomes `2.12.0`). The
-accepted API spellings are `2.<n>` and `2.0.<n>`; for example, `2.11` and
-`2.0.11-SNAPSHOT` both map to generation `11`. Unsupported formats and API
+Within the same generation, the patch number increments (`2.12.0` becomes
+`2.12.1`). When that connector moves to a higher PDK API generation, its
+version starts at `2.<new-generation>.0` (`2.12.3` becomes `2.13.0`). The
+accepted API spellings are `2.<n>` and `2.0.<n>`; for example, `2.12` and
+`2.0.12-SNAPSHOT` both map to generation `12`. Unsupported formats and API
 generation downgrades fail the workflow. Unchanged connectors retain their
 exact version from the previous BOM. The BOM itself has an independent version:
 later releases increment its final numeric segment; the first BOM uses the
 default PDK API base version, UTC date, and `.1` (for example,
-`2.0.11.20261022.1`).
+`2.0.12.20261022.1`).
 
 Before changing local POMs, building connectors, or uploading artifacts, CI
 checks the planned BOM version's exact POM URL in Nexus. An existing BOM aborts

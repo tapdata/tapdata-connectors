@@ -28,8 +28,8 @@ import java.util.zip.ZipInputStream;
 
 public final class OceanbaseCdcRuntime {
 
-    public static final String VERSION = "4.4.2.1";
-    public static final String PLATFORM = "linux-x86_64";
+    public static final String VERSION = "4.4.2.3";
+    public static final String PLATFORM = "linux-" + normalizeArch(System.getProperty("os.arch", ""));
     public static final String CACHE_PROPERTY = "tapdata.native.cache.dir";
     public static final String RESOURCE = "/native/obcdc/" + VERSION + "/" + PLATFORM + "/runtime.zip";
 
@@ -38,16 +38,28 @@ public final class OceanbaseCdcRuntime {
     private static final Map<String, Long> FILE_SIZES = new LinkedHashMap<>();
 
     static {
-        FILE_HASHES.put("lib64/libobcdc.so.4.4.2.1", "dac5929cefb923cf5b40c2a0ea1c2d93bd067ad6245d6bfc7d369b82f264d767");
+        FILE_HASHES.put("lib64/libobcdc.so.4.4.2.3", "182327ae8e934225facbd40bc16121241244d9841f9e40be4141497beac646ee");
+        FILE_SIZES.put("lib64/libobcdc.so.4.4.2.3", 1176591600L);
         FILE_HASHES.put("lib64/libaio.so.1.0.1", "74c6bb0192ba9b116c2567d88056b0d5c62f44bb6af7032e928ef452b0e132b5");
-        FILE_HASHES.put("etc/libobcdc.conf", "b92ae713b45bf60687edf6df28c588b5256c5b5223670a0022c67402f7596007");
-        FILE_HASHES.put("etc/obcdc_compatiable_ob_info.yaml", "9ae662a379c78907fe359c7233c20c7d574a2d8655a92005dddb570e6c6e2966");
-        FILE_HASHES.put("etc/timezone_info.conf", "8902e04a06925d9bfd22919b9e346689882eddae2a6225cd2270ba433c70fce3");
-        FILE_SIZES.put("lib64/libobcdc.so.4.4.2.1", 1031381816L);
         FILE_SIZES.put("lib64/libaio.so.1.0.1", 6264L);
-        FILE_SIZES.put("etc/libobcdc.conf", 5000L);
-        FILE_SIZES.put("etc/obcdc_compatiable_ob_info.yaml", 797L);
+        FILE_HASHES.put("etc/libobcdc.conf", "18c97b16ec7e049b786ed10aafe24674da445128cf94e806da96c547fbd72060");
+        FILE_SIZES.put("etc/libobcdc.conf", 5346L);
+        FILE_HASHES.put("etc/obcdc_compatiable_ob_info.yaml", "d527303c06e19dac07cee712fa724f770ae905b8a1500150686560f5ac3357f4");
+        FILE_SIZES.put("etc/obcdc_compatiable_ob_info.yaml", 821L);
+        FILE_HASHES.put("etc/timezone_info.conf", "8902e04a06925d9bfd22919b9e346689882eddae2a6225cd2270ba433c70fce3");
         FILE_SIZES.put("etc/timezone_info.conf", 11940260L);
+        if ("linux-aarch64".equals(PLATFORM)) {
+            FILE_HASHES.put("lib64/libobcdc.so.4.4.2.3", "ec9e89bfdca8df2a4fffdb607ad6a4a4bed6fbc32f529b8c76a51927fe5ff70c");
+            FILE_SIZES.put("lib64/libobcdc.so.4.4.2.3", 1165009744L);
+            FILE_HASHES.put("lib64/libaio.so.1.0.1", "db543aabc24abf97ba99965c31e947876023d1bba3277b81ffa5a9edff6c86a1");
+            FILE_SIZES.put("lib64/libaio.so.1.0.1", 4936L);
+            FILE_HASHES.put("etc/libobcdc.conf", "18c97b16ec7e049b786ed10aafe24674da445128cf94e806da96c547fbd72060");
+            FILE_SIZES.put("etc/libobcdc.conf", 5346L);
+            FILE_HASHES.put("etc/obcdc_compatiable_ob_info.yaml", "d527303c06e19dac07cee712fa724f770ae905b8a1500150686560f5ac3357f4");
+            FILE_SIZES.put("etc/obcdc_compatiable_ob_info.yaml", 821L);
+            FILE_HASHES.put("etc/timezone_info.conf", "8902e04a06925d9bfd22919b9e346689882eddae2a6225cd2270ba433c70fce3");
+            FILE_SIZES.put("etc/timezone_info.conf", 11940260L);
+        }
     }
 
     private OceanbaseCdcRuntime() {
@@ -114,13 +126,34 @@ public final class OceanbaseCdcRuntime {
         return new File(System.getProperty("java.io.tmpdir"), "tapdata-native").toPath();
     }
 
-    private static void validatePlatform() {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
-        if (!os.contains("linux") || !("amd64".equals(arch) || "x86_64".equals(arch))) {
-            throw new IllegalStateException("OceanBase CDC runtime " + VERSION
-                    + " supports Linux x86_64 only, current platform is " + os + " " + arch);
+    static String normalizeArch(String arch) {
+        String value = arch.toLowerCase(Locale.ROOT);
+        if ("amd64".equals(value) || "x86_64".equals(value)) {
+            return "x86_64";
         }
+        if ("arm64".equals(value) || "aarch64".equals(value)) {
+            return "aarch64";
+        }
+        return value;
+    }
+
+    static String platform(String os, String arch) {
+        String normalized = normalizeArch(arch);
+        if (!"linux".equals(os.toLowerCase(Locale.ROOT))
+                || !("x86_64".equals(normalized) || "aarch64".equals(normalized))) {
+            throw new IllegalStateException("OceanBase CDC runtime " + VERSION
+                    + " supports Linux x86_64 and aarch64 only, current platform is " + os + " " + arch);
+        }
+        return "linux-" + normalized;
+    }
+
+    public static String resourcePath(String fileName) {
+        validatePlatform();
+        return "/native/obcdc/" + VERSION + "/" + PLATFORM + "/" + fileName;
+    }
+
+    private static void validatePlatform() {
+        platform(System.getProperty("os.name", ""), System.getProperty("os.arch", ""));
         if (new File("/etc/alpine-release").isFile()) {
             throw new IllegalStateException("OceanBase CDC runtime " + VERSION
                     + " requires glibc and does not support Alpine Linux/musl");
@@ -155,7 +188,7 @@ public final class OceanbaseCdcRuntime {
     private static void createLibraryLinks(Path runtimeHome) throws IOException {
         Path libDir = runtimeHome.resolve("lib64");
         Files.createDirectories(libDir);
-        createOrReplaceLink(libDir.resolve("libobcdc.so.4"), "libobcdc.so.4.4.2.1");
+        createOrReplaceLink(libDir.resolve("libobcdc.so.4"), "libobcdc.so.4.4.2.3");
         createOrReplaceLink(libDir.resolve("libobcdc.so"), "libobcdc.so.4");
         createOrReplaceLink(libDir.resolve("libaio.so.1"), "libaio.so.1.0.1");
     }
