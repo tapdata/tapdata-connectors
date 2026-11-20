@@ -326,6 +326,25 @@
 
         <plugins>
             <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
                 <groupId>org.codehaus.mojo</groupId><artifactId>build-helper-maven-plugin</artifactId><version>3.2.0</version>
                 <executions><execution><id>add-integration-test-source</id><phase>generate-test-sources</phase><goals><goal>add-test-source</goal><goal>add-test-resource</goal></goals><configuration><sources><source>src/it/java</source></sources><resources><resource><directory>src/it/resources</directory></resource></resources></configuration></execution></executions>
             </plugin>

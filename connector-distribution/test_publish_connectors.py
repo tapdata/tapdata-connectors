@@ -148,7 +148,7 @@ class PublishingTests(unittest.TestCase):
         modules = ''.join(f'<module>c{i:02}</module>' for i in range(count))
         (connectors / 'pom.xml').write_text(
             f'<project xmlns="{namespace}"><artifactId>connectors</artifactId>'
-            '<properties><tapdata.pdk.api.version>2.0.11</tapdata.pdk.api.version></properties>'
+            '<properties><tapdata.pdk.api.version>2.0.12</tapdata.pdk.api.version></properties>'
             f'<modules>{modules}</modules></project>')
         for i in range(count):
             module = connectors / f'c{i:02}'
@@ -252,7 +252,7 @@ class PublishingTests(unittest.TestCase):
     def test_enterprise_partial_upload_resumes_original_source(self):
         source = self.seed(2)
         external = self.nexuses[1]
-        external.fail_path = external.path('c01', '2.11.0', 'pom')
+        external.fail_path = external.path('c01', '2.12.0', 'pom')
         external.fail_count = 1
         with patch.dict(os.environ, {'CONNECTOR_DISTRIBUTION': 'enterprise'}):
             with self.assertRaisesRegex(RuntimeError, 'HTTP 403'):
@@ -285,7 +285,7 @@ class PublishingTests(unittest.TestCase):
     def test_partial_connector_failure_resumes_pinned_plan_even_after_branch_advances(self):
         source = self.seed()
         external = self.nexuses[1]
-        external.fail_path = external.path('c10', '2.11.0', 'pom')
+        external.fail_path = external.path('c10', '2.12.0', 'pom')
         external.fail_count = 1
         with self.assertRaisesRegex(RuntimeError, 'HTTP 403'):
             self.publish()
@@ -304,14 +304,14 @@ class PublishingTests(unittest.TestCase):
         for index, nexus in enumerate(self.nexuses):
             self.assertEqual(nexus.files[nexus.path('connector-release-plan', 'bootstrap', 'json')],
                              plans_before[index])
-            self.assertEqual(nexus.puts.count(nexus.path('c00', '2.11.0', 'jar')), 1)
+            self.assertEqual(nexus.puts.count(nexus.path('c00', '2.12.0', 'jar')), 1)
         self.publish()  # The next invocation releases the newer source.
         self.assertEqual(self.builds[-1], ['connectors/c00'])
         self.assert_replicated()
 
     def test_second_bom_upload_failure_reuses_existing_bom(self):
         self.seed(1)
-        version = '2.0.11.20990101.1'
+        version = '2.0.12.20990101.1'
         external = self.nexuses[1]
         external.fail_path = external.path('connectors-bom', version, 'pom')
         external.fail_count = 1
@@ -339,7 +339,7 @@ class PublishingTests(unittest.TestCase):
 
     def test_bom_conflict_fails_before_plan_build_or_upload(self):
         self.seed(1)
-        version = '2.0.11.20990101.1'
+        version = '2.0.12.20990101.1'
         self.nexuses[1].files[self.nexuses[1].path('connectors-bom', version, 'pom')] = b'conflict'
         with patch.object(publisher, 'next_bom_version', return_value=version):
             with self.assertRaisesRegex(RuntimeError, 'already exists'):
@@ -402,37 +402,37 @@ class PublishingTests(unittest.TestCase):
     def test_same_generation_parent_spelling_change_preserves_reused_api(self):
         self.seed(2)
         pom = self.root / 'connectors/pom.xml'
-        pom.write_text(pom.read_text().replace('2.0.11', '2.0.11-SNAPSHOT'))
+        pom.write_text(pom.read_text().replace('2.0.12', '2.0.12-SNAPSHOT'))
         self.git('add', '.')
         self.git('commit', '-qm', 'initial snapshot API')
         self.publish()
-        pom.write_text(pom.read_text().replace('2.0.11-SNAPSHOT', '2.0.11'))
+        pom.write_text(pom.read_text().replace('2.0.12-SNAPSHOT', '2.0.12'))
         (self.root / 'connectors/c00/source.txt').write_text('updated')
         self.git('add', '.')
         self.git('commit', '-qm', 'same generation and connector update')
         self.publish()
         releases = {i['artifactId']: i for i in publisher.bom_releases(publisher.latest_bom(self.targets[0])[1])}
-        self.assertEqual(releases['c00']['version'], '2.11.1')
-        self.assertEqual(releases['c01']['version'], '2.11.0')
-        self.assertEqual(releases['c01']['pdkApiVersion'], '2.0.11-SNAPSHOT')
+        self.assertEqual(releases['c00']['version'], '2.12.1')
+        self.assertEqual(releases['c01']['version'], '2.12.0')
+        self.assertEqual(releases['c01']['pdkApiVersion'], '2.0.12-SNAPSHOT')
         self.assert_replicated()
 
     def test_cross_generation_parent_change_rebuilds_inherited_connectors(self):
         self.seed(2)
         self.publish()
         pom = self.root / 'connectors/pom.xml'
-        pom.write_text(pom.read_text().replace('2.0.11', '2.0.12'))
+        pom.write_text(pom.read_text().replace('2.0.12', '2.0.13'))
         self.git('add', '.')
         self.git('commit', '-qm', 'API generation upgrade')
         self.publish()
         releases = publisher.bom_releases(publisher.latest_bom(self.targets[0])[1])
-        self.assertEqual({i['version'] for i in releases}, {'2.12.0'})
+        self.assertEqual({i['version'] for i in releases}, {'2.13.0'})
         self.assertEqual(len(self.builds[-1]), 2)
 
     def test_upload_rejects_tampered_plan_before_any_put(self):
         self.seed(1)
         plan = publisher.release_plan(self.targets, self.git('rev-parse', 'HEAD'))
-        plan['items'][0]['version'] = '2.11.99'
+        plan['items'][0]['version'] = '2.12.99'
         plan_file = Path(self.temp.name) / 'tampered.json'
         plan_file.write_text(json.dumps(plan))
         count = [len(n.puts) for n in self.nexuses]
@@ -463,10 +463,10 @@ class PublishingTests(unittest.TestCase):
         self.assertFalse(any('/connectors-bom/' in p for n in self.nexuses for p in n.puts))
 
     def test_existing_jar_is_canonical_and_missing_pom_is_repaired(self):
-        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
-                'pdkApiVersion': '2.0.11'}
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.12.0',
+                'pdkApiVersion': '2.0.12'}
         nexus = self.nexuses[0]
-        nexus.files[nexus.path('c00', '2.11.0', 'jar')] = b'original'
+        nexus.files[nexus.path('c00', '2.12.0', 'jar')] = b'original'
         jar = Path(self.temp.name) / 'local.jar'
         jar.write_bytes(b'rebuilt differently')
         output = io.StringIO()
@@ -477,17 +477,17 @@ class PublishingTests(unittest.TestCase):
         self.assert_replicated()
 
     def test_different_immutable_jars_across_environments_fail(self):
-        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
-                'pdkApiVersion': '2.0.11'}
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.12.0',
+                'pdkApiVersion': '2.0.12'}
         for i, nexus in enumerate(self.nexuses):
-            nexus.files[nexus.path('c00', '2.11.0', 'jar')] = str(i).encode()
+            nexus.files[nexus.path('c00', '2.12.0', 'jar')] = str(i).encode()
         with self.assertRaisesRegex(RuntimeError, 'differs between'):
             publisher.sync_connector(item, self.targets, Path(self.temp.name))
         self.assertTrue(all(not n.puts for n in self.nexuses))
 
     def seeded_sidecar_jar(self, jar):
         for nexus in self.nexuses:
-            path = nexus.path('c00', '2.11.0', 'jar')
+            path = nexus.path('c00', '2.12.0', 'jar')
             nexus.files[path] = jar
             nexus.files[path + '.sha1'] = hashlib.sha1(jar).hexdigest().encode()
             nexus.files[path + '.sha256'] = hashlib.sha256(jar).hexdigest().encode()
@@ -496,8 +496,8 @@ class PublishingTests(unittest.TestCase):
         return path
 
     def test_matching_sidecars_verify_without_downloading_jars(self):
-        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
-                'pdkApiVersion': '2.0.11'}
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.12.0',
+                'pdkApiVersion': '2.0.12'}
         jar = b'x' * 1024
         jar_path = self.seeded_sidecar_jar(jar)
         with contextlib.redirect_stdout(io.StringIO()):
@@ -510,8 +510,8 @@ class PublishingTests(unittest.TestCase):
         self.assert_replicated()
 
     def test_conflicting_sidecars_fall_back_to_jar_bytes(self):
-        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
-                'pdkApiVersion': '2.0.11'}
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.12.0',
+                'pdkApiVersion': '2.0.12'}
         jar_path = self.seeded_sidecar_jar(b'x' * 1024)
         self.nexuses[1].files[jar_path + '.sha256'] = b'0' * 64
         # The JARs are identical, so the drift is a stale immutable sidecar and
@@ -521,8 +521,8 @@ class PublishingTests(unittest.TestCase):
         self.assertIn(jar_path, self.nexuses[1].gets)
 
     def test_conflicting_sidecars_with_different_jars_fail(self):
-        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
-                'pdkApiVersion': '2.0.11'}
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.12.0',
+                'pdkApiVersion': '2.0.12'}
         jar_path = self.seeded_sidecar_jar(b'x' * 1024)
         other = b'y' * 1024
         self.nexuses[1].files[jar_path] = other
@@ -532,8 +532,8 @@ class PublishingTests(unittest.TestCase):
         self.assertTrue(all(not n.puts for n in self.nexuses))
 
     def test_missing_sha1_sidecar_is_repaired_with_one_jar_download(self):
-        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
-                'pdkApiVersion': '2.0.11'}
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.12.0',
+                'pdkApiVersion': '2.0.12'}
         jar = b'x' * 1024
         jar_path = self.seeded_sidecar_jar(jar)
         del self.nexuses[1].files[jar_path + '.sha1']
@@ -548,8 +548,8 @@ class PublishingTests(unittest.TestCase):
         self.assert_replicated()
 
     def test_deleted_jar_is_reuploaded_despite_surviving_sidecars(self):
-        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
-                'pdkApiVersion': '2.0.11'}
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.12.0',
+                'pdkApiVersion': '2.0.12'}
         jar = b'x' * 1024
         jar_path = self.seeded_sidecar_jar(jar)
         # Maven's detached checksums can outlive a deleted artifact.
@@ -569,8 +569,8 @@ class PublishingTests(unittest.TestCase):
         self.assert_replicated()
 
     def test_deleted_jar_and_sha1_are_repaired_together(self):
-        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.11.0',
-                'pdkApiVersion': '2.0.11'}
+        item = {'groupId': 'io.tapdata', 'artifactId': 'c00', 'version': '2.12.0',
+                'pdkApiVersion': '2.0.12'}
         jar = b'x' * 1024
         jar_path = self.seeded_sidecar_jar(jar)
         del self.nexuses[1].files[jar_path]

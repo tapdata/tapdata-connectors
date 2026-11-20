@@ -401,7 +401,7 @@ def connector_pdk_api_version(pom):
 
 
 def api_generation(pdk_api_version):
-    """Map 2.11 and 2.0.11[-SNAPSHOT] to connector API generation 11."""
+    """Map 2.12 and 2.0.12[-SNAPSHOT] to connector API generation 12."""
     stable = pdk_api_version.split("-", 1)[0]
     match = re.fullmatch(r"2\.(?:0\.)?(\d+)", stable)
     if not match:
