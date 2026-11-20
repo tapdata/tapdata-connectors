@@ -28,7 +28,7 @@ import java.util.zip.ZipInputStream;
 
 public final class OceanbaseCdcRuntime {
 
-    public static final String VERSION = "4.4.2.1";
+    public static final String VERSION = "4.4.2.3";
     public static final String PLATFORM = "linux-" + normalizeArch(System.getProperty("os.arch", ""));
     public static final String CACHE_PROPERTY = "tapdata.native.cache.dir";
     public static final String RESOURCE = "/native/obcdc/" + VERSION + "/" + PLATFORM + "/runtime.zip";
@@ -38,23 +38,27 @@ public final class OceanbaseCdcRuntime {
     private static final Map<String, Long> FILE_SIZES = new LinkedHashMap<>();
 
     static {
-        FILE_HASHES.put("lib64/libobcdc.so.4.4.2.1", "dac5929cefb923cf5b40c2a0ea1c2d93bd067ad6245d6bfc7d369b82f264d767");
+        FILE_HASHES.put("lib64/libobcdc.so.4.4.2.3", "182327ae8e934225facbd40bc16121241244d9841f9e40be4141497beac646ee");
+        FILE_SIZES.put("lib64/libobcdc.so.4.4.2.3", 1176591600L);
         FILE_HASHES.put("lib64/libaio.so.1.0.1", "74c6bb0192ba9b116c2567d88056b0d5c62f44bb6af7032e928ef452b0e132b5");
-        FILE_HASHES.put("etc/libobcdc.conf", "b92ae713b45bf60687edf6df28c588b5256c5b5223670a0022c67402f7596007");
-        FILE_HASHES.put("etc/obcdc_compatiable_ob_info.yaml", "9ae662a379c78907fe359c7233c20c7d574a2d8655a92005dddb570e6c6e2966");
-        FILE_HASHES.put("etc/timezone_info.conf", "8902e04a06925d9bfd22919b9e346689882eddae2a6225cd2270ba433c70fce3");
-        FILE_SIZES.put("lib64/libobcdc.so.4.4.2.1", 1031381816L);
         FILE_SIZES.put("lib64/libaio.so.1.0.1", 6264L);
-        FILE_SIZES.put("etc/libobcdc.conf", 5000L);
-        FILE_SIZES.put("etc/obcdc_compatiable_ob_info.yaml", 797L);
+        FILE_HASHES.put("etc/libobcdc.conf", "18c97b16ec7e049b786ed10aafe24674da445128cf94e806da96c547fbd72060");
+        FILE_SIZES.put("etc/libobcdc.conf", 5346L);
+        FILE_HASHES.put("etc/obcdc_compatiable_ob_info.yaml", "d527303c06e19dac07cee712fa724f770ae905b8a1500150686560f5ac3357f4");
+        FILE_SIZES.put("etc/obcdc_compatiable_ob_info.yaml", 821L);
+        FILE_HASHES.put("etc/timezone_info.conf", "8902e04a06925d9bfd22919b9e346689882eddae2a6225cd2270ba433c70fce3");
         FILE_SIZES.put("etc/timezone_info.conf", 11940260L);
         if ("linux-aarch64".equals(PLATFORM)) {
-            FILE_HASHES.put("lib64/libobcdc.so.4.4.2.1", "7043856ba1e9739c67926cc34235a5c2a0417a9c88d8bf0159ebf4255aa42e1d");
+            FILE_HASHES.put("lib64/libobcdc.so.4.4.2.3", "ec9e89bfdca8df2a4fffdb607ad6a4a4bed6fbc32f529b8c76a51927fe5ff70c");
+            FILE_SIZES.put("lib64/libobcdc.so.4.4.2.3", 1165009744L);
             FILE_HASHES.put("lib64/libaio.so.1.0.1", "db543aabc24abf97ba99965c31e947876023d1bba3277b81ffa5a9edff6c86a1");
-            FILE_HASHES.put("etc/libobcdc.conf", "2006d9c1545fc87e9a6f5ea584df4d5fd45411ded4387b9dca958f74a58b6b65");
-            FILE_SIZES.put("lib64/libobcdc.so.4.4.2.1", 1019803400L);
             FILE_SIZES.put("lib64/libaio.so.1.0.1", 4936L);
-            FILE_SIZES.put("etc/libobcdc.conf", 5003L);
+            FILE_HASHES.put("etc/libobcdc.conf", "18c97b16ec7e049b786ed10aafe24674da445128cf94e806da96c547fbd72060");
+            FILE_SIZES.put("etc/libobcdc.conf", 5346L);
+            FILE_HASHES.put("etc/obcdc_compatiable_ob_info.yaml", "d527303c06e19dac07cee712fa724f770ae905b8a1500150686560f5ac3357f4");
+            FILE_SIZES.put("etc/obcdc_compatiable_ob_info.yaml", 821L);
+            FILE_HASHES.put("etc/timezone_info.conf", "8902e04a06925d9bfd22919b9e346689882eddae2a6225cd2270ba433c70fce3");
+            FILE_SIZES.put("etc/timezone_info.conf", 11940260L);
         }
     }
 
@@ -184,7 +188,7 @@ public final class OceanbaseCdcRuntime {
     private static void createLibraryLinks(Path runtimeHome) throws IOException {
         Path libDir = runtimeHome.resolve("lib64");
         Files.createDirectories(libDir);
-        createOrReplaceLink(libDir.resolve("libobcdc.so.4"), "libobcdc.so.4.4.2.1");
+        createOrReplaceLink(libDir.resolve("libobcdc.so.4"), "libobcdc.so.4.4.2.3");
         createOrReplaceLink(libDir.resolve("libobcdc.so"), "libobcdc.so.4");
         createOrReplaceLink(libDir.resolve("libaio.so.1"), "libaio.so.1.0.1");
     }

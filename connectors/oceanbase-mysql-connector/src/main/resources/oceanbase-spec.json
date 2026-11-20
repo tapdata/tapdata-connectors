@@ -352,6 +352,30 @@
             }
           }
         },
+        "cdcMemoryLimit": {
+          "type": "string",
+          "title": "${cdcMemoryLimit}",
+          "default": "2G",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "cdcMemoryLimit",
+          "x-validator": [{"pattern": "^[1-9][0-9]*[mMgG]$", "message": "${cdcMemoryLimitInvalid}"}],
+          "x-index": 15,
+          "x-decorator-props": {
+            "tooltip": "${cdcMemoryLimitTooltip}"
+          },
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type",
+              "useNativeCdc"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]===\"target\" || !$deps[1] ? \"none\":null}}"
+              }
+            }
+          }
+        },
         "timezone": {
           "type": "string",
           "title": "${timezone}",
@@ -490,7 +514,10 @@
       "cdcUser": "CDC User",
       "cdcPassword": "CDC Password",
       "useNativeCdc": "Native CDC",
-      "useNativeCdcTooltip": "Read incremental logs with the packaged obcdc runtime (no raw log server, OBCDC_HOME, or LD_LIBRARY_PATH required); supports Linux x86_64",
+      "useNativeCdcTooltip": "Read incremental logs with the packaged obcdc runtime (no raw log server, OBCDC_HOME, or LD_LIBRARY_PATH required); supports Linux x86_64 and aarch64",
+      "cdcMemoryLimit": "CDC memory limit",
+      "cdcMemoryLimitTooltip": "Per-task libobcdc memory limit, default 2G (e.g. 512M, 2G, 4G). Separate from JVM heap; increase for larger workloads.",
+      "cdcMemoryLimitInvalid": "Use a positive integer followed by M or G, e.g. 2G.",
       "timezone": "timezone",
       "doc": "docs/oceanbase_mysql_en_US.md",
       "hashSplit": "Single Table Concurrent Read",
@@ -512,7 +539,10 @@
       "cdcUser": "CDC账号",
       "cdcPassword": "CDC密码",
       "useNativeCdc": "原生CDC",
-      "useNativeCdcTooltip": "使用连接器内置的obcdc Runtime读取增量日志（无需日志服务器，也无需设置OBCDC_HOME或LD_LIBRARY_PATH）；支持Linux x86_64",
+      "useNativeCdcTooltip": "使用连接器内置的obcdc Runtime读取增量日志（无需日志服务器，也无需设置OBCDC_HOME或LD_LIBRARY_PATH）；支持Linux x86_64和aarch64",
+      "cdcMemoryLimit": "CDC内存限制",
+      "cdcMemoryLimitTooltip": "每个原生CDC任务的libobcdc内存上限，默认2G（如512M、2G、4G），独立于JVM堆内存；大负载可调高。",
+      "cdcMemoryLimitInvalid": "请输入正整数及M或G单位，例如2G。",
       "timezone": "时区",
       "doc": "docs/oceanbase_mysql_zh_CN.md",
       "hashSplit": "单表并发读",
@@ -534,7 +564,10 @@
       "cdcUser": "CDC賬號",
       "cdcPassword": "CDC密碼",
       "useNativeCdc": "原生CDC",
-      "useNativeCdcTooltip": "使用連接器內置的obcdc Runtime讀取增量日誌（無需日誌服務器，也無需設定OBCDC_HOME或LD_LIBRARY_PATH）；支援Linux x86_64",
+      "useNativeCdcTooltip": "使用連接器內置的obcdc Runtime讀取增量日誌（無需日誌服務器，也無需設定OBCDC_HOME或LD_LIBRARY_PATH）；支援Linux x86_64和aarch64",
+      "cdcMemoryLimit": "CDC記憶體限制",
+      "cdcMemoryLimitTooltip": "每個原生CDC任務的libobcdc記憶體上限，預設2G（如512M、2G、4G），獨立於JVM堆記憶體；大負載可調高。",
+      "cdcMemoryLimitInvalid": "請輸入正整數及M或G單位，例如2G。",
       "timezone": "時區",
       "doc": "docs/oceanbase_mysql_zh_TW.md",
       "hashSplit": "單表並發讀",

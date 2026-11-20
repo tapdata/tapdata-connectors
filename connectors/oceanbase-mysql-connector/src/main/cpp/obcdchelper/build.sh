@@ -2,13 +2,13 @@
 set -euo pipefail
 sdk_dir=${1:?Usage: build.sh /path/to/oceanbase-sdk [output]}
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-machine=$(readelf -h "$sdk_dir/lib64/libobcdc.so.4.4.2.1" | awk -F: '/Machine:/ {gsub(/^[ \t]+/, "", $2); print $2}')
+machine=$(readelf -h "$sdk_dir/lib64/libobcdc.so.4.4.2.3" | awk -F: '/Machine:/ {gsub(/^[ \t]+/, "", $2); print $2}')
 case "$machine" in
   AArch64) platform=linux-aarch64 ;;
   "Advanced Micro Devices X86-64") platform=linux-x86_64 ;;
   *) echo "Unsupported libobcdc ELF machine: $machine" >&2; exit 2 ;;
 esac
-output=${2:-"$source_dir/../../resources/native/obcdc/4.4.2.1/$platform/obcdc-helper"}
+output=${2:-"$source_dir/../../resources/native/obcdc/4.4.2.3/$platform/obcdc-helper"}
 mkdir -p "$(dirname -- "$output")"
 # CXX may point to a cross compiler. Use an SDK and sysroot for the target.
 # Hide our static STL: libobcdc exports a private STL that must stay separate.

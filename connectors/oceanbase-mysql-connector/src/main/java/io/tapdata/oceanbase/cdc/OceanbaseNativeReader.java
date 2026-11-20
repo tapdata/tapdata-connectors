@@ -36,8 +36,8 @@ import java.util.stream.Collectors;
 public class OceanbaseNativeReader extends OceanbaseReaderV2 {
 
     private static final String HELPER_NAME = "obcdc-helper";
-    private static final int HELPER_LAUNCH_TIMEOUT_SECONDS = 75;
-    private static final int HELPER_READY_TIMEOUT_SECONDS = 90;
+    private static final int HELPER_LAUNCH_TIMEOUT_SECONDS = 375;
+    private static final int HELPER_READY_TIMEOUT_SECONDS = 450;
     private static final int NATIVE_LOG_TAIL_LINES = 80;
 
     private final Log tapLogger;
@@ -89,6 +89,7 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
                 writeConf(writer, "cluster_user", oceanbaseConfig.getCdcUser());
                 writeConf(writer, "cluster_password", oceanbaseConfig.getCdcPassword());
                 writeConf(writer, "rootserver_list", oceanbaseConfig.getRootServerList());
+                writeConf(writer, "memory_limit", oceanbaseConfig.getCdcMemoryLimit());
                 writeConf(writer, "tb_white_list", tableList.stream()
                         .map(table -> oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + "." + table)
                         .collect(Collectors.joining("|")));

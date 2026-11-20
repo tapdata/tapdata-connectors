@@ -24,7 +24,7 @@
         <protoc.version>3.19.1</protoc.version>
         <grpc.version>1.43.0</grpc.version>
         <origin.driver.class>com.oceanbase.jdbc.Driver</origin.driver.class>
-        <obcdc.runtime.version>4.4.2.1</obcdc.runtime.version>
+        <obcdc.runtime.version>4.4.2.3</obcdc.runtime.version>
         <obcdc.helper.platform>linux-x86_64</obcdc.helper.platform>
         <obcdc.helper.compiler>g++</obcdc.helper.compiler>
         <obcdc.helper.libaio.dir>${obcdc.sdk.home}/lib64</obcdc.helper.libaio.dir>
@@ -180,7 +180,7 @@
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>oceanbase-cdc-runtime-loader</artifactId>
-            <version>1.0-SNAPSHOT</version>
+            <version>${obcdc.runtime.version}</version>
         </dependency>
     </dependencies>
 
@@ -311,7 +311,8 @@
                 </plugins>
             </build>
         </profile>
-    </profiles>
+
+</profiles>
 
     <build>
         <!-- os系统信息插件, protobuf-maven-plugin需要获取系统信息下载相应的protobuf程序 -->
@@ -350,7 +351,7 @@
                                     <groupId>io.tapdata.native</groupId>
                                     <artifactId>oceanbase-cdc-runtime</artifactId>
                                     <version>${obcdc.runtime.version}</version>
-                                    <type>zip</type>
+                                    <type>jar</type>
                                     <classifier>linux-x86_64</classifier>
                                     <outputDirectory>${project.build.outputDirectory}/native/obcdc/${obcdc.runtime.version}/linux-x86_64</outputDirectory>
                                     <destFileName>runtime.zip</destFileName>
@@ -359,7 +360,7 @@
                                     <groupId>io.tapdata.native</groupId>
                                     <artifactId>oceanbase-cdc-runtime</artifactId>
                                     <version>${obcdc.runtime.version}</version>
-                                    <type>zip</type>
+                                    <type>jar</type>
                                     <classifier>linux-aarch64</classifier>
                                     <outputDirectory>${project.build.outputDirectory}/native/obcdc/${obcdc.runtime.version}/linux-aarch64</outputDirectory>
                                     <destFileName>runtime.zip</destFileName>
