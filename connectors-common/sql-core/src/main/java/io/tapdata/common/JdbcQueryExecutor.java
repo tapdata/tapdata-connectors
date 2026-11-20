@@ -40,13 +40,24 @@ public final class JdbcQueryExecutor {
                 }
             }
             if (fetchSize != null) { statement.setFetchSize(fetchSize); }
+            InspectQueryScope.register(statement, connection);
             boolean hasResult = statement.execute(sql);
+            if (InspectQueryScope.active() && !hasResult) throw new SQLException("Inspection requires one result set, not an update count");
+            int resultSets = 0;
             if (!hasResult) {
                 consumer.accept((long) statement.getUpdateCount());
             } else {
                 while (alive.get() && hasResult) {
                     try (ResultSet resultSet = statement.getResultSet()) {
-                        RowReader reader = readers.create(resultSet);
+                        if (InspectQueryScope.active() && ++resultSets > 1) throw new SQLException("Inspection requires exactly one result set");
+                        InspectQueryScope.columns(resultSet);
+                        RowReader reader;
+                        if (InspectQueryScope.active()) {
+                            List<String> columns = InspectQueryScope.rowColumns(resultSet);
+                            reader = () -> InspectJdbcValues.read(resultSet, columns);
+                        } else {
+                            reader = readers.create(resultSet);
+                        }
                         List<Map<String, Object>> batch = new ArrayList<>();
                         while (alive.get() && resultSet.next()) {
                             batch.add(reader.read());
@@ -58,8 +69,10 @@ public final class JdbcQueryExecutor {
                         if (!batch.isEmpty()) { consumer.accept(batch); }
                     }
                     hasResult = statement.getMoreResults();
+                    if (InspectQueryScope.active() && !hasResult && statement.getUpdateCount() != -1) throw new SQLException("Unexpected update count after query");
                 }
             }
+            if (InspectQueryScope.active() && !alive.get()) throw new SQLException("Inspection query was cancelled before completion");
             if (!connection.getAutoCommit()) connection.commit();
         }
     }

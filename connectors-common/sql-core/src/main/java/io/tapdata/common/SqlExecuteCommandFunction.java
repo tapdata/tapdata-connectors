@@ -47,7 +47,7 @@ public class SqlExecuteCommandFunction {
     }
 
     private static void executeCommand(SqlExecutor sqlExecutor, TapExecuteCommand tapExecuteCommand, TapSupplier<Connection> connectionSupplier, Supplier<Boolean> aliveSupplier, Consumer<ExecuteResult> executeResultConsumer) {
-        try {
+        try (InspectQueryScope scope = InspectQueryScope.open(tapExecuteCommand.getParams())) {
             Map<String, Object> params = tapExecuteCommand.getParams();
             String command = tapExecuteCommand.getCommand();
             switch (command) {

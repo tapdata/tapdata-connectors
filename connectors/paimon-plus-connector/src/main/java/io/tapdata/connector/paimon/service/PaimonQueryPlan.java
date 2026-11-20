@@ -46,6 +46,17 @@ final class PaimonQueryPlan {
     private boolean aggregate;
     private boolean star;
 
+    java.util.List<java.util.Map<String, String>> resultColumns() {
+        java.util.List<java.util.Map<String, String>> result = new java.util.ArrayList<>();
+        for (Item item : items) {
+            String type = "COUNT".equals(item.function) ? "BIGINT"
+                    : ("SUM".equals(item.function) || "AVG".equals(item.function)) ? "DECIMAL" : item.scalar.date ? "DATE" : item.scalar.type.getTypeRoot().name();
+            java.util.Map<String, String> column = new java.util.LinkedHashMap<>();
+            column.put("name", item.label); column.put("type", type); result.add(column);
+        }
+        return result;
+    }
+
     private PaimonQueryPlan(RowType rowType, String table) {
         this.rowType = rowType;
         this.table = table;
