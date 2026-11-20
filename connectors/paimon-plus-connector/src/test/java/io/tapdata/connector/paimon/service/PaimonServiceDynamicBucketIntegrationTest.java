@@ -119,6 +119,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
         Schema schema = Schema.newBuilder()
                 .column("id", DataTypes.INT()).column("a", DataTypes.INT()).column("b", DataTypes.INT())
                 .primaryKey("id").option("bucket", Integer.toString(buckets))
+                .option("changelog-producer", "input")
                 .option("write-buffer-size", "1mb").build();
         TapTable source = threeIntColumns(name);
         Map<String, Object> existing = map("id", 3, "a", 30, "b", 300);
@@ -134,7 +135,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
             Catalog ddl = catalog(external);
             ddl.alterTable(identifier, SchemaChange.updateColumnPosition(SchemaChange.Move.first("b")), false);
             catalog.invalidateTable(identifier);
-            Table reordered = catalog.getTable(identifier);
+            FileStoreTable reordered = (FileStoreTable) catalog.getTable(identifier);
             assertEquals(Arrays.asList("b", "id", "a"), reordered.rowType().getFieldNames());
             // Ten other live tables evict the first table from the former ten-entry field cache.
             for (int i = 0; i < 10; i++) {
@@ -146,6 +147,18 @@ class PaimonServiceDynamicBucketIntegrationTest {
             assertStoredRows(reordered, existing, inserted);
             writer.writeRecords(Collections.singletonList(cdcUpdate(name, inserted, updated)), source, context);
             assertStoredRows(reordered, existing, updated);
+
+            // The final rows alone cannot distinguish DELETE/INSERT from UPDATE_BEFORE/UPDATE_AFTER.
+            List<InternalRow> changes = readLatestChangelogRows(reordered);
+            assertEquals(2, changes.size());
+            int idIndex = reordered.rowType().getFieldIndex("id");
+            Map<Integer, RowKind> kindById = new LinkedHashMap<>();
+            for (InternalRow change : changes) {
+                kindById.put(change.getInt(idIndex), change.getRowKind());
+            }
+            assertEquals(RowKind.DELETE, kindById.get(1), "changelog for the old primary key");
+            assertEquals(RowKind.INSERT, kindById.get(2), "changelog for the new primary key");
+
             writer.writeRecords(Collections.singletonList(cdcDelete(name, updated)), source, context);
             assertStoredRows(reordered, existing);
             assertSame(originalWriter, derivedCache(writer, "tableWriteContexts").get(identifier.getFullName()));
