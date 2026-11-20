@@ -3,10 +3,10 @@ package io.tapdata.connector.paimon.schema;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -21,6 +21,9 @@ public final class PaimonWriteSemanticContract {
     private final MergeEngine mergeEngine;
     private final ChangelogProducer changelogProducer;
     private final boolean fullChangelogRequired;
+    // Paimon fixes the writer's row layout and key extractor together at creation:
+    // https://github.com/apache/paimon/blob/c05f7d1f1b1e5d37e64edab0f2978124d90b64f7/paimon-core/src/main/java/org/apache/paimon/table/PrimaryKeyFileStoreTable.java#L160-L173
+    private final RowType rowType;
     private final List<String> targetFields;
     private final Set<String> nonNullTargetFields;
     private final Set<String> defaultedTargetFields;
@@ -35,7 +38,7 @@ public final class PaimonWriteSemanticContract {
             MergeEngine mergeEngine,
             ChangelogProducer changelogProducer,
             boolean fullChangelogRequired,
-            List<String> targetFields,
+            RowType rowType,
             Set<String> nonNullTargetFields,
             Set<String> defaultedTargetFields,
             Set<String> primaryKeys,
@@ -47,9 +50,8 @@ public final class PaimonWriteSemanticContract {
         this.mergeEngine = Objects.requireNonNull(mergeEngine, "mergeEngine");
         this.changelogProducer = Objects.requireNonNull(changelogProducer, "changelogProducer");
         this.fullChangelogRequired = fullChangelogRequired;
-        this.targetFields =
-                Collections.unmodifiableList(
-                        new ArrayList<>(Objects.requireNonNull(targetFields, "targetFields")));
+        this.rowType = Objects.requireNonNull(rowType, "rowType");
+        this.targetFields = Collections.unmodifiableList(rowType.getFieldNames());
         this.nonNullTargetFields = immutableSet(nonNullTargetFields, "nonNullTargetFields");
         this.defaultedTargetFields = immutableSet(defaultedTargetFields, "defaultedTargetFields");
         this.primaryKeys = immutableSet(primaryKeys, "primaryKeys");
@@ -81,6 +83,10 @@ public final class PaimonWriteSemanticContract {
 
     public boolean requiresFullChangelog() {
         return fullChangelogRequired;
+    }
+
+    public RowType rowType() {
+        return rowType;
     }
 
     public List<String> targetFields() {

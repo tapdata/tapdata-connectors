@@ -203,23 +203,6 @@ public class PaimonService implements AutoCloseable {
      */
     private final Map<String, DynamicIngressGuard> dynamicSourceIngressGuards = new ConcurrentHashMap<>();
 
-    // ===== Paimon Field Cache for Performance =====
-    /**
-     * Paimon 目标字段顺序缓存：Key 为 {@code database.tableName}，Value 为目标 RowType 的
-     * {@link DataField} 列表。使用同步 LRU Map，最多保留 10 张表，减少重复读取 Catalog 元数据。
-     */
-    private final Map<String, List<DataField>> paimonFieldCache = Collections.synchronizedMap(
-            new LinkedHashMap<String, List<DataField>>(5, 0.75f, true) {
-                /** 匿名 LRU Map 的序列化版本标识。 */
-                private static final long serialVersionUID = 1L;
-
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<String, List<DataField>> eldest) {
-                    return size() > 10;
-                }
-            }
-    );
-
     /**
      * save tapContext log
      */
@@ -1047,7 +1030,7 @@ public class PaimonService implements AutoCloseable {
                     ddlFailure = failure;
                     recordStickyFailure(failure);
                 } finally {
-                    invalidateTableDerivedCaches(tableKey, tableName);
+                    invalidateTableDerivedCaches(tableName);
                     if (releasePhysicalOwner && !unsafeResourceOwners.contains(tableKey)
                             && !stopController.isRetained() && !stopController.expired()) {
                         unregisterPhysicalTableOwner(tableKey);
@@ -1074,23 +1057,21 @@ public class PaimonService implements AutoCloseable {
      *
      * <p>Paimon 1.3.2 {@code CachingCatalog#dropTable} invalidates Paimon's own table and
      * partition caches after a successful drop. Connector policy additionally invalidates these
-     * independent row-layout and legacy-hash caches after every DDL attempt, including failures,
-     * so a later table generation cannot reuse stale field positions or source primary keys.
+     * source primary-key and synthetic-hash caches after every DDL attempt, including failures,
+     * so a later table generation cannot reuse stale source primary keys.
      * This helper runs inside the existing per-table lifecycle lock.
      *
      * <p>Source: {@code paimon-core/src/main/java/org/apache/paimon/catalog/
      * CachingCatalog.java#dropTable}, lines 185-197. Baseline:
      * {@code apache/paimon@5c59e6cb01ed0b29563371f56e14fcade4597a2e}.
      */
-    private void invalidateTableDerivedCaches(String tableKey, String tableName) {
-        paimonFieldCache.remove(tableKey);
+    private void invalidateTableDerivedCaches(String tableName) {
         computeHashKey.remove(tableName);
         primaryKeyMap.remove(tableName);
     }
 
     /** Clear the same Connector-owned derived-cache set during whole-service cleanup. */
     private void clearAllTableDerivedCaches() {
-        paimonFieldCache.clear();
         computeHashKey.clear();
         primaryKeyMap.clear();
     }
@@ -1757,7 +1738,6 @@ public class PaimonService implements AutoCloseable {
             FileStoreTable fileStoreTable = PaimonWriteOptions.runtimeWriteTable(target, config);
             log.info("Paimon write-buffer spill decision for table {}: spillable={}, diskTmpDir={}",
                     tableKey, PaimonWriteOptions.spillValue(config), config.getDiskTmpDir(tableName));
-            List<DataField> paimonFields = fileStoreTable.rowType().getFields();
             // Contract resolution must precede commit-state binding and the HASH_DYNAMIC
             // RocksDB pollution preflight, not merely raw writer construction.
             PaimonWriteSemanticContract writeSemanticContract =
@@ -1801,7 +1781,6 @@ public class PaimonService implements AutoCloseable {
                 // 已持有表级锁；短控制门禁中只安装内存引用，不进入 Factory 或 Context。
                 stopController.publish("install write context", () -> {
                     tableWriteContexts.put(tableKey, writeContext);
-                    paimonFieldCache.putIfAbsent(tableKey, paimonFields);
                     return null;
                 });
                 return writeContext;
@@ -1941,10 +1920,8 @@ public class PaimonService implements AutoCloseable {
      */
     private void handleStreamInsert(TapInsertRecordEvent event, PaimonTableWriteContext writeContext, TapTable table, Log currentLog) throws Exception {
         Map<String, Object> after = event.getAfter();
-        String database = config.getDatabase();
-        Identifier identifier = Identifier.create(database, table.getName());
         PaimonWriteSemanticContract contract = writeContext.writeSemanticContract();
-        GenericRow row = convertToGenericRow(after, table, identifier);
+        GenericRow row = convertToGenericRow(after, table, contract.rowType());
         PaimonRowKindField.apply(contract, row, RowKind.INSERT);
         writeContext.validateRoutingRow(row, "INSERT");
         writeRow(writeContext, event, row, table, after, currentLog);
@@ -1960,9 +1937,6 @@ public class PaimonService implements AutoCloseable {
      * @throws Exception if update fails
      */
     private void handleStreamUpdate(TapUpdateRecordEvent event, PaimonTableWriteContext writeContext, TapTable table, Log currentLog) throws Exception {
-        String database = config.getDatabase();
-        Identifier identifier = Identifier.create(database, table.getName());
-
         Map<String, Object> before = event.getBefore();
         Map<String, Object> after = event.getAfter();
         PaimonWriteSemanticContract contract = writeContext.writeSemanticContract();
@@ -1970,9 +1944,9 @@ public class PaimonService implements AutoCloseable {
         // Convert before and after data to GenericRow first to avoid duplicate conversion
         GenericRow beforeRow = null;
         if (before != null && !before.isEmpty()) {
-            beforeRow = convertToGenericRow(before, table, identifier);
+            beforeRow = convertToGenericRow(before, table, contract.rowType());
         }
-        GenericRow afterRow = convertToGenericRow(after, table, identifier);
+        GenericRow afterRow = convertToGenericRow(after, table, contract.rowType());
 
         // Check if primary key update detection is enabled
         Boolean enablePkUpdate = config.getEnablePrimaryKeyUpdate(table.getName());
@@ -1984,7 +1958,7 @@ public class PaimonService implements AutoCloseable {
             }
 
             // Check if primary key has changed
-            if (isPrimaryKeyChanged(beforeRow, afterRow, table)) {
+            if (isPrimaryKeyChanged(beforeRow, afterRow, table, contract.rowType())) {
                 // Validate both effective rows before the first writer call so a malformed
                 // after image cannot leave a half-written DELETE + INSERT pair.
                 PaimonRowKindField.apply(contract, beforeRow, RowKind.DELETE);
@@ -2021,9 +1995,10 @@ public class PaimonService implements AutoCloseable {
      * @param beforeRow before GenericRow (must not be null)
      * @param afterRow  after GenericRow (must not be null)
      * @param table     table definition
+     * @param rowType   layout of both rows in the active writer
      * @return true if primary key has changed, false otherwise
      */
-    boolean isPrimaryKeyChanged(GenericRow beforeRow, GenericRow afterRow, TapTable table) {
+    boolean isPrimaryKeyChanged(GenericRow beforeRow, GenericRow afterRow, TapTable table, RowType rowType) {
         // Get primary key fields
         Collection<String> primaryKeys = table.primaryKeys(true);
         if (primaryKeys == null || primaryKeys.isEmpty()) {
@@ -2031,20 +2006,9 @@ public class PaimonService implements AutoCloseable {
             return false;
         }
 
-        String tableKey = config.getDatabase() + "." + table.getName();
-        List<DataField> targetFields = paimonFieldCache.get(tableKey);
-        if (targetFields == null) {
-            throw new PaimonFatalWriteException(
-                    "Paimon target RowType is not cached for primary-key comparison on " + tableKey);
-        }
-
-        Map<String, Integer> targetIndexes = new HashMap<>();
-        for (int i = 0; i < targetFields.size(); i++) {
-            targetIndexes.put(targetFields.get(i).name(), i);
-        }
         for (String primaryKey : primaryKeys) {
-            Integer index = targetIndexes.get(primaryKey);
-            if (index == null || index < 0
+            int index = rowType.getFieldIndex(primaryKey);
+            if (index < 0
                     || index >= beforeRow.getFieldCount()
                     || index >= afterRow.getFieldCount()) {
                 throw new PaimonFatalWriteException(
@@ -2069,10 +2033,8 @@ public class PaimonService implements AutoCloseable {
      */
     private void handleStreamDelete(TapDeleteRecordEvent event, PaimonTableWriteContext writeContext, TapTable table, Log currentLog) throws Exception {
         Map<String, Object> before = event.getBefore();
-        String database = config.getDatabase();
-        Identifier identifier = Identifier.create(database, table.getName());
         PaimonWriteSemanticContract contract = writeContext.writeSemanticContract();
-        GenericRow row = convertToGenericRow(before, table, identifier);
+        GenericRow row = convertToGenericRow(before, table, contract.rowType());
         PaimonRowKindField.apply(contract, row, RowKind.DELETE);
         writeContext.validateRoutingRow(row, "DELETE");
         writeRow(writeContext, event, row, table, before, currentLog);
@@ -2109,7 +2071,8 @@ public class PaimonService implements AutoCloseable {
             writeContext.write(row);
         } catch (Exception e) {
             currentLog.warn("Failed to write row to Paimon. table={}, bucket=connector-managed, sourceData={}, event={}, row={}",
-                    table == null ? null : table.getName(), formatSourceDataForLog(sourceData), formatEventForLog(event), formatRowForLog(row, table), e);
+                    table == null ? null : table.getName(), formatSourceDataForLog(sourceData),
+                    formatEventForLog(event), formatRowForLog(row, writeContext.writeSemanticContract().targetFields()), e);
             throw e;
         }
     }
@@ -2118,10 +2081,10 @@ public class PaimonService implements AutoCloseable {
      * Format row content for human-friendly error logging.
      *
      * @param row   Paimon row
-     * @param table table definition
+     * @param fieldNames field names in writer order
      * @return readable row string
      */
-    private String formatRowForLog(GenericRow row, TapTable table) {
+    private String formatRowForLog(GenericRow row, List<String> fieldNames) {
         if (row == null) {
             return "null";
         }
@@ -2129,7 +2092,6 @@ public class PaimonService implements AutoCloseable {
         StringBuilder builder = new StringBuilder("GenericRow{");
         builder.append("rowKind=").append(row.getRowKind());
         builder.append(", fieldCount=").append(row.getFieldCount());
-        List<String> fieldNames = resolveRowFieldNames(table, row.getFieldCount());
         builder.append(", fieldMapping=").append(formatFieldMappingForLog(fieldNames));
         builder.append(", valueMetadata=");
 
@@ -2166,31 +2128,6 @@ public class PaimonService implements AutoCloseable {
         }
         builder.append(']');
         return builder.toString();
-    }
-
-    /**
-     * Resolve row field names from cached Paimon schema if available.
-     *
-     * @param table table definition
-     * @param fieldCount row field count
-     * @return field names aligned with row order
-     */
-    private List<String> resolveRowFieldNames(TapTable table, int fieldCount) {
-        if (table == null || fieldCount <= 0) {
-            return Collections.emptyList();
-        }
-
-        String cacheKey = config.getDatabase() + "." + table.getName();
-        List<DataField> paimonFields = paimonFieldCache.get(cacheKey);
-        if (paimonFields == null || paimonFields.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        List<String> fieldNames = new ArrayList<>(paimonFields.size());
-        for (DataField field : paimonFields) {
-            fieldNames.add(field.name());
-        }
-        return fieldNames;
     }
 
     /**
@@ -2254,24 +2191,11 @@ public class PaimonService implements AutoCloseable {
      *
      * @param data       data map
      * @param table      table definition
-     * @param identifier table identifier
+     * @param rowType layout used by the active writer
      * @return GenericRow
-     * @throws Exception if conversion fails
      */
-    private GenericRow convertToGenericRow(Map<String, Object> data, TapTable table, Identifier identifier) throws Exception {
-        // Get or build field type mapping from cache
-        String cacheKey = identifier.getFullName();
-        List<DataField> paimonFields = paimonFieldCache.get(cacheKey);
-
-        if (paimonFields == null) {
-            // Cache miss - build field type mapping
-            Table paimonTable = stopController.call("catalog getTable", () -> catalog.getTable(identifier));
-            paimonFields = paimonTable.rowType().getFields();
-
-            // Store in cache
-            paimonFieldCache.put(cacheKey, paimonFields);
-        }
-
+    private GenericRow convertToGenericRow(Map<String, Object> data, TapTable table, RowType rowType) {
+        List<DataField> paimonFields = rowType.getFields();
         GenericRow genericRow = new GenericRow(paimonFields.size());
         boolean useHashKey = Boolean.TRUE.equals(computeHashKey.get(table.getName()));
         for (int i = 0; i < paimonFields.size(); i++) {
@@ -2284,7 +2208,6 @@ public class PaimonService implements AutoCloseable {
                 value = data.get(fieldName);
             }
 
-            // Get corresponding Paimon field type from cache
             DataType paimonType = dataField.type();
 
             genericRow.setField(i, convertValueToPaimonType(fieldName, value, paimonType));

@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,7 +36,6 @@ import org.mockito.ArgumentCaptor;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -74,8 +74,7 @@ class PaimonServiceValueConversionTest {
 
         writerStrategy = mock(PaimonBucketWriterStrategy.class);
         when(writerStrategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
-        when(writerStrategy.writeSemanticContract())
-                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED));
+        useIdType(DataTypes.INT());
         writeContext =
                 new PaimonTableWriteContext(
                         TABLE_KEY,
@@ -87,10 +86,6 @@ class PaimonServiceValueConversionTest {
                         Collections.emptyList(),
                         0L);
         tableContexts(service).put(TABLE_KEY, writeContext);
-        fieldCache(service)
-                .put(
-                        TABLE_KEY,
-                        Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
 
         tapTable = mock(TapTable.class);
         when(tapTable.getName()).thenReturn(TABLE_NAME);
@@ -99,6 +94,11 @@ class PaimonServiceValueConversionTest {
         connectorContext = mock(TapConnectorContext.class);
         when(connectorContext.getStateMap()).thenReturn(mock(KVMap.class));
         when(connectorContext.getLog()).thenReturn(mock(Log.class));
+    }
+
+    private void useIdType(DataType type) {
+        when(writerStrategy.writeSemanticContract()).thenReturn(PaimonWriteSemanticContractTestFactory.forMode(
+                BucketMode.HASH_FIXED, new DataField(0, "id", type)));
     }
 
     @AfterEach
@@ -160,11 +160,7 @@ class PaimonServiceValueConversionTest {
 
     @Test
     void legacyPhysicalStringColumnMustKeepAcceptingNumericCdcValues() throws Exception {
-        fieldCache(service)
-                .put(
-                        TABLE_KEY,
-                        Collections.singletonList(
-                                new DataField(0, "id", DataTypes.STRING())));
+        useIdType(DataTypes.STRING());
 
         service.writeRecords(
                 Collections.singletonList(insertEvent(42L)), tapTable, connectorContext);
@@ -182,11 +178,7 @@ class PaimonServiceValueConversionTest {
 
     @Test
     void existingPhysicalDecimalColumnMustKeepUsingActualRowType() throws Exception {
-        fieldCache(service)
-                .put(
-                        TABLE_KEY,
-                        Collections.singletonList(
-                                new DataField(0, "id", DataTypes.DECIMAL(10, 0))));
+        useIdType(DataTypes.DECIMAL(10, 0));
 
         service.writeRecords(
                 Collections.singletonList(insertEvent(new BigDecimal("12.0"))),
@@ -206,8 +198,7 @@ class PaimonServiceValueConversionTest {
 
     @Test
     void existingPhysicalDecimalMustRejectScaleLossBeforeWriter() throws Exception {
-        fieldCache(service).put(TABLE_KEY, Collections.singletonList(
-                new DataField(0, "id", DataTypes.DECIMAL(10, 0))));
+        useIdType(DataTypes.DECIMAL(10, 0));
         assertThrows(PaimonFatalWriteException.class, () -> service.writeRecords(
                 Collections.singletonList(insertEvent(new BigDecimal("12.5"))), tapTable, connectorContext));
         verify(writerStrategy, never()).write(any(InternalRow.class));
@@ -215,14 +206,7 @@ class PaimonServiceValueConversionTest {
 
     @Test
     void nativeComplexPhysicalColumnMustFailBeforePaimonWriter() throws Exception {
-        fieldCache(service)
-                .put(
-                        TABLE_KEY,
-                        Collections.singletonList(
-                                new DataField(
-                                        0,
-                                        "id",
-                                        DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()))));
+        useIdType(DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()));
 
         PaimonFatalWriteException thrown =
                 assertThrows(
@@ -287,12 +271,5 @@ class PaimonServiceValueConversionTest {
         Field field = PaimonService.class.getDeclaredField("tableWriteContexts");
         field.setAccessible(true);
         return (Map<String, PaimonTableWriteContext>) field.get(service);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, List<DataField>> fieldCache(PaimonService service) throws Exception {
-        Field field = PaimonService.class.getDeclaredField("paimonFieldCache");
-        field.setAccessible(true);
-        return (Map<String, List<DataField>>) field.get(service);
     }
 }

@@ -27,6 +27,7 @@ import org.apache.paimon.table.sink.*;
 import org.apache.paimon.table.source.*;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -182,7 +183,7 @@ class PaimonShapedFloatingTest {
                 FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
                 assertEquals(DataTypes.DOUBLE(), table.rowType().getField("v").type());
                 Method toRow = PaimonService.class.getDeclaredMethod(
-                        "convertToGenericRow", Map.class, TapTable.class, Identifier.class);
+                        "convertToGenericRow", Map.class, TapTable.class, RowType.class);
                 toRow.setAccessible(true);
                 Method fromRow = PaimonService.class.getDeclaredMethod(
                         "convertInternalRowToMap", InternalRow.class, List.class, Map.class);
@@ -193,7 +194,7 @@ class PaimonShapedFloatingTest {
                     for (int id = 0; id < values.length; id++) {
                         Map<String, Object> row = new LinkedHashMap<>();
                         row.put("id", id); row.put("v", codecValue(source, values[id]));
-                        write.write((GenericRow) toRow.invoke(service, row, tapTable, identifier));
+                        write.write((GenericRow) toRow.invoke(service, row, tapTable, table.rowType()));
                     }
                     commit.commit(1L, write.prepareCommit(false, 1L));
                 }
