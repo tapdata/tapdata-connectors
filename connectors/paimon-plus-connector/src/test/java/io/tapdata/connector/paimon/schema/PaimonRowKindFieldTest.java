@@ -5,11 +5,12 @@ import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-import java.util.Arrays;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -26,7 +27,7 @@ class PaimonRowKindFieldTest {
                         MergeEngine.DEDUPLICATE,
                         ChangelogProducer.INPUT,
                         true,
-                        Arrays.asList("id", "rk"),
+                        RowType.builder().field("id", DataTypes.INT()).field("rk", DataTypes.STRING()).build(),
                         Collections.singleton("id"),
                         Collections.emptySet(),
                         Collections.singleton("id"),

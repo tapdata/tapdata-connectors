@@ -18,14 +18,12 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -121,7 +119,8 @@ class PaimonServiceAsyncCommitIntegrationTest {
         PaimonTableCommitter replacementCommitter = mock(PaimonTableCommitter.class);
         when(replacementStrategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
         when(replacementStrategy.writeSemanticContract())
-                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED));
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(
+                        BucketMode.HASH_FIXED, new DataField(0, "id", DataTypes.INT())));
         when(replacementStrategy.prepareCommit(anyLong())).thenReturn(Collections.emptyList());
         when(replacementCommitter.filterAndCommit(anyMap())).thenReturn(0);
         PaimonTableWriteContext replacementContext =
@@ -151,9 +150,6 @@ class PaimonServiceAsyncCommitIntegrationTest {
 
                 fixture.service.clearTable("t");
                 tableContexts(fixture.service).put("default.t", replacementContext);
-                fieldCache(fixture.service).put(
-                        "default.t",
-                        Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
                 fixture.write(2);
             }
             staleFuture.get(5, TimeUnit.SECONDS);
@@ -308,7 +304,8 @@ class PaimonServiceAsyncCommitIntegrationTest {
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
         when(strategy.writeSemanticContract())
-                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED));
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(
+                        BucketMode.HASH_FIXED, new DataField(0, "id", DataTypes.INT())));
         when(strategy.prepareCommit(anyLong())).thenReturn(Collections.emptyList());
         when(committer.filterAndCommit(anyMap())).thenReturn(0);
         tableContexts(service)
@@ -323,8 +320,6 @@ class PaimonServiceAsyncCommitIntegrationTest {
                                 null,
                                 Collections.emptyList(),
                                 0L));
-        fieldCache(service).put(
-                "default.t", Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
         TapTable tapTable = mock(TapTable.class);
         when(tapTable.getName()).thenReturn("t");
         when(tapTable.primaryKeys(true)).thenReturn(Collections.emptyList());
@@ -359,13 +354,6 @@ class PaimonServiceAsyncCommitIntegrationTest {
         Field field = PaimonService.class.getDeclaredField("tableWriteContexts");
         field.setAccessible(true);
         return (Map<String, PaimonTableWriteContext>) field.get(service);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, List<DataField>> fieldCache(PaimonService service) throws Exception {
-        Field field = PaimonService.class.getDeclaredField("paimonFieldCache");
-        field.setAccessible(true);
-        return (Map<String, List<DataField>>) field.get(service);
     }
 
     private static PaimonMicroBatchCoordinator coordinator(PaimonService service) throws Exception {

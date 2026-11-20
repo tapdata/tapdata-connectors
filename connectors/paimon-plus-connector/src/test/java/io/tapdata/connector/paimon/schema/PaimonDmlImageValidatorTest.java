@@ -11,6 +11,8 @@ import io.tapdata.entity.schema.TapTable;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -726,13 +728,15 @@ class PaimonDmlImageValidatorTest {
             java.util.Set<String> partitionKeys,
             String rowKindField,
             int rowKindIndex) {
+        RowType.Builder layout = RowType.builder();
+        fields.forEach(name -> layout.field(name, DataTypes.STRING()));
         return new PaimonWriteSemanticContract(
                 bucketMode,
                 true,
                 mergeEngine,
                 ChangelogProducer.NONE,
                 full,
-                fields,
+                layout.build(),
                 nonNull,
                 defaulted,
                 primaryKeys,

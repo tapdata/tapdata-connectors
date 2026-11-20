@@ -78,7 +78,6 @@ public final class PaimonWriteSemanticContractResolver {
         }
 
         RowType rowType = schema.logicalRowType();
-        List<String> targetFields = rowType.getFieldNames();
         Set<String> nonNullTargetFields = new LinkedHashSet<>();
         Set<String> defaultedTargetFields = new LinkedHashSet<>();
         for (DataField field : rowType.getFields()) {
@@ -102,7 +101,7 @@ public final class PaimonWriteSemanticContractResolver {
         String rowKindField = configuredRowKindField.orElse(null);
         int rowKindFieldIndex = -1;
         if (rowKindField != null) {
-            rowKindFieldIndex = targetFields.indexOf(rowKindField);
+            rowKindFieldIndex = rowType.getFieldIndex(rowKindField);
             DataType rowKindType =
                     rowKindFieldIndex < 0 ? null : rowType.getTypeAt(rowKindFieldIndex);
             // This mirrors Paimon 1.3.1 RowKindGenerator's field/type contract. The connector
@@ -146,7 +145,7 @@ public final class PaimonWriteSemanticContractResolver {
                 mergeEngine,
                 changelogProducer,
                 fullChangelogRequired,
-                targetFields,
+                rowType,
                 nonNullTargetFields,
                 defaultedTargetFields,
                 new LinkedHashSet<>(schema.primaryKeys()),
