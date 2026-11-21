@@ -160,9 +160,12 @@ public class MongodbExecuteCommandFunction {
   }
 
   public void aggregate(Map<String, Object> executeObj, MongoClient mongoClient, Consumer<List<Map<String, Object>>> consumer, Supplier<Boolean> aliveSupplier) {
+    // The connector owns this shared client. Cancel only this query's cursor, never the client.
     AggregateIterable<Document> aggregateIterable = getAggregateIterable(executeObj, mongoClient);
     int batchSize = executeObj.get("batchSize") != null ? (int) executeObj.get("batchSize") : 1000;
-    consumer(aggregateIterable, consumer, batchSize, aliveSupplier);
+    Object timeout = executeObj.get("queryTimeoutSeconds");
+    if (timeout instanceof Number) aggregateIterable.maxTime(((Number) timeout).longValue(), java.util.concurrent.TimeUnit.SECONDS);
+    consumer(aggregateIterable, consumer, batchSize, aliveSupplier, executeObj);
   }
 
   private AggregateIterable<Document> getAggregateIterable(Map<String, Object> executeObj, MongoClient mongoClient) {
@@ -170,7 +173,7 @@ public class MongodbExecuteCommandFunction {
     String database = executeObject.getDatabase();
     String collection = executeObject.getCollection();
     List<Document> pipelines = executeObject.getPipeline();
-    if (pipelines == null || pipelines.isEmpty()) {
+    if (pipelines == null || (pipelines.isEmpty() && !Boolean.TRUE.equals(executeObj.get("inspectAllowEmptyPipeline")))) {
       throw new RuntimeException(String.format("Process execute %s failed, pipeline cannot be blank", executeObject));
     }
     boolean allowDiskUse = true;
@@ -213,7 +216,14 @@ public class MongodbExecuteCommandFunction {
   }
 
   private void consumer(MongoIterable<Document> mongoIterable, Consumer<List<Map<String, Object>>> consumer, int batchSize, Supplier<Boolean> aliveSupplier) {
+    consumer(mongoIterable, consumer, batchSize, aliveSupplier, java.util.Collections.emptyMap());
+  }
+
+  private void consumer(MongoIterable<Document> mongoIterable, Consumer<List<Map<String, Object>>> consumer, int batchSize, Supplier<Boolean> aliveSupplier, Map<String, Object> params) {
     try (MongoCursor<Document> mongoCursor = mongoIterable.iterator()) {
+      Object registration = params.get("inspectRegisterCancel");
+      if (registration instanceof Consumer) ((Consumer<Runnable>) registration).accept(mongoCursor::close);
+
 
       List<Map<String, Object>> resultList = TapSimplify.list();
       while (mongoCursor.hasNext()) {

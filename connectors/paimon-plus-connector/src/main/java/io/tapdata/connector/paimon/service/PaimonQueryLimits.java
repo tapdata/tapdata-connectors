@@ -36,6 +36,11 @@ final class PaimonQueryLimits {
         started = clock.getAsLong();
     }
 
+    void publishColumns(java.util.List<java.util.Map<String, String>> columns) {
+        Object listener = params.get("inspectColumns");
+        if (listener instanceof java.util.function.Consumer) ((java.util.function.Consumer<java.util.List<java.util.Map<String, String>>>) listener).accept(columns);
+    }
+
     void check() throws SQLTimeoutException, InterruptedException {
         if (Thread.currentThread().isInterrupted()) { throw new InterruptedException("Paimon executeQuery interrupted"); }
         if (timeoutNanos > 0 && clock.getAsLong() - started >= timeoutNanos) {

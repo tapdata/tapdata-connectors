@@ -51,7 +51,7 @@ public class DefaultSqlExecutor implements SqlExecutor {
                         Supplier<Boolean> aliveSupplier, int batchSize, int queryTimeoutSeconds) throws Throwable {
         JdbcQueryExecutor.execute(sql, connectionSupplier, consumer, aliveSupplier, batchSize, queryTimeoutSeconds,
                 null, resultSet -> {
-                    List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
+                    List<String> columnNames = InspectQueryScope.rowColumns(resultSet);
                     return () -> {
                         DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
                         processDataMap(dataMap);
@@ -209,7 +209,7 @@ public class DefaultSqlExecutor implements SqlExecutor {
         while (hasResult) {
             try (ResultSet resultSet = callableStatement.getResultSet()) {
                 List<Map<String, Object>> list = TapSimplify.list();
-                List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
+                List<String> columnNames = InspectQueryScope.rowColumns(resultSet);
                 while (resultSet.next()) {
                     DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
                     processDataMap(dataMap);
