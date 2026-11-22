@@ -37,7 +37,7 @@ concurrency:
 jobs:
   connector-it:
     # tapdata-it#22: pin the DBForge configuration fix until it is released to main.
-    uses: jarad0628/tapdata-it/.github/workflows/connector-it-reusable.yml@5d603ac4ac7e2c091339ed77d33eddb10bf1ef47
+    uses: tapdata/tapdata-it/.github/workflows/connector-it-reusable.yml@5d603ac4ac7e2c091339ed77d33eddb10bf1ef47
     with:
       connectors_override: ${{ inputs.connectors || '' }}
       dbforge_url: ${{ vars.CONNECTOR_IT_DBFORGE_URL }}
