@@ -395,11 +395,7 @@ public class OceanbaseConnector extends MysqlConnector {
                 exceptionCollector.revealException(throwable.get());
                 throw throwable.get();
             }
-        } catch (Exception e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-            e.printStackTrace();
+        } finally {
             executorService.shutdown();
         }
     }
