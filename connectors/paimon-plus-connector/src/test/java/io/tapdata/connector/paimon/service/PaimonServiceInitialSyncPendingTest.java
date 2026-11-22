@@ -133,7 +133,8 @@ class PaimonServiceInitialSyncPendingTest {
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.HASH_DYNAMIC);
         when(strategy.writeSemanticContract())
-                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_DYNAMIC));
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(
+                        BucketMode.HASH_DYNAMIC, new DataField(0, "_hash_key", DataTypes.VARCHAR(32))));
         when(strategy.prepareCommit(0L)).thenReturn(Collections.emptyList());
         PaimonTableWriteContext context =
                 new PaimonTableWriteContext(
@@ -146,10 +147,6 @@ class PaimonServiceInitialSyncPendingTest {
                         Collections.emptyList(),
                         0L);
         tableContexts(service).put("default.t", context);
-        fieldCache(service).put(
-                "default.t",
-                Collections.singletonList(
-                        new DataField(0, "_hash_key", DataTypes.VARCHAR(32))));
 
         TapTable tapTable = mock(TapTable.class);
         when(tapTable.getName()).thenReturn("t");
@@ -225,7 +222,8 @@ class PaimonServiceInitialSyncPendingTest {
         }).when(strategy).write(any());
         when(strategy.bucketMode()).thenReturn(BucketMode.KEY_DYNAMIC);
         when(strategy.writeSemanticContract())
-                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.KEY_DYNAMIC));
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(
+                        BucketMode.KEY_DYNAMIC, new DataField(0, "id", DataTypes.INT())));
         when(strategy.prepareCommit(0L)).thenReturn(Collections.emptyList());
         when(committer.filterAndCommit(anyMap())).thenReturn(0);
         PaimonTableWriteContext context =
@@ -239,8 +237,6 @@ class PaimonServiceInitialSyncPendingTest {
                         Collections.emptyList(),
                         0L);
         tableContexts(service).put("default.t", context);
-        fieldCache(service).put(
-                "default.t", Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
 
         TapTable tapTable = mock(TapTable.class);
         when(tapTable.getName()).thenReturn("t");
@@ -332,9 +328,11 @@ class PaimonServiceInitialSyncPendingTest {
         when(strategy1.bucketMode()).thenReturn(BucketMode.HASH_DYNAMIC);
         when(strategy2.bucketMode()).thenReturn(BucketMode.KEY_DYNAMIC);
         when(strategy1.writeSemanticContract())
-                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_DYNAMIC));
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(
+                        BucketMode.HASH_DYNAMIC, new DataField(0, "id", DataTypes.INT())));
         when(strategy2.writeSemanticContract())
-                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.KEY_DYNAMIC));
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(
+                        BucketMode.KEY_DYNAMIC, new DataField(0, "id", DataTypes.INT())));
         PaimonTableWriteContext context1 = new PaimonTableWriteContext(
                 "default.t1", "t1", "user-1", strategy1,
                 mock(PaimonTableCommitter.class), null, Collections.emptyList(), 0L);
@@ -343,10 +341,6 @@ class PaimonServiceInitialSyncPendingTest {
                 mock(PaimonTableCommitter.class), null, Collections.emptyList(), 0L);
         tableContexts(service).put("default.t1", context1);
         tableContexts(service).put("default.t2", context2);
-        fieldCache(service).put(
-                "default.t1", Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
-        fieldCache(service).put(
-                "default.t2", Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
 
         TapTable tapTable1 = mock(TapTable.class);
         TapTable tapTable2 = mock(TapTable.class);
@@ -395,7 +389,8 @@ class PaimonServiceInitialSyncPendingTest {
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
         when(strategy.writeSemanticContract())
-                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED));
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(
+                        BucketMode.HASH_FIXED, new DataField(0, "id", DataTypes.INT())));
         PaimonTableWriteContext context =
                 new PaimonTableWriteContext(
                         "default.t",
@@ -416,8 +411,6 @@ class PaimonServiceInitialSyncPendingTest {
         assertThrows(RuntimeException.class, context::commit);
 
         tableContexts(service).put("default.t", context);
-        fieldCache(service).put(
-                "default.t", Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
 
         TapTable tapTable = mock(TapTable.class);
         when(tapTable.getName()).thenReturn("t");
@@ -452,7 +445,8 @@ class PaimonServiceInitialSyncPendingTest {
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
         when(strategy.writeSemanticContract())
-                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED));
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(
+                        BucketMode.HASH_FIXED, new DataField(0, "id", DataTypes.INT())));
         PaimonTableWriteContext context =
                 new PaimonTableWriteContext(
                         "default.t",
@@ -478,8 +472,6 @@ class PaimonServiceInitialSyncPendingTest {
         assertThrows(RuntimeException.class, context::commit);
 
         tableContexts(service).put("default.t", context);
-        fieldCache(service).put(
-                "default.t", Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
 
         TapTable tapTable = mock(TapTable.class);
         when(tapTable.getName()).thenReturn("t");
@@ -547,7 +539,8 @@ class PaimonServiceInitialSyncPendingTest {
         PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.KEY_DYNAMIC);
         when(strategy.writeSemanticContract())
-                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.KEY_DYNAMIC));
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(
+                        BucketMode.KEY_DYNAMIC, new DataField(0, "id", DataTypes.INT()), new DataField(1, "pt", DataTypes.INT())));
         PaimonFatalWriteException missingPrimaryKey =
                 new PaimonFatalWriteException(
                         "Missing non-null Paimon routing field 'id' for INSERT on dynamic-bucket table default.t");
@@ -565,11 +558,6 @@ class PaimonServiceInitialSyncPendingTest {
                         Collections.emptyList(),
                         0L);
         tableContexts(service).put("default.t", context);
-        fieldCache(service).put(
-                "default.t",
-                java.util.Arrays.asList(
-                        new DataField(0, "id", DataTypes.INT()),
-                        new DataField(1, "pt", DataTypes.INT())));
 
         TapTable tapTable = mock(TapTable.class);
         when(tapTable.getName()).thenReturn("t");
@@ -599,13 +587,6 @@ class PaimonServiceInitialSyncPendingTest {
         Field field = PaimonService.class.getDeclaredField("tableWriteContexts");
         field.setAccessible(true);
         return (Map<String, PaimonTableWriteContext>) field.get(service);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, List<DataField>> fieldCache(PaimonService service) throws Exception {
-        Field field = PaimonService.class.getDeclaredField("paimonFieldCache");
-        field.setAccessible(true);
-        return (Map<String, List<DataField>>) field.get(service);
     }
 
     private static PaimonMicroBatchCoordinator.TableSnapshot tableState(

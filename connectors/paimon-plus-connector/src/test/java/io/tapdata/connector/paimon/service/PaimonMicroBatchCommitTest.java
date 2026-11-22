@@ -24,7 +24,6 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -199,7 +198,8 @@ class PaimonMicroBatchCommitTest {
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
         when(strategy.writeSemanticContract())
-                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED));
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(
+                        BucketMode.HASH_FIXED, new DataField(0, "id", DataTypes.INT())));
         when(strategy.prepareCommit(anyLong())).thenReturn(Collections.emptyList());
         when(committer.filterAndCommit(anyMap())).thenReturn(0);
         PaimonTableWriteContext context =
@@ -213,8 +213,6 @@ class PaimonMicroBatchCommitTest {
                         Collections.emptyList(),
                         0L);
         tableContexts(service).put("default.t", context);
-        fieldCache(service).put(
-                "default.t", Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
 
         TapTable tapTable = mock(TapTable.class);
         when(tapTable.getName()).thenReturn("t");
@@ -232,13 +230,6 @@ class PaimonMicroBatchCommitTest {
         Field field = PaimonService.class.getDeclaredField("tableWriteContexts");
         field.setAccessible(true);
         return (Map<String, PaimonTableWriteContext>) field.get(service);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, List<DataField>> fieldCache(PaimonService service) throws Exception {
-        Field field = PaimonService.class.getDeclaredField("paimonFieldCache");
-        field.setAccessible(true);
-        return (Map<String, List<DataField>>) field.get(service);
     }
 
     private static PaimonMicroBatchCoordinator coordinator(PaimonService service) throws Exception {

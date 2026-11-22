@@ -21,6 +21,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -29,6 +30,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -47,6 +49,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -104,6 +107,85 @@ class PaimonServiceDynamicBucketIntegrationTest {
 
     @TempDir
     java.nio.file.Path tempDir;
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, -1})
+    void activeWriterKeepsItsLayoutAfterExternalReorder(int buckets) throws Exception {
+        String name = "reordered";
+        PaimonConfig config = config(name);
+        config.setEnablePrimaryKeyUpdate(true);
+        TapConnectorContext context = context(stateMap());
+        Identifier identifier = Identifier.create(DATABASE, name);
+        Schema schema = Schema.newBuilder()
+                .column("id", DataTypes.INT()).column("a", DataTypes.INT()).column("b", DataTypes.INT())
+                .primaryKey("id").option("bucket", Integer.toString(buckets))
+                .option("changelog-producer", "input")
+                .option("write-buffer-size", "1mb").build();
+        TapTable source = threeIntColumns(name);
+        Map<String, Object> existing = map("id", 3, "a", 30, "b", 300);
+        Map<String, Object> inserted = map("id", 1, "a", 10, "b", 3);
+        Map<String, Object> updated = map("id", 2, "a", 10, "b", 3);
+        try (PaimonService writer = service(config); PaimonService external = service(config)) {
+            Catalog catalog = catalog(writer);
+            catalog.createTable(identifier, schema, false);
+            writer.writeRecords(Collections.singletonList(cdcInsert(name, existing)), source, context);
+            Object originalWriter = derivedCache(writer, "tableWriteContexts").get(identifier.getFullName());
+            assertNotNull(originalWriter);
+
+            Catalog ddl = catalog(external);
+            ddl.alterTable(identifier, SchemaChange.updateColumnPosition(SchemaChange.Move.first("b")), false);
+            catalog.invalidateTable(identifier);
+            FileStoreTable reordered = (FileStoreTable) catalog.getTable(identifier);
+            assertEquals(Arrays.asList("b", "id", "a"), reordered.rowType().getFieldNames());
+            // Ten other live tables evict the first table from the former ten-entry field cache.
+            for (int i = 0; i < 10; i++) {
+                String other = "other_" + i;
+                catalog.createTable(Identifier.create(DATABASE, other), schema, false);
+                writer.writeRecords(Collections.singletonList(cdcInsert(other, existing)), threeIntColumns(other), context);
+            }
+            writer.writeRecords(Collections.singletonList(cdcInsert(name, inserted)), source, context);
+            assertStoredRows(reordered, existing, inserted);
+            writer.writeRecords(Collections.singletonList(cdcUpdate(name, inserted, updated)), source, context);
+            assertStoredRows(reordered, existing, updated);
+
+            // The final rows alone cannot distinguish DELETE/INSERT from UPDATE_BEFORE/UPDATE_AFTER.
+            List<InternalRow> changes = readLatestChangelogRows(reordered);
+            assertEquals(2, changes.size());
+            int idIndex = reordered.rowType().getFieldIndex("id");
+            Map<Integer, RowKind> kindById = new LinkedHashMap<>();
+            for (InternalRow change : changes) {
+                kindById.put(change.getInt(idIndex), change.getRowKind());
+            }
+            assertEquals(RowKind.DELETE, kindById.get(1), "changelog for the old primary key");
+            assertEquals(RowKind.INSERT, kindById.get(2), "changelog for the new primary key");
+
+            writer.writeRecords(Collections.singletonList(cdcDelete(name, updated)), source, context);
+            assertStoredRows(reordered, existing);
+            assertSame(originalWriter, derivedCache(writer, "tableWriteContexts").get(identifier.getFullName()));
+        }
+
+        try (PaimonService restarted = service(config)) {
+            restarted.writeRecords(Collections.singletonList(cdcInsert(name, inserted)), source, context);
+            assertStoredRows(catalog(restarted).getTable(identifier), existing, inserted);
+        }
+    }
+
+    private TapTable threeIntColumns(String name) {
+        return new TapTable(name).add(new TapField("id", "INT").primaryKeyPos(1))
+                .add(new TapField("a", "INT")).add(new TapField("b", "INT"));
+    }
+
+    @SafeVarargs
+    private final void assertStoredRows(Table table, Map<String, Object>... expected) throws Exception {
+        List<Map<String, Object>> actual = new ArrayList<>();
+        RowType type = table.rowType();
+        for (InternalRow row : readRows(table)) {
+            actual.add(map("id", row.getInt(type.getFieldIndex("id")),
+                    "a", row.getInt(type.getFieldIndex("a")), "b", row.getInt(type.getFieldIndex("b"))));
+        }
+        assertEquals(expected.length, actual.size(), actual.toString());
+        assertTrue(actual.containsAll(Arrays.asList(expected)), actual.toString());
+    }
 
     @ParameterizedTest
     @ValueSource(strings = {"fixed", "dynamic"})
@@ -565,8 +647,7 @@ class PaimonServiceDynamicBucketIntegrationTest {
                     connectorContext);
 
             // Paimon 1.3.1 CachingCatalog#dropTable invalidates Paimon's own cached Table.
-            // Connector policy must independently invalidate the cached DataField order so the
-            // recreated generation is converted as right_value,id,left_value.
+            // The new writer must use the recreated table's right_value,id,left_value layout.
             // Source:
             // https://github.com/apache/paimon/blob/release-1.3.1/paimon-core/src/main/java/org/apache/paimon/catalog/CachingCatalog.java#L184-L197
             List<InternalRow> rows =

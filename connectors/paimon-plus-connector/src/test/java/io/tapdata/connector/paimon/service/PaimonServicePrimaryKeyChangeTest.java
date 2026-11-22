@@ -9,14 +9,12 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,6 +25,7 @@ class PaimonServicePrimaryKeyChangeTest {
 
     private PaimonService service;
     private TapTable table;
+    private RowType rowType;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -38,8 +37,7 @@ class PaimonServicePrimaryKeyChangeTest {
         when(table.primaryKeys(true)).thenReturn(Arrays.asList("a", "b"));
 
         // Deliberately use a target RowType order different from the primary-key/TapTable order.
-        fieldCache(service).put(
-                "default.t",
+        rowType = new RowType(
                 Arrays.asList(
                         new DataField(0, "b", DataTypes.STRING()),
                         new DataField(1, "value", DataTypes.STRING()),
@@ -53,7 +51,7 @@ class PaimonServicePrimaryKeyChangeTest {
         GenericRow after = GenericRow.of(
                 string("b"), string("new"), string("a"));
 
-        assertFalse(service.isPrimaryKeyChanged(before, after, table));
+        assertFalse(service.isPrimaryKeyChanged(before, after, table, rowType));
     }
 
     @Test
@@ -65,29 +63,21 @@ class PaimonServicePrimaryKeyChangeTest {
         GenericRow after = GenericRow.of(
                 string("b|c"), string("same"), string("a"));
 
-        assertTrue(service.isPrimaryKeyChanged(before, after, table));
+        assertTrue(service.isPrimaryKeyChanged(before, after, table, rowType));
     }
 
     @Test
     void missingPrimaryKeyInTargetRowTypeMustFailInsteadOfBeingIgnored() throws Exception {
-        fieldCache(service).put(
-                "default.t",
+        rowType = new RowType(
                 Collections.singletonList(new DataField(0, "a", DataTypes.STRING())));
         GenericRow row = GenericRow.of(string("a"));
 
         org.junit.jupiter.api.Assertions.assertThrows(
                 PaimonFatalWriteException.class,
-                () -> service.isPrimaryKeyChanged(row, row, table));
+                () -> service.isPrimaryKeyChanged(row, row, table, rowType));
     }
 
     private static BinaryString string(String value) {
         return BinaryString.fromString(value);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, List<DataField>> fieldCache(PaimonService service) throws Exception {
-        Field field = PaimonService.class.getDeclaredField("paimonFieldCache");
-        field.setAccessible(true);
-        return (Map<String, List<DataField>>) field.get(service);
     }
 }

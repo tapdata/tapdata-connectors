@@ -1255,7 +1255,8 @@ class PaimonServiceCloseTest {
             throws Exception {
         when(strategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
         when(strategy.writeSemanticContract())
-                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED));
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(
+                        BucketMode.HASH_FIXED, new DataField(0, "id", DataTypes.INT())));
         when(strategy.prepareCommit(anyLong())).thenReturn(Collections.emptyList());
         when(strategy.prepareFinalCommit(anyLong())).thenReturn(Collections.emptyList());
         when(committer.filterAndCommit(anyMap())).thenReturn(0);
@@ -1284,8 +1285,6 @@ class PaimonServiceCloseTest {
                 tableKey, (PaimonStopController) controllerField.get(service));
         scope.reserve("test context").bind(tableContexts(service).get(tableKey));
         tableContexts(service).get(tableKey).attachStopScope(scope);
-        fieldCache(service).put(
-                tableKey, Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
         return new TableFixture(strategy, committer, tableContexts(service).get(tableKey));
     }
 
@@ -1329,13 +1328,6 @@ class PaimonServiceCloseTest {
         Field field = PaimonService.class.getDeclaredField("tableWriteContexts");
         field.setAccessible(true);
         return (Map<String, PaimonTableWriteContext>) field.get(service);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, List<DataField>> fieldCache(PaimonService service) throws Exception {
-        Field field = PaimonService.class.getDeclaredField("paimonFieldCache");
-        field.setAccessible(true);
-        return (Map<String, List<DataField>>) field.get(service);
     }
 
     private static PaimonMicroBatchCoordinator coordinator(PaimonService service) throws Exception {
