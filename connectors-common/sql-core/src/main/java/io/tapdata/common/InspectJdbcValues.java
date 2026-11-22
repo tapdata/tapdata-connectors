@@ -18,7 +18,19 @@ final class InspectJdbcValues {
 
     static Map<String, Object> read(ResultSet rows, List<String> columns) throws SQLException {
         Map<String, Object> row = new LinkedHashMap<>();
-        for (int i = 0; i < columns.size(); i++) row.put(columns.get(i), detach(rows.getObject(i + 1)));
+        ResultSetMetaData metadata = rows.getMetaData();
+        for (int i = 0; i < columns.size(); i++) {
+            Object value = rows.getObject(i + 1);
+            if (value instanceof Timestamp) {
+                String type = metadata.getColumnTypeName(i + 1);
+                String normalized = type == null ? "" : type.toLowerCase(Locale.ROOT);
+                boolean zoned = metadata.getColumnType(i + 1) == Types.TIMESTAMP_WITH_TIMEZONE
+                        || normalized.equals("timestamptz") || normalized.contains("with time zone")
+                        || normalized.equals("datetimeoffset");
+                value = zoned ? ((Timestamp) value).toInstant() : ((Timestamp) value).toLocalDateTime();
+            }
+            row.put(columns.get(i), detach(value));
+        }
         return row;
     }
 

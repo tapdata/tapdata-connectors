@@ -11,14 +11,14 @@ import static org.mockito.Mockito.*;
 
 class InspectMongoRedesignTest {
     @Test void emptyPipelineRequiresInspectOptInAndCancelNeverClosesSharedClient() {
-        var function=new MongodbExecuteCommandFunction();
+        MongodbExecuteCommandFunction function=new MongodbExecuteCommandFunction();
         MongoClient client=mock(MongoClient.class);MongoDatabase db=mock(MongoDatabase.class);
         MongoCollection<Document> collection=mock(MongoCollection.class);
         AggregateIterable<Document> iterable=mock(AggregateIterable.class);MongoCursor<Document> cursor=mock(MongoCursor.class);
         when(client.getDatabase("db")).thenReturn(db);when(db.getCollection("rows")).thenReturn(collection);
         when(collection.aggregate(anyList())).thenReturn(iterable);when(iterable.allowDiskUse(true)).thenReturn(iterable);
         when(iterable.iterator()).thenReturn(cursor);when(cursor.hasNext()).thenReturn(false);
-        Map<String,Object> params=new HashMap<>();params.put("database","db");params.put("collection","rows");params.put("pipeline",List.of());
+        Map<String,Object> params=new HashMap<>();params.put("database","db");params.put("collection","rows");params.put("pipeline",Collections.emptyList());
         assertThrows(RuntimeException.class,()->function.aggregate(params,client,rows->{},()->true));
         verifyNoInteractions(client);
         params.put("inspectAllowEmptyPipeline",true);params.put("inspectOwnClient",true);params.put("queryTimeoutSeconds",2);

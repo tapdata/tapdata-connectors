@@ -25,4 +25,16 @@ class InspectQueryRedesignTest {
         try(InspectQueryScope scope=InspectQueryScope.open(params)) { assertThrows(SQLException.class,()->JdbcQueryExecutor.execute("update t set v=1",()->connection,ignored->{},()->true,10,0,null,rs->()->Map.of())); }
         List<Object> result=new ArrayList<>();JdbcQueryExecutor.execute("update t set v=1",()->connection,result::add,()->true,10,0,null,rs->()->Map.of());assertEquals(List.of(1L),result);
     }
+
+    @Test void inspectionRunsInReadOnlyTransactionAndNeverCommits() throws Throwable {
+        Connection connection=mock(Connection.class);Statement statement=mock(Statement.class);
+        when(connection.createStatement()).thenReturn(statement);when(statement.getUpdateCount()).thenReturn(1);
+        Map<String,Object> params=new HashMap<>();params.put("inspectColumns",(Consumer<List<Map<String,String>>>)ignored->{});
+        try(InspectQueryScope scope=InspectQueryScope.open(params)) {
+            assertThrows(SQLException.class,()->JdbcQueryExecutor.execute("select 1",()->connection,ignored->{},()->true,10,1,null,rs->()->Collections.emptyMap()));
+        }
+        org.mockito.InOrder order=inOrder(connection,statement);order.verify(connection).setReadOnly(true);order.verify(connection).createStatement();order.verify(statement).execute("select 1");
+        verify(connection,never()).commit();verify(connection).close();
+    }
+
 }

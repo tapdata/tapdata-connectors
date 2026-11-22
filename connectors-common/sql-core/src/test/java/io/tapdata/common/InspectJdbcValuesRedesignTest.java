@@ -84,4 +84,15 @@ class InspectJdbcValuesRedesignTest {
             verify(rows).close(); verify(connection).close(); if (inspect) verify(clob).free(); else verify(clob, never()).free();
         }
     }
+
+    @Test void jdbcMetadataDistinguishesZonedAndWallClockTimestamps() throws Exception {
+        ResultSet rows=mock(ResultSet.class);ResultSetMetaData meta=mock(ResultSetMetaData.class);when(rows.getMetaData()).thenReturn(meta);
+        java.time.Instant instant=java.time.Instant.parse("2026-11-19T00:00:00.123456Z");
+        Timestamp timestamp=Timestamp.from(instant);when(rows.getObject(1)).thenReturn(timestamp);when(rows.getObject(2)).thenReturn(timestamp);
+        when(rows.getObject(3)).thenReturn(timestamp);when(meta.getColumnTypeName(1)).thenReturn("timestamptz");
+        when(meta.getColumnTypeName(2)).thenReturn("timestamp");when(meta.getColumnType(3)).thenReturn(Types.TIMESTAMP_WITH_TIMEZONE);
+        Map<String,Object> values=InspectJdbcValues.read(rows,Arrays.asList("zoned","local","jdbcZoned"));
+        assertEquals(instant,values.get("zoned"));assertEquals(timestamp.toLocalDateTime(),values.get("local"));assertEquals(instant,values.get("jdbcZoned"));
+    }
+
 }
