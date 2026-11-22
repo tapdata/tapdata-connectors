@@ -11,6 +11,8 @@ import java.util.concurrent.TimeUnit;
 
 /** Per-execution metadata only: never retain headers, credentials, queries or row data. */
 final class StreamLoadDiagnostics {
+
+
     static final String KEY = StreamLoadDiagnostics.class.getName();
     final long started = System.nanoTime();
     final List<String> hops = new ArrayList<>();

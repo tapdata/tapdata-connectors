@@ -41,6 +41,7 @@ public class DorisSqlMaker extends CommonSqlMaker {
         }).collect(Collectors.joining(", "));
     }
 
+    @Override
     protected void buildDefaultDefinition(StringBuilder builder, TapField tapField) {
         if (EmptyKit.isNotNull(tapField.getDefaultValue())) {
             builder.append("DEFAULT").append(' ');

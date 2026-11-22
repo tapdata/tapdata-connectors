@@ -73,7 +73,7 @@ public class ElasticsearchRecordWriter {
         listResult = new WriteListResult<>();
         try{
             BulkRequest bulkRequest = new BulkRequest();
-//        bulkRequest.setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
+
             for (TapRecordEvent recordEvent : tapRecordEvents) {
                 if (recordEvent instanceof TapInsertRecordEvent) {
                     if (ConnectionOptions.DML_INSERT_POLICY_JUST_INSERT.equals(insertPolicy)) {

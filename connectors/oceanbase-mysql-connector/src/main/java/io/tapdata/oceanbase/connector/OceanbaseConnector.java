@@ -156,6 +156,7 @@ public class OceanbaseConnector extends MysqlConnector {
      * @param tapTable
      * @param writeListResultConsumer
      */
+    @Override
     protected void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
         String insertDmlPolicy = tapConnectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {
@@ -250,9 +251,7 @@ public class OceanbaseConnector extends MysqlConnector {
             return offsetStartTime / 1000L;
         }
         AtomicLong offset = new AtomicLong(0);
-        mysqlJdbcContext.queryWithNext("select unix_timestamp(current_timestamp())", resultSet -> {
-            offset.set(resultSet.getLong(1));
-        });
+        mysqlJdbcContext.queryWithNext("select unix_timestamp(current_timestamp())", resultSet -> offset.set(resultSet.getLong(1)));
         return offset.get();
     }
 
@@ -283,6 +282,7 @@ public class OceanbaseConnector extends MysqlConnector {
         return partitions;
     }
 
+    @Override
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
         mysqlJdbcContext.streamQueryWithTimeout(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer), prepareSqlBeforeQuery, Integer.MIN_VALUE);
@@ -386,6 +386,7 @@ public class OceanbaseConnector extends MysqlConnector {
             try {
                 countDownLatch.await();
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
             }
             if (EmptyKit.isNotNull(throwable.get())) {
@@ -395,11 +396,15 @@ public class OceanbaseConnector extends MysqlConnector {
                 throw throwable.get();
             }
         } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             e.printStackTrace();
             executorService.shutdown();
         }
     }
 
+    @Override
     protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         List<String> tablePartitions = getTablePartitions(tapConnectorContext, tapTable);
         if (tablePartitions.size() >= 4) {
@@ -441,6 +446,7 @@ public class OceanbaseConnector extends MysqlConnector {
             try {
                 countDownLatch.await();
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
             }
             if (EmptyKit.isNotNull(throwable.get())) {

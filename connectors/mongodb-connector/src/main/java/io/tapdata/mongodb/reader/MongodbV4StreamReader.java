@@ -104,9 +104,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
         if (this.globalStateMap == null) {
             this.globalStateMap = connectorContext.getGlobalStateMap();
         }
-//        pipeline = new ArrayList<>();
-//        List<Bson> collList = tableList.stream().map(t -> Filters.eq("ns.coll", t)).collect(Collectors.toList());
-//        List<Bson> pipeline1 = asList(Aggregates.match(Filters.or(collList)));
+
         FullDocument fullDocumentOption = FullDocument.DEFAULT;
         FullDocumentBeforeChange fullDocumentBeforeChangeOption = FullDocumentBeforeChange.WHEN_AVAILABLE;
         if (mongodbConfig.isEnableFillingModifiedData() || isPreImage) {
@@ -224,10 +222,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                     }
                 }
                 throw throwable;
-                //else {
-                //TapLogger.warn(TAG,"Read change stream from {}, failed {} " ,MongodbUtil.maskUriPassword(mongodbConfig.getUri()), throwable.getMessage());
-                //TapLogger.debug(TAG, "Read change stream from {}, failed {}, error {}", MongodbUtil.maskUriPassword(mongodbConfig.getUri()), throwable.getMessage(), getStackString(throwable));
-                //}
+
             } finally {
                 concurrentProcessor.close();
             }
@@ -407,7 +402,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 
                         TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
                         Map<String, Object> info = new DataMap();
-//							Map<String, Object> unset = new DataMap();
+
                         List<String> removedFields = new ArrayList<>();
 
                         LinkedHashSet<String> updatedFields = new LinkedHashSet<>();
@@ -417,16 +412,13 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                             for (String f : updateDescription.getRemovedFields()) {
 
                                 if (after.keySet().stream().noneMatch(v -> v.equals(f))) {
-//										unset.put(f, true);
+
                                     removedFields.add(f);
                                 }
-//									if (!after.containsKey(f)) {
-//										unset.put(f, true);
-//									}
+
+
                             }
-//								if (unset.size() > 0) {
-//									info.put("$unset", unset);
-//								}
+
                             if (removedFields.size() > 0) {
                                 recordEvent.removedFields(removedFields);
                             }

@@ -28,13 +28,19 @@ import java.util.List;
 public class SSLUtil {
 
   public static SSLContext createSSLContext(String privateKey, List<String> certificates, List<String> trustCertificates, String password) throws Exception {
-    SSLContext sslContext = SSLContext.getInstance("SSL");
+    SSLContext sslContext = SSLContext.getInstance("TLSv1.2");
     if (password == null) {
       password = "";
     }
 
     TrustManager[] trustManagers = createTrustManagers(trustCertificates, password);
-    KeyManager[] keyManagers = createKeyManagers(privateKey, certificates, password);
+    KeyManager[] keyManagers = null;
+    if (EmptyKit.isNotBlank(privateKey) || CollectionUtils.isNotEmpty(certificates)) {
+      if (EmptyKit.isBlank(privateKey) || CollectionUtils.isEmpty(certificates)) {
+        throw new IllegalArgumentException("Both a private key and certificate chain are required for client authentication");
+      }
+      keyManagers = createKeyManagers(privateKey, certificates, password);
+    }
     sslContext.init(keyManagers,
       trustManagers,
       null);
@@ -48,16 +54,20 @@ public class SSLUtil {
 
     if (x509Certificates != null && x509Certificates.length > 0) {
       KeyStore trustStoreContainingTheCertificate = KeyStore.getInstance("JKS");
-      trustStoreContainingTheCertificate.load(null, password.toCharArray());
+      trustStoreContainingTheCertificate.load(null, password == null ? null : password.toCharArray());
 
-      trustStoreContainingTheCertificate.setCertificateEntry("", x509Certificates[0]);
+      for (int i = 0; i < x509Certificates.length; i++) {
+        trustStoreContainingTheCertificate.setCertificateEntry("ca-" + i, x509Certificates[i]);
+      }
 
       trustManagerFactory.init(trustStoreContainingTheCertificate);
 
       return trustManagerFactory.getTrustManagers();
     }
 
-    return createTrustAllHost();
+    // Without a custom CA, use the JVM trust store; never silently trust every certificate.
+    trustManagerFactory.init((KeyStore) null);
+    return trustManagerFactory.getTrustManagers();
   }
 
   public static KeyManager[] createKeyManagers(String privateKey, List<String> certificates, String password) throws Exception {
@@ -65,25 +75,6 @@ public class SSLUtil {
     final KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
     kmf.init(keystore, password.toCharArray());
     return kmf.getKeyManagers();
-  }
-
-  private static TrustManager[] createTrustAllHost() {
-    TrustManager[] trustAllCerts = new TrustManager[]{new X509TrustManager() {
-
-      public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-        return new java.security.cert.X509Certificate[]{};
-      }
-
-      public void checkClientTrusted(X509Certificate[] chain, String authType) {
-
-      }
-
-      public void checkServerTrusted(X509Certificate[] chain, String authType) {
-
-      }
-    }};
-
-    return trustAllCerts;
   }
 
   /**

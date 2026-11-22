@@ -33,7 +33,7 @@ public class TidbSqlMaker extends MysqlMaker implements DDLSqlMaker {
 
     private static final String CREATE_TABLE_TEMPLATE = "CREATE TABLE `%s`.`%s`(\n%s) %s";
 
-    private final static String ALTER_TABLE_PREFIX = "alter table `%s`.`%s`";
+
 
     protected static final int DEFAULT_CONSTRAINT_NAME_MAX_LENGTH = 30;
 
@@ -138,8 +138,8 @@ public class TidbSqlMaker extends MysqlMaker implements DDLSqlMaker {
         return sqls;
     }
 
+    @Override
     protected String createTableAppendField(TapField tapField) {
-        String datatype = tapField.getDataType().toUpperCase();
         String fieldSql = "  `" + tapField.getName() + "`" + " " + tapField.getDataType().toUpperCase();
 
         // auto increment
@@ -183,6 +183,7 @@ public class TidbSqlMaker extends MysqlMaker implements DDLSqlMaker {
         return fieldSql;
     }
 
+    @Override
     protected String createTableAppendPrimaryKey(TapTable tapTable) {
         LinkedHashMap<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
         String pkSql = "";
@@ -203,6 +204,7 @@ public class TidbSqlMaker extends MysqlMaker implements DDLSqlMaker {
         return pkSql;
     }
 
+    @Override
     protected String getConstraintName(String constraintName) {
         if (StringUtils.isBlank(constraintName)) {
             return "";
@@ -215,7 +217,7 @@ public class TidbSqlMaker extends MysqlMaker implements DDLSqlMaker {
     }
 
     private static final String TIDB_FIELD_TEMPLATE = "`%s`";
-    private static final String TIDB_TABLE_TEMPLATE = "%s.%s";//"[%s].[%s].[%s]";
+    private static final String TIDB_TABLE_TEMPLATE = "%s.%s";
     private static final String TIDB_TABLE_WITHOUT_DATABASE_TEMPLATE = "%s.%s";
 
 
@@ -277,10 +279,7 @@ public class TidbSqlMaker extends MysqlMaker implements DDLSqlMaker {
             builder.append(filter.getSortOnList().stream().map(v -> v.toString("`")).collect(Collectors.joining(", "))).append(' ');
         }
 
-//        Integer skip = filter.getSkip();
-//        if (null != skip) {
-//            builder.append("OFFSET ").append(filter.getSkip()).append(" ROWS ");
-//        }
+
 
         return builder.toString();
     }

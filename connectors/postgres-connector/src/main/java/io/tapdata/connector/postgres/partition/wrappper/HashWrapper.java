@@ -23,7 +23,7 @@ public class HashWrapper extends PGPartitionWrapper {
 
     @Override
     public List<TapPartitionType> parse(TapTable table, String partitionSQL, String checkOrPartitionRule, Log log) {
-        //for values with (modulus 4, remainder 1);
+
         Pattern pattern = Pattern.compile(REGEX);
         Matcher matcher = pattern.matcher(String.valueOf(partitionSQL).toLowerCase());
         if (matcher.find()) {

@@ -22,6 +22,7 @@ public class DorisRecordWriter extends NormalRecordWriter {
         super(jdbcContext, tapTable);
     }
 
+    @Override
     public void write(List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, Supplier<Boolean> isAlive) throws SQLException {
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
         for (TapRecordEvent recordEvent : tapRecordEvents) {

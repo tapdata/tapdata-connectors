@@ -36,8 +36,8 @@ import static io.tapdata.base.ConnectorBase.*;
 public class TidbConnectionTest extends CommonDbTest {
     private final TidbConfig tidbConfig;
     private static final String TI_DB_GC_LIFE_TIME = "TiCDC GC Life Time";
-    private final static String PB_SERVER_SUCCESS = "Check PDServer host port is valid";
-    private final static String IC_CONFIGURATION_ENABLED = " Check  Incremental is enable";
+    private static final String PB_SERVER_SUCCESS = "Check PDServer host port is valid";
+
     protected static final String CHECK_DATABASE_PRIVILEGES_SQL = "SHOW GRANTS FOR CURRENT_USER";
     protected static final String CHECK_DATABASE_BINLOG_STATUS_SQL = "SHOW GLOBAL VARIABLES where variable_name = 'log_bin' OR variable_name = 'binlog_format'";
     protected static final String CHECK_DATABASE_BINLOG_ROW_IMAGE_SQL = "SHOW VARIABLES LIKE '%binlog_row_image%'";
@@ -211,7 +211,7 @@ public class TidbConnectionTest extends CommonDbTest {
                 tableList.add(table);
             }
         } else if (databaseName.contains(
-                (grantSql.substring(grantSql.indexOf("`")+1, grantSql.indexOf("`" + ".")).trim().replaceAll("%", "")))) {
+                (grantSql.substring(grantSql.indexOf("`")+1, grantSql.indexOf("`" + ".")).trim().replace("%", "")))) {
             if (grantSql.contains("`" + ".* TO")) {
                 if (privilege) {
                     return true;
@@ -267,10 +267,7 @@ public class TidbConnectionTest extends CommonDbTest {
     }
 
     //    @Override
-//    public Boolean testVersion() {
-//        consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY));
-//        return true;
-//    }
+
     @Override
     public Boolean testVersion() {
         AtomicReference<String> version = new AtomicReference<>();

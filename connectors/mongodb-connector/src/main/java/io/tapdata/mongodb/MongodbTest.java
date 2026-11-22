@@ -32,6 +32,8 @@ import static io.tapdata.base.ConnectorBase.testItem;
 
 public class MongodbTest extends CommonDbTest {
 
+    private static final String AUTHENTICATED_USER_PRIVILEGES = "authenticatedUserPrivileges";
+
     protected final MongodbConfig mongodbConfig;
     protected final MongoClient mongoClient;
 
@@ -126,7 +128,8 @@ public class MongodbTest extends CommonDbTest {
         try {
             MongoDatabase mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
             try (final MongoCursor<String> mongoCursor = mongoDatabase.listCollectionNames().iterator()) {
-                mongoCursor.hasNext();
+                io.tapdata.entity.logger.TapLogger.debug("MongodbTest",
+                        "Connection check found collections: {}", mongoCursor.hasNext());
             }
             consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY, TEST_CONNECTION_LOGIN));
             return true;
@@ -178,9 +181,7 @@ public class MongodbTest extends CommonDbTest {
             // validate mongos config.shards and source DB privileges
             return validateMongodb(connectionStatus);
         } else if (isMaster.containsKey("setName")) {   // validate replica set
-//            if (!validateAuthDB(connectionStatus)) {
-//                return false;
-//            }
+
             if (!validateReadOrWriteDatabase(connectionStatus, database, READ_PRIVILEGE_ACTIONS)) {
                 consumer.accept(new TestItem(TestItem.ITEM_READ, new TapTestItemException(new TapCodeException(MongodbErrorCode.READ_PRIVILEGES_MISSING, "Missing read privileges")), TestItem.RESULT_FAILED));
                 return false;
@@ -223,7 +224,7 @@ public class MongodbTest extends CommonDbTest {
 
     protected boolean validateReadOrWriteDatabase(Document connectionStatus, String database, Set<String> expectActions) {
         Document nodeAuthInfo = connectionStatus.get("authInfo", Document.class);
-        List authUserPrivileges = nodeAuthInfo.get("authenticatedUserPrivileges", List.class);
+        List<Document> authUserPrivileges = nodeAuthInfo.get(AUTHENTICATED_USER_PRIVILEGES, List.class);
 
         if (CollectionUtils.isEmpty(authUserPrivileges)) {
             return false;
@@ -241,10 +242,7 @@ public class MongodbTest extends CommonDbTest {
                 sourceDBPrivilegeSet.addAll(allDatabasePrivilegeSet);
             }
         }
-        if (sourceDBPrivilegeSet == null || !sourceDBPrivilegeSet.containsAll(expectActions)) {
-            return false;
-        }
-        return true;
+        return !(sourceDBPrivilegeSet == null || !sourceDBPrivilegeSet.containsAll(expectActions));
     }
 
 
@@ -285,15 +283,12 @@ public class MongodbTest extends CommonDbTest {
             }
 
         }
-        if (EmptyKit.isBlank(username) || EmptyKit.isBlank(password)) {
-            return false;
-        }
-        return true;
+        return !(EmptyKit.isBlank(username) || EmptyKit.isBlank(password));
     }
 
     protected Boolean validateMongodbShardKeys(Document connectionStatus) {
         Document nodeAuthInfo = connectionStatus.get("authInfo", Document.class);
-        List authUserPrivileges = nodeAuthInfo.get("authenticatedUserPrivileges", List.class);
+        List<Document> authUserPrivileges = nodeAuthInfo.get(AUTHENTICATED_USER_PRIVILEGES, List.class);
         Map<String, Set<String>> resourcePrivilegesMap = adaptResourcePrivilegesMap(authUserPrivileges);
         if (!resourcePrivilegesMap.containsKey(CONFIG_DATABASE) && !resourcePrivilegesMap.containsKey(CONFIG_DATABASE_COLLECTIONS)) {
             consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestItemException(new TapCodeException(MongodbErrorCode.READ_CONFIG_DB_FAIL, "Missing config read privileges")), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
@@ -314,7 +309,7 @@ public class MongodbTest extends CommonDbTest {
 
     protected boolean validateMongodb(Document connectionStatus) {
         Document nodeAuthInfo = connectionStatus.get("authInfo", Document.class);
-        List authUserPrivileges = nodeAuthInfo.get("authenticatedUserPrivileges", List.class);
+        List<Document> authUserPrivileges = nodeAuthInfo.get(AUTHENTICATED_USER_PRIVILEGES, List.class);
 
         Map<String, Set<String>> resourcePrivilegesMap = adaptResourcePrivilegesMap(authUserPrivileges);
         if (!resourcePrivilegesMap.containsKey(CONFIG_DATABASE) && !resourcePrivilegesMap.containsKey(CONFIG_DATABASE_SHARDS_COLLECTION)) {
@@ -339,7 +334,7 @@ public class MongodbTest extends CommonDbTest {
 
     protected boolean validateOplog(Document connectionStatus) {
         Document nodeAuthInfo = connectionStatus.get("authInfo", Document.class);
-        List authUserPrivileges = nodeAuthInfo.get("authenticatedUserPrivileges", List.class);
+        List<Document> authUserPrivileges = nodeAuthInfo.get(AUTHENTICATED_USER_PRIVILEGES, List.class);
         if (CollectionUtils.isNotEmpty(authUserPrivileges)) {
             Map<String, Set<String>> resourcePrivilegesMap = adaptResourcePrivilegesMap(authUserPrivileges);
             if (!resourcePrivilegesMap.containsKey(LOCAL_DATABASE) && !resourcePrivilegesMap.containsKey(LOCAL_DATABASEOPLOG_COLLECTION)) {
@@ -377,6 +372,7 @@ public class MongodbTest extends CommonDbTest {
         return true;
     }
 
+    @Override
     public Boolean testTimeDifference() {
         try {
             Long nowTime = MongodbUtil.getServerTime(mongoClient, mongodbConfig.getDatabase());

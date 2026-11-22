@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
 
 public class DorisDDLSqlGenerator implements DDLSqlGenerator {
 
-    protected final static String ALTER_TABLE_PREFIX = "alter table `%s`.`%s`";
+    protected static final String ALTER_TABLE_PREFIX = "alter table `%s`.`%s`";
 
     @Override
     public List<String> addColumn(CommonDbConfig config, TapNewFieldEvent tapNewFieldEvent) {

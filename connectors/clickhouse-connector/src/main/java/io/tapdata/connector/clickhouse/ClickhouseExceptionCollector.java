@@ -12,38 +12,38 @@ import java.util.regex.Pattern;
 
 public class ClickhouseExceptionCollector extends AbstractExceptionCollector implements ExceptionCollector {
 
-    private final static String pdkId = "clickhouse";
+    private static final String PDK_ID = "clickhouse";
 
     @Override
     protected String getPdkId() {
-        return pdkId;
+        return PDK_ID;
     }
 
     @Override
     public void collectTerminateByServer(Throwable cause) {
         if (cause instanceof SQLException && ((SQLException) cause).getErrorCode() == 394) {
-            throw new TapPdkTerminateByServerEx(pdkId, ErrorKit.getLastCause(cause));
+            throw new TapPdkTerminateByServerEx(PDK_ID, ErrorKit.getLastCause(cause));
         }
     }
 
     @Override
     public void collectUserPwdInvalid(String username, Throwable cause) {
         if (cause instanceof SQLException && ((SQLException) cause).getErrorCode() == 516) {
-            throw new TapPdkUserPwdInvalidEx(pdkId, username, ErrorKit.getLastCause(cause));
+            throw new TapPdkUserPwdInvalidEx(PDK_ID, username, ErrorKit.getLastCause(cause));
         }
     }
 
     @Override
     public void collectReadPrivileges(Object operation, List<String> privileges, Throwable cause) {
         if (cause instanceof SQLException && ((SQLException) cause).getErrorCode() == 497) {
-            throw new TapPdkReadMissingPrivilegesEx(pdkId, operation, privileges, ErrorKit.getLastCause(cause));
+            throw new TapPdkReadMissingPrivilegesEx(PDK_ID, operation, privileges, ErrorKit.getLastCause(cause));
         }
     }
 
     @Override
     public void collectWritePrivileges(Object operation, List<String> privileges, Throwable cause) {
         if (cause instanceof SQLException && ((SQLException) cause).getErrorCode() == 497) {
-            throw new TapPdkWriteMissingPrivilegesEx(pdkId, operation, privileges, ErrorKit.getLastCause(cause));
+            throw new TapPdkWriteMissingPrivilegesEx(PDK_ID, operation, privileges, ErrorKit.getLastCause(cause));
         }
     }
 
@@ -66,7 +66,7 @@ public class ClickhouseExceptionCollector extends AbstractExceptionCollector imp
             if (matcher.find()) {
                 fieldName = matcher.group(1);
             }
-            throw new TapPdkViolateNullableEx(pdkId, fieldName, ErrorKit.getLastCause(cause));
+            throw new TapPdkViolateNullableEx(PDK_ID, fieldName, ErrorKit.getLastCause(cause));
         }
     }
 

@@ -25,6 +25,7 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
         setJdbcDriver("com.oceanbase.jdbc.Driver");
     }
 
+    @Override
     public OceanbaseConfig load(Map<String, Object> map) {
         OceanbaseConfig config = (OceanbaseConfig) super.load(map);
         properties.put("rewriteBatchedStatements", "true");

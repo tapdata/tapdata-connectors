@@ -68,17 +68,7 @@ public class MongodbConfig extends CommonDbConfig {
 		this.syncIndex = syncIndex;
 	}
 
-//	public static MongodbConfig load(String jsonFile) throws IOException {
-//		ObjectMapper mapper = new ObjectMapper(new JsonFactory());
-//		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-//		return mapper.readValue(new File(jsonFile), MongodbConfig.class);
-//	}
-//
-//	public static MongodbConfig load(Map<String, Object> map) throws IOException {
-//		ObjectMapper mapper = new ObjectMapper();
-//		mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-//		return mapper.readValue((new ObjectMapper()).writeValueAsString(map), MongodbConfig.class);
-//	}
+
 
 	public String getUri() {
 		if (isUri) {
@@ -105,6 +95,7 @@ public class MongodbConfig extends CommonDbConfig {
 		}
 	}
 
+	@Override
 	public String getDatabase() {
 		if (isUri && EmptyKit.isNotEmpty(uri)) {
 			ConnectionString connectionString = new ConnectionString(uri);
@@ -136,30 +127,37 @@ public class MongodbConfig extends CommonDbConfig {
 		return isUri;
 	}
 
+	@Override
 	public String getHost() {
 		return host;
 	}
 
+	@Override
 	public void setHost(String host) {
 		this.host = host;
 	}
 
+	@Override
 	public void setDatabase(String database) {
 		this.database = database;
 	}
 
+	@Override
 	public String getUser() {
 		return user;
 	}
 
+	@Override
 	public void setUser(String user) {
 		this.user = user;
 	}
 
+	@Override
 	public String getPassword() {
 		return password;
 	}
 
+	@Override
 	public void setPassword(String password) {
 		this.password = password;
 	}
@@ -180,10 +178,12 @@ public class MongodbConfig extends CommonDbConfig {
 		this.ssl = ssl;
 	}
 
+	@Override
 	public String getSslKey() {
 		return sslKey;
 	}
 
+	@Override
 	public void setSslKey(String sslKey) {
 		this.sslKey = sslKey;
 	}

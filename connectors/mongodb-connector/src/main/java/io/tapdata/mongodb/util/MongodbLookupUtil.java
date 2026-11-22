@@ -95,7 +95,7 @@ public class MongodbLookupUtil {
 		}
 
 	private static String handleMongodbUriSpecialChar(String mongodbUri) {
-		mongodbUri = mongodbUri.replaceAll(":", "_")
+		mongodbUri = mongodbUri.replace(":", "_")
 				.replaceAll("/", "_");
 		return mongodbUri;
 	}

@@ -60,10 +60,12 @@ public class DDLObject extends TiData implements Serializable {
         this.version = version;
     }
 
+    @Override
     public Long getTableVersion() {
         return tableVersion;
     }
 
+    @Override
     public void setTableVersion(Long tableVersion) {
         this.tableVersion = tableVersion;
     }

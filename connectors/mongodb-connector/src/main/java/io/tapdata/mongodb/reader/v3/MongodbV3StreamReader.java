@@ -47,8 +47,8 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 
 	public static final String TAG = MongodbConnector.class.getSimpleName();
 
-	private final static String LOCAL_DATABASE = "local";
-	private final static String OPLOG_COLLECTION = "oplog.rs";
+	private static final String LOCAL_DATABASE = "local";
+	private static final String OPLOG_COLLECTION = "oplog.rs";
 	public static final long CONSUME_TIME_OUT = TimeUnit.SECONDS.toMillis(1L);
 
 	private MongodbConfig mongodbConfig;
@@ -167,6 +167,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 					lastConsumeTs = System.currentTimeMillis();
 				}
 			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
 				TapLogger.info("Stream polling failed: {}", e.getMessage(), e);
 				break;
 			}
@@ -209,7 +210,8 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 				try {
 					Thread.sleep(500l);
 				} catch (InterruptedException e) {
-					// nothing to do
+					Thread.currentThread().interrupt();
+					break;
 				}
 			}
 		}
@@ -220,7 +222,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 
 		BsonTimestamp startTs = null;
 		if (MapUtils.isNotEmpty(offset) && offset.containsKey(replicaSetName)) {
-			final MongoV3StreamOffset mongoV3StreamOffset = (MongoV3StreamOffset) offset.get(replicaSetName);
+			final MongoV3StreamOffset mongoV3StreamOffset = offset.get(replicaSetName);
 			final int seconds = mongoV3StreamOffset.getSeconds();
 			startTs = new BsonTimestamp(seconds, mongoV3StreamOffset.getInc());
 		} else {
@@ -252,8 +254,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 				return;
 			}
 
-//						List<TapEvent> tapEvents = new ArrayList<>(eventBatchSize);
-			// todo exception retry
+
 			while (running.get()) {
 				filter = Filters.and(Filters.gt("ts", startTs), fromMigrateFilter);
 				try (final MongoCursor<Document> mongoCursor = oplogCollection.find(filter)
@@ -290,25 +291,15 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 									break;
 								}
 							}
-//														Map<String, MongoV3StreamOffset> snapshotOffset = new ConcurrentHashMap<>(offset);
-//														tapEvents.add(tapEvent);
 
-//														snapshotOffset.put(replicaSetName, new MongoV3StreamOffset(bsonTimestamp.getTime(), bsonTimestamp.getInc()));
-//														if (tapEvents.size() % eventBatchSize == 0) {
-//																consumer.accept(tapEvents, snapshotOffset);
-//																tapEvents = new ArrayList<>();
-//														}
 							startTs = bsonTimestamp;
 						}
-//												else {
-//														if (tapEvents.size() > 0) {
-//																consumer.accept(tapEvents);
-//																tapEvents = new ArrayList<>();
-//														}
-//														Thread.sleep(500L);
-//												}
+
 					}
 				} catch (InterruptedException | MongoInterruptedException e) {
+					if (e instanceof InterruptedException) {
+					    Thread.currentThread().interrupt();
+					}
 					running.compareAndSet(true, false);
 				}
 			}
@@ -344,30 +335,30 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 		TapBaseEvent tapBaseEvent = null;
 		if (ns == null || ns.isEmpty()) {
 			// These are replica set events ...
-//						String msg = object.getString("msg");
-//						if ("new primary".equals(msg)) {
-//								AtomicReference<ServerAddress> address = new AtomicReference<>();
-//								try {
-//										primaryClient.executeBlocking("conn", mongoClient -> {
-//												ServerAddress currentPrimary = mongoClient.getAddress();
-//												address.set(currentPrimary);
-//										});
-//								} catch (InterruptedException e) {
-//										logger.error("Get current primary executeBlocking", e);
-//								}
-//								ServerAddress serverAddress = address.get();
-//
-//								if (serverAddress != null && !serverAddress.equals(primaryAddress)) {
-//										logger.info("Found new primary event in oplog, so stopping use of {} to continue with new primary",
-//														primaryAddress);
-//										// There is a new primary, so stop using this server and instead use the new primary ...
-//										return false;
-//								} else {
-//										logger.info("Found new primary event in oplog, current {} is new primary. " +
-//														"Continue to process oplog event.", primaryAddress);
-//								}
-//						}
-			// Otherwise, ignore this event ...
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 			TapLogger.debug(TAG, "Skipping event with no namespace: {}", event.toJson());
 			return null;
 		}
@@ -379,13 +370,13 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 			// Otherwise, it is an event on a document in a collection ...
 			if (!namespaces.contains(ns)) {
 				TapLogger.debug(TAG, "Skipping the event for database {} based on database.whitelist");
-//								try {
-//										// generate last msg event's timestamp event
-//										factory.recordEvent(event, clock.currentTimeInMillis(), false);
-//								} catch (InterruptedException e) {
-//										Thread.interrupted();
-//										return false;
-//								}
+
+
+
+
+
+
+
 				return null;
 			}
 
@@ -414,20 +405,20 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 					}
 					tapBaseEvent = updateDMLEvent(null, after, collectionName);((TapUpdateRecordEvent) tapBaseEvent).setIsReplaceEvent(!o.keySet().stream().anyMatch(k -> k.startsWith("$")));
 					Map<String, Object> originUnset = o.get("$unset", Map.class);
-					//Map<String, Object> finalUnset = new DataMap();
+
 					List<String> finalUnset = new ArrayList<>();if (originUnset != null) {
 						for (Map.Entry<String, Object> entry : originUnset.entrySet()) {
 							if (after == null || after.keySet().stream().noneMatch(v -> v.equals(entry.getKey()))) {
-								//finalUnset.put(entry.getKey(), true);
+
 							finalUnset.add(entry.getKey());
 							}
-//												if (!after.containsKey(entry.getKey())) {
-//													finalUnset.put(entry.getKey(), true);
-//												}
+
+
+
 						}
 					}
 					if (finalUnset.size() > 0) {
-						//info.put("$unset", finalUnset);
+
 					((TapUpdateRecordEvent) tapBaseEvent).removedFields(finalUnset);}
 					tapBaseEvent.setInfo(info);
 				} else if ("i".equalsIgnoreCase(event.getString("op"))) {
@@ -442,22 +433,22 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 						tapBaseEvent = deleteDMLEvent(o, collectionName);
 					}
 				}
-//								try {
-//										factory.recordEvent(event, clock.currentTimeInMillis(), true);
-//								} catch (InterruptedException e) {
-//										Thread.interrupted();
-//										return false;
-//								}
+
+
+
+
+
+
 			}
-//						else {
-//								try {
-//										// generate last msg event's timestamp event
-//										factory.recordEvent(event, clock.currentTimeInMillis(), false);
-//								} catch (InterruptedException e) {
-//										Thread.interrupted();
-//										return false;
-//								}
-//						}
+
+
+
+
+
+
+
+
+
 		}
 		return tapBaseEvent;
 	}

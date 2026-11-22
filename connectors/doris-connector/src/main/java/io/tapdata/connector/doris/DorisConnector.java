@@ -68,10 +68,7 @@ public class DorisConnector extends CommonDbConnector {
             dorisConfig.setTableConfig(tapConnectionContext.getTableNodeConfig());
         });
         dorisJdbcContext = new DorisJdbcContext(dorisConfig);
-//        if (!dorisJdbcContext.queryVersion().contains("2.")) {
-//            dorisConfig.setUpdateSpecific(false);
-//            dorisConfig.setUniqueKeyType("Unique");
-//        }
+
         if (tapConnectionContext instanceof TapConnectorContext) {
             ddlSqlGenerator = new DorisDDLSqlGenerator();
         }
@@ -171,6 +168,7 @@ public class DorisConnector extends CommonDbConnector {
 
     }
 
+    @Override
     protected RetryOptions errorHandle(TapConnectionContext tapConnectionContext, PDKMethod pdkMethod, Throwable throwable) {
         RetryOptions retryOptions = RetryOptions.create();
         if (null != matchThrowable(throwable, DorisRetryableException.class)
@@ -199,11 +197,7 @@ public class DorisConnector extends CommonDbConnector {
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
         try {
-            if (checkStreamLoad()) {
                 getDorisStreamLoader().writeRecord(tapRecordEvents, tapTable, writeListResultConsumer);
-            } else {
-                // TODO: 2023/4/28 jdbc writeRecord
-            }
         } catch (Throwable t) {
             dorisStreamLoaderMap.computeIfPresent(Thread.currentThread().getName(), (key, value) -> {
                 value.shutdown();
@@ -295,64 +289,14 @@ public class DorisConnector extends CommonDbConnector {
     }
 
 //    @Override
-//    protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
-//        TapTable tapTable = createTableEvent.getTable();
-//        CreateTableOptions createTableOptions = new CreateTableOptions();
-//        if (jdbcContext.queryAllTables(Collections.singletonList(tapTable.getId())).size() > 0) {
-//            createTableOptions.setTableExists(true);
-//            return createTableOptions;
-//        }
-//        String sql;
-//        Collection<String> primaryKeys = tapTable.primaryKeys(true);
-//        DorisTableType uniqueType = Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType()) ? DorisTableType.Aggregate : DorisTableType.Unique;
-//        long bucket = (EmptyKit.isNotNull(tapTable.getTableAttr()) && EmptyKit.isNotNull((tapTable.getTableAttr().get("capacity")))) ?
-//                (Math.min(Long.parseLong(tapTable.getTableAttr().get("capacity").toString()) / 1000000L, 14) + 2) : 16;
-//        if (CollectionUtils.isEmpty(primaryKeys)) {
-//            //append mode
-//            if (EmptyKit.isEmpty(dorisConfig.getDuplicateKey())) {
-//                Collection<String> allColumns = tapTable.getNameFieldMap().keySet();
-//                sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
-//                        "(" + commonSqlMaker.buildColumnDefinition(tapTable, true) + ") " +
-//                        uniqueType + " KEY (`" + String.join("`,`", allColumns) + "`) " +
-//                        "DISTRIBUTED BY HASH(`" + String.join("`,`", allColumns) + "`) BUCKETS " + bucket + " " +
-//                        "PROPERTIES(\"replication_num\" = \"" +
-//                        dorisConfig.getReplicationNum().toString() +
-//                        "\"" + (uniqueType == DorisTableType.Unique ? ", \"enable_unique_key_merge_on_write\" = \"true\", \"store_row_column\" = \"true\"" : "") + ")";
-//            } else {
-//                sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
-//                        "(" + ((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, dorisConfig.getDuplicateKey(), false) + ") " +
-//                        "DUPLICATE KEY (`" + String.join("`,`", dorisConfig.getDuplicateKey()) + "`) " +
-//                        "DISTRIBUTED BY HASH(`" + String.join("`,`", dorisConfig.getDistributedKey()) + "`) BUCKETS " + bucket + " " +
-//                        "PROPERTIES(\"replication_num\" = \"" +
-//                        dorisConfig.getReplicationNum().toString() +
-//                        "\")";
-//            }
-//        } else {
-//            sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
-//                    "(" + ((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, primaryKeys, uniqueType == DorisTableType.Aggregate) + ") " +
-//                    uniqueType + " KEY (`" + String.join("`,`", primaryKeys) + "`) " +
-//                    "DISTRIBUTED BY HASH(`" + String.join("`,`", primaryKeys) + "`) BUCKETS " + bucket + " " +
-//                    "PROPERTIES(\"replication_num\" = \"" +
-//                    dorisConfig.getReplicationNum().toString() +
-//                    "\"" + (uniqueType == DorisTableType.Unique ? ", \"enable_unique_key_merge_on_write\" = \"true\", \"store_row_column\" = \"true\"" : "") + ")";
-//        }
-//        createTableOptions.setTableExists(false);
-//        try {
-//            dorisJdbcContext.execute(sql);
-//            return createTableOptions;
-//        } catch (Exception e) {
-//            exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
-//            throw new RuntimeException("Create Table " + tapTable.getId() + " Failed | Error: " + e.getMessage() + " | Sql: " + sql, e);
-//        }
-//    }
 
-    //the second method to load schema instead of mysql
     @Override
     protected void singleThreadDiscoverSchema(List<DataMap> subList, Consumer<List<TapTable>> consumer) throws SQLException {
         List<TapTable> tapTableList = dorisJdbcContext.queryTablesDesc(subList.stream().map(v -> v.getString("tableName")).collect(Collectors.toList()));
         syncSchemaSubmit(tapTableList, consumer);
     }
 
+    @Override
     protected TapField makeTapField(DataMap dataMap) {
         return new MysqlColumn(dataMap).getTapField();
     }
@@ -369,11 +313,6 @@ public class DorisConnector extends CommonDbConnector {
         EmptyKit.closeQuietly(dorisJdbcContext);
     }
 
-    private boolean checkStreamLoad() {
-        // TODO: 2023/4/28 check stream load
-        return true;
-    }
-
     private TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
         DataMap dataMap = dorisJdbcContext.getTableInfo(tableName);
         TableInfo tableInfo = TableInfo.create();
@@ -382,6 +321,7 @@ public class DorisConnector extends CommonDbConnector {
         return tableInfo;
     }
 
+    @Override
     protected void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) throws SQLException {
         List<String> sqlList = fieldDDLHandlers.handle(tapFieldBaseEvent, tapConnectorContext);
         if (null == sqlList) {

@@ -161,7 +161,7 @@ public class KafkaConnector extends ConnectorBase {
             tableId = kafkaConfig.getTopicName();
         }
         CreateTableOptions createTableOptions = new CreateTableOptions();
-//        if (!this.isSchemaRegister) {
+
         Integer replicasSize = Optional.ofNullable(kafkaConfig.getReplicasSize()).orElse(1);
         Integer partitionNum = Optional.ofNullable(kafkaConfig.getPartitionNum()).orElse(3);
         AdminConfiguration configuration = new AdminConfiguration(kafkaConfig, tapConnectorContext.getId());
@@ -184,44 +184,18 @@ public class KafkaConnector extends ConnectorBase {
                 }
                 createTableOptions.setTableExists(true);
             }
-        } catch (InterruptedException | ExecutionException e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Create Table " + tableId + " Failed | Error: " + e.getMessage());
+        } catch (ExecutionException e) {
             throw new RuntimeException("Create Table " + tableId + " Failed | Error: " + e.getMessage());
         }
-//        }else{
-//            createTableOptions.setTableExists(true);
-//        }
+
         return createTableOptions;
     }
 
 
-//    private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws ExecutionException, InterruptedException, IOException {
-//        TapTable tapTable = tapCreateTableEvent.getTable();
-//        CreateTableOptions createTableOptions = new CreateTableOptions();
-//        if (this.isSchemaRegister) {
-//            if (checkTopicExists(kafkaConfig.getConnectionString(), tapTable.getId())) {
-//                createTableOptions.setTableExists(true);
-//                return createTableOptions;
-//            }
-//            AdminClient adminClient = null;
-//            try {
-////                properties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaConfig.getConnectionString());
-//                adminClient = AdminClient.create(properties);
-//                int numPartitions = 3;
-//                short replicationFactor = 1;
-//                NewTopic newTopic = new NewTopic(tapTable.getId(), numPartitions, replicationFactor);
-//                adminClient.createTopics(Collections.singletonList(newTopic)).all().get();
-//            } catch (InterruptedException e) {
-//                throw new RuntimeException("Create Table " + tapTable.getId() + " Failed! " + e.getMessage());
-//            } finally {
-//                adminClient.close();
-//            }
-//            createTableOptions.setTableExists(false);
-//        } else {
-//            createTableOptions.setTableExists(true);
-//        }
-//
-//        return createTableOptions;
-//    }
+
 
     private void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) {
         try {

@@ -1,6 +1,6 @@
 package io.tapdata.connector.doris.streamload;
 
-import io.tapdata.connector.doris.DorisJdbcContext;
+
 import io.tapdata.connector.doris.bean.DorisConfig;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.http.HttpEntity;
@@ -22,6 +22,8 @@ import java.util.Properties;
  * @Date 7/14/22
  */
 public class HttpPutBuilder {
+
+
     String url;
     Map<String, String> header;
     HttpEntity httpEntity;

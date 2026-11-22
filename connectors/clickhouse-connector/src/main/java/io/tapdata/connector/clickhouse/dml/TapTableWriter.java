@@ -168,33 +168,7 @@ public class TapTableWriter implements IWriter<TapRecordEvent, WriteListResult<T
         }
     }
 
-    private boolean checkExists(TapTable tapTable, Map<String, Object> data) throws SQLException {
-        Collection<String> primaryKeys = tapTable.primaryKeys(true);
-        if (CollectionUtils.isEmpty(primaryKeys)) {
-            return false;
-        }
 
-        if (null == existsStatement) {
-            StringBuilder sql = new StringBuilder();
-            sql.append("SELECT COUNT(1) AS COUNTS ").append(sqlQuota(".", database, tapTable.getId())).append(" WHERE");
-            for (String fieldName : primaryKeys) {
-                sql.append(" ").append(sqlQuota(fieldName)).append("<=>? AND");
-            }
-            sql.setLength(sql.length() - 4);
-            existsStatement = connection.prepareStatement(sql.toString());
-        }
-
-        int i = 1;
-        for (String fieldName : primaryKeys) {
-            existsStatement.setObject(i++, data.get(fieldName));
-        }
-        try (ResultSet rs = existsStatement.executeQuery()) {
-            if (rs.next()) {
-                return rs.getInt("COUNTS") > 0;
-            }
-            return false;
-        }
-    }
 
     protected String statementKey(Type type, TapRecordEvent record) {
         Map<String, Object> data;
@@ -271,7 +245,7 @@ public class TapTableWriter implements IWriter<TapRecordEvent, WriteListResult<T
                 sql.setLength(sql.length() - 1);
                 sql.append(")");
 
-//                TapLogger.info(connectorTag, "insert sql: " + sql);
+
                 return connection.prepareStatement(sql.toString());
             } catch (SQLException e) {
                 throw new RuntimeException(e);
@@ -317,7 +291,7 @@ public class TapTableWriter implements IWriter<TapRecordEvent, WriteListResult<T
                 sql.setLength(sql.length() - 4);
                 sql.append(" SETTINGS mutations_sync=2");
 
-//                TapLogger.info(connectorTag, "update sql: " + sql);
+
                 return connection.prepareStatement(sql.toString());
             } catch (SQLException e) {
                 throw new RuntimeException(e);
@@ -337,7 +311,7 @@ public class TapTableWriter implements IWriter<TapRecordEvent, WriteListResult<T
                 }
                 sql.setLength(sql.length() - 4);
                 sql.append(" SETTINGS mutations_sync=2");
-//                TapLogger.info(connectorTag, "delete sql: " + sql);
+
                 return connection.prepareStatement(sql.toString());
             } catch (SQLException e) {
                 throw new RuntimeException(e);

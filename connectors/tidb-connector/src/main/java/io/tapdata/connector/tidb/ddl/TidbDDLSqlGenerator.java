@@ -16,7 +16,7 @@ import java.util.List;
 
 public class TidbDDLSqlGenerator implements DDLSqlGenerator {
 
-    private final static String ALTER_TABLE_PREFIX = "alter table `%s`.`%s`";
+    private static final String ALTER_TABLE_PREFIX = "alter table `%s`.`%s`";
 
     @Override
     public List<String> addColumn(CommonDbConfig commonDbConfig, TapNewFieldEvent tapNewFieldEvent) {
@@ -137,7 +137,7 @@ public class TidbDDLSqlGenerator implements DDLSqlGenerator {
         if (StringUtils.isBlank(after)) {
             throw new RuntimeException("Append alter column name ddl sql failed, new column name is blank");
         }
-        // Integer subVersion = MysqlUtil.getSubVersion(version, 1);
+
         String sql = String.format(ALTER_TABLE_PREFIX, database, tableId);
         return Collections.singletonList(sql + " rename column `" + before + "` to `" + after + "`");
     }

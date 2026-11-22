@@ -130,14 +130,7 @@ public class ElasticsearchConnector extends ConnectorBase {
             if (tapRawValue != null && tapRawValue.getValue() != null) return tapRawValue.getValue().toString();
             return "null";
         });
-//        codecRegistry.registerFromTapValue(TapArrayValue.class, "text", TapArrayValue -> {
-//            if (TapArrayValue != null && TapArrayValue.getValue() != null) return TapArrayValue.getValue().toString();
-//            return "null";
-//        });
-//        codecRegistry.registerFromTapValue(TapMapValue.class, "text", tapMapValue -> {
-//            if (tapMapValue != null && tapMapValue.getValue() != null) return toJson(tapMapValue.getValue());
-//            return "null";
-//        });
+
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), elasticsearchConfig.getTimeFormat()));
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> formatTapDateTime(tapDateTimeValue.getValue(), elasticsearchConfig.getDatetimeFormat()));
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> formatTapDateTime(tapDateValue.getValue(), elasticsearchConfig.getDateFormat()));
@@ -309,7 +302,6 @@ public class ElasticsearchConnector extends ConnectorBase {
     }
 
     private void queryByFilter(TapConnectorContext connectorContext, List<TapFilter> filters, TapTable tapTable, Consumer<List<FilterResult>> listConsumer) throws Throwable {
-        Set<String> columnNames = tapTable.getNameFieldMap().keySet();
         List<FilterResult> filterResults = new LinkedList<>();
         MultiSearchRequest multiSearchRequest = new MultiSearchRequest();
         for (TapFilter filter : filters) {

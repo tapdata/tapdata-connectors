@@ -24,6 +24,7 @@ public class OceanbaseTest extends MysqlConnectionTest implements AutoCloseable 
         jdbcContext = new MysqlJdbcContextV2(oceanbaseConfig);
     }
 
+    @Override
     protected Boolean testVersion() {
         try {
             jdbcContext.queryWithNext("select version()", rs -> consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, rs.getString(1))));
@@ -33,6 +34,7 @@ public class OceanbaseTest extends MysqlConnectionTest implements AutoCloseable 
         return true;
     }
 
+    @Override
     public boolean testWriteOrReadPrivilegeV2(String grantSql, List<String> tableList, String databaseName, String mark) {
         return super.testWriteOrReadPrivilege(grantSql, tableList, databaseName, mark);
     }
@@ -59,5 +61,3 @@ public class OceanbaseTest extends MysqlConnectionTest implements AutoCloseable 
 
     private static final String ITEM_OB_LOG_PROXY = "ObLogProxy";
 }
-
-

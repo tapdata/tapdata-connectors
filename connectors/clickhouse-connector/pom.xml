@@ -70,7 +70,7 @@
         <dependency>
             <groupId>ru.yandex.clickhouse</groupId>
             <artifactId>clickhouse-jdbc</artifactId>
-<!--            <version>0.3.1-patch</version>-->
+
             <version>0.2.4</version>
             <exclusions>
                 <exclusion>
@@ -82,7 +82,7 @@
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
-<!--            <version>${guava.version}</version>-->
+
             <version>31.0.1-jre</version>
         </dependency>
         <dependency>
@@ -101,8 +101,6 @@
             <artifactId>tapdata-pdk-runner</artifactId>
             <scope>test</scope>
         </dependency>
-
-
 
     </dependencies>
 

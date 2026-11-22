@@ -24,6 +24,7 @@ import java.util.regex.Pattern;
 
 public class MongodbExceptionCollector extends AbstractExceptionCollector {
 
+    @Override
     protected String getPdkId() {
         return "mongodb";
     }
@@ -161,7 +162,7 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
             // 查找匹配项
             if (matcher.find()) {
                 // 提取表名和字段信息
-                String tableName = matcher.group(1);
+                matcher.group(1);
                 targetFieldName = matcher.group(2);
             }
             String constraintStr = "duplicate key error " + targetFieldName;
@@ -190,10 +191,8 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
     public boolean FromMongoBulkWriteExceptionGetWriteErrors(Throwable cause, int errorCode) {
         if (cause instanceof MongoBulkWriteException) {
             List<BulkWriteError> writeErrors = ((MongoBulkWriteException) cause).getWriteErrors();
-            if (null != writeErrors && writeErrors.size() > 0) {
-                if (writeErrors.get(0).getCode() == errorCode) {
+            if (!writeErrors.isEmpty() && writeErrors.get(0).getCode() == errorCode) {
                     return true;
-                }
             }
         }
         return false;

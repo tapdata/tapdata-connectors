@@ -30,12 +30,16 @@ public class ProcessLauncher {
                 sb.append(line);
             }
         } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             log.warn(errorMsg, e.getMessage());
         } finally {
             if (br != null) {
                 try {
                     br.close();
                 } catch (IOException e) {
+                    // Cleanup must not replace the command result or its original failure.
                 }
             }
         }

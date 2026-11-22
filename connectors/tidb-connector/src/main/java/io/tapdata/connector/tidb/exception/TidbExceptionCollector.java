@@ -1,21 +1,21 @@
 package io.tapdata.connector.tidb.exception;
 
 import io.tapdata.connector.mysql.MysqlExceptionCollector;
-import io.tapdata.connector.mysql.constant.DeployModeEnum;
-import io.tapdata.exception.TapPdkRetryableEx;
+
+
 import io.tapdata.exception.TapPdkTerminateByServerEx;
 import io.tapdata.kit.ErrorKit;
 
-import java.io.EOFException;
+
 import java.sql.SQLException;
 
 public class TidbExceptionCollector extends MysqlExceptionCollector {
 
-    private final static String pdkId = "tidb";
+    private static final String PDK_ID = "tidb";
 
     @Override
     protected String getPdkId() {
-        return pdkId;
+        return PDK_ID;
     }
 
     @Override

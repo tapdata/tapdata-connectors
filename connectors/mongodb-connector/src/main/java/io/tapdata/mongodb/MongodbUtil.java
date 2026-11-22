@@ -47,14 +47,14 @@ import java.util.stream.IntStream;
  **/
 public class MongodbUtil {
 
-	public final static String SUB_COLUMN_NAME = "__tapd8";
+	public static final String SUB_COLUMN_NAME = "__tapd8";
 
 	private static final int SAMPLE_SIZE_BATCH_SIZE = 1000;
 
-	private final static String BUILDINFO = "buildinfo";
-	private final static String VERSION = "version";
-	private final static String COLL_STATS = "collStats";
-	private final static String SERVER_STATUS = "serverStatus";
+	private static final String BUILDINFO = "buildinfo";
+	private static final String VERSION = "version";
+	private static final String COLL_STATS = "collStats";
+	private static final String SERVER_STATUS = "serverStatus";
 
 	public static int getVersion(MongoClient mongoClient, String database) {
 		int versionNum = 0;
@@ -138,7 +138,7 @@ public class MongodbUtil {
 			if (null == mongoClient || null == collectionName || "".equals(collectionName.trim())) return map;
 			MongoDatabase mongoDatabase = mongoClient.getDatabase("config");
 			FindIterable<Document> collections = mongoDatabase.getCollection("collections").find(new Document("_id", collectionFullName).toBsonDocument());
-			Document collStats = collections.first();//mongoDatabase.runCommand(new Document("connections", collectionFullName).toBsonDocument());
+			Document collStats = collections.first();
 			if (null != collStats && !collStats.isEmpty()) {
 				collStats.entrySet()
 						.stream()
@@ -391,10 +391,7 @@ public class MongodbUtil {
 		try (MongoClient mongoClient = MongoClients.create(getMongoClientSettingsBuilder(mongoUri, mongodbConfig).build())) {
 			MongoCollection<Document> collection = mongoClient.getDatabase("config").getCollection("shards");
 			final MongoCursor<Document> cursor = collection.find().iterator();
-			if (cursor.hasNext()) {
-				return true;
-			}
-			return false;
+			return (cursor.hasNext());
 		} catch (Exception e) {
 			return false;
 		}
@@ -430,12 +427,14 @@ public class MongodbUtil {
 							try {
 								client.close();
 							} catch (Exception ignored) {
+								// A failed probe-client close must not discard the discovered primary.
 							}
 						}
 					}
 				});
 			}
 		} catch (Exception ignored) {
+			// Primary discovery is optional; fall back to the original connection URI.
 		}
 		// 如果 primaryHost 为空, 给第一个地址, 等报错后续继续选择
 		if (primaryHost.get() == null) {
@@ -525,38 +524,12 @@ public class MongodbUtil {
 		});
 
 		builder.applyConnectionString(new ConnectionString(mongodbUri));
-		if (EmptyKit.isNotEmpty(mongodbUri) &&
-				(mongodbUri.indexOf("tlsAllowInvalidCertificates=true") > 0 ||
-						mongodbUri.indexOf("sslAllowInvalidCertificates=true") > 0)) {
-			builder.applyToSslSettings(sslSettingBuilder -> {
-				SSLContext sslContext = null;
-				try {
-					sslContext = SSLContext.getInstance("SSL");
-				} catch (NoSuchAlgorithmException e) {
-					throw new RuntimeException(String.format("Create ssl context failed %s", e.getMessage()), e);
+        if (java.util.regex.Pattern.compile(
+                "[?&](?:tlsAllowInvalidCertificates|sslAllowInvalidCertificates|tlsInsecure)=true(?:&|$)",
+                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(mongodbUri).find()) {
+            throw new IllegalArgumentException("Disabling TLS certificate validation is not supported; configure a trusted CA certificate instead");
 				}
-				try {
-					sslContext.init(null, new TrustManager[]{new X509TrustManager() {
-						@Override
-						public void checkClientTrusted(X509Certificate[] x509Certificates, String s) throws CertificateException {
-						}
-
-						@Override
-						public void checkServerTrusted(X509Certificate[] x509Certificates, String s) throws CertificateException {
-						}
-
-						@Override
-						public X509Certificate[] getAcceptedIssuers() {
-							return null;
-						}
-					}}, new SecureRandom());
-				} catch (KeyManagementException e) {
-					throw new RuntimeException(String.format("Initialize ssl context failed %s", e.getMessage()), e);
-				}
-				sslSettingBuilder.enabled(true).context(sslContext).invalidHostNameAllowed(true);
-			});
-
-		} else if(mongodbConfig.isSsl()) {
+        if (mongodbConfig.isSsl()) {
 			sslMongoClientOption(mongodbConfig.isSslValidate(), mongodbConfig.getSslCA(),
 					mongodbConfig.getSslKey(), mongodbConfig.getSslPass(), mongodbConfig.getCheckServerIdentity(), builder);
 		}
@@ -569,24 +542,17 @@ public class MongodbUtil {
 
 		List<String> clientCertificates = SSLUtil.retriveCertificates(sslClientPem);
 		String clientPrivateKey = SSLUtil.retrivePrivateKey(sslClientPem);
-		if (EmptyKit.isNotBlank(clientPrivateKey) && CollectionUtils.isNotEmpty(clientCertificates)) {
-
 			builder.applyToSslSettings(sslSettingsBuilder -> {
-				List<String> trustCertificates = null;
-				if (sslValidate) {
-					trustCertificates = SSLUtil.retriveCertificates(sslCA);
-				}
-				SSLContext sslContext = null;
+            List<String> trustCertificates = sslValidate ? SSLUtil.retriveCertificates(sslCA) : null;
 				try {
-					sslContext = SSLUtil.createSSLContext(clientPrivateKey, clientCertificates, trustCertificates, sslPass);
+                sslSettingsBuilder.context(SSLUtil.createSSLContext(
+                        clientPrivateKey, clientCertificates, trustCertificates, sslPass));
 				} catch (Exception e) {
 					throw new RuntimeException(String.format("Create ssl context failed %s", e.getMessage()), e);
 				}
-				sslSettingsBuilder.context(sslContext);
 				sslSettingsBuilder.enabled(true);
 				sslSettingsBuilder.invalidHostNameAllowed(!checkServerIdentity);
 			});
-		}
 	}
 
 	public static String getSimpleMongodbUri(ConnectionString connectionString) {
@@ -725,6 +691,8 @@ public class MongodbUtil {
 		}
 	}
 
+    // Plugins can provide ObjectId through another classloader; class identity checks cannot match it.
+    @SuppressWarnings("java:S1872")
     public static Object convertValue(Object o) {
         if (null == o) return null;
         if (o instanceof DateTime) {

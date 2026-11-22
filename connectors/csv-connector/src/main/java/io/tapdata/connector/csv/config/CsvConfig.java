@@ -20,6 +20,7 @@ public class CsvConfig extends FileConfig {
         setFileType("csv");
     }
 
+    @Override
     public CsvConfig load(Map<String, Object> map) {
         super.load(map);
         String configuredSeparator = separator;

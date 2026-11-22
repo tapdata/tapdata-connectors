@@ -122,7 +122,7 @@ public class ClickhouseConnector extends CommonDbConnector {
             //2、table columns info
             AtomicInteger keyPos = new AtomicInteger(0);
             AtomicInteger primaryKeyPos = new AtomicInteger(0);
-//            AtomicInteger partitionKeyPos = new AtomicInteger(0);
+
             List<TapIndexField> sortingIndexFields = new ArrayList<>();
             List<TapIndexField> primaryIndexFields = new ArrayList<>();
             columnList.stream().filter(col -> table.equals(col.getString("tableName")))
@@ -138,10 +138,7 @@ public class ClickhouseConnector extends CommonDbConnector {
                         if (column.isSorting()) {
                             sortingIndexFields.add(new TapIndexField().name(tapField.getName()).fieldAsc(true));
                         }
-//                        if (column.isPartition()) {
-//                            tapField.setPartitionKey(column.isPartition());
-//                            tapField.setPartitionKeyPos(partitionKeyPos.incrementAndGet());
-//                        }
+
                         tapTable.add(tapField);
                     });
             if (EmptyKit.isNotEmpty(primaryIndexFields)) {
@@ -205,7 +202,7 @@ public class ClickhouseConnector extends CommonDbConnector {
         });
 
         //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
-//        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime());
+
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
             if (clickhouseConfig.getOldVersionTimezone()) {
                 return tapDateTimeValue.getValue().toTimestamp();
@@ -226,16 +223,14 @@ public class ClickhouseConnector extends CommonDbConnector {
         connectorFunctions.supportCreateTableV2(this::createTableV2);
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportClearTable(this::clearTable);
-//        connectorFunctions.supportCreateIndex(this::createIndex);
+
         connectorFunctions.supportWriteRecord(this::writeRecord);
 
 
         //source
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
-//        connectorFunctions.supportStreamRead(this::streamRead);
-//        connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
-        //query
+
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
         connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
@@ -253,6 +248,7 @@ public class ClickhouseConnector extends CommonDbConnector {
 
     }
 
+    @Override
     protected void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) throws SQLException {
         List<String> sqlList = fieldDDLHandlers.handle(tapFieldBaseEvent, tapConnectorContext);
         if (null == sqlList) {
@@ -265,6 +261,7 @@ public class ClickhouseConnector extends CommonDbConnector {
         jdbcContext.batchExecute(sqlList);
     }
 
+    @Override
     protected CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws SQLException {
         TapTable tapTable = tapCreateTableEvent.getTable();
         CreateTableOptions createTableOptions = new CreateTableOptions();
@@ -392,6 +389,7 @@ public class ClickhouseConnector extends CommonDbConnector {
     }
 
     //需要改写成ck的创建索引方式
+    @Override
     protected void createIndex(TapConnectorContext connectorContext, TapTable tapTable, TapCreateIndexEvent createIndexEvent) {
         try {
             List<String> sqls = TapSimplify.list();

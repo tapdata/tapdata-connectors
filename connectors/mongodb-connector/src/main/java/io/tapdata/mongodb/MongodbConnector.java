@@ -116,8 +116,8 @@ public class MongodbConnector extends ConnectorBase {
 	 * Reference：<a href="https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.yml">error_codes.yml</a>
 	 * connectors/mongodb-connector/src/main/resources/mongo-error-codes.yml
 	 */
-	private final static int[] SERVER_ERROR_CODES = new int[]{6, 7, 70, 71, 74, 76, 83, 89, 90, 91, 92, 93, 94, 95, 133, 149, 189, 190, 202, 279, 317, 384, 402, 9001, 10058, 10107, 11600, 11602, 13435, 13436};
-	private final static int[] RETRYABLE_ERROR_CODES = new int[]{43, 50, 134, 175, 222, 234, 237, 262, 358, 363, 50915};
+	private static final int[] SERVER_ERROR_CODES = new int[]{6, 7, 70, 71, 74, 76, 83, 89, 90, 91, 92, 93, 94, 95, 133, 149, 189, 190, 202, 279, 317, 384, 402, 9001, 10058, 10107, 11600, 11602, 13435, 13436};
+	private static final int[] RETRYABLE_ERROR_CODES = new int[]{43, 50, 134, 175, 222, 234, 237, 262, 358, 363, 50915};
 
 
 	protected MongoCollection<Document> getMongoCollection(String table) {
@@ -193,6 +193,7 @@ public class MongodbConnector extends ConnectorBase {
 					try {
 						countDownLatch.await();
 					} catch (InterruptedException e) {
+						Thread.currentThread().interrupt();
 						TapLogger.error(TAG, "MongodbConnector discoverSchema countDownLatch await", e);
 					}
 
@@ -235,7 +236,7 @@ public class MongodbConnector extends ConnectorBase {
 
 								TapIndex tapIndex = new TapIndex();
 								// TODO: TapIndex struct not enough to represent index, so we encode index info in name
-								tapIndex.setName("__t__" + ((Document) index).toJson());
+								tapIndex.setName("__t__" + (index).toJson());
 
 								AtomicBoolean haveOid = new AtomicBoolean();
 								AtomicInteger keyCounter = new AtomicInteger();
@@ -260,7 +261,7 @@ public class MongodbConnector extends ConnectorBase {
 								if (haveOid.get() && keyCounter.get() == 1) {
 									tapIndex.unique(true);
 								}
-								TapLogger.info(TAG, "MongodbConnector discoverSchema table: {} index {}", name, ((Document) index).toJson());
+								TapLogger.info(TAG, "MongodbConnector discoverSchema table: {} index {}", name, (index).toJson());
 								table.add(tapIndex);
 							});
 							Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
@@ -284,6 +285,7 @@ public class MongodbConnector extends ConnectorBase {
 					try {
 						countDownLatch.await();
 					} catch (InterruptedException e) {
+						Thread.currentThread().interrupt();
 						TapLogger.error(TAG, "MongodbConnector discoverSchema countDownLatch await", e);
 					}
 
@@ -334,12 +336,14 @@ public class MongodbConnector extends ConnectorBase {
 				schemaLimit = 1024;
 			}
 		} catch (Exception ignored) {
+			// Retain the default schema limit when the optional setting cannot be read.
 		}
 		try {
 			if (table.getNameFieldMap().size() > schemaLimit) {
 				return;
 			}
 		} catch (Exception ignored) {
+			// Schema-limit enforcement is best-effort when field metadata is unavailable.
 		}
 
 		if (value instanceof BsonDocument) {
@@ -590,7 +594,7 @@ public class MongodbConnector extends ConnectorBase {
 		connectorFunctions.supportGetReadPartitionsFunction(this::getReadPartitions);
 		connectorFunctions.supportCountByPartitionFilterFunction(this::countByPartitionFilter);
 		connectorFunctions.supportQueryFieldMinMaxValueFunction(this::queryFieldMinMaxValue);
-//        connectorFunctions.supportStreamOffset((connectorContext, tableList, offsetStartTime, offsetOffsetTimeConsumer) -> streamOffset(connectorContext, tableList, offsetStartTime, offsetOffsetTimeConsumer));
+
 		connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
 		connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
 		connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
@@ -876,17 +880,12 @@ public class MongodbConnector extends ConnectorBase {
 								});
 
 						//开启分片功能
-						//db.runCommand({enablesharding:"testdb"});
+
 						MongoDatabase admin = null;
 						try {
 							admin = mongoClient.getDatabase("admin");
-							if (null != admin) {
 								admin.runCommand(new BsonDocument("enablesharding", new BsonString(database)));
 								isShardCollection = true;
-							} else {
-								log.warn("The current Database does not have a sharding cluster configuration and cannot copy the sharding attributes of the source table,message: can not use system database 'admin' ");
-								isShardCollection = false;
-							}
 						} catch (Exception e) {
 							isShardCollection = false;
 							log.warn(" The current Database does not have a sharding cluster configuration and cannot copy the sharding attributes of the source table. The sharding configuration cannot be opened, message: {}", e.getMessage());
@@ -906,8 +905,7 @@ public class MongodbConnector extends ConnectorBase {
 							}
 
 							//设置分片
-							//db.runCommand({shardcollection:"db.collection",key:{field1:1}});
-							//sh.shardCollection({"": 1/hased, "unique" : true, keys: {}});
+
 							BsonDocument bson = new BsonDocument();
 							bson.put("shardcollection", new BsonString(String.format("%s.%s", database, table.getId())));
 							bson.put("unique", new BsonBoolean(unique));
@@ -1084,32 +1082,24 @@ public class MongodbConnector extends ConnectorBase {
 		FindIterable<Document> minIterable = collection.find(query).sort(minSort).projection(new Document().append(fieldName, 1)).limit(1);
 		Document minDoc = minIterable.first();
 		if (minDoc == null) {
-//			throw new CoreException(MongoErrors.NO_RECORD_WHILE_GET_MIN, "No record while get min for field {}, query {}, sort {}", fieldName, query, sort);
+
 			TapLogger.info(TAG, "No record while get min for field {}, query {}, sort {}", fieldName, query, sort);
 			return null;
 		}
 		Object minValue = minDoc.get(fieldName);
-//		if(minValue == null) {
-////			throw new CoreException(MongoErrors.MIN_VALUE_IS_NULL, "Min value is null for field {}, query {}, sort {}", fieldName, query, sort);
-//			TapLogger.info(TAG, "Min value is null for field {}, query {}, sort {}", fieldName, query, sort);
-//			return null;
-//		}
+
 		fieldMinMaxValue.min(minValue).detectType(minValue);
 
 		//Get max value
 		FindIterable<Document> maxIterable = collection.find(query).sort(maxSort).projection(new Document().append(fieldName, 1)).limit(1);
 		Document maxDoc = maxIterable.first();
 		if (maxDoc == null) {
-//			throw new CoreException(MongoErrors.NO_RECORD_WHILE_GET_MAX, "No record while get max for field {}, query {}, sort {}", fieldName, query, sort);
+
 			TapLogger.info(TAG, "No record while get max for field {}, query {}, sort {}", fieldName, query, sort);
 			return null;
 		}
 		Object maxValue = maxDoc.get(fieldName);
-//		if(maxValue == null) {
-////			throw new CoreException(MongoErrors.MAX_VALUE_IS_NULL, "Max value is null for field {}, query {}, sort {}", fieldName, query, sort);
-//			TapLogger.info(TAG, "Max value is null for field {}, query {}, sort {}", fieldName, query, sort);
-//			return null;
-//		}
+
 		fieldMinMaxValue.max(maxValue);
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
@@ -1221,6 +1211,7 @@ public class MongodbConnector extends ConnectorBase {
 					try {
 						value = Integer.parseInt((String) value);
 					} catch (NumberFormatException ignored) {
+						// Keep the original value when it cannot be converted to an integer.
 					}
 				}
 				break;
@@ -1229,6 +1220,7 @@ public class MongodbConnector extends ConnectorBase {
 					try {
 						value = Long.parseLong((String) value);
 					} catch (NumberFormatException ignored) {
+						// Keep the original value when it cannot be converted to a long.
 					}
 				}
 				break;
@@ -1237,6 +1229,7 @@ public class MongodbConnector extends ConnectorBase {
 					try {
 						value = Double.parseDouble((String) value);
 					} catch (NumberFormatException ignored) {
+						// Keep the original value when it cannot be converted to a double.
 					}
 				}
 				break;
@@ -1245,6 +1238,7 @@ public class MongodbConnector extends ConnectorBase {
 					try {
 						value = new BigDecimal((String) value);
 					} catch (Exception ignored) {
+						// Keep the original value when it cannot be converted to a decimal.
 					}
 				}
 				break;
@@ -1253,6 +1247,7 @@ public class MongodbConnector extends ConnectorBase {
 					try {
 						value = new ObjectId(value.toString());
 					} catch (Exception ignored) {
+						// Keep the original filter value when it is not a valid ObjectId.
 					}
 				}
 			default:
@@ -1273,15 +1268,18 @@ public class MongodbConnector extends ConnectorBase {
 				.startSplitting();
 	}
 
+	@Override
 	protected RetryOptions errorHandle(TapConnectionContext tapConnectionContext, PDKMethod pdkMethod, Throwable throwable) {
 		if (null != matchThrowable(throwable, MongoNotPrimaryException.class)) {
 			try {
 				onStop(tapConnectionContext);
 			} catch (Throwable ignore) {
+				// Continue reconnect recovery even if closing the old client fails.
 			}
 			try {
 				onStart(tapConnectionContext);
 			} catch (Throwable ignore) {
+				// The retry result below lets the next attempt reconnect after a failed restart.
 			}
 		}
 
@@ -1323,59 +1321,71 @@ public class MongodbConnector extends ConnectorBase {
 
 	protected void createIndex(TapConnectorContext tapConnectorContext, TapTable table, TapCreateIndexEvent tapCreateIndexEvent) {
 		final List<TapIndex> indexList = tapCreateIndexEvent.getIndexList();
-		if (CollectionUtils.isNotEmpty(indexList)) {
-			Document keys = new Document();
-			List<IndexModel> indexModels = new ArrayList<>();
-			MongoCollection<Document> collection = mongoDatabase.getCollection(table.getName());
-			for (TapIndex tapIndex : indexList) {
-				try {
-					final List<TapIndexField> indexFields = tapIndex.getIndexFields();
-					if (CollectionUtils.isNotEmpty(indexFields)) {
-						if (indexFields.size() == 1 && "_id".equals(indexFields.stream().findFirst().get().getName())) {
-							continue;
-						}
-						keys = new Document();
-						for (TapIndexField indexField : indexFields) {
-							keys.append(indexField.getName(), Boolean.FALSE.equals(indexField.getFieldAsc()) ? -1 : 1);
-						}
-						final IndexOptions indexOptions = new IndexOptions();
-						indexOptions.background(true);
-						if (indexFields.size() != 1 || !"_id".equals(indexFields.stream().findFirst().get().getName())) {
-							indexOptions.unique(tapIndex.isUnique());
-						}
-						if (EmptyKit.isNotEmpty(tapIndex.getName())) {
-							indexOptions.name(tapIndex.getName());
-						}
-						indexModels.add(new IndexModel(keys, indexOptions));
+		if (CollectionUtils.isEmpty(indexList)) {
+			return;
+		}
+		Document keys = new Document();
+		List<IndexModel> indexModels = new ArrayList<>();
+		MongoCollection<Document> collection = mongoDatabase.getCollection(table.getName());
+		for (TapIndex tapIndex : indexList) {
+			try {
+				final List<TapIndexField> indexFields = tapIndex.getIndexFields();
+				if (CollectionUtils.isNotEmpty(indexFields)) {
+					if (indexFields.size() == 1 && "_id".equals(indexFields.get(0).getName())) {
+						continue;
 					}
-					if (isCommitQuorumSupported()) {
-						CreateIndexOptions createIndexOptions = new CreateIndexOptions().commitQuorum(CreateIndexCommitQuorum.MAJORITY);
-						collection.createIndexes(indexModels, createIndexOptions);
-					} else {
-						collection.createIndexes(indexModels);
-					}
-				} catch (Exception e) {
-					if (e instanceof MongoCommandException) {
-						MongoCommandException mongoCommandException = (MongoCommandException) e;
-						if (mongoCommandException.getErrorCode() == 86 && "IndexKeySpecsConflict".equals(mongoCommandException.getErrorCodeName())) {
-							// Index already exists
-							Document finalKeys = keys;
-							Optional.ofNullable(tapConnectorContext.getLog()).ifPresent(log -> log.info("Index [{}] already exists, can ignore creating this index, server error detail message: {}", finalKeys, e.getMessage()));
-							continue;
-						}
-						if (mongoCommandException.getErrorCode() == 85 && "IndexOptionsConflict".equals(mongoCommandException.getErrorCodeName())) {
-							// Index already exists but options is inconsistent
-							Document finalKeys = keys;
-							Optional.ofNullable(tapConnectorContext.getLog()).ifPresent(log -> log.warn("Index [{}] already exists but options is inconsistent, will ignore creating this index, server error detail message: {}", finalKeys, e.getMessage()));
-							continue;
-						}
-					}
-					exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(), e);
-					exceptionCollector.throwWriteExIfNeed(null, e);
-					throw e;
+					keys = new Document();
+					indexModels.add(buildIndexModel(tapIndex, indexFields, keys));
 				}
+				submitIndexes(collection, indexModels);
+			} catch (Exception e) {
+				if (ignoreExistingIndexFailure(tapConnectorContext, keys, e)) {
+					continue;
+				}
+				exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(), e);
+				exceptionCollector.throwWriteExIfNeed(null, e);
+				throw e;
 			}
 		}
+	}
+
+	private void submitIndexes(MongoCollection<Document> collection, List<IndexModel> indexModels) {
+		if (isCommitQuorumSupported()) {
+			CreateIndexOptions createIndexOptions = new CreateIndexOptions().commitQuorum(CreateIndexCommitQuorum.MAJORITY);
+			collection.createIndexes(indexModels, createIndexOptions);
+		} else {
+			collection.createIndexes(indexModels);
+		}
+	}
+
+	private IndexModel buildIndexModel(TapIndex tapIndex, List<TapIndexField> indexFields, Document keys) {
+		for (TapIndexField indexField : indexFields) {
+			keys.append(indexField.getName(), Boolean.FALSE.equals(indexField.getFieldAsc()) ? -1 : 1);
+		}
+		final IndexOptions indexOptions = new IndexOptions();
+		indexOptions.background(true);
+		// The caller skips the immutable single-field _id index before building a model.
+		indexOptions.unique(tapIndex.isUnique());
+		if (EmptyKit.isNotEmpty(tapIndex.getName())) {
+			indexOptions.name(tapIndex.getName());
+		}
+		return new IndexModel(keys, indexOptions);
+	}
+
+	private boolean ignoreExistingIndexFailure(TapConnectorContext context, Document keys, Exception failure) {
+		if (!(failure instanceof MongoCommandException)) {
+			return false;
+		}
+		MongoCommandException commandFailure = (MongoCommandException) failure;
+		if (commandFailure.getErrorCode() == 86 && "IndexKeySpecsConflict".equals(commandFailure.getErrorCodeName())) {
+			Optional.ofNullable(context.getLog()).ifPresent(log -> log.info("Index [{}] already exists, can ignore creating this index, server error detail message: {}", keys, failure.getMessage()));
+			return true;
+		}
+		if (commandFailure.getErrorCode() == 85 && "IndexOptionsConflict".equals(commandFailure.getErrorCodeName())) {
+			Optional.ofNullable(context.getLog()).ifPresent(log -> log.warn("Index [{}] already exists but options is inconsistent, will ignore creating this index, server error detail message: {}", keys, failure.getMessage()));
+			return true;
+		}
+		return false;
 	}
 
 	private String memoryFetcher(List<String> mapKeys, String level) {
@@ -1393,9 +1403,6 @@ public class MongodbConnector extends ConnectorBase {
 		}
 		mongoConfig = (MongodbConfig) new MongodbConfig().load(connectionConfig);
 		mongoConfig.load(connectionContext.getNodeConfig());
-		if (mongoConfig == null) {
-			throw new RuntimeException("load mongo config failed from connection config");
-		}
 		if (mongoClient == null) {
 			mongoClient = MongodbUtil.createMongoClient(mongoConfig,false);
 			mongoDatabase = mongoClient.getDatabase(mongoConfig.getDatabase());
@@ -1409,13 +1416,7 @@ public class MongodbConnector extends ConnectorBase {
 
 	}
 
-//    Object streamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
-//        //If don't support return stream offset by offsetStartTime, please throw NotSupportedException to let Flow engine knows, otherwise the result will be unpredictable.
-////        if(offsetStartTime != null)
-////            throw new NotSupportedException();
-//        //TODO return stream offset
-//        return null;
-//    }
+
 
 	private static final String CONFIG = "config";
 	private static final String COLLECTIONS = "collections";
@@ -1439,6 +1440,7 @@ public class MongodbConnector extends ConnectorBase {
 				return (Boolean) document.get("sharded");
 			}
 		} catch (Exception ignored) {
+			// An unavailable collStats probe falls back to treating the collection as unsharded.
 		}
 		return false;
 	}
@@ -1641,8 +1643,7 @@ public class MongodbConnector extends ConnectorBase {
 	 * @return
 	 */
 	protected long batchCount(TapConnectorContext connectorContext, TapTable table) throws Throwable {
-//        MongoCollection<Document> collection = getMongoCollection(table.getId());
-//        return collection.countDocuments();
+
 		Long collectionNotAggregateCountByTableName = null;
 		try {
 			collectionNotAggregateCountByTableName = getCollectionNotAggregateCountByTableName(mongoClient, mongoConfig.getDatabase(), table.getId(), null);
@@ -1652,7 +1653,7 @@ public class MongodbConnector extends ConnectorBase {
 			throw e;
 		}
 		return collectionNotAggregateCountByTableName;
-//		return getCollectionNotAggregateCountByTableName(mongoClient, mongoConfig.getDatabase(), table.getId(), null);
+
 	}
 
 	public static long getCollectionNotAggregateCountByTableName(MongoClient mongoClient, String db, String collectionName, Bson filter) {
@@ -1665,7 +1666,7 @@ public class MongodbConnector extends ConnectorBase {
 
 		if (countDocument.containsKey("ok") && countDocument.containsKey("n")) {
 			if (countDocument.get("ok").equals(1d)) {
-//				dbCount = Long.valueOf(countDocument.get("n") + "");
+
 				Object countObj = countDocument.get("n");
 				String countStr = countObj + "";
 				try {
@@ -1816,9 +1817,7 @@ public class MongodbConnector extends ConnectorBase {
 	 * you can get the connection/node config which is the user input for your connection/node application, described in your json file.
 	 * current instance is serving for the table from connectorContext.
 	 */
-//    @Override
-//    public void onDestroy(TapConnectionContext connectionContext) {
-//    }
+
 	protected MongodbStreamReader createStreamReader() {
 		MongodbStreamReader mongodbStreamReader = null;
 		try {

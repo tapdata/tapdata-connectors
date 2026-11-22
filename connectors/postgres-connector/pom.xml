@@ -283,27 +283,22 @@
                     <target>17</target>
                 </configuration>
             </plugin>
-            <!--<plugin>
+
+            <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <executions>
-                    &lt;!&ndash;first execution : for preparing JaCoCo runtime agent&ndash;&gt;
                     <execution>
                         <id>prepare-agent</id>
-                        <goals>
-                            <goal>prepare-agent</goal>
-                        </goals>
+                        <goals><goal>prepare-agent</goal></goals>
                     </execution>
-                    &lt;!&ndash;second execution : for creating code coverage reports&ndash;&gt;
                     <execution>
                         <id>report</id>
                         <phase>test</phase>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
+                        <goals><goal>report</goal></goals>
                     </execution>
                 </executions>
-            </plugin>-->
+            </plugin>
         </plugins>
     </build>
 </project>

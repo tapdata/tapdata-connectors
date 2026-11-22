@@ -84,24 +84,12 @@ public class MongoBatchReader {
     }
 
     protected FindIterable<RawBsonDocument> findIterable(ReadParam param, ClientSession clientSession) {
-//        Log log = connectorContext.getLog();
+
         MongoCollection<RawBsonDocument> collection = param.getRawCollection().collectRawCollection(table.getId());
         FindIterable<RawBsonDocument> findIterable;
         final int batchSize = eventBatchSize > 0 ? eventBatchSize : DEFAULT_BATCH_SIZE;
         findIterable = collection.find().batchSize(batchSize);
-//        if (offset == null) {
-//            findIterable = collection.find().sort(sort).batchSize(batchSize);
-//        } else {
-//            MongoBatchOffset mongoOffset = (MongoBatchOffset) offset;
-//            Object offsetValue = mongoOffset.value();
-//            if (offsetValue != null) {
-//                findIterable = collection.find(queryCondition(offsetKey, offsetValue)).sort(sort)
-//                        .batchSize(batchSize);
-//            } else {
-//                findIterable = collection.find().sort(sort).batchSize(batchSize);
-//                log.warn("Offset format is illegal {}, no offset value has been found. Final offset will be null to do the batchRead", offset);
-//            }
-//        }
+
         if (mongoConfig.isNoCursorTimeout() && null != clientSession) {
             findIterable = collection.find(clientSession).batchSize(batchSize).noCursorTimeout(true);
         } else {
@@ -232,6 +220,9 @@ public class MongoBatchReader {
     }
 
     protected void doException(Exception e) {
+        if (e instanceof InterruptedException) {
+            Thread.currentThread().interrupt();
+        }
         if (!checkAlive.getAsBoolean() && e instanceof MongoInterruptedException) {
             return;
         }

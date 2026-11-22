@@ -8,7 +8,7 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.simplify.TapSimplify;
 import org.apache.commons.collections4.MapUtils;
 import org.bson.Document;
-import org.bson.json.JsonWriterSettings;
+
 
 import java.util.*;
 import java.util.function.Consumer;

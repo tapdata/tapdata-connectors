@@ -15,37 +15,37 @@ import java.util.regex.Pattern;
 
 
 public class ElasticsearchExceptionCollector extends AbstractExceptionCollector implements ExceptionCollector {
-    private final static String pdkId = "elasticsearch";
+    private static final String PDK_ID = "elasticsearch";
 
-    private final static String documents_length = "documents in the index cannot exceed";
+    private static final String DOCUMENTS_LENGTH = "documents in the index cannot exceed";
 
-    private final static List<RestStatus> terminate = new ArrayList<RestStatus>(
+    private static final List<RestStatus> terminate = new ArrayList<>(
             Arrays.asList(RestStatus.GATEWAY_TIMEOUT,RestStatus.TOO_MANY_REQUESTS,RestStatus.BAD_GATEWAY));
 
     @Override
     protected String getPdkId() {
-        return pdkId;
+        return PDK_ID;
     }
 
     @Override
     public void collectTerminateByServer(Throwable cause) {
         if (cause instanceof ElasticsearchStatusException &&
                 terminate.contains(((ElasticsearchStatusException) cause).status())){
-            throw new TapPdkTerminateByServerEx(pdkId, ErrorKit.getLastCause(cause));
+            throw new TapPdkTerminateByServerEx(PDK_ID, ErrorKit.getLastCause(cause));
         }
     }
 
     @Override
     public void collectUserPwdInvalid(String username, Throwable cause) {
         if (cause instanceof ElasticsearchStatusException && RestStatus.UNAUTHORIZED==((ElasticsearchStatusException) cause).status()) {
-            throw new TapPdkUserPwdInvalidEx(pdkId, username,ErrorKit.getLastCause(cause));
+            throw new TapPdkUserPwdInvalidEx(PDK_ID, username,ErrorKit.getLastCause(cause));
         }
     }
 
     @Override
     public void collectWritePrivileges(Object operation, List<String> privileges, Throwable cause) {
         if (cause instanceof ElasticsearchStatusException && RestStatus.FORBIDDEN==((ElasticsearchStatusException) cause).status()) {
-            throw new TapPdkWriteMissingPrivilegesEx(pdkId, operation, privileges, ErrorKit.getLastCause(cause));
+            throw new TapPdkWriteMissingPrivilegesEx(PDK_ID, operation, privileges, ErrorKit.getLastCause(cause));
         }
     }
 
@@ -59,7 +59,7 @@ public class ElasticsearchExceptionCollector extends AbstractExceptionCollector 
             while (m.find()) {
                 fieldName = m.group(1);
             }
-            throw new TapPdkWriteTypeEx(pdkId, fieldName, null, data, ErrorKit.getLastCause(cause));
+            throw new TapPdkWriteTypeEx(PDK_ID, fieldName, null, data, ErrorKit.getLastCause(cause));
         }
 
     }
@@ -68,8 +68,8 @@ public class ElasticsearchExceptionCollector extends AbstractExceptionCollector 
         //documents length
         if(cause instanceof ElasticsearchException
                 && ((ElasticsearchException) cause).getDetailedMessage().contains("illegal_argument_exception")
-                &&((ElasticsearchException) cause).getDetailedMessage().contains(documents_length)){
-            throw new TapPdkWriteLengthEx(pdkId, "documents", null, data, ErrorKit.getLastCause(cause));
+                &&((ElasticsearchException) cause).getDetailedMessage().contains(DOCUMENTS_LENGTH)){
+            throw new TapPdkWriteLengthEx(PDK_ID, "documents", null, data, ErrorKit.getLastCause(cause));
         }
 
     }

@@ -88,6 +88,7 @@ import static io.tapdata.pdk.apis.entity.ConnectionOptions.DDL_DROP_FIELD_EVENT;
  */
 @TapConnectorClass("spec_postgres.json")
 public class PostgresConnector extends CommonDbConnector {
+
     private final ThreadLocal<Boolean> transactionActive = ThreadLocal.withInitial(() -> false);
 
     @Override
@@ -154,6 +155,7 @@ public class PostgresConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected TapField makeTapField(DataMap dataMap) {
         return new PostgresColumn(dataMap).getTapField();
     }
@@ -628,8 +630,8 @@ public class PostgresConnector extends CommonDbConnector {
         }
         postgresTest = new PostgresTest(postgresConfig, testItem -> {
         }, null).initContext();
-        postgresJdbcContext = new PostgresJdbcContext(postgresConfig)
-                .withDiscoverViews(getClass() == PostgresConnector.class);
+        postgresJdbcContext = new PostgresJdbcContext(postgresConfig);
+        postgresJdbcContext.withDiscoverViews(getClass() == PostgresConnector.class);
         commonDbConfig = postgresConfig;
         jdbcContext = postgresJdbcContext;
         postgresVersion = postgresJdbcContext.queryVersion();
@@ -677,6 +679,7 @@ public class PostgresConnector extends CommonDbConnector {
         return jdbcContext.queryAllIndexes(Collections.singletonList(tapTable.getId()));
     }
 
+    @Override
     protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
         if (Boolean.TRUE.equals(postgresConfig.getCreateAutoInc()) && Integer.parseInt(postgresVersion) > 100000) {
             createTableEvent.getTable().getNameFieldMap().entrySet().stream().filter(entry -> EmptyKit.isNotBlank(entry.getValue().getSequenceName())).forEach(entry -> {
@@ -703,6 +706,7 @@ public class PostgresConnector extends CommonDbConnector {
         return options;
     }
 
+    @Override
     protected void beforeWriteRecord(TapTable tapTable) throws SQLException {
         if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
             openIdentity(tapTable);
@@ -776,7 +780,6 @@ public class PostgresConnector extends CommonDbConnector {
             if (EmptyKit.isNotEmpty(postgresRecordWriter.getAutoIncMap())) {
                 List<String> alterSqls = new ArrayList<>();
                 postgresRecordWriter.getAutoIncMap().forEach((k, v) -> {
-                    String sequenceName = tapTable.getNameFieldMap().get(k).getSequenceName();
                     AtomicLong actual = new AtomicLong(0);
                         AtomicReference<String> actualSequenceName = new AtomicReference<>();
                         try {
@@ -1501,16 +1504,7 @@ public class PostgresConnector extends CommonDbConnector {
         return new TapPdkRetryableEx("postgres", new RuntimeException(message));
     }
 
-    private String getTimestampOffset(Long offsetStartTime) throws SQLException {
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
-        AtomicReference<Timestamp> timestamp = new AtomicReference<>();
-        if (EmptyKit.isNull(offsetStartTime)) {
-            postgresJdbcContext.queryWithNext("SELECT clock_timestamp()", resultSet -> timestamp.set(resultSet.getTimestamp(1)));
-            return sdf.format(timestamp.get());
-        } else {
-            return sdf.format(offsetStartTime);
-        }
-    }
+
 
     private String timestampToWalLsnV2(Long offsetStartTime) throws SQLException {
         String walDirectory = getWalDirectory();
@@ -1542,38 +1536,7 @@ public class PostgresConnector extends CommonDbConnector {
         return lsn.get() + "," + lsn.get() + ",0";
     }
 
-    private String timestampToWalLsn(Long offsetStartTime) throws SQLException {
-        String walDirectory = getWalDirectory();
-        AtomicReference<String> fileAndLsn = new AtomicReference<>();
-        if (EmptyKit.isNull(offsetStartTime)) {
-            postgresJdbcContext.queryWithNext("SELECT pg_current_wal_lsn()", resultSet -> fileAndLsn.set(resultSet.getString(1)));
-            postgresJdbcContext.queryWithNext(String.format("select pg_walfile_name('%s')", fileAndLsn.get()), resultSet -> {
-                fileAndLsn.set(resultSet.getString(1) + "," + fileAndLsn.get());
-            });
-        } else {
-            postgresJdbcContext.prepareQuery("SELECT * FROM pg_ls_waldir() where modification>? order by modification", Collections.singletonList(new Timestamp(offsetStartTime)), resultSet -> {
-                if (resultSet.next()) {
-                    fileAndLsn.set(resultSet.getString(1));
-                }
-            });
-            try (
-                    Connection connection = jdbcContext.getConnection();
-                    Statement statement = connection.createStatement();
-                    PreparedStatement preparedStatement = connection.prepareStatement("select * from walminer_contents where timestamp >= ? order by start_lsn limit 1")
-            ) {
-                statement.execute(String.format("select walminer_wal_add('%s')", walDirectory + fileAndLsn.get()));
-                statement.execute("select walminer_all()");
-                preparedStatement.setObject(1, new Timestamp(offsetStartTime));
-                try (ResultSet resultSet = preparedStatement.executeQuery()) {
-                    if (resultSet.next()) {
-                        fileAndLsn.set(fileAndLsn.get() + "," + resultSet.getString("start_lsn"));
-                    }
-                }
-                statement.execute("select walminer_stop()");
-            }
-        }
-        return walDirectory + fileAndLsn.get();
-    }
+
 
     protected String getWalDirectory() throws SQLException {
         AtomicReference<String> walDirectory = new AtomicReference<>();
@@ -1824,6 +1787,7 @@ public class PostgresConnector extends CommonDbConnector {
         return value;
     }
 
+    @Override
     protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
@@ -1893,6 +1857,7 @@ public class PostgresConnector extends CommonDbConnector {
             try {
                 countDownLatch.await();
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
             }
             if (EmptyKit.isNotNull(throwable.get())) {
@@ -1906,6 +1871,7 @@ public class PostgresConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
         jdbcContext.query(sql, resultSet -> {
@@ -1968,6 +1934,7 @@ public class PostgresConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected DataMap filterData(ResultSet resultSet, String[] fields, String[] columnTypes) throws SQLException {
         DataMap dataMap = new DataMap();
         for (int i = 0; i < fields.length; i++) {
@@ -2043,6 +2010,7 @@ public class PostgresConnector extends CommonDbConnector {
         return postgresPartitionContext.discoverPartitionInfo(tapTableList);
     }
 
+    @Override
     protected CopyOnWriteArraySet<List<DataMap>> splitTableForMultiDiscoverSchema(List<DataMap> tables, int tableSize) {
         if (Integer.parseInt(postgresVersion) < 100000) {
             return super.splitTableForMultiDiscoverSchema(tables, tableSize);
@@ -2071,6 +2039,7 @@ public class PostgresConnector extends CommonDbConnector {
         return result;
     }
 
+    @Override
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
             String clearSQL = "truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId());
@@ -2084,6 +2053,7 @@ public class PostgresConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
             String dropSQL = "drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()) + " cascade";
@@ -2094,6 +2064,7 @@ public class PostgresConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected void createIndex(TapConnectorContext connectorContext, TapTable tapTable, TapCreateIndexEvent createIndexEvent) throws SQLException {
         super.createIndex(connectorContext, tapTable, createIndexEvent);
         createIndexEvent.getIndexList().stream().filter(v -> Boolean.TRUE.equals(v.getCluster())).forEach(v -> {
@@ -2105,6 +2076,7 @@ public class PostgresConnector extends CommonDbConnector {
         });
     }
 
+    @Override
     protected TapIndex makeTapIndex(String key, List<DataMap> value) {
         TapIndex index = new TapIndex();
         index.setName(key);
@@ -2122,6 +2094,7 @@ public class PostgresConnector extends CommonDbConnector {
         return index;
     }
 
+    @Override
     protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
         List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
         if (EmptyKit.isNotEmpty(constraintList)) {

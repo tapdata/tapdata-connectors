@@ -35,6 +35,7 @@ public class DorisConfig extends CommonDbConfig {
         setJdbcDriver("com.mysql.cj.jdbc.Driver");
     }
 
+    @Override
     public DorisConfig load(Map<String, Object> map) {
         DorisConfig config = (DorisConfig) super.load(map);
         config.setSchema(config.getDatabase());
@@ -46,6 +47,7 @@ public class DorisConfig extends CommonDbConfig {
         return config;
     }
 
+    @Override
     public String getDatabaseUrlPattern() {
         return "jdbc:mysql://%s:%s/%s?rewriteBatchedStatements=true%s";
     }
@@ -55,6 +57,7 @@ public class DorisConfig extends CommonDbConfig {
         return getHost() + ":" + getPort() + "/" + getDatabase();
     }
 
+    @Override
     public String getDatabaseUrl() {
         if (EmptyKit.isNull(this.getExtParams())) {
             this.setExtParams("");
