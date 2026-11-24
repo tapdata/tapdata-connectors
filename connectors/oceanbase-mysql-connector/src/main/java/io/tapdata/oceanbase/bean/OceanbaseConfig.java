@@ -98,7 +98,7 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
         String value = cdcMemoryLimit == null ? "" : cdcMemoryLimit.trim();
         if (value.isEmpty()) return "2G";
         value = value.toUpperCase(java.util.Locale.ROOT);
-        if (!value.matches("[1-9][0-9]*[MG]")) {
+        if (!value.matches("[1-9]\\d*[MG]")) {
             throw new IllegalArgumentException("cdcMemoryLimit must be a positive integer followed by M or G (e.g. 2G)");
         }
         return value;

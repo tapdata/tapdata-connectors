@@ -71,6 +71,63 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
     private DbForgeLeaseProvider dbForgeLeaseProvider;
     private DataMap dbForgeConnectionConfig;
 
+    // The frozen TapNumberValue stores Double. Mongo's registered exact numeric
+    // carrier keeps BigDecimal instead, and has its own registered unwrap codec.
+    @Override
+    protected Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> expectedTapValueClasses(io.tapdata.it.schema.TestDataType type) {
+        Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> classes = new HashSet<>(super.expectedTapValueClasses(type));
+        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.mongodb.codecs.ExactDecimalValue.class);
+        return classes;
+    }
+
+    @Override
+    protected Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> expectedTapValueClassesForReadBack(io.tapdata.it.schema.TestDataType type) {
+        Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> classes = new HashSet<>(super.expectedTapValueClassesForReadBack(type));
+        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.mongodb.codecs.ExactDecimalValue.class);
+        return classes;
+    }
+
+    @Override
+    protected Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> expectedTapValueClassesForTapType(io.tapdata.entity.schema.type.TapType type) {
+        Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> classes = new HashSet<>(super.expectedTapValueClassesForTapType(type));
+        if (type instanceof io.tapdata.entity.schema.type.TapNumber) classes.add(io.tapdata.mongodb.codecs.ExactDecimalValue.class);
+        return classes;
+    }
+
+    @Test
+    @UnderTest(value = "writeRecord", requiresVerifier = true)
+    @UnderTest(value = "batchRead", requiresVerifier = true)
+    void should_preserve_report_high_precision_numbers_at_both_connector_boundaries() throws Throwable {
+        String finite = "12345678901234567890.12345678901234";
+        collection().insertOne(new Document("_id", "seed").append("V", Decimal128.parse(finite)));
+        TapTable table = discoverTable();
+        registerTable(table);
+        Map<String, Object> wrapped = wrapRow(rowById(batchReadAll(table), "seed"), table);
+        Object number = ((io.tapdata.entity.schema.value.TapValue<?, ?>) wrapped.get("V")).getValue();
+        assertEquals(0, new java.math.BigDecimal(finite).compareTo(new java.math.BigDecimal(number.toString())),
+                "reading Decimal128 must not pass through double");
+        Object unwrapped = unwrapRow(wrapped).get("V");
+        assertTrue(unwrapped instanceof java.math.BigDecimal, "the exact numeric carrier must unwrap as a portable decimal");
+        assertEquals(0, new java.math.BigDecimal(finite).compareTo((java.math.BigDecimal) unwrapped));
+        List<Number> values = Arrays.asList(new java.math.BigDecimal(finite),
+                new java.math.BigDecimal("12345678901234567890123456789012345678"),
+                new java.math.BigInteger("12345678901234567890123456789012345678"),
+                new java.math.BigDecimal("1E+7000"), new java.math.BigDecimal("1E-7000"));
+        for (int i = 0; i < values.size(); i++) {
+            Number value = values.get(i);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("_id", "exact-" + i); row.put("V", value);
+            assertEquals(1, writeInsertEvents(Collections.singletonList(row), table));
+            Document document = collection().find(eq("_id", "exact-" + i)).first();
+            assertNotNull(document);
+            Object actual = document.get("V");
+            assertNotNull(actual);
+            if (i > 0) assertTrue(actual instanceof String, "numbers outside Decimal128 use exact decimal text");
+            assertEquals(0, new java.math.BigDecimal(value.toString()).compareTo(new java.math.BigDecimal(actual.toString())),
+                    "target must retain every source digit and exponent");
+        }
+    }
+
     @Test
     @DisplayName("真实MongoDB统计：普通、空、capped及不存在集合保持原字段契约")
     void statisticsMatchLegacyCommand() {
