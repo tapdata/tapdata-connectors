@@ -52,3 +52,13 @@ The test database must be a replica set because change streams and multi-documen
 required. Connection values can be overridden with `connector.it.*` system properties or
 `CONNECTOR_IT_*` environment variables. Performance volume and thresholds use the shared
 `performance.*`/`PERFORMANCE_*` settings; TPCC smoke/full sizing uses `tpcc.*`/`TPCC_*`.
+
+## Lossless report numeric regressions
+
+The real database suite checks precision at both connector boundaries. Decimal128
+reads retain an exact BigDecimal carrier through the PDK conversion registry.
+Writes use Decimal128 when the value is exactly representable; decimals outside
+its 34-digit precision or exponent range are stored as exact decimal text. Large
+BigInteger values follow the same rule, while signed 64-bit integers remain Int64.
+This fallback changes the target BSON type to string, preserving digits rather
+than silently rounding. Query and index semantics follow the stored BSON type.

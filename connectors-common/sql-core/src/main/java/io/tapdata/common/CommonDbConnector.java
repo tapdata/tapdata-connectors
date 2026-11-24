@@ -436,7 +436,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         Set<String> columnNames = tapTable.getNameFieldMap().keySet();
         List<FilterResult> filterResults = new LinkedList<>();
         for (TapFilter filter : filters) {
-            String sql = "select * from " + getSchemaAndTable(tapTable.getId()) + " where " + commonSqlMaker.buildKeyAndValue(filter.getMatch(), "and", "=");
+            String sql = getSelectSql(tapTable) + " where " + commonSqlMaker.buildKeyAndValue(filter.getMatch(), "and", "=");
             FilterResult filterResult = new FilterResult();
             try {
                 jdbcContext.query(sql, resultSet -> {
@@ -730,7 +730,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 " is '" + tapField.getComment().replace("'", "''") + '\'';
     }
 
-    private String getSelectSql(TapTable tapTable) {
+    protected String getSelectSql(TapTable tapTable) {
         char escapeChar = commonDbConfig.getEscapeChar();
         return "select " + escapeChar + String.join(escapeChar + "," + escapeChar, tapTable.getNameFieldMap().keySet()) + escapeChar + " from " +
                 getSchemaAndTable(tapTable.getId());
