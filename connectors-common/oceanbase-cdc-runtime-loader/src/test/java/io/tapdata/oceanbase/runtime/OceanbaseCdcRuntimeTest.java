@@ -11,10 +11,22 @@ import java.nio.file.Path;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class OceanbaseCdcRuntimeTest {
+
+    @Test
+    void shouldSelectSupportedPlatforms() {
+        assertEquals("linux-x86_64", OceanbaseCdcRuntime.platform("Linux", "amd64"));
+        assertEquals("linux-x86_64", OceanbaseCdcRuntime.platform("Linux", "x86_64"));
+        assertEquals("linux-aarch64", OceanbaseCdcRuntime.platform("Linux", "aarch64"));
+        assertEquals("linux-aarch64", OceanbaseCdcRuntime.platform("Linux", "arm64"));
+        assertThrows(IllegalStateException.class, () -> OceanbaseCdcRuntime.platform("Windows", "amd64"));
+        assertThrows(IllegalStateException.class, () -> OceanbaseCdcRuntime.platform("Linux", "arm"));
+        assertThrows(IllegalStateException.class, () -> OceanbaseCdcRuntime.platform("Linux", "ppc64le"));
+    }
 
     @Test
     void shouldRejectArchivePathTraversal() throws Exception {

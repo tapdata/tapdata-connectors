@@ -55,20 +55,6 @@ class PaimonServiceWriteErrorLogTest {
     private static final String LONG_NAME = repeat('x', 300);
 
     @Test
-    void legacySyntheticHashMustKeepMissingAndNullPrimaryKeyEncoding() {
-        PaimonService service = new PaimonService(new PaimonConfig(), mock(Log.class));
-        List<String> keys = Arrays.asList("pk1", "pk2", "pk3");
-        Map<String, Object> missing = new LinkedHashMap<>();
-        missing.put("pk1", 1);
-        missing.put("pk3", 3);
-        Map<String, Object> explicitNull = new LinkedHashMap<>(missing);
-        explicitNull.put("pk2", null);
-
-        assertEquals("5989c034788371db039a59ebbdbc5ff8", service.toHash(keys, missing));
-        assertEquals(service.toHash(keys, missing), service.toHash(keys, explicitNull));
-    }
-
-    @Test
     void syntheticHashFailureMustNotExposeSourceValues() {
         PaimonService service = new PaimonService(new PaimonConfig(), mock(Log.class));
         String secret = "primary-key-secret-sentinel";
@@ -89,38 +75,29 @@ class PaimonServiceWriteErrorLogTest {
     }
 
     @Test
-    void rowFormatterMustPreserveCompleteOutputWithCachedSchema() throws Exception {
+    void rowFormatterMustPreserveCompleteOutputWithWriterFieldNames() throws Exception {
         PaimonConfig config = new PaimonConfig();
         config.setDatabase(DATABASE);
         PaimonService service = new PaimonService(config, mock(Log.class));
-        TapTable table = mock(TapTable.class);
-        when(table.getName()).thenReturn(TABLE_NAME);
-        seedFieldCache(
-                service,
-                Arrays.asList(
-                        new DataField(0, "id", DataTypes.BIGINT()),
-                        new DataField(1, "name", DataTypes.STRING())));
         GenericRow row = GenericRow.of(null, BinaryString.fromString("Alice"));
 
         assertEquals(
                 "GenericRow{rowKind=INSERT, fieldCount=2, fieldMapping=[0:id, 1:name], "
                         + "valueMetadata={0:id=null, 1:name=BinaryString(len=5)}}",
-                invokeFormatRowForLog(service, row, table));
+                invokeFormatRowForLog(service, row, Arrays.asList("id", "name")));
     }
 
     @Test
-    void rowFormatterMustPreserveCompleteOutputWithoutCachedSchema() throws Exception {
+    void rowFormatterMustPreserveCompleteOutputWithoutFieldNames() throws Exception {
         PaimonConfig config = new PaimonConfig();
         config.setDatabase(DATABASE);
         PaimonService service = new PaimonService(config, mock(Log.class));
-        TapTable table = mock(TapTable.class);
-        when(table.getName()).thenReturn(TABLE_NAME);
         GenericRow row = GenericRow.of(null, BinaryString.fromString("Alice"));
 
         assertEquals(
                 "GenericRow{rowKind=INSERT, fieldCount=2, fieldMapping=[], "
                         + "valueMetadata={0:field_0=null, 1:field_1=BinaryString(len=5)}}",
-                invokeFormatRowForLog(service, row, table));
+                invokeFormatRowForLog(service, row, Collections.emptyList()));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -140,10 +117,6 @@ class PaimonServiceWriteErrorLogTest {
         when(table.getName()).thenReturn(TABLE_NAME);
 
         seedComputeHashKey(service);
-        seedFieldCache(service, Arrays.asList(
-                new DataField(0, "id", DataTypes.BIGINT()),
-                new DataField(1, "name", DataTypes.STRING())
-        ));
 
         try (FailingWriteFixture fixture = new FailingWriteFixture(scenario.failOnWriteCall())) {
             Exception thrown =
@@ -185,14 +158,6 @@ class PaimonServiceWriteErrorLogTest {
         );
     }
 
-    private void seedFieldCache(PaimonService service, List<DataField> fields) throws Exception {
-        Field cacheField = PaimonService.class.getDeclaredField("paimonFieldCache");
-        cacheField.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        Map<String, List<DataField>> cache = (Map<String, List<DataField>>) cacheField.get(service);
-        cache.put(CACHE_KEY, fields);
-    }
-
     private void seedComputeHashKey(PaimonService service) throws Exception {
         Field cacheField = PaimonService.class.getDeclaredField("computeHashKey");
         cacheField.setAccessible(true);
@@ -202,12 +167,12 @@ class PaimonServiceWriteErrorLogTest {
     }
 
     private static String invokeFormatRowForLog(
-            PaimonService service, GenericRow row, TapTable table) throws Exception {
+            PaimonService service, GenericRow row, List<String> fieldNames) throws Exception {
         Method method =
                 PaimonService.class.getDeclaredMethod(
-                        "formatRowForLog", GenericRow.class, TapTable.class);
+                        "formatRowForLog", GenericRow.class, List.class);
         method.setAccessible(true);
-        return (String) method.invoke(service, row, table);
+        return (String) method.invoke(service, row, fieldNames);
     }
 
     private static void invokeHandleStreamInsert(PaimonService service, TapInsertRecordEvent event,
@@ -493,7 +458,8 @@ class PaimonServiceWriteErrorLogTest {
 
         @Override
         public PaimonWriteSemanticContract writeSemanticContract() {
-            return PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED);
+            return PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED,
+                    new DataField(0, "id", DataTypes.BIGINT()), new DataField(1, "name", DataTypes.STRING()));
         }
 
         @Override

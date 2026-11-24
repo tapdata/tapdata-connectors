@@ -760,7 +760,7 @@
       "database": "Database Name",
       "database_placeholder": "Paimon database name",
       "hashKey": "Hash Key",
-      "hashKeyTip": "When enabled, if the primary key or update condition field is greater than 5, the hash field will be automatically added in the paimon table to improve write performance",
+      "hashKeyTip": "When the primary key or update condition has more than five fields, create a synthetic _hash_key. Before upgrading an existing synthetic-key table, rebuild it from the source or migrate its stored keys.",
       "partitionKey": "Partition Key",
       "partitionKeyTip": "The partition key of the table, used to partition the data. If left empty, it means not to use the partitioning function.",
       "bucketMode": "Bucket Mode",
@@ -794,7 +794,7 @@
       "targetFileSize_placeholder": "Target size for data files (32-1024 MB, default: 128)",
       "enablePrimaryKeyUpdate": "Enable Primary Key Update Detection",
       "enablePrimaryKeyUpdate_description": "When enabled, automatically detects primary key changes and converts update operations to delete+insert. Requires source database to provide before-update data. If unavailable, enabling this feature will cause errors. It is recommended to keep this feature disabled by default and only enable it when primary key values are expected to change. Enabling this feature will reduce update performance.",
-      "enableDeduplicateUpdateAfterCompletenessCheck": "Validate UPDATE_AFTER completeness for Deduplicate tables",
+      "enableDeduplicateUpdateAfterCompletenessCheck": "Validate completeness for Deduplicate tables",
       "enableDeduplicateUpdateAfterCompletenessCheck_description": "Enabled by default. Disable only when sparse UPDATE_AFTER records should continue through the normal Paimon write path; omitted columns may be written as null or schema defaults. Other validation rules remain enabled."
     },
     "zh_CN": {
@@ -826,7 +826,7 @@
       "database": "数据库名称",
       "database_placeholder": "Paimon 数据库名称",
       "hashKey": "Hash键",
-      "hashKeyTip": "开关打开时，如果主键或更新条件字段大于5个时，会自动在paimon表中添加hash字段，用于提升写入性能",
+      "hashKeyTip": "启用后，主键或更新条件超过五列时会生成 _hash_key。升级旧版合成主键表前，请从源端重建目标表或迁移已存储的键值。",
       "partitionKey": "分区键",
       "partitionKeyTip": "表的分区键，用于对数据进行分区。如果置空，则表示不使用分区功能。",
       "bucketMode": "分桶模式",
@@ -892,7 +892,7 @@
       "database": "數據庫名稱",
       "database_placeholder": "Paimon 數據庫名稱",
       "hashKey": "Hash 鍵",
-      "hashKeyTip": "開啟後，如果主鍵或更新條件字段大於5個時，會自動在paimon表中添加hash字段，用於提升寫入性能",
+      "hashKeyTip": "啟用後，主鍵或更新條件超過五欄時會產生 _hash_key。升級舊版合成主鍵表前，請從來源重建目標表或遷移已儲存的鍵值。",
       "partitionKey": "分區鍵",
       "partitionKeyTip": "表的分區鍵，用於對數據進行分區。如果置空，則表示不使用分區功能。",
       "bucketMode": "分桶模式",
@@ -926,7 +926,7 @@
       "targetFileSize_placeholder": "數據文件的目標大小（32-1024 MB，默認：128）",
       "enablePrimaryKeyUpdate": "是否更新主鍵",
       "enablePrimaryKeyUpdate_description": "開啟後，會自動檢查主鍵變更，將更新操作改為刪除+寫入，要求源庫可以提供更新前數據，如果無法提供，開啟此功能會報錯退出。建議默認關閉該功能，如果確認主鍵值會變更再開啟，開啟後，更新性能會下降。",
-      "enableDeduplicateUpdateAfterCompletenessCheck": "校驗 Deduplicate 表的 UPDATE_AFTER 欄位完整性",
+      "enableDeduplicateUpdateAfterCompletenessCheck": "校驗 Deduplicate 表的字段完整性",
       "enableDeduplicateUpdateAfterCompletenessCheck_description": "預設開啟。僅在希望稀疏 UPDATE_AFTER 繼續走 Paimon 正常寫入流程時才關閉；缺失欄位可能寫為 null 或 schema 預設值。其它校驗仍然開啟。"
     }
   },

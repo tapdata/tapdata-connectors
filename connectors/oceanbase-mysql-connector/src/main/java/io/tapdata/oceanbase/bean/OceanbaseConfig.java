@@ -15,6 +15,8 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
     private String rawLogServerHost;
     private int rawLogServerPort;
     private Boolean useNativeCdc = false;
+    /** libobcdc memory_limit passed through to the native CDC helper (e.g. "2G", "4G"). */
+    private String cdcMemoryLimit = "2G";
 
     //customize
     public OceanbaseConfig() {
@@ -87,4 +89,21 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
         this.useNativeCdc = useNativeCdc;
     }
 
+
+
+
+    /** Per-task libobcdc ceiling, independent of the engine JVM heap. */
+    public String getCdcMemoryLimit() {
+        String value = cdcMemoryLimit == null ? "" : cdcMemoryLimit.trim();
+        if (value.isEmpty()) return "2G";
+        value = value.toUpperCase(java.util.Locale.ROOT);
+        if (!value.matches("[1-9][0-9]*[MG]")) {
+            throw new IllegalArgumentException("cdcMemoryLimit must be a positive integer followed by M or G (e.g. 2G)");
+        }
+        return value;
+    }
+
+    public void setCdcMemoryLimit(String cdcMemoryLimit) {
+        this.cdcMemoryLimit = cdcMemoryLimit;
+    }
 }

@@ -17,7 +17,7 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPut;
-import org.apache.http.entity.InputStreamEntity;
+import org.apache.http.client.protocol.HttpClientContext;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
 
@@ -138,11 +138,15 @@ public class DorisStreamLoader {
 
     public RespContent put(final TapTable table) throws StreamLoadException, DorisRetryableException {
         DorisConfig.WriteFormat writeFormat = dorisConfig.getWriteFormatEnum();
+        StreamLoadDiagnostics diagnostics = new StreamLoadDiagnostics();
+        String label = null;
         try {
             final String loadUrl = buildLoadUrl(dorisConfig.getDorisHttp(), dorisConfig.getDatabase(), table.getId());
+            diagnostics.initialEndpoint = StreamLoadDiagnostics.endpoint(loadUrl);
+            diagnostics.batchBytes = recordStream.getContentLength();
             final String prefix = buildPrefix(URLEncoder.encode(table.getId()).replace("%", ""));
 
-            String label = prefix + "-" + UUID.randomUUID();
+            label = prefix + "-" + UUID.randomUUID();
             List<String> columns = new ArrayList<>();
             for (String col : tapTable.getNameFieldMap().keySet()) {
                 if (dataColumns.get().contains(col) || DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType(table.getId()))) {
@@ -152,9 +156,7 @@ public class DorisStreamLoader {
             // add the DORIS_DELETE_SIGN at the end of the column
             columns.add(Constants.DORIS_DELETE_SIGN);
             HttpPutBuilder putBuilder = new HttpPutBuilder();
-            InputStreamEntity entity = new InputStreamEntity(recordStream, recordStream.getContentLength());
-            entity.setContentEncoding("UTF-8");
-            entity.setContentType("application/json");
+            ReplayableStreamLoadEntity entity = new ReplayableStreamLoadEntity(recordStream, diagnostics);
             putBuilder.setUrl(loadUrl)
                     // 前端表单传出来的值和tdd json加载的值可能有差别，如前端传的pwd可能是null，tdd的是空字符串
                     .baseAuth(dorisConfig.getUser(), dorisConfig.getPassword())
@@ -175,14 +177,28 @@ public class DorisStreamLoader {
                 }
             }
             HttpPut httpPut = putBuilder.build();
-            TapLogger.debug(TAG, "Call stream load http api, url: {}, headers: {}", loadUrl, putBuilder.header);
-            try (CloseableHttpResponse execute = httpClient.execute(httpPut)) {
-                return handlePreCommitResponse(execute);
+            HttpClientContext context = HttpClientContext.create();
+            context.setAttribute(StreamLoadDiagnostics.KEY, diagnostics);
+            TapLogger.debug(TAG, "Stream load start: label={}, endpoint={}, bytes={}, repeatable=true",
+                    label, StreamLoadDiagnostics.endpoint(loadUrl), entity.getContentLength());
+            diagnostics.phase = "execute";
+            try (CloseableHttpResponse execute = httpClient.execute(httpPut, context)) {
+                diagnostics.phase = "validate_load_response";
+                RespContent result = handlePreCommitResponse(execute);
+                if (diagnostics.bodyWrites > 1) {
+                    TapLogger.warn(TAG, "Stream load recovered after body replay: label={}, {}", label, diagnostics);
+                } else {
+                    TapLogger.debug(TAG, "Stream load completed: label={}, {}", label, diagnostics);
+                }
+                return result;
             }
         } catch (DorisRetryableException e) {
+            TapLogger.warn(TAG, "Stream load failed: label={}, failure={}, {}", label, diagnostics.failureSummary(e), diagnostics);
             throw e;
         } catch (Exception e) {
-            throw new StreamLoadException(String.format("Call stream load error: %s", e.getMessage()), e);
+            String failure = diagnostics.failureSummary(e);
+            TapLogger.warn(TAG, "Stream load failed: label={}, failure={}, {}", label, failure, diagnostics);
+            throw new StreamLoadException("Call stream load error: label=" + label + ", " + failure + ", " + diagnostics, e);
         }
     }
 
@@ -193,7 +209,6 @@ public class DorisStreamLoader {
         }
         String loadResult = EntityUtils.toString(response.getEntity());
 
-        TapLogger.debug(TAG, "Stream load Result {}", loadResult);
         RespContent respContent = OBJECT_MAPPER.readValue(loadResult, RespContent.class);
         if (!respContent.isSuccess() && !"Publish Timeout".equals(respContent.getStatus())) {
             if (respContent.getMessage().toLowerCase().contains("too many filtered rows")
@@ -218,7 +233,7 @@ public class DorisStreamLoader {
             recordStream.write(messageSerializer.batchEnd());
             recordStream.endInput();
             RespContent respContent = put(table);
-            TapLogger.info(TAG, "Execute stream load response: " + respContent);
+            TapLogger.info(TAG, "Execute stream load response: status={}", respContent.getStatus());
             if (null != listResult) {
                 metrics.writeIntoResultList(listResult);
                 metrics.clear();

@@ -1,85 +1,129 @@
 package io.tapdata.connector.doris.streamload;
 
-import io.tapdata.entity.logger.TapLogger;
-import org.apache.http.Header;
-import org.apache.http.HttpRequest;
-import org.apache.http.HttpResponse;
-import org.apache.http.ProtocolException;
+import org.apache.http.*;
 import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.conn.ssl.TrustAllStrategy;
 import org.apache.http.impl.client.*;
 import org.apache.http.protocol.HttpContext;
+import org.apache.http.protocol.HttpRequestExecutor;
 import org.apache.http.ssl.SSLContexts;
-import org.apache.http.util.Args;
 
-import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.SSLContext;
-import java.util.concurrent.TimeUnit;
+import java.net.URI;
 
-/**
- * @Author dayun
- * @Date 7/14/22
- */
 public class HttpUtil {
     public static final int CONNECT_TIMEOUT = 5000;
     public static final int READ_TIMEOUT = 300000;
+    public static final int EXPECT_CONTINUE_TIMEOUT = 30000;
+    public static final int MAX_REDIRECTS = 5;
     public static final String TAG = HttpUtil.class.getSimpleName();
-    private final HttpClientBuilder httpClientBuilder = HttpClients
-            .custom()
-            .setRedirectStrategy(new DefaultRedirectStrategy() {
-                @Override
-                protected boolean isRedirectable(String method) {
-                    return true;
-                }
-            });
+
+    private static HttpClientBuilder builder() {
+        return HttpClients.custom()
+                .disableAutomaticRetries()
+                .setRequestExecutor(new HttpRequestExecutor(EXPECT_CONTINUE_TIMEOUT) {
+                    @Override
+                    protected HttpResponse doSendRequest(HttpRequest request, HttpClientConnection connection,
+                                                         HttpContext context) throws java.io.IOException, HttpException {
+                        // The request interceptor runs before connect; capture the actual peer here.
+                        StreamLoadDiagnostics d = StreamLoadDiagnostics.get(context);
+                        if (d != null) {
+                            d.lastPeer = StreamLoadDiagnostics.peer(context);
+                            d.phase = "send_request";
+                        }
+                        return super.doSendRequest(request, connection, context);
+                    }
+                })
+                .setDefaultRequestConfig(RequestConfig.custom()
+                        .setConnectTimeout(CONNECT_TIMEOUT)
+                        .setConnectionRequestTimeout(CONNECT_TIMEOUT)
+                        .setSocketTimeout(READ_TIMEOUT)
+                        .setMaxRedirects(MAX_REDIRECTS).build())
+                .addInterceptorLast((HttpRequestInterceptor) (request, context) -> {
+                    StreamLoadDiagnostics d = StreamLoadDiagnostics.get(context);
+                    if (d != null) d.lastPeer = StreamLoadDiagnostics.peer(context);
+                    if (d != null) {
+                        d.requestStartedMs = d.elapsedMs();
+                        d.phase = "request_prepared";
+                    }
+                    if (d != null) d.hops.add("request@" + d.elapsedMs() + "ms target="
+                            + StreamLoadDiagnostics.endpoint(String.valueOf(context.getAttribute("http.target_host")))
+                            + " method=" + request.getRequestLine().getMethod());
+                })
+                .addInterceptorLast((HttpResponseInterceptor) (response, context) -> {
+                    StreamLoadDiagnostics d = StreamLoadDiagnostics.get(context);
+                    if (d != null) d.phase = "response_received";
+                    Header location = response.getFirstHeader("Location");
+                    if (d != null) d.hops.add("response@" + d.elapsedMs() + "ms status="
+                            + response.getStatusLine().getStatusCode() + " peer=" + StreamLoadDiagnostics.peer(context)
+                            + " location=" + StreamLoadDiagnostics.endpoint(location == null ? null : location.getValue())
+                            + " bodyWrites=" + d.bodyWrites + " bytesWritten=" + d.bytesWritten);
+                })
+                .setRedirectStrategy(new DefaultRedirectStrategy() {
+                    @Override
+                    public boolean isRedirected(HttpRequest request, HttpResponse response, HttpContext context) throws ProtocolException {
+                        if (!"PUT".equalsIgnoreCase(request.getRequestLine().getMethod())) {
+                            return super.isRedirected(request, response, context);
+                        }
+                        int code = response.getStatusLine().getStatusCode();
+                        // Stream Load must never silently turn PUT into GET on a proxy's 301/302/303.
+                        return code == 307 || code == 308;
+                    }
+
+                    @Override
+                    public HttpUriRequest getRedirect(HttpRequest request, HttpResponse response, HttpContext context)
+                            throws ProtocolException {
+                        if (!"PUT".equalsIgnoreCase(request.getRequestLine().getMethod())) {
+                            return super.getRedirect(request, response, context);
+                        }
+                        StreamLoadDiagnostics d = StreamLoadDiagnostics.get(context);
+                        if (d != null) d.phase = "redirect_validation";
+                        URI target;
+                        try {
+                            target = getLocationURI(request, response, context);
+                        } catch (org.apache.http.client.CircularRedirectException e) {
+                            if (d != null) d.redirectFailure = "circular_redirect";
+                            throw e;
+                        } catch (ProtocolException e) {
+                            if (d != null) d.redirectFailure = response.getFirstHeader("Location") == null
+                                    ? "missing_location" : "invalid_redirect_location";
+                            throw e;
+                        }
+                        // Keep HttpClient's existing URI/routing compatibility. URI.getHost()
+                        // rejects authorities (e.g. underscore hostnames) that HttpClient can route.
+                        // Do not reject these authorities based on URI.getHost().
+                        HttpHost source = (HttpHost) context.getAttribute("http.target_host");
+                        boolean httpsToHttp = source != null && "https".equalsIgnoreCase(source.getSchemeName())
+                                && "http".equalsIgnoreCase(target.getScheme());
+                        if (d != null) {
+                            d.hops.add("redirect@" + d.elapsedMs() + "ms target="
+                                    + StreamLoadDiagnostics.endpoint(target.toString())
+                                    + " javaHostMissing=" + (target.getHost() == null)
+                                    + " hasUserInfo=" + (target.getRawAuthority() != null && target.getRawAuthority().contains("@"))
+                                    + " hasFragment=" + (target.getRawFragment() != null)
+                                    + " httpsToHttp=" + httpsToHttp);
+                        }
+                        // Authorization is an explicit header and must accompany Doris BE uploads.
+                        // Reject before copying/sending rather than silently expose it over HTTP.
+                        if (httpsToHttp) {
+                            if (d != null) d.redirectFailure = "https_to_http_redirect_rejected";
+                            throw new ProtocolException("Refusing HTTPS to HTTP Stream Load redirect");
+                        }
+                        return org.apache.http.client.methods.RequestBuilder.copy(request).setUri(target).build();
+                    }
+                });
+    }
 
     public CloseableHttpClient getHttpClient() {
-        return httpClientBuilder.build();
+        return builder().build();
     }
+
     public static CloseableHttpClient generationHttpClient() {
         try {
-            TrustAllStrategy instance = TrustAllStrategy.INSTANCE;
-            SSLContext sslContext = SSLContexts.custom()
-                    .loadTrustMaterial(instance)
-                    .build();
-            HostnameVerifier hostnameVerifier = NoopHostnameVerifier.INSTANCE;
-            HttpClientBuilder custom = HttpClients.custom();
-            custom.setSSLContext(sslContext);
-            custom.setSSLHostnameVerifier(hostnameVerifier);
-            custom.setRedirectStrategy(new LaxRedirectStrategy() {
-                @Override
-                public boolean isRedirected(HttpRequest request, HttpResponse response, HttpContext context) throws ProtocolException {
-                    Args.notNull(request, "HTTP request");
-                    Args.notNull(response, "HTTP response");
-                    int statusCode = response.getStatusLine().getStatusCode();
-                    String method = request.getRequestLine().getMethod();
-                    Header locationHeader = response.getFirstHeader("location");
-                    switch (statusCode) {
-                        case 301:
-                        case 308:
-                            return this.isRedirectable(method);
-                        case 302:
-                            return this.isRedirectable(method) && locationHeader != null;
-                        case 303:
-                        case 307:
-                            return true;
-                        case 304:
-                        case 305:
-                        case 306:
-                        default:
-                            return false;
-                    }
-                }
-            });
-            RequestConfig requestConfig = RequestConfig.custom()
-                    .setConnectTimeout(CONNECT_TIMEOUT)
-                    .setSocketTimeout(READ_TIMEOUT)
-                    .build();
-            custom.setDefaultRequestConfig(requestConfig);
-            CloseableHttpClient httpClient = custom
-                    .build();
-            return httpClient;
+            // Preserve the existing TLS policy; both factory paths share redirect handling and timeouts.
+            return builder().setSSLContext(SSLContexts.custom().loadTrustMaterial(TrustAllStrategy.INSTANCE).build())
+                    .setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE).build();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

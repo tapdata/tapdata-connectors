@@ -10,5 +10,6 @@
     </parent>
 
     <artifactId>oceanbase-cdc-runtime-loader</artifactId>
+    <version>4.4.2.3</version>
     <name>oceanbase-cdc-runtime-loader</name>
 </project>

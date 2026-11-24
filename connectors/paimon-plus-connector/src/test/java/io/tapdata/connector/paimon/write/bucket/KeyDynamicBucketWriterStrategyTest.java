@@ -15,6 +15,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
@@ -189,7 +190,8 @@ class KeyDynamicBucketWriterStrategyTest {
                         MergeEngine.DEDUPLICATE,
                         ChangelogProducer.NONE,
                         false,
-                        Arrays.asList("pt", "id", "rk"),
+                        RowType.builder().field("pt", DataTypes.INT()).field("id", DataTypes.INT())
+                                .field("rk", DataTypes.STRING()).build(),
                         Collections.singleton("id"),
                         Collections.emptySet(),
                         Collections.singleton("id"),
