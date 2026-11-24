@@ -1120,7 +1120,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void executeCommand(TapConnectorContext connectorContext, TapExecuteCommand executeCommand, Consumer<ExecuteResult> consumer) throws Throwable {
-        try {
+        try (InspectQueryScope scope = InspectQueryScope.open(executeCommand.getParams())) {
             Map<String, Object> params = executeCommand.getParams();
             String command = executeCommand.getCommand();
             switch (command) {
@@ -1207,7 +1207,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     private void executeJdbcQuery(String sql, Consumer<Object> consumer, int batchSize, int queryTimeoutSeconds) throws Throwable {
         JdbcQueryExecutor.execute(sql, jdbcContext::getConnection, consumer, this::isAlive,
                 batchSize, queryTimeoutSeconds, batchSize > 0 ? batchSize : 1000, resultSet -> {
-                    String[] columnNames = DbKit.getColumnsFromResultSet(resultSet).toArray(new String[0]);
+                    String[] columnNames = InspectQueryScope.rowColumns(resultSet).toArray(new String[0]);
                     String[] columnTypes = DbKit.getColumnTypesFromResultSet(resultSet).toArray(new String[0]);
                     return () -> filterData(resultSet, columnNames, columnTypes);
                 });

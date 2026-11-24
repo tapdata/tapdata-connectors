@@ -333,6 +333,63 @@ class PaimonServiceExecuteQueryIntegrationTest {
         } finally { service.close(); }
     }
 
+    @Test
+    void executeCommandGroupsFloatAndDecimalSumsByBatchId() throws Throwable {
+        PaimonService service = new PaimonService(config(), mock(Log.class));
+        String tableName = "perf_test_001";
+        try {
+            service.init();
+            Catalog catalog = catalog(service);
+            catalog.createDatabase(DATABASE, true);
+            catalog.createTable(Identifier.create(DATABASE, tableName), Schema.newBuilder()
+                    .column("id", DataTypes.INT())
+                    .column("batch_id", DataTypes.INT())
+                    .column("col_float", DataTypes.FLOAT())
+                    .column("col_decimal", DataTypes.DECIMAL(20, 4))
+                    .primaryKey("id").option("bucket", "1")
+                    .option("write-buffer-size", "8mb").build(), false);
+            TapTable table = new TapTable(tableName)
+                    .add(new TapField("id", "INT").primaryKeyPos(1))
+                    .add(new TapField("batch_id", "INT"))
+                    .add(new TapField("col_float", "FLOAT"))
+                    .add(new TapField("col_decimal", "DECIMAL(20,4)"));
+            service.writeRecords(Arrays.asList(
+                    cdcInsert(map("id", 1, "batch_id", 2, "col_float", 1.5f,
+                            "col_decimal", new java.math.BigDecimal("10.1234"))).table(tableName),
+                    cdcInsert(map("id", 2, "batch_id", 1, "col_float", 0.1f,
+                            "col_decimal", new java.math.BigDecimal("0.1000"))).table(tableName),
+                    cdcInsert(map("id", 3, "batch_id", 1, "col_float", 0.2f,
+                            "col_decimal", new java.math.BigDecimal("0.2000"))).table(tableName),
+                    cdcInsert(map("id", 4, "batch_id", 1, "col_float", null,
+                            "col_decimal", null)).table(tableName)), table, context());
+
+            PaimonConnector connector = new PaimonConnector();
+            java.lang.reflect.Field serviceField = PaimonConnector.class.getDeclaredField("paimonService");
+            serviceField.setAccessible(true);
+            serviceField.set(connector, service);
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+            List<Map<String, Object>> rows = new java.util.ArrayList<>();
+            functions.getExecuteCommandFunction().execute(context(), TapExecuteCommand.create()
+                    .command("executeQuery").params(map("sql",
+                            "select batch_id, sum(col_float) f, sum(col_decimal) d "
+                                    + "from perf_test_001 where 1=1 group by batch_id order by batch_id",
+                            "batchSize", 1)), result -> {
+                        if (result.getError() != null) throw new AssertionError(result.getError());
+                        rows.addAll(castRows(result.getResult()));
+                    });
+            assertEquals(2, rows.size());
+            assertEquals(1, rows.get(0).get("batch_id"));
+            assertEquals(0, new java.math.BigDecimal("0.3").compareTo(
+                    (java.math.BigDecimal) rows.get(0).get("f")));
+            assertEquals(new java.math.BigDecimal("0.3000"), rows.get(0).get("d"));
+            assertEquals(2, rows.get(1).get("batch_id"));
+            assertEquals(0, new java.math.BigDecimal("1.5").compareTo(
+                    (java.math.BigDecimal) rows.get(1).get("f")));
+            assertEquals(new java.math.BigDecimal("10.1234"), rows.get(1).get("d"));
+        } finally { service.close(); }
+    }
+
     private TapInsertRecordEvent redemption(int id, String created, String transaction, String total, String points, String op) {
         return cdcInsert(map("id", id, "CreationTime", created == null ? null : timestamp(created),
                 "TransactionDatetime", timestamp(transaction),

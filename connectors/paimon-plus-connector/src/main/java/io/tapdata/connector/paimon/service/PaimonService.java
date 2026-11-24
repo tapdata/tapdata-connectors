@@ -3101,6 +3101,13 @@ public class PaimonService implements AutoCloseable {
             throw new IllegalArgumentException("Paimon SQL table name changed during parsing");
         }
         PaimonQueryPlan queryPlan = query.plan();
+        if (queryPlan == null) {
+            java.util.Map<String, String> column = new java.util.LinkedHashMap<>();
+            column.put("name", "value"); column.put("type", "BIGINT");
+            limits.publishColumns(java.util.Collections.singletonList(column));
+        } else {
+            limits.publishColumns(queryPlan.resultColumns());
+        }
         if (queryPlan == null && !query.countQuery()) {
             throw new IllegalStateException("Paimon row query requires a query plan");
         }

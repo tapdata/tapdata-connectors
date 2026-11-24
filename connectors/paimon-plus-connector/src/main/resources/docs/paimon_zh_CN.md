@@ -183,6 +183,7 @@ ARRAY/MAP/ROW/MULTISET/VARIANT 目标列会被拒绝。复杂 CDC 值必须以 J
 - 多列 `GROUP BY`，以及 `CAST(timestamp_column AS DATE)` 日期投影、分组。日期转换仅接受 DATE 或无时区 TIMESTAMP，不隐式选择时区。
 - 按已选择的表达式、别名、列序号 `ORDER BY`，支持 ASC/DESC、NULLS FIRST/LAST；默认 ASC 时 NULL 在前、DESC 时 NULL 在后。排序需要把结果行缓存在内存中，受 `maxBufferedRows` 限制：超过限制整次失败，不会返回截断或未排序的结果。
 - 原有 WHERE 子集：列与常量比较、BETWEEN、IN、IS NULL、有限的 LIKE、AND/OR/NOT。整型列只接受列范围内的整数字面量；小数或超范围字面量会以 `literal ... is not representable as ...` 明确报错，不会被静默截断，也不会被误报为语法错误。WHERE 下推至 Paimon，并由 reader 精确执行；读取投影保留 SELECT、GROUP BY、WHERE 所需的列。
+- 支持数字常量之间的比较，例如 `WHERE 1=1`、`WHERE 1=0`，以及与列条件的 AND/OR/NOT 组合。常量条件不计作分区列或前导主键过滤，显式禁止全表扫描时仍需提供键过滤条件。
 
 不支持 JOIN、通用子查询、WITH、UNION、HAVING、窗口函数、通用算术表达式、分页、表别名或带数据库/schema 前缀的表名。不支持的语法明确报错，不会静默忽略。历史 `COUNT(1) FROM (SELECT * ...)` 计数包装继续支持，历史直接 COUNT(1) 和计数包装仍返回 Long；其他查询返回 `List<Map<String,Object>>`，建议为所有表达式指定唯一别名。
 
