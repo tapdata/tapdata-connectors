@@ -307,6 +307,13 @@ final class PaimonSqlQueryParser {
 
     private static Predicate parseComparison(BinaryExpression expression, String tableName,
                                              RowType rowType, PredicateBuilder builder) {
+        if (isNumericLiteral(expression.getLeftExpression())
+                && isNumericLiteral(expression.getRightExpression())) {
+            // Paimon has no constant predicate. These complementary null checks
+            // preserve true/false even for null rows and work with AND/OR/NOT.
+            return compareNumericLiterals(expression) ? PredicateBuilder.or(builder.isNull(0), builder.isNotNull(0))
+                    : PredicateBuilder.and(builder.isNull(0), builder.isNotNull(0));
+        }
         boolean reversed = !(expression.getLeftExpression() instanceof Column)
                 && expression.getRightExpression() instanceof Column;
         int index = fieldIndex(reversed ? expression.getRightExpression() : expression.getLeftExpression(), tableName, rowType, builder);
@@ -327,6 +334,34 @@ final class PaimonSqlQueryParser {
             return reversed ? builder.greaterThan(index, value) : builder.lessThan(index, value);
         }
         return reversed ? builder.greaterOrEqual(index, value) : builder.lessOrEqual(index, value);
+    }
+
+    private static boolean compareNumericLiterals(BinaryExpression expression) {
+        int comparison = new BigDecimal(expression.getLeftExpression().toString())
+                .compareTo(new BigDecimal(expression.getRightExpression().toString()));
+        if (expression instanceof EqualsTo) {
+            return comparison == 0;
+        }
+        if (expression instanceof NotEqualsTo) {
+            return comparison != 0;
+        }
+        if (expression instanceof GreaterThan) {
+            return comparison > 0;
+        }
+        if (expression instanceof GreaterThanEquals) {
+            return comparison >= 0;
+        }
+        if (expression instanceof MinorThan) {
+            return comparison < 0;
+        }
+        return comparison <= 0;
+    }
+
+    private static boolean isNumericLiteral(Expression expression) {
+        if (expression instanceof SignedExpression) {
+            return isNumericLiteral(((SignedExpression) expression).getExpression());
+        }
+        return expression instanceof LongValue || expression instanceof DoubleValue;
     }
 
     private static Predicate parseOptionalPredicate(Expression expression, String tableName, RowType rowType,

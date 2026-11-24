@@ -90,6 +90,34 @@ class PaimonSqlQueryParserTest {
     }
 
     @Test
+    void numericConstantPredicatesPreserveBooleanAndNullSemantics() {
+        Stream.of("1=1", "1.0=1", "-1 < +2", "2 > 1", "2 >= 2", "1 <= 1", "1 <> 0",
+                "NOT (1=0)", "1=0 OR 1=1", "1=1 AND (1=1)")
+                .forEach(condition -> {
+                    Predicate predicate = PaimonSqlQueryParser.parse(
+                            "SELECT * FROM orders WHERE " + condition, ROW_TYPE).predicate();
+                    assertTrue(predicate.test(GenericRow.of(2, null, null)), condition);
+                    assertTrue(predicate.test(GenericRow.of(null, null, null)), condition);
+                });
+        Stream.of("1=0", "1<>1", "1 > 2", "1 >= 2", "2 < 1", "2 <= 1",
+                "NOT (1=1)", "1=0 OR 1=0", "1=1 AND 1=0")
+                .forEach(condition -> {
+                    Predicate predicate = PaimonSqlQueryParser.parse(
+                            "SELECT * FROM orders WHERE " + condition, ROW_TYPE).predicate();
+                    assertFalse(predicate.test(GenericRow.of(2, null, null)), condition);
+                    assertFalse(predicate.test(GenericRow.of(null, null, null)), condition);
+                });
+        Stream.of("1=1 AND id=2", "1=0 OR id=2", "NOT (1=0) AND id=2")
+                .forEach(condition -> {
+                    Predicate predicate = PaimonSqlQueryParser.parse(
+                            "SELECT * FROM orders WHERE " + condition, ROW_TYPE).predicate();
+                    assertTrue(predicate.test(GenericRow.of(2, null, null)), condition);
+                    assertFalse(predicate.test(GenericRow.of(3, null, null)), condition);
+                    assertFalse(predicate.test(GenericRow.of(null, null, null)), condition);
+                });
+    }
+
+    @Test
     void rejectsStatementsThatCouldMutateOrSilentlyScanTheWholeTable() {
         Stream.of(
                 "INSERT INTO orders VALUES (1, 'A', NULL)",
