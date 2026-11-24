@@ -37,6 +37,39 @@ import static org.mockito.Mockito.mockStatic;
 @DisplayName("Class MongodbMergeOperate Test")
 class MongodbMergeOperateTest {
 
+	@Test
+	@DisplayName("Recursive insert keeps parent and child updates when merge filter is absent")
+	void recursiveInsertWithoutMergeFilter() {
+		MergeTableProperties parent = new MergeTableProperties();
+		parent.setMergeType(MergeTableProperties.MergeType.updateWrite);
+		Map<String, String> joinKey = new HashMap<>();
+		joinKey.put("source", "id");
+		joinKey.put("target", "id");
+		parent.setJoinKeys(Collections.singletonList(joinKey));
+		MergeTableProperties child = new MergeTableProperties();
+		child.setMergeType(MergeTableProperties.MergeType.updateWrite);
+		child.setTargetPath("child");
+		child.setJoinKeys(parent.getJoinKeys());
+		MergeLookupResult lookup = new MergeLookupResult();
+		lookup.setProperty(child);
+		lookup.setData(new Document("id", 1).append("name", "child value"));
+		lookup.setDataExists(true);
+		List<MergeResult> results = new ArrayList<>();
+
+		MongodbMergeOperate.recursiveMerge(
+				new MergeBundle(MergeBundle.EventOperation.INSERT, null,
+						new Document("id", 1).append("name", "parent value")),
+				parent, results, Collections.singletonList(lookup), null, null, null, 1, null);
+
+		assertFalse(results.isEmpty());
+		for (MergeResult result : results) {
+			assertEquals(MergeResult.Operation.UPDATE, result.getOperation());
+			assertEquals(1, result.getFilter().get("id"));
+		}
+		assertTrue(results.stream().anyMatch(result ->
+				"child value".equals(result.getUpdate().get("$set", Document.class).get("child.name"))));
+	}
+
 	@Nested
 	@DisplayName("Method appendAllParentMergeFilters Test")
 	class appendAllParentMergeFiltersTest {

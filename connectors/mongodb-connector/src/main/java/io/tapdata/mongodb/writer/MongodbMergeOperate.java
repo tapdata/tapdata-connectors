@@ -246,7 +246,7 @@ public class MongodbMergeOperate {
 					mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, data);
 					mergeBundle.setRecursive(true);
 					mergeBundle.setDataExists(mergeLookupResult.isDataExists());
-					if (mergeFilter.isAppend() && null != mergeResult) {
+					if (null != mergeFilter && mergeFilter.isAppend() && null != mergeResult) {
 						mergeFilter.addFilter(mergeResult.getFilter());
 					}
 				}
