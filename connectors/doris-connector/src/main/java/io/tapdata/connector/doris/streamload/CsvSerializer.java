@@ -23,9 +23,7 @@ public class CsvSerializer implements MessageSerializer {
     public byte[] serialize(TapTable table, TapRecordEvent recordEvent, boolean isAgg) throws Throwable {
         // in some case, the before might be null, here we use after if the before is null
         // and doris will use pk to delete the data
-//        if (before == null) {
-//            before = after;
-//        }
+
 
         String value = "";
         if (recordEvent instanceof TapInsertRecordEvent) {
@@ -34,10 +32,9 @@ public class CsvSerializer implements MessageSerializer {
             value += buildCSVString(table, after, false, isAgg);
         } else if (recordEvent instanceof TapUpdateRecordEvent) {
             final TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
-//            final Map<String, Object> before = updateRecordEvent.getBefore();
+
             final Map<String, Object> after = updateRecordEvent.getAfter();
-//            value += buildCSVString(table, before, true);
-//            value += Constants.LINE_DELIMITER_DEFAULT;
+
             value += buildCSVString(table, after, false, isAgg);
         } else {
             final TapDeleteRecordEvent deleteRecordEvent = (TapDeleteRecordEvent) recordEvent;

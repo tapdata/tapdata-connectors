@@ -16,8 +16,8 @@ import java.util.List;
 
 public class ClickhouseDDLSqlGenerator implements DDLSqlGenerator {
 
-    private final static String TABLE_NAME_FORMAT = "\"%s\".\"%s\"";
-    private final static String ALTER_TABLE_PREFIX = "alter table " + TABLE_NAME_FORMAT;
+    private static final String TABLE_NAME_FORMAT = "\"%s\".\"%s\"";
+    private static final String ALTER_TABLE_PREFIX = "alter table " + TABLE_NAME_FORMAT;
 
     @Override
     public List<String> addColumn(CommonDbConfig config, TapNewFieldEvent tapNewFieldEvent) {

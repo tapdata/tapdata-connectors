@@ -17,8 +17,8 @@ import java.util.stream.Collectors;
 
 public class ClickhouseDDLSqlMaker implements DDLSqlMaker {
 
-    private final static String TABLE_NAME_FORMAT = "\"%s\".\"%s\"";
-    private final static String ALTER_TABLE_PREFIX = "alter table " + TABLE_NAME_FORMAT;
+    private static final String TABLE_NAME_FORMAT = "\"%s\".\"%s\"";
+    private static final String ALTER_TABLE_PREFIX = "alter table " + TABLE_NAME_FORMAT;
 
     @Override
     public List<String> addColumn(TapConnectorContext tapConnectorContext, TapNewFieldEvent tapNewFieldEvent) {
@@ -180,7 +180,7 @@ public class ClickhouseDDLSqlMaker implements DDLSqlMaker {
         LinkedHashMap<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
         //no primary key,need judge logic primary key
         Collection<String> primaryKeys = tapTable.primaryKeys(true);
-//        Collection<String> logicPrimaryKeys = EmptyKit.isNotEmpty(primaryKeys) ? Collections.emptyList() : tapTable.primaryKeys(true);
+
         return nameFieldMap.entrySet().stream().sorted(Comparator.comparing(v ->
                 EmptyKit.isNull(v.getValue().getPos()) ? 99999 : v.getValue().getPos())).map(v -> { //pos may be null
             StringBuilder builder = new StringBuilder();

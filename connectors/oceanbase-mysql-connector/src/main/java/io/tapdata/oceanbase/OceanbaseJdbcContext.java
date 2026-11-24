@@ -17,6 +17,7 @@ public class OceanbaseJdbcContext extends MysqlJdbcContextV2 {
         super(config);
     }
 
+    @Override
     public void queryWithStream(String sql, ResultSetConsumer resultSetConsumer) throws Throwable {
         try (
                 Connection connection = getConnection();

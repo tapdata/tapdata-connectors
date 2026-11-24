@@ -5,12 +5,12 @@ package io.tapdata.connector.doris.streamload;
  * @Date 7/14/22
  */
 
-import io.tapdata.entity.logger.TapLogger;
+
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
+
 
 /**
  * Record Stream for writing record.
@@ -36,6 +36,7 @@ public class RecordStream extends InputStream {
         try {
             return recordBuffer.read();
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException(e);
         }
     }
@@ -45,6 +46,7 @@ public class RecordStream extends InputStream {
         try {
             return recordBuffer.read(buff);
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException(e);
         }
     }
@@ -54,6 +56,7 @@ public class RecordStream extends InputStream {
         try {
             return recordBuffer.read(b, off, len);
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException(e);
         }
     }
@@ -63,6 +66,7 @@ public class RecordStream extends InputStream {
             recordBuffer.write(buff);
             contentLength += buff.length;
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException(e);
         }
     }

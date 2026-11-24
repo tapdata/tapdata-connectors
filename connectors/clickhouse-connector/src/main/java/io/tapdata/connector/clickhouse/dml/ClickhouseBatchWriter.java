@@ -4,7 +4,7 @@ import io.tapdata.connector.clickhouse.ClickhouseJdbcContext;
 import io.tapdata.connector.clickhouse.util.JdbcUtil;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
-import io.tapdata.entity.schema.TapTable;
+
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 

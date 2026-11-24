@@ -360,7 +360,10 @@ public class CsvConnector extends FileConnector {
 
     private void skipRead(BufferedReader bufferedReader, int skip) throws IOException {
         while (skip > 0) {
-            bufferedReader.readLine();
+            String skippedLine = bufferedReader.readLine();
+            if (skippedLine == null) {
+                return;
+            }
             skip--;
         }
     }

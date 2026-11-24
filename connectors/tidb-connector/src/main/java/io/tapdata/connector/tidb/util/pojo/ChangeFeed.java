@@ -1,6 +1,6 @@
 package io.tapdata.connector.tidb.util.pojo;
 
-import com.alibaba.fastjson.JSONObject;
+
 
 public class ChangeFeed {
     private Long startTs;

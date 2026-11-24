@@ -117,7 +117,6 @@
             <version>2.3.1</version>
         </dependency>
 
-
         <!-- 通用 Connector 集成测试框架（test scope，提供 ConnectorIT 基类与全部通用用例） -->
         <dependency>
             <groupId>io.tapdata</groupId>
@@ -291,10 +290,7 @@
                     <target>8</target>
                 </configuration>
             </plugin>
-            <!--            <plugin>-->
-            <!--                <groupId>org.apache.maven.plugins</groupId>-->
-            <!--                <artifactId>maven-source-plugin</artifactId>-->
-            <!--                <executions>-->
+
             <!--                    <execution>-->
             <!--                        <id>attach-sources</id>-->
             <!--                        <goals>-->

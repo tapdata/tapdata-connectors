@@ -17,14 +17,25 @@ public class CsvFileWriter extends AbstractFileWriter {
 
     @Override
     public void init() throws Exception {
-        super.init();
-        this.csvWriter = new DelimitedCsvWriter(writer, separator, quoteChar, lineEnd);
+        boolean initialized = false;
+        try {
+            super.init();
+            this.csvWriter = new DelimitedCsvWriter(writer, separator, quoteChar, lineEnd);
+            initialized = true;
+        } finally {
+            if (!initialized) {
+                super.close();
+            }
+        }
     }
 
     public void setRule(String separator, char quoteChar, String lineEnd) {
         this.separator = separator;
         this.quoteChar = quoteChar;
         this.lineEnd = lineEnd;
+        if (writer != null) {
+            this.csvWriter = new DelimitedCsvWriter(writer, separator, quoteChar, lineEnd);
+        }
     }
 
     public DelimitedCsvWriter getCsvWriter() {

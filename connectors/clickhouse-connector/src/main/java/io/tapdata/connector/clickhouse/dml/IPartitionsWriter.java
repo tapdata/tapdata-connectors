@@ -1,7 +1,7 @@
 package io.tapdata.connector.clickhouse.dml;
 
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.schema.TapTable;
+
 
 import java.util.function.Supplier;
 

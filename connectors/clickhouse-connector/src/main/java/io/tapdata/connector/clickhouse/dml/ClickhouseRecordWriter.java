@@ -34,6 +34,7 @@ public class ClickhouseRecordWriter extends NormalRecordWriter {
         deleteRecorder = new ClickhouseWriteRecorder(connection, tapTable, jdbcContext.getConfig().getSchema());
     }
 
+    @Override
     public void write(List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, Supplier<Boolean> isAlive) throws SQLException {
         //result of these events
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();

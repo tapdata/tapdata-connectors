@@ -16,6 +16,7 @@ public class JdbcUtil {
 				c.close();
 			}
 		} catch (Throwable ignored) {
+			// Close is best-effort so it cannot replace the original JDBC failure.
 		}
 	}
 
@@ -35,6 +36,7 @@ public class JdbcUtil {
 				connection.rollback();
 			}
 		} catch (Throwable ignored) {
+			// Rollback is best-effort during failure cleanup.
 		}
 	}
 }

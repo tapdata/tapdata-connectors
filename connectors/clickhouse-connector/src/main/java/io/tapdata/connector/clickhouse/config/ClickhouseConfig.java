@@ -4,7 +4,7 @@ import io.tapdata.common.CommonDbConfig;
 
 import java.io.Serializable;
 import java.util.*;
-import java.util.function.Function;
+
 
 public class ClickhouseConfig extends CommonDbConfig implements Serializable {
 

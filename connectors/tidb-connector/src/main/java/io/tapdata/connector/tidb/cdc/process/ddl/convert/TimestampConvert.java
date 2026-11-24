@@ -22,7 +22,7 @@ public class TimestampConvert implements Convert {
         if (timestamp instanceof LocalDateTime) {
             return ((LocalDateTime) timestamp).plusSeconds((dbTimezone.getRawOffset() - TimeZone.getDefault().getRawOffset()) / 1000).atZone(ZoneOffset.UTC);
         } else if (timestamp instanceof Instant) {
-            return ((Instant) timestamp).plusMillis(dbTimezone.getRawOffset() - TimeZone.getDefault().getRawOffset()).atZone(ZoneOffset.UTC);
+            return ((Instant) timestamp).plusMillis((long) dbTimezone.getRawOffset() - TimeZone.getDefault().getRawOffset()).atZone(ZoneOffset.UTC);
         }
         return timestamp;
     }

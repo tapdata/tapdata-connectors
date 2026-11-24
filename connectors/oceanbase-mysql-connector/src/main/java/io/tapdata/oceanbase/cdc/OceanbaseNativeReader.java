@@ -41,7 +41,7 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
     private static final int NATIVE_LOG_TAIL_LINES = 80;
 
     private final Log tapLogger;
-    private volatile Process process;
+    private final java.util.concurrent.atomic.AtomicReference<Process> process = new java.util.concurrent.atomic.AtomicReference<>();
     private File workDir;
 
     public OceanbaseNativeReader(OceanbaseConfig oceanbaseConfig, String connectorId, Log tapLogger) {
@@ -59,7 +59,7 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
         File helper = extractHelper();
         ProcessBuilder pb = new ProcessBuilder(helper.getAbsolutePath()).directory(workDir);
         Process helperProcess = pb.start();
-        process = helperProcess;
+        process.set(helperProcess);
         tapLogger.info("obcdc-helper started, pid dir: {}", workDir.getAbsolutePath());
         CountDownLatch ready = new CountDownLatch(1);
 
@@ -73,6 +73,7 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
                     }
                 }
             } catch (IOException ignore) {
+                // The helper closes stderr during shutdown; readiness and exit checks report startup failures.
             }
         });
         stderrPump.setName("OceanBaseNativeReader-StderrPump");
@@ -83,7 +84,7 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
             // configuration goes through stdin so credentials never appear on argv
             try (Writer writer = new OutputStreamWriter(helperProcess.getOutputStream(), StandardCharsets.UTF_8)) {
                 writeConf(writer, "_task_id", connectorId);
-                writeConf(writer, "_start_timestamp", String.valueOf((Long) offsetState));
+                writeConf(writer, "_start_timestamp", String.valueOf(offsetState));
                 writeConf(writer, "_conf_template", new File(workDir, "obcdc/etc/libobcdc.conf").getAbsolutePath());
                 writeConf(writer, "_launch_timeout_sec", String.valueOf(HELPER_LAUNCH_TIMEOUT_SECONDS));
                 writeConf(writer, "cluster_user", oceanbaseConfig.getCdcUser());
@@ -155,7 +156,7 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
         if (!isAlive.get()) {
             return; // task is stopping, helper exit is expected
         }
-        Process p = process;
+        Process p = process.get();
         Integer exitCode = null;
         if (p != null && p.waitFor(3, TimeUnit.SECONDS)) {
             exitCode = p.exitValue();
@@ -167,11 +168,10 @@ public class OceanbaseNativeReader extends OceanbaseReaderV2 {
 
     @Override
     public void stop() {
-        Process p = process;
+        Process p = process.getAndSet(null);
         if (p == null) {
             return;
         }
-        process = null;
         p.destroy(); // SIGTERM, helper stops obcdc and exits
         try {
             if (!p.waitFor(30, TimeUnit.SECONDS)) {

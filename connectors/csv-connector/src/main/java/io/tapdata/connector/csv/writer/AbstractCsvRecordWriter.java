@@ -109,18 +109,12 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
                 if (storage.supportAppendData()) {
                     csvFileWriter.init();
                 } else {
-                    csvFileWriter = new CsvFileWriter(storage, getNewCacheFileName(csvFileWriter.getPath()), fileConfig.getFileEncoding());
-                    csvFileWriter.setRule(csvConfig.getSeparator(),
-                            csvConfig.getQuoteCharacter(), csvConfig.getLineEnd());
-                    csvFileWriter.init();
+                    csvFileWriter = createCsvFileWriter(getNewCacheFileName(csvFileWriter.getPath()), csvConfig);
                     fileWriterMap.put(uniquePath, csvFileWriter);
                 }
             }
         } else {
-            csvFileWriter = new CsvFileWriter(storage, uniquePath, fileConfig.getFileEncoding());
-            csvFileWriter.setRule(csvConfig.getSeparator(),
-                    csvConfig.getQuoteCharacter(), csvConfig.getLineEnd());
-            csvFileWriter.init();
+            csvFileWriter = createCsvFileWriter(uniquePath, csvConfig);
             fileWriterMap.put(uniquePath, csvFileWriter);
         }
         if (!lastWriteMap.containsKey(skipPoints(uniquePath)) || EmptyKit.isNull(lastWriteMap.get(skipPoints(uniquePath)))) {
@@ -135,6 +129,20 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
             lastWriteMap.put(skipPoints(uniquePath), System.currentTimeMillis());
         }
         return csvFileWriter;
+    }
+
+    private CsvFileWriter createCsvFileWriter(String path, CsvConfig config) throws Exception {
+        CsvFileWriter csvFileWriter = new CsvFileWriter(storage, path, fileConfig.getFileEncoding());
+        boolean configured = false;
+        try {
+            csvFileWriter.setRule(config.getSeparator(), config.getQuoteCharacter(), config.getLineEnd());
+            configured = true;
+            return csvFileWriter;
+        } finally {
+            if (!configured) {
+                csvFileWriter.close();
+            }
+        }
     }
 
     private String getNewCacheFileName(String path) {
@@ -161,7 +169,6 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
             CsvConfig csvConfig = (CsvConfig) fileConfig;
             localCsvFileWriter.setRule(csvConfig.getSeparator(),
                     csvConfig.getQuoteCharacter(), csvConfig.getLineEnd());
-            localCsvFileWriter.init();
             for (TapFile file : cacheFilesPath) {
                 storage.readFile(file.getPath(), inputStream -> {
                     try (

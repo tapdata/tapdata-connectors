@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class ClickhouseJdbcContext extends JdbcContext {
 
-    private final static String TAG = ClickhouseJdbcContext.class.getSimpleName();
+    private static final String TAG = ClickhouseJdbcContext.class.getSimpleName();
     private String clickhouseVersion;
 
     public ClickhouseJdbcContext(ClickhouseConfig config) {
@@ -25,6 +25,7 @@ public class ClickhouseJdbcContext extends JdbcContext {
         try {
             clickhouseVersion = queryVersion();
         } catch (SQLException ignored) {
+            // Version discovery is optional here; normal connection checks report server errors.
         }
     }
 
@@ -90,9 +91,9 @@ public class ClickhouseJdbcContext extends JdbcContext {
     }
 
     public static final String DATABASE_TIMEZONE_SQL = "SELECT timeZone()";
-    private final static String CK_ALL_TABLE = "select name `tableName`, comment `tableComment` from system.tables where database='%s' %s";
-    private final static String CK_ALL_TABLE_20 = "select name `tableName` from system.tables where database='%s' %s";
-    private final static String CK_ALL_COLUMN =
+    private static final String CK_ALL_TABLE = "select name `tableName`, comment `tableComment` from system.tables where database='%s' %s";
+    private static final String CK_ALL_TABLE_20 = "select name `tableName` from system.tables where database='%s' %s";
+    private static final String CK_ALL_COLUMN =
             "select \n" +
                     "table `tableName`, \n" +
                     "name `columnName`, \n" +
@@ -106,7 +107,7 @@ public class ClickhouseJdbcContext extends JdbcContext {
                     "from system.columns \n" +
                     "where database='%s' %s\n" +
                     "order by table,position";
-    private final static String CK_TABLE_INFO = "select total_rows,total_bytes from system.tables where name ='%s' and database='%s' ";
+    private static final String CK_TABLE_INFO = "select total_rows,total_bytes from system.tables where name ='%s' and database='%s' ";
 
-    private final static String CK_CURRENT_TIME = "SELECT NOW64()";
+    private static final String CK_CURRENT_TIME = "SELECT NOW64()";
 }

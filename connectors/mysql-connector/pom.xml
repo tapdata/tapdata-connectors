@@ -223,10 +223,7 @@
                     <target>8</target>
                 </configuration>
             </plugin>
-            <!--            <plugin>-->
-            <!--                <groupId>org.apache.maven.plugins</groupId>-->
-            <!--                <artifactId>maven-source-plugin</artifactId>-->
-            <!--                <executions>-->
+
             <!--                    <execution>-->
             <!--                        <id>attach-sources</id>-->
             <!--                        <goals>-->
@@ -328,11 +325,7 @@
                     </execution>
                 </executions>
             </plugin>
-            <!--            <plugin>-->
-<!--                <groupId>org.codehaus.mojo</groupId>-->
-<!--                <artifactId>exec-maven-plugin</artifactId>-->
-<!--                <version>3.0.0</version>-->
-<!--                <executions>-->
+
 <!--                    <execution>-->
 <!--                        <phase>install</phase>-->
 <!--                        <goals>-->
@@ -340,7 +333,7 @@
 <!--                        </goals>-->
 <!--                    </execution>-->
 <!--                </executions>-->
-<!--                <configuration>-->
+
 <!--                    <executable>java</executable>-->
 <!--                    <arguments>-->
 <!--                        <argument>-jar</argument>-->

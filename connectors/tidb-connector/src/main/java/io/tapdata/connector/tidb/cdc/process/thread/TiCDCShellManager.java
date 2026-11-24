@@ -20,6 +20,7 @@ import java.util.Comparator;
 import java.util.List;
 
 public class TiCDCShellManager implements Activity {
+
     public static final int CDC_TOOL_NOT_EXISTS = 1000010;
     public static final Object PROCESS_LOCK = new Object();
     public static final String CDC_CMD = "${cdc_tool_path} server " +
@@ -250,9 +251,15 @@ public class TiCDCShellManager implements Activity {
 
     protected void permission(File file) {
         try {
-            if (!file.canRead()) file.setReadable(true);
-            if (!file.canWrite()) file.setWritable(true);
-            if (!file.canExecute()) file.setExecutable(true);
+            if (!file.canRead() && !file.setReadable(true)) {
+                log.warn("Failed to set readable permission for {}", file.getAbsolutePath());
+            }
+            if (!file.canWrite() && !file.setWritable(true)) {
+                log.warn("Failed to set writable permission for {}", file.getAbsolutePath());
+            }
+            if (!file.canExecute() && !file.setExecutable(true)) {
+                log.warn("Failed to set executable permission for {}", file.getAbsolutePath());
+            }
         } catch (Exception e) {
             log.warn("Auto set permission failed,  message: {}", e.getMessage());
         }

@@ -71,7 +71,7 @@ public class MongodbWriter {
 
 	// Error file cleanup configuration
 	private volatile long lastCleanupTime = 0;
-	private static final long CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+	private static final long CLEANUP_INTERVAL_MS = 60L * 60 * 1000; // 1 hour
 	private static final int ERROR_FILE_RETENTION_DAYS = 7; // Keep error files for 7 days
 	private static final int ERROR_FILE_MAX_COUNT = 100; // Keep at most 100 error files
 
@@ -279,6 +279,7 @@ public class MongodbWriter {
 				try {
 					retryWriteModel = bulkWriteErrorCodeHandlerEnum.getBulkWriteErrorHandler().handle(bulkWriteModel, writeModel, bulkWriteOptions, originMongoBulkWriteException, writeError, collection);
 				} catch (Exception ignored) {
+					// Fall back to the original bulk-write failure when retry-model conversion fails.
 				}
 				if (null != retryWriteModel) {
 					handledIndexes.add(index);
@@ -543,7 +544,7 @@ public class MongodbWriter {
 	protected List<WriteModel<Document>> normalWriteMode(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, UpdateOptions options, TapTable tapTable, Collection<String> pks, TapRecordEvent recordEvent) {
 		List<WriteModel<Document>> writeModels = new ArrayList<>();
 		if (recordEvent instanceof TapInsertRecordEvent) {
-			WriteModel<Document> writeModel;
+
 			TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
 			Document unsetDoc = wrapUnset(recordEvent);
 
@@ -722,9 +723,7 @@ public class MongodbWriter {
 	 * isParentField("a.b", "a.b.c") -> true
 	 * isParentField("a.b", "a") -> false
 	 */
-	private boolean isParentField(String parentField, String field) {
-		return field.startsWith(parentField + ".");
-	}
+
 
 	public void onDestroy() {
 		if (mongoClient != null) {
@@ -792,10 +791,12 @@ public class MongodbWriter {
 
 			long cutoffTime = System.currentTimeMillis() - (retentionDays * 24L * 60 * 60 * 1000);
 
-			List<Path> allFiles = Files.list(errorDir)
-					.filter(Files::isRegularFile)
+			List<Path> allFiles;
+			try (java.util.stream.Stream<Path> files = Files.list(errorDir)) {
+				allFiles = files.filter(Files::isRegularFile)
 					.filter(p -> p.getFileName().toString().startsWith("mongodb_bulk_write_error_"))
 					.collect(java.util.stream.Collectors.toList());
+			}
 
 			// Step 1: Delete files older than retention period
 			List<Path> validFiles = new ArrayList<>();

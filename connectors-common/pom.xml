@@ -24,7 +24,7 @@
 		<module>js-connector-core-plus</module>
 		<module>read-partition</module>
         <module>hive-core</module>
-        <!--		<module>dependency-core</module>-->
+
     </modules>
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -48,12 +48,6 @@
 
 	<dependencies>
 		<!-- Some connectors need invoke pdk.jar which from tapdata-cli, so compile tapdata-cli before connectors compile start.  -->
-<!--		<dependency>-->
-<!--			<groupId>io.tapdata</groupId>-->
-<!--			<artifactId>tapdata-cli</artifactId>-->
-<!--			<version>1.0-SNAPSHOT</version>-->
-<!--			<scope>test</scope>-->
-<!--		</dependency>-->
 
 			<dependency>
 				<groupId>org.junit.jupiter</groupId>
@@ -81,7 +75,6 @@
 				<version>4.11.0</version>
 				<scope>test</scope>
 			</dependency>
-
 
 	</dependencies>
 	<dependencyManagement>

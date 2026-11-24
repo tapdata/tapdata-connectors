@@ -2,10 +2,9 @@ package io.tapdata.connector.tidb;
 
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.connector.mysql.MysqlJdbcContextV2;
-import io.tapdata.connector.mysql.config.MysqlConfig;
-import io.tapdata.kit.EmptyKit;
 
-import java.io.Serializable;
+
+
 import java.sql.SQLException;
 import java.text.DecimalFormat;
 import java.time.ZoneId;
@@ -14,7 +13,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class TidbJdbcContext extends MysqlJdbcContextV2 implements Serializable {
+public class TidbJdbcContext extends MysqlJdbcContextV2 {
     public static final String SAFE_GC_POINT_SQL = "SELECT VARIABLE_NAME, VARIABLE_VALUE FROM mysql.tidb WHERE VARIABLE_NAME IN ('tikv_gc_safe_point', 'tikv_gc_enable')";
 
     public TidbJdbcContext(CommonDbConfig config) {
@@ -51,6 +50,7 @@ public class TidbJdbcContext extends MysqlJdbcContextV2 implements Serializable 
         return gcLifeTimeCollector.get();
     }
 
+    @Override
     public TimeZone queryTimeZone() throws SQLException {
         AtomicReference<Long> timeOffset = new AtomicReference<>();
         queryWithNext("SELECT ROUND(TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) / 3600) AS timeoffset",

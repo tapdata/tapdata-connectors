@@ -27,6 +27,19 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 public class MongodbUtilTest {
+    @org.junit.jupiter.api.Test
+    void objectIdFromAnotherPluginClassloaderKeepsItsValue() throws Exception {
+        java.net.URL bsonJar = org.bson.types.ObjectId.class.getProtectionDomain().getCodeSource().getLocation();
+        try (java.net.URLClassLoader loader = new java.net.URLClassLoader(new java.net.URL[]{bsonJar}, null)) {
+            Object foreign = loader.loadClass("org.bson.types.ObjectId").getConstructor(String.class)
+                    .newInstance("507f1f77bcf86cd799439011");
+            org.junit.jupiter.api.Assertions.assertFalse(foreign instanceof org.bson.types.ObjectId);
+            Object converted = MongodbUtil.convertValue(foreign);
+            org.junit.jupiter.api.Assertions.assertInstanceOf(org.bson.types.ObjectId.class, converted);
+            org.junit.jupiter.api.Assertions.assertEquals("507f1f77bcf86cd799439011", converted.toString());
+        }
+    }
+
     @Test
     void convertValueShouldConvertNestedDateTimeToDate() {
         long epochMilli = 1_715_187_045_123L;

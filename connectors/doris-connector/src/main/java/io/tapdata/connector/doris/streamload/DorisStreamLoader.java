@@ -251,9 +251,10 @@ public class DorisStreamLoader {
 
     public void shutdown() {
         try {
-//            this.stopLoad();
+
             this.httpClient.close();
         } catch (Exception ignored) {
+            // Closing the HTTP client is best-effort during loader shutdown.
         }
     }
 
@@ -274,11 +275,7 @@ public class DorisStreamLoader {
                 || !recordStream.canWrite(length);
     }
 
-    private void stopLoad() throws DorisRetryableException {
-        if (null != tapTable) {
-            flush(tapTable);
-        }
-    }
+
 
     public enum OperationType {
         INSERT(1, "insert"),
@@ -311,8 +308,7 @@ public class DorisStreamLoader {
         private long update = 0L;
         private long delete = 0L;
 
-        public Metrics() {
-        }
+
 
         public void increase(TapRecordEvent tapRecordEvent) {
             if (tapRecordEvent instanceof TapInsertRecordEvent) {

@@ -86,6 +86,7 @@ import java.util.stream.Collectors;
  **/
 @TapConnectorClass("mysql-spec.json")
 public class MysqlConnector extends CommonDbConnector {
+
     private final ThreadLocal<Boolean> transactionActive = ThreadLocal.withInitial(() -> false);
 
     @Override
@@ -354,8 +355,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
         connectorFunctions.supportExecuteCommandV2Function(this::executeCommandV2);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
-        //connectorFunctions.supportQueryFieldMinMaxValueFunction(this::minMaxValue);
-        //connectorFunctions.supportGetReadPartitionsFunction(this::getReadPartitions);
+
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
         connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
         connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
@@ -365,25 +365,15 @@ public class MysqlConnector extends CommonDbConnector {
 
     }
 
-    private void rollback(TapConnectorContext tapConnectorContext) {
-    }
 
-    private void commit(TapConnectorContext tapConnectorContext) {
-    }
 
-    private void begin(TapConnectorContext tapConnectorContext) {
-    }
 
-    private void getReadPartitions(TapConnectorContext connectorContext, TapTable table, GetReadPartitionOptions options) throws Throwable {
-        DatabaseReadPartitionSplitter.calculateDatabaseReadPartitions(connectorContext, table, options)
-                .queryFieldMinMaxValue(this::minMaxValue)
-                .typeSplitterMap(options.getTypeSplitterMap().registerSplitter(TypeSplitterMap.TYPE_STRING, StringCaseInsensitiveSplitter.INSTANCE))
-                .startSplitting();
-    }
 
-    private void partitionRead(TapConnectorContext connectorContext, TapTable table, ReadPartition readPartition, int eventBatchSize, Consumer<List<TapEvent>> consumer) {
 
-    }
+
+
+
+
 
     private FieldMinMaxValue minMaxValue(TapConnectorContext tapConnectorContext, TapTable tapTable, TapAdvanceFilter tapPartitionFilter, String fieldName) {
         SqlMaker sqlMaker = new MysqlMaker();
@@ -423,6 +413,7 @@ public class MysqlConnector extends CommonDbConnector {
         return fieldMinMaxValue;
     }
 
+    @Override
     protected RetryOptions errorHandle(TapConnectionContext tapConnectionContext, PDKMethod pdkMethod, Throwable throwable) {
         RetryOptions retryOptions = RetryOptions.create();
         retryOptions.setNeedRetry(true);
@@ -445,6 +436,7 @@ public class MysqlConnector extends CommonDbConnector {
                     }
                 }
             } catch (Throwable ignore) {
+                // The retry decision remains authoritative if this reconnect attempt fails.
             }
         });
         return retryOptions;
@@ -452,11 +444,7 @@ public class MysqlConnector extends CommonDbConnector {
 
     private boolean checkStatementClosed(Throwable throwable) {
         Throwable cause = matchThrowable(throwable, StatementIsClosedException.class);
-        if (throwable instanceof TapPdkRetryableEx && null != cause && "S1009".equals(((StatementIsClosedException) cause).getSQLState())) {
-            return true;
-        } else {
-            return false;
-        }
+        return (throwable instanceof TapPdkRetryableEx && null != cause && "S1009".equals(((StatementIsClosedException) cause).getSQLState()));
     }
 
     private boolean checkValid() {
@@ -482,6 +470,7 @@ public class MysqlConnector extends CommonDbConnector {
         try {
             Optional.ofNullable(this.mysqlReader).ifPresent(MysqlReader::close);
         } catch (Exception ignored) {
+            // Reader cleanup is best-effort so the remaining connector resources can close.
         }
         if (null != mysqlJdbcContext) {
             try {
@@ -503,6 +492,7 @@ public class MysqlConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected TapField makeTapField(DataMap dataMap) {
         return new MysqlColumn(dataMap).withVersion(version)
                 .withSeedValue(autoStartValue)
@@ -511,6 +501,7 @@ public class MysqlConnector extends CommonDbConnector {
                 .getTapField();
     }
 
+    @Override
     protected CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws SQLException {
         if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive())) {
             createDoubleActiveTempTable();
@@ -542,52 +533,11 @@ public class MysqlConnector extends CommonDbConnector {
             exceptionCollector.collectWritePrivileges("createTable :" + tapCreateTableEvent.getTableId(), Collections.emptyList(), t);
             throw new RuntimeException("Create table failed, message: " + t.getMessage(), t);
         }
-//        List<TapIndex> indexList = tapCreateTableEvent.getTable().getIndexList();
-//        if (EmptyKit.isNotEmpty(indexList) && tapConnectorContext.getNodeConfig() != null && tapConnectorContext.getNodeConfig().getValue("syncIndex", false)) {
-//            List<String> sqlList = TapSimplify.list();
-//            List<TapIndex> createIndexList = new ArrayList<>();
-//            List<TapIndex> existsIndexList = discoverIndex(tapCreateTableEvent.getTable().getId());
-//            // 如果索引已经存在，就不再创建; 名字相同视为存在; 字段以及顺序相同, 也视为存在
-//            if (EmptyKit.isNotEmpty(existsIndexList)) {
-//                for (TapIndex tapIndex : indexList) {
-//                    boolean exists = false;
-//                    for (TapIndex existsIndex : existsIndexList) {
-//                        if (tapIndex.getName().equals(existsIndex.getName())) {
-//                            exists = true;
-//                            break;
-//                        }
-//                        if (tapIndex.getIndexFields().size() == existsIndex.getIndexFields().size()) {
-//                            boolean same = true;
-//                            for (int i = 0; i < tapIndex.getIndexFields().size(); i++) {
-//                                if (!tapIndex.getIndexFields().get(i).getName().equals(existsIndex.getIndexFields().get(i).getName())
-//                                        || tapIndex.getIndexFields().get(i).getFieldAsc() != existsIndex.getIndexFields().get(i).getFieldAsc()) {
-//                                    same = false;
-//                                    break;
-//                                }
-//                            }
-//                            if (same) {
-//                                exists = true;
-//                                break;
-//                            }
-//                        }
-//                    }
-//                    if (!exists) {
-//                        createIndexList.add(tapIndex);
-//                    }
-//                }
-//            } else {
-//                createIndexList.addAll(indexList);
-//            }
-//            tapLogger.info("Table: {} will create Index list: {}", tapCreateTableEvent.getTable().getName(), createIndexList);
-//            if (EmptyKit.isNotEmpty(createIndexList)) {
-//                createIndexList.stream().filter(i -> !i.isPrimary()).forEach(i ->
-//                        sqlList.add(getCreateIndexSql(tapCreateTableEvent.getTable(), i)));
-//            }
-//            jdbcContext.batchExecute(sqlList);
-//        }
+
         return createTableOptions;
     }
 
+    @Override
     protected void beforeWriteRecord(TapTable tapTable) throws SQLException {
         super.beforeWriteRecord(tapTable);
         List<String> autoIncFields = new ArrayList<>();
@@ -757,7 +707,7 @@ public class MysqlConnector extends CommonDbConnector {
         Object value;
         TapIllegalDate date = new TapIllegalDate();
         StringBuilder sb = new StringBuilder();
-        String str = valueS.replaceAll("T", "-")
+        String str = valueS.replace("T", "-")
                 .replaceAll(" ", "-")
                 .replaceAll(":", "-")
                 .replaceAll("\\.", "-")
@@ -875,6 +825,7 @@ public class MysqlConnector extends CommonDbConnector {
             try {
                 countDownLatch.await();
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
             }
             if (EmptyKit.isNotNull(throwable.get())) {
@@ -1108,7 +1059,7 @@ public class MysqlConnector extends CommonDbConnector {
                                 exception.addException(c, sql, e1);
                             }
                         } else if (e instanceof SQLException && (((SQLException) e).getErrorCode() == 1826 || ((SQLException) e).getErrorCode() == 1823)) {
-                            String rename = c.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
+                            String rename = c.getName() + "_" + UUID.randomUUID().toString().replace("-", "").substring(28);
                             c.setName(rename);
                             sql = getCreateConstraintSql(tapTable, c);
                             try {
@@ -1304,9 +1255,6 @@ public class MysqlConnector extends CommonDbConnector {
 
         try (Connection connection = jdbcContext.getConnection();
              CallableStatement callableStatement = createMysqlCallableStatement(funcName, params, connection, outList)) {
-            if (callableStatement == null) {
-                throw new RuntimeException("create callableStatement error");
-            }
             callableStatement.setFetchSize(Integer.MIN_VALUE);
             boolean hasResult = callableStatement.execute();
             executeResult = new ExecuteResult<>().result(getOutputFromCall(outList, callableStatement, hasResult));
@@ -1337,11 +1285,18 @@ public class MysqlConnector extends CommonDbConnector {
         }
 
         callableStatement = connection.prepareCall(callStr.toString());
+        try {
         callableStatement.setFetchSize(Integer.MIN_VALUE);
-
         setCallableStatementParameters(callableStatement, params, outList, connection);
-
         return callableStatement;
+        } catch (Exception | Error failure) {
+            try {
+                callableStatement.close();
+            } catch (SQLException closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
+            throw failure;
+        }
     }
 
     @Override

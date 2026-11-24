@@ -37,6 +37,7 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         justInsert(after);
     }
 
+    @Override
     public void addUpdateBatch(Map<String, Object> after, Map<String, Object> before, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         if (EmptyKit.isEmpty(after)) {
             return;
@@ -75,6 +76,7 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         }
     }
 
+    @Override
     public void addDeleteBatch(Map<String, Object> before, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         if (EmptyKit.isEmpty(before)) {
             return;
@@ -91,6 +93,7 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         atomicLong.incrementAndGet();
     }
 
+    @Override
     protected String getDeleteSql(Map<String, Object> before, boolean containsNull) {
         if (!containsNull) {
             return "ALTER TABLE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " DELETE WHERE " +

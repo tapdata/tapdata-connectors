@@ -38,10 +38,7 @@ public class JsonSerializer implements MessageSerializer {
 		} else if (recordEvent instanceof TapUpdateRecordEvent) {
 			final TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
 			Map<String, Object> after = updateRecordEvent.getAfter();
-//			Map<String, Object> before = updateRecordEvent.getBefore();
-//			before = before == null ? after : before;
-//			jsonString = toJsonString(table, before, false);
-//			jsonString += LINE_END;
+
 			jsonString = toJsonString(table, after, false, isAgg);
 		} else {
 			final TapDeleteRecordEvent deleteRecordEvent = (TapDeleteRecordEvent) recordEvent;

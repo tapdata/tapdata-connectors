@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 
 public class OffStandardCsvSchema extends FileSchema {
 
-    private final static String TAG = CsvSchema.class.getSimpleName();
+    private static final String TAG = CsvSchema.class.getSimpleName();
     private final OffStandardFilter filter;
 
     public OffStandardCsvSchema(CsvConfig csvConfig, TapFileStorage storage) {
@@ -26,6 +26,7 @@ public class OffStandardCsvSchema extends FileSchema {
         filter = new OffStandardFilter(csvConfig.getLineExpression());
     }
 
+    @Override
     public Map<String, Object> sampleFixedFileData(Map<String, TapFile> csvFileMap) throws Exception {
         Map<String, Object> sampleResult = new LinkedHashMap<>();
         String[] headers = fileConfig.getHeader().split(",");
@@ -93,7 +94,10 @@ public class OffStandardCsvSchema extends FileSchema {
 
     private void skipRead(BufferedReader bufferedReader, int skip) throws IOException {
         while (skip > 0) {
-            bufferedReader.readLine();
+            String skippedLine = bufferedReader.readLine();
+            if (skippedLine == null) {
+                return;
+            }
             skip--;
         }
     }

@@ -4,7 +4,7 @@ import io.tapdata.entity.logger.TapLogger;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
+
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingDeque;
@@ -40,7 +40,7 @@ public class RecordBuffer {
     }
 
     public void startBufferData() {
-        assert readQueue.size() == 0;
+        assert readQueue.isEmpty();
         assert writeQueue.size() == queueSize;
         for (ByteBuffer byteBuffer: writeQueue) {
             assert byteBuffer.position() == 0;
@@ -65,6 +65,9 @@ public class RecordBuffer {
                 assert byteBuffer.limit() == 0;
                 readQueue.put(byteBuffer);
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException(e);
         } catch (Exception e) {
             throw new IOException(e);
         }
@@ -100,7 +103,7 @@ public class RecordBuffer {
         if (currentReadBuffer.limit() == 0) {
             recycleBuffer(currentReadBuffer);
             currentReadBuffer = null;
-            assert readQueue.size() == 0;
+            assert readQueue.isEmpty();
             return -1;
         }
         int _byte = currentReadBuffer.get();
@@ -117,7 +120,7 @@ public class RecordBuffer {
         if (currentReadBuffer.limit() == 0) {
             recycleBuffer(currentReadBuffer);
             currentReadBuffer = null;
-            assert readQueue.size() == 0;
+            assert readQueue.isEmpty();
             return -1;
         }
         int available = currentReadBuffer.remaining();

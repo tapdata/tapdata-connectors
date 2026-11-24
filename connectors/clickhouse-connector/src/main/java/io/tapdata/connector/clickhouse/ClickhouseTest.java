@@ -24,6 +24,7 @@ public class ClickhouseTest extends CommonDbTest {
         this.connectionOptions = connectionOptions;
     }
 
+    @Override
     protected Boolean testWritePrivilege() {
         try {
             List<String> sqls = new ArrayList<>();

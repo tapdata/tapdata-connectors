@@ -10,7 +10,7 @@
 
 	<modules>
 		<module>js-core</module>
-<!--		<module>coding-demo-connector</module>-->
+
 		<module>lark-im-connector</module>
 		<module>github-connector</module>
 		<module>zoho-crm-connector</module>

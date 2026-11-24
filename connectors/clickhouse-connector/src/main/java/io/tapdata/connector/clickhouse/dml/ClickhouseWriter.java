@@ -29,7 +29,6 @@ import java.util.stream.Collectors;
 
 public class ClickhouseWriter {
 
-
     private static final String TAG = ClickhouseWriter.class.getSimpleName();
     private final Map<String, PreparedStatement> insertMap = new LRUOnRemoveMap<>(10, entry -> JdbcUtil.closeQuietly(entry.getValue()));
     private final Map<String, PreparedStatement> updateMap = new LRUOnRemoveMap<>(10, entry -> JdbcUtil.closeQuietly(entry.getValue()));
@@ -41,7 +40,7 @@ public class ClickhouseWriter {
     protected Connection connection;
 
     protected static final String INSERT_SQL_TEMPLATE = "INSERT INTO `%s`.`%s`(%s) values(%s)";
-    //ALTER TABLE student UPDATE count=10 where id=0;
+
     protected static final String UPDATE_SQL_TEMPLATE = "ALTER TABLE `%s`.`%s` UPDATE %s WHERE %s";
     //alter table default.student delete where id =0
     protected static final String DELETE_SQL_TEMPLATE = "ALTER TABLE `%s`.`%s` DELETE WHERE %s";
@@ -152,8 +151,7 @@ public class ClickhouseWriter {
         }
         List<String> afterKeys = new ArrayList<>(after.keySet());
         Collection<String> uniqueKeys = getUniqueKeys(tapTable);
-//        Collection<String> primaryKeys = tapTable.primaryKeys(true);
-//        Collection<String> logicPrimaryKeys = EmptyKit.isNotEmpty(primaryKeys) ? Collections.emptyList() : tapTable.primaryKeys(true);
+
         for (String fieldName : nameFieldMap.keySet()) {
             TapField tapField = nameFieldMap.get(fieldName);
             if (!needAddIntoPreparedStatementValues(tapField, tapRecordEvent)) {
@@ -182,8 +180,7 @@ public class ClickhouseWriter {
         PreparedStatement updatePreparedStatement = getUpdatePreparedStatement(tapConnectorContext, tapTable, tapRecordEvent, updateMap);
         int parameterIndex = setPreparedStatementValues(tapTable, tapRecordEvent, updatePreparedStatement);
         setPreparedStatementWhere(tapTable, tapRecordEvent, updatePreparedStatement, parameterIndex);
-//        JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
-//        TapLogger.info("XXXXXX", "doUpdate tapTable {} tapRecordEvent {}", jsonParser.toJson(tapTable), jsonParser.toJson(tapRecordEvent));
+
         int row = doUpdate(tapConnectorContext, tapTable, tapRecordEvent);
         if (row <= 0 && ConnectionOptions.DML_UPDATE_POLICY_INSERT_ON_NON_EXISTS.equals(updateDmlPolicy)) {
             doInsert(tapConnectorContext, tapTable, tapRecordEvent);
@@ -197,7 +194,7 @@ public class ClickhouseWriter {
         if (null == preparedStatement) {
             DataMap connectionConfig = tapConnectorContext.getConnectionConfig();
             String database = connectionConfig.getString("database");
-//            String name = connectionConfig.getString("name");
+
             String tableId = tapTable.getId();
             LinkedHashMap<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
             if (MapUtils.isEmpty(nameFieldMap)) {
@@ -239,8 +236,7 @@ public class ClickhouseWriter {
         int parameterIndex = setPreparedStatementValues(tapTable, tapRecordEvent, updatePreparedStatement);
         setPreparedStatementWhere(tapTable, tapRecordEvent, updatePreparedStatement, parameterIndex);
         try {
-//            int i = updatePreparedStatement.executeUpdate();
-//            ClickhouseJdbcContext.tryCommit(connection);
+
             return updatePreparedStatement.executeUpdate();
         } catch (Exception e) {
             throw new RuntimeException("Update data failed, sql: " + updatePreparedStatement + ", message: " + e.getMessage(), e);
@@ -291,7 +287,7 @@ public class ClickhouseWriter {
         if (null == preparedStatement) {
             DataMap connectionConfig = tapConnectorContext.getConnectionConfig();
             String database = connectionConfig.getString("database");
-//            String name = connectionConfig.getString("name");
+
             String tableId = tapTable.getId();
             LinkedHashMap<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
             if (MapUtils.isEmpty(nameFieldMap)) {

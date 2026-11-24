@@ -2,19 +2,19 @@ package io.tapdata.connector.doris;
 
 import io.tapdata.connector.doris.bean.DorisConfig;
 import io.tapdata.connector.mysql.MysqlJdbcContextV2;
-import io.tapdata.connector.mysql.config.MysqlConfig;
+
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.kit.EmptyKit;
+
 
 import java.sql.SQLException;
-import java.text.DecimalFormat;
-import java.time.ZoneId;
+
+
 import java.util.ArrayList;
 import java.util.List;
-import java.util.TimeZone;
+
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -29,6 +29,7 @@ public class DorisJdbcContext extends MysqlJdbcContextV2 {
         exceptionCollector = new DorisExceptionCollector();
     }
 
+    @Override
     public String queryVersion() throws SQLException {
         AtomicReference<String> version = new AtomicReference<>();
         queryWithNext(DORIS_VERSION, resultSet -> version.set(resultSet.getString("Value")));

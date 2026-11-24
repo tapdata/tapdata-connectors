@@ -27,14 +27,17 @@ public class ClickhouseColumn extends CommonColumn {
         this.columnDefaultValue = null;
     }
 
+    @Override
     protected Boolean isNullable() {
         return "1".equals(this.nullable);
     }
 
+    @Override
     protected Boolean isAutoInc() {
         return "1".equals(this.autoInc);
     }
 
+    @Override
     public TapField getTapField() {
         return new TapField(this.columnName, this.dataType)
                 .nullable(this.isNullable())

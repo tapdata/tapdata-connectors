@@ -1,6 +1,6 @@
 package io.tapdata.mongodb.merge;
 
-import java.util.List;
+
 
 /**
  * The target supports merge write interfaces

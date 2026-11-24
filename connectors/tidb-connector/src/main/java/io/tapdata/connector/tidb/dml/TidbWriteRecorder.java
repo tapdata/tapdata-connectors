@@ -41,6 +41,7 @@ public class TidbWriteRecorder extends NormalWriteRecorder {
                 + allColumn.stream().map(k -> escapeChar + k + escapeChar + "=values(" + escapeChar + k + escapeChar + ")").collect(Collectors.joining(", "));
     }
 
+    @Override
     protected void insertIgnore(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         if (EmptyKit.isNull(preparedStatement)) {
             preparedStatement = connection.prepareStatement(getInsertIgnoreSql());
@@ -58,6 +59,7 @@ public class TidbWriteRecorder extends NormalWriteRecorder {
                 "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ")";
     }
 
+    @Override
     protected void insertUpdate(Map<String, Object> after, Map<String, Object> before, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         String preparedStatementKey = String.join(",", after.keySet());
         if (preparedStatementKey.equals(this.preparedStatementKey)) {

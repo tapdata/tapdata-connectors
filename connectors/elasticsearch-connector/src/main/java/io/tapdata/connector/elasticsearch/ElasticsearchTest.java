@@ -45,6 +45,7 @@ public class ElasticsearchTest {
         try {
             elasticsearchHttpContext.finish();
         } catch (Exception ignored) {
+            // Cleanup must not replace the connection test result.
         }
     }
 }

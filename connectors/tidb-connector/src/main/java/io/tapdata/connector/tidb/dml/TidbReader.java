@@ -9,17 +9,16 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 
-import java.io.Serializable;
 import java.sql.ResultSetMetaData;
-import java.util.HashMap;
+
 import java.util.HashSet;
-import java.util.Map;
+
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
-public class TidbReader implements Serializable {
+public class TidbReader {
 
     private final TidbJdbcContext tidbJdbcContext;
 

@@ -99,6 +99,9 @@ public class DMLManager implements Activity {
         try {
             completableFuture.get();
         } catch (InterruptedException | ExecutionException interruptedException) {
+            if (interruptedException instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             throwableCollector.set(interruptedException);
         }
     }
