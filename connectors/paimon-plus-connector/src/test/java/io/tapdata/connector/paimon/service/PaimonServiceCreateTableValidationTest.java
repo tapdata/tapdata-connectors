@@ -28,6 +28,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Field;
 import java.nio.file.Files;
@@ -453,24 +454,37 @@ class PaimonServiceCreateTableValidationTest {
         }
     }
 
-    @Test
-    void flinkSinkParallelismTablePropertyMustFailBeforeTableCreation() throws Exception {
-        String tableName = "reject_flink_sink_parallelism";
+    @ParameterizedTest
+    @ValueSource(strings = {"1", "8"})
+    void legacyFlinkSinkParallelismMustAllowTableCreation(String parallelism) throws Exception {
+        String tableName = "legacy_flink_sink_parallelism";
         Catalog catalog = catalog(tableName, Collections.emptyMap());
         PaimonConfig config = config(tableName);
         config.setTableProperties(
-                Collections.singletonList(property("sink.parallelism", "8")));
-        PaimonService service = service(config, catalog);
+                Collections.singletonList(property("sink.parallelism", parallelism)));
+        Log log = mock(Log.class);
+        PaimonService service = service(config, catalog, log);
         Identifier identifier = Identifier.create(DATABASE, tableName);
 
         try {
-            PaimonFatalWriteException thrown =
-                    assertThrows(
-                            PaimonFatalWriteException.class,
-                            () -> service.createTable(crossPartitionTable(tableName)));
-
-            assertTrue(thrown.getMessage().contains("PAIMON_FLINK_ONLY_SINK_PARALLELISM"));
-            assertThrows(Catalog.TableNotExistException.class, () -> catalog.getTable(identifier));
+            assertTrue(service.createTable(crossPartitionTable(tableName)));
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            assertEquals(parallelism, table.options().get("sink.parallelism"));
+            verify(log).warn(
+                    "Table {} retains sink.parallelism for compatibility; this option only "
+                            + "affects Paimon's Flink sink and does not control TapData Core writer parallelism",
+                    identifier.getFullName());
+            // Restart/upgrade against an existing table must also preserve its metadata.
+            assertFalse(service.createTable(crossPartitionTable(tableName)));
+            FileStoreTable existingTable = (FileStoreTable) catalog.getTable(identifier);
+            Log restartLog = mock(Log.class);
+            PaimonWriteSemanticContractResolver.resolve(
+                    identifier.getFullName(), existingTable, restartLog);
+            verify(restartLog).warn(
+                    "Table {} retains sink.parallelism for compatibility; this option only "
+                            + "affects Paimon's Flink sink and does not control TapData Core writer parallelism",
+                    identifier.getFullName());
+            assertEquals(parallelism, existingTable.options().get("sink.parallelism"));
         } finally {
             service.close();
         }
