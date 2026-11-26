@@ -1,6 +1,7 @@
 package io.tapdata.connector.paimon.schema;
 
 import io.tapdata.connector.paimon.exception.PaimonFatalWriteException;
+import io.tapdata.entity.logger.Log;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
@@ -26,6 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class PaimonWriteSemanticContractResolverTest {
 
@@ -400,25 +403,54 @@ class PaimonWriteSemanticContractResolverTest {
         assertTrue(thrown.getMessage().contains(fileFormat));
     }
 
-    @Test
-    void flinkOnlySinkParallelismMustBeRejectedBeforeTableCreation() {
+    @ParameterizedTest
+    @ValueSource(strings = {"1", "8"})
+    void legacyFlinkSinkParallelismMustBeAccepted(String parallelism) {
         Schema schema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
                         .primaryKey("id")
                         .option(CoreOptions.BUCKET.key(), "-1")
-                        .option("sink.parallelism", "8")
+                        .option("sink.parallelism", parallelism)
                         .build();
 
-        PaimonFatalWriteException thrown =
-                assertThrows(
-                        PaimonFatalWriteException.class,
-                        () ->
-                                PaimonWriteSemanticContractResolver.validateNewTable(
-                                        "default.flink_only_option", schema));
+        PaimonWriteSemanticContractResolver.validateNewTable(
+                "default.legacy_flink_option", schema);
+        assertEquals(parallelism, schema.options().get("sink.parallelism"));
+    }
 
-        assertTrue(thrown.getMessage().contains("PAIMON_FLINK_ONLY_SINK_PARALLELISM"));
-        assertTrue(thrown.getMessage().contains("sink.parallelism"));
+    @ParameterizedTest
+    @ValueSource(strings = {"1", "8"})
+    void existingTableWithLegacyFlinkSinkParallelismMustResolveAndWarn(String parallelism) {
+        Schema schema = Schema.newBuilder()
+                .column("id", DataTypes.INT())
+                .primaryKey("id")
+                .option(CoreOptions.BUCKET.key(), "1")
+                .option("sink.parallelism", parallelism)
+                .build();
+        FileStoreTable table = mockTable(BucketMode.HASH_FIXED, TableSchema.create(0L, schema));
+        Log log = mock(Log.class);
+
+        PaimonWriteSemanticContract contract =
+                PaimonWriteSemanticContractResolver.resolve("default.legacy_flink_option", table, log);
+
+        assertEquals(BucketMode.HASH_FIXED, contract.bucketMode());
+        assertEquals(parallelism, table.schema().options().get("sink.parallelism"));
+        verify(log).warn(
+                "Table {} retains sink.parallelism for compatibility; this option only "
+                        + "affects Paimon's Flink sink and does not control TapData Core writer parallelism",
+                "default.legacy_flink_option");
+    }
+
+    @Test
+    void existingTableWithoutFlinkSinkParallelismMustNotWarn() {
+        FileStoreTable table = table(BucketMode.KEY_DYNAMIC, false,
+                MergeEngine.DEDUPLICATE, ChangelogProducer.NONE, false, false, null);
+        Log log = mock(Log.class);
+
+        PaimonWriteSemanticContractResolver.resolve("default.t", table, log);
+
+        verifyNoInteractions(log);
     }
 
     @ParameterizedTest(name = "{0}")

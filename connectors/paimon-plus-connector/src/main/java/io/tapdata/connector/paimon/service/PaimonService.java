@@ -906,6 +906,8 @@ public class PaimonService implements AutoCloseable {
                 Boolean.TRUE.equals(config.getDiskOverflowWrite()) ? config.getDiskMaxSize() : null);
         finalSchema.options().put(
                 CoreOptions.WRITE_BUFFER_SPILLABLE.key(), PaimonWriteOptions.spillValue(config));
+        PaimonWriteSemanticContractResolver.warnIgnoredFlinkSinkParallelism(
+                identifier.getFullName(), finalSchema.options(), log);
         PaimonExpireMode.validate(identifier.getFullName(), finalSchema.options());
         PaimonWriteSemanticContractResolver.validateNewTable(
                 identifier.getFullName(), finalSchema);
@@ -1762,7 +1764,7 @@ public class PaimonService implements AutoCloseable {
             PaimonWriteSemanticContract writeSemanticContract =
                     preResolvedContract == null || fileStoreTable != preResolvedTable
                             ? PaimonWriteSemanticContractResolver.resolve(
-                                    tableKey, fileStoreTable)
+                                    tableKey, fileStoreTable, log)
                             : preResolvedContract;
             registerPhysicalTableOwner(tableKey, fileStoreTable);
             PaimonStopResources.Scope construction = stopResources.scope("writer " + tableKey, stopController);
@@ -1845,7 +1847,7 @@ public class PaimonService implements AutoCloseable {
             fileStoreTable = (FileStoreTable) targetTable;
             contract =
                     PaimonWriteSemanticContractResolver.resolve(
-                            tableKey, fileStoreTable);
+                            tableKey, fileStoreTable, log);
         }
 
         PaimonGeneratedFieldDependencies generatedFields =
