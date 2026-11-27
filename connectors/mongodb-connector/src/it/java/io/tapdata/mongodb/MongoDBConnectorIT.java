@@ -71,26 +71,25 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
     private DbForgeLeaseProvider dbForgeLeaseProvider;
     private DataMap dbForgeConnectionConfig;
 
-    // The frozen TapNumberValue stores Double. Mongo's registered exact numeric
-    // carrier keeps BigDecimal instead, and has its own registered unwrap codec.
+    // The public decimal carrier preserves BigDecimal across connector registries.
     @Override
     protected Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> expectedTapValueClasses(io.tapdata.it.schema.TestDataType type) {
         Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> classes = new HashSet<>(super.expectedTapValueClasses(type));
-        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.mongodb.codecs.ExactDecimalValue.class);
+        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.entity.schema.value.TapDecimalValue.class);
         return classes;
     }
 
     @Override
     protected Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> expectedTapValueClassesForReadBack(io.tapdata.it.schema.TestDataType type) {
         Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> classes = new HashSet<>(super.expectedTapValueClassesForReadBack(type));
-        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.mongodb.codecs.ExactDecimalValue.class);
+        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.entity.schema.value.TapDecimalValue.class);
         return classes;
     }
 
     @Override
     protected Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> expectedTapValueClassesForTapType(io.tapdata.entity.schema.type.TapType type) {
         Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> classes = new HashSet<>(super.expectedTapValueClassesForTapType(type));
-        if (type instanceof io.tapdata.entity.schema.type.TapNumber) classes.add(io.tapdata.mongodb.codecs.ExactDecimalValue.class);
+        if (type instanceof io.tapdata.entity.schema.type.TapNumber) classes.add(io.tapdata.entity.schema.value.TapDecimalValue.class);
         return classes;
     }
 
