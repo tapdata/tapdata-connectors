@@ -71,26 +71,25 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
     private DbForgeLeaseProvider dbForgeLeaseProvider;
     private DataMap dbForgeConnectionConfig;
 
-    // The frozen TapNumberValue stores Double. Mongo's registered exact numeric
-    // carrier keeps BigDecimal instead, and has its own registered unwrap codec.
+    // The standard raw carrier preserves BigDecimal across connector registries.
     @Override
     protected Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> expectedTapValueClasses(io.tapdata.it.schema.TestDataType type) {
         Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> classes = new HashSet<>(super.expectedTapValueClasses(type));
-        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.mongodb.codecs.ExactDecimalValue.class);
+        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.entity.schema.value.TapRawValue.class);
         return classes;
     }
 
     @Override
     protected Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> expectedTapValueClassesForReadBack(io.tapdata.it.schema.TestDataType type) {
         Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> classes = new HashSet<>(super.expectedTapValueClassesForReadBack(type));
-        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.mongodb.codecs.ExactDecimalValue.class);
+        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.entity.schema.value.TapRawValue.class);
         return classes;
     }
 
     @Override
     protected Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> expectedTapValueClassesForTapType(io.tapdata.entity.schema.type.TapType type) {
         Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> classes = new HashSet<>(super.expectedTapValueClassesForTapType(type));
-        if (type instanceof io.tapdata.entity.schema.type.TapNumber) classes.add(io.tapdata.mongodb.codecs.ExactDecimalValue.class);
+        if (type instanceof io.tapdata.entity.schema.type.TapNumber) classes.add(io.tapdata.entity.schema.value.TapRawValue.class);
         return classes;
     }
 
@@ -431,11 +430,38 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
         samples.put("obj_objectid", new ObjectId());
         samples.put("obj_binary", new Binary((byte) 0x80, new byte[]{1, 2, 3}));
         samples.put("obj_code", new Code("function() { return 1; }"));
-        samples.put("obj_decimal128", Decimal128.parse("12345.6789"));
+        // Decimal128 intentionally uses TapRawValue<BigDecimal>, verified separately by
+        // should_wrap_decimal128_as_portable_bigdecimal. The shared test rejects all raw values.
         samples.put("obj_symbol", new Symbol("sym"));
         samples.put("obj_bson_timestamp", new BsonTimestamp(1_700_000_000, 1));
         samples.put("obj_regex", new BsonRegularExpression("^tap.*", "i"));
         return samples;
+    }
+
+    @Test
+    void should_wrap_decimal128_as_portable_bigdecimal() throws Throwable {
+        // Exercise both the shared special-value test's string schema and numeric discovery.
+        for (io.tapdata.entity.schema.type.TapType type : Arrays.asList(
+                new io.tapdata.entity.schema.type.TapString(), new io.tapdata.entity.schema.type.TapNumber())) {
+            TapTable table = new TapTable("decimal_codec_samples");
+            table.add(new io.tapdata.entity.schema.TapField("amount", "decimal").tapType(type));
+            for (String text : Arrays.asList("12345.6789", "9007199254740993.123456789012345678",
+                    "123.4500", "1E+6144", "1E-6176")) {
+                Decimal128 decimal = Decimal128.parse(text);
+                Map<String, Object> input = new LinkedHashMap<>();
+                input.put("amount", decimal);
+                Map<String, Object> wrapped = wrapRow(input, table);
+                assertTrue(wrapped.get("amount") instanceof io.tapdata.entity.schema.value.TapRawValue);
+                assertEquals(decimal.bigDecimalValue(),
+                        ((io.tapdata.entity.schema.value.TapRawValue) wrapped.get("amount")).getValue(),
+                        "codec must replace BSON Decimal128 with exact portable BigDecimal");
+                Map<String, Object> defaults = new LinkedHashMap<>(wrapped);
+                io.tapdata.entity.codec.filter.TapCodecsFilterManager.create(TapCodecsRegistry.create())
+                        .transformFromTapValueMap(defaults);
+                assertEquals(decimal.bigDecimalValue(), defaults.get("amount"), "default registry unwrap");
+                assertEquals(decimal.bigDecimalValue(), unwrapRow(wrapped).get("amount"), "connector registry unwrap");
+            }
+        }
     }
 
     @Override

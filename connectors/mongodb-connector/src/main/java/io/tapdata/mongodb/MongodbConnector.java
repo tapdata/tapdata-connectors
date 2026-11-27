@@ -535,13 +535,12 @@ public class MongodbConnector extends ConnectorBase {
 		codecRegistry.registerToTapValue(Decimal128.class, (value, tapType) -> {
 			Decimal128 decimal128 = (Decimal128) value;
 			try {
-				return new io.tapdata.mongodb.codecs.ExactDecimalValue(decimal128.bigDecimalValue());
+				// Use the standard carrier so every target/default registry can unwrap BigDecimal.
+				return new TapRawValue(decimal128.bigDecimalValue());
 			} catch (ArithmeticException specialValue) {
 				return new TapNumberValue(decimal128.doubleValue());
 			}
 		});
-		codecRegistry.registerFromTapValue(io.tapdata.mongodb.codecs.ExactDecimalValue.class,
-				io.tapdata.mongodb.codecs.ExactDecimalValue::getValue);
 
 		codecRegistry.registerToTapValue(Symbol.class, (value, tapType) -> {
 			Symbol symbol = (Symbol) value;
