@@ -71,25 +71,25 @@ public class MongoDBConnectorIT extends TpccConnectorIT {
     private DbForgeLeaseProvider dbForgeLeaseProvider;
     private DataMap dbForgeConnectionConfig;
 
-    // The public decimal carrier preserves BigDecimal across connector registries.
+    // The standard raw carrier preserves BigDecimal across connector registries.
     @Override
     protected Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> expectedTapValueClasses(io.tapdata.it.schema.TestDataType type) {
         Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> classes = new HashSet<>(super.expectedTapValueClasses(type));
-        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.entity.schema.value.TapDecimalValue.class);
+        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.entity.schema.value.TapRawValue.class);
         return classes;
     }
 
     @Override
     protected Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> expectedTapValueClassesForReadBack(io.tapdata.it.schema.TestDataType type) {
         Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> classes = new HashSet<>(super.expectedTapValueClassesForReadBack(type));
-        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.entity.schema.value.TapDecimalValue.class);
+        if (type == io.tapdata.it.schema.TestDataType.DECIMAL) classes.add(io.tapdata.entity.schema.value.TapRawValue.class);
         return classes;
     }
 
     @Override
     protected Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> expectedTapValueClassesForTapType(io.tapdata.entity.schema.type.TapType type) {
         Set<Class<? extends io.tapdata.entity.schema.value.TapValue<?, ?>>> classes = new HashSet<>(super.expectedTapValueClassesForTapType(type));
-        if (type instanceof io.tapdata.entity.schema.type.TapNumber) classes.add(io.tapdata.entity.schema.value.TapDecimalValue.class);
+        if (type instanceof io.tapdata.entity.schema.type.TapNumber) classes.add(io.tapdata.entity.schema.value.TapRawValue.class);
         return classes;
     }
 

@@ -535,7 +535,8 @@ public class MongodbConnector extends ConnectorBase {
 		codecRegistry.registerToTapValue(Decimal128.class, (value, tapType) -> {
 			Decimal128 decimal128 = (Decimal128) value;
 			try {
-				return new TapDecimalValue(decimal128.bigDecimalValue());
+				// Use the standard carrier so every target/default registry can unwrap BigDecimal.
+				return new TapRawValue(decimal128.bigDecimalValue());
 			} catch (ArithmeticException specialValue) {
 				return new TapNumberValue(decimal128.doubleValue());
 			}
