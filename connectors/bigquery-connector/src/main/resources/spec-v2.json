@@ -140,7 +140,7 @@
       ]
     },
     "FLOAT64": {
-      "to": "TapDouble",
+      "binaryFloat": true, "to": "TapDouble",
       "bit": 64,
       "scale": [
         0,

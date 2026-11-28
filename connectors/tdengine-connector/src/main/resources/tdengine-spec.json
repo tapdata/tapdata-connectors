@@ -605,7 +605,7 @@
       "queryOnly": true
     },
     "FLOAT": {
-      "to": "TapFloat",
+      "binaryFloat": true, "to": "TapFloat",
       "precision": [
         1,
         6
@@ -617,7 +617,7 @@
       "fixed": false
     },
     "DOUBLE": {
-      "to": "TapDouble",
+      "binaryFloat": true, "to": "TapDouble",
       "precision": [
         1,
         17

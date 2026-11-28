@@ -436,7 +436,7 @@
       "fixed": true
     },
     "float($precision,$scale)[unsigned]": {
-      "to": "TapFloat",
+      "binaryFloat": true, "to": "TapFloat",
       "name": "float",
       "precision": [
         1,
@@ -454,7 +454,7 @@
       "fixed": false
     },
     "float($precision)[unsigned]": {
-      "to": "TapCoefficientFloat",
+      "binaryFloat": true, "to": "TapCoefficientFloat",
       "name": "float",
       "coefficient": {
         "TapFloat": [
@@ -482,7 +482,7 @@
       "fixed": false
     },
     "float": {
-      "to": "TapFloat",
+      "binaryFloat": true, "to": "TapFloat",
       "precision": [
         1,
         6
@@ -494,7 +494,7 @@
       "fixed": false
     },
     "double": {
-      "to": "TapDouble",
+      "binaryFloat": true, "to": "TapDouble",
       "precision": [
         1,
         17
@@ -508,7 +508,7 @@
       "fixed": false
     },
     "double[($precision,$scale)][unsigned]": {
-      "to": "TapDouble",
+      "binaryFloat": true, "to": "TapDouble",
       "precision": [
         1,
         255

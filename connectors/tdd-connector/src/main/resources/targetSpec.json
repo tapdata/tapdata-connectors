@@ -34,11 +34,11 @@
     },
     "float": {
       "bit": 32,
-      "to": "TapNumber"
+      "binaryFloat": true, "to": "TapNumber"
     },
     "double": {
       "bit": 64,
-      "to": "TapNumber"
+      "binaryFloat": true, "to": "TapNumber"
     },
     "decimal[($precision,$scale)]": {
       "bit": 128,

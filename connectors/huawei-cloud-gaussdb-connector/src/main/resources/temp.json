@@ -524,7 +524,7 @@
       "scale": 16383
     },
     "real": {
-      "to": "TapNumber",
+      "binaryFloat": true, "to": "TapNumber",
       "name": "REAL",
       "precision": [
         1,
@@ -541,7 +541,7 @@
       "fixed": false
     },
     "float4": {
-      "to": "TapNumber",
+      "binaryFloat": true, "to": "TapNumber",
       "name": "FLOAT4",
       "precision": [
         1,
@@ -558,7 +558,7 @@
       "fixed": false
     },
     "double": {
-      "to": "TapNumber",
+      "binaryFloat": true, "to": "TapNumber",
       "name": "DOUBLE",
       "precision": [
         1,
@@ -575,7 +575,7 @@
       "fixed": false
     },
     "precision": {
-      "to": "TapNumber",
+      "binaryFloat": true, "to": "TapNumber",
       "name": "PRECISION",
       "precision": [
         1,
@@ -592,7 +592,7 @@
       "fixed": false
     },
     "float8": {
-      "to": "TapNumber",
+      "binaryFloat": true, "to": "TapNumber",
       "name": "FLOAT8",
       "precision": [
         1,
@@ -609,7 +609,7 @@
       "fixed": false
     },
     "binary_double": {
-      "to": "TapNumber",
+      "binaryFloat": true, "to": "TapNumber",
       "name": "BINARY_DOUBLE",
       "precision": [
         1,
@@ -626,7 +626,7 @@
       "fixed": false
     },
     "float[($precision)]": {
-      "to": "TapNumber",
+      "binaryFloat": true, "to": "TapNumber",
       "precision": [
         1,
         53

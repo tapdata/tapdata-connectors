@@ -469,7 +469,7 @@
         17
       ],
       "fixed": false,
-      "to": "TapDouble"
+      "binaryFloat": true, "to": "TapDouble"
     },
     "DECFLOAT": {
       "precision": [
