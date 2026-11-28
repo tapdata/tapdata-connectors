@@ -331,7 +331,7 @@
       ],
       "preferScale": 4,
       "fixed": false,
-      "to": "TapDouble"
+      "binaryFloat": true, "to": "TapDouble"
     },
     "float": {
       "precision": [
@@ -343,12 +343,12 @@
         6
       ],
       "fixed": false,
-      "to": "TapFloat"
+      "binaryFloat": true, "to": "TapFloat"
     },
     "half_float": {
       "queryOnly": true,
       "fixed": false,
-      "to": "TapNumber"
+      "binaryFloat": true, "to": "TapNumber"
     },
     "scaled_float": {
       "queryOnly": true,

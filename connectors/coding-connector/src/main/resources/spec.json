@@ -286,7 +286,7 @@
       "scale": [ 0, 2]
     },
     "Float": {
-      "to": "TapNumber",
+      "binaryFloat": true, "to": "TapNumber",
       "precision": [ 1, 30],
       "value": [ -3.402823466E+38, 3.402823466E+38],
       "scale": [ 0, 30],

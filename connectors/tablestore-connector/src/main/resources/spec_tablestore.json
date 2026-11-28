@@ -112,7 +112,7 @@
       ],
       "preferScale": 4,
       "fixed": false,
-      "to": "TapDouble"
+      "binaryFloat": true, "to": "TapDouble"
     },
     "BOOLEAN": {
       "to": "TapBoolean"

@@ -965,7 +965,7 @@
       "value": [-9223372036854775808, 9223372036854775807]
     },
     "FLOAT": {
-      "to": "TapFloat",
+      "binaryFloat": true, "to": "TapFloat",
       "queryOnly": true,
       "bit": 32,
       "precision": 7,
@@ -973,14 +973,14 @@
       "fixed": false
     },
     "DOUBLE": {
-      "to": "TapDouble",
+      "binaryFloat": true, "to": "TapDouble",
       "bit": 64,
       "precision": 15,
       "scale": 15,
       "fixed": false
     },
     "DOUBLE[($precision,$scale)]": {
-      "to": "TapNumber",
+      "binaryFloat": true, "to": "TapNumber",
       "precision": [1, 255],
       "scale": [0, 30],
       "value": ["-99999999999999999999999999999999999999", "99999999999999999999999999999999999999"],

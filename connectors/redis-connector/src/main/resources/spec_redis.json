@@ -659,7 +659,7 @@
       ],
       "preferScale": 4,
       "fixed": false,
-      "to": "TapDouble"
+      "binaryFloat": true, "to": "TapDouble"
     },
     "float": {
       "precision": [
@@ -671,7 +671,7 @@
         6
       ],
       "fixed": false,
-      "to": "TapFloat"
+      "binaryFloat": true, "to": "TapFloat"
     },
     "boolean": {
       "to": "TapBoolean"

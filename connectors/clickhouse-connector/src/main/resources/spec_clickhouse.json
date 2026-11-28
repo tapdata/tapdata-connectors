@@ -631,7 +631,7 @@
     },
     "Float32[($precision,$scale)]": {
       "queryOnly": true,
-      "to": "TapFloat",
+      "binaryFloat": true, "to": "TapFloat",
       "name": "float",
       "precision": [
         1,
@@ -645,7 +645,7 @@
       "fixed": false
     },
     "Float64": {
-      "to": "TapDouble",
+      "binaryFloat": true, "to": "TapDouble",
       "precision": [
         0,
         30
@@ -657,7 +657,7 @@
       "fixed": false
     },
     "Float32": {
-      "to": "TapFloat",
+      "binaryFloat": true, "to": "TapFloat",
       "name": "float",
       "precision": [
         1,

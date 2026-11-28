@@ -740,7 +740,7 @@
 	},
 	"dataTypes": {
 		"DOUBLE": {
-			"to": "TapDouble",
+			"binaryFloat": true, "to": "TapDouble",
 			"precision": [
 				1,
 				255

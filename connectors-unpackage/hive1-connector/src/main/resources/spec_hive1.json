@@ -282,13 +282,13 @@
       ]
     },
     "FLOAT": {
-      "to": "TapFloat",
+      "binaryFloat": true, "to": "TapFloat",
       "name": "float",
       "bit": 32,
       "fixed": false
     },
     "DOUBLE": {
-      "to": "TapDouble",
+      "binaryFloat": true, "to": "TapDouble",
       "bit": 64,
       "fixed": false
     },

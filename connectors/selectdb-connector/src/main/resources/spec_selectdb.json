@@ -220,10 +220,10 @@
     },
     "double": {
       "bit": 64,
-      "to": "TapDouble"
+      "binaryFloat": true, "to": "TapDouble"
     },
     "float": {
-      "to": "TapFloat",
+      "binaryFloat": true, "to": "TapFloat",
       "precision": [
         1,
         6

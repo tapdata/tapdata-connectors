@@ -412,7 +412,7 @@
       "to": "TapNumber"
     },
     "float($precision)": {
-      "to": "TapCoefficientFloat",
+      "binaryFloat": true, "to": "TapCoefficientFloat",
       "name": "float",
       "coefficient": {
         "TapFloat": [
@@ -442,7 +442,7 @@
         6
       ],
       "fixed": false,
-      "to": "TapFloat"
+      "binaryFloat": true, "to": "TapFloat"
     },
     "double precision": {
       "priority": 2,
@@ -457,7 +457,7 @@
         17
       ],
       "fixed": false,
-      "to": "TapDouble"
+      "binaryFloat": true, "to": "TapDouble"
     },
     "character[($byte)]": {
       "byte": 10485760,

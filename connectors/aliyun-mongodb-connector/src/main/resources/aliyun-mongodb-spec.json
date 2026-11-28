@@ -340,7 +340,7 @@
   },
   "dataTypes": {
     "DOUBLE": {
-      "to": "TapDouble",
+      "binaryFloat": true, "to": "TapDouble",
       "value": [
         "-1.7976931348623157E+308",
         "1.7976931348623157E+308"

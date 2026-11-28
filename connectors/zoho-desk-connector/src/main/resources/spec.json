@@ -540,7 +540,7 @@
     "Text": {"to": "TapString","byte": 255},
     "Number": {"to": "TapNumber","value": [0,999999999]},
     "Percent": {
-      "to": "TapDouble",
+      "binaryFloat": true, "to": "TapDouble",
       "precision": [ 1, 5],
       "value": [0.0,99999.0],
       "scale": [ 0, 2]
@@ -552,7 +552,7 @@
       "scale": [ 0, 9]
     },
     "Currency": {
-      "to": "TapDouble",
+      "binaryFloat": true, "to": "TapDouble",
       "precision": [ 1, 16],
       "value": [0.0,99999.0],
       "scale": [ 0, 9]
@@ -617,12 +617,12 @@
       "scale": [ 0, 2]
     },
     "price": {
-      "to": "TapDouble",
+      "binaryFloat": true, "to": "TapDouble",
       "value": [ 0.00 , 10000000.00],
       "scale": [ 0, 2]
     },
     "Float": {
-      "to": "TapDouble",
+      "binaryFloat": true, "to": "TapDouble",
       "precision": [ 1, 30],
       "value": [ -3.402823466E+38, 3.402823466E+38],
       "scale": [ 0, 30],
